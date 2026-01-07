@@ -1,5 +1,9 @@
 # SteamShell (Steam BPM Focus + Window Helper)
 
+** I won't be providing any support for this and you are using this at your own risk. **
+
+Vibe coded with ChatGPT
+
 ## Screenshots
 
 ### Control Panel (live in Steam Big Picture)
