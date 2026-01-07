@@ -11,7 +11,9 @@
   keeps the right window in front (Steam vs games vs whitelisted apps), optionally
   recenters/maximizes windows, and provides a Control Panel plus controller-to-mouse/keyboard mode.
 
-  ** The .exe file on the releases file was compiled with Ahk2Exe.  If you want to compile your own, please download the .ahk raw file and convert it in ahk2exe.  This was built using ahk version 2.0.19 for 64bit. **
+  ** The .exe file on the releases page was compiled with Ahk2Exe.  If you want to compile your own, please download the .ahk raw file and convert it in ahk2exe.  This was built using ahk version 2.0.19 for 64bit. **
+
+  The included .reg file assumes the SteamShell.exe is located at C:\Utilities\SteamShell.exe.  Please modifiy this file to the location you would like.
 
 ## Hotkeys
 
