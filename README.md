@@ -47,6 +47,7 @@ Vibe coded with ChatGPT
 - Hidden Startup Programs: Optional list of extra programs to launch hidden/minimized at boot.
 - Controller mouse mode (hold View/Back): Right stick moves mouse, left stick scrolls, D-pad arrows.
   Buttons are configurable (Short/Long) via the Controller Mapping window.
+- Launcher Cleanup - Clean up launchers after exiting your game so no unnecessary tasks run in the background.
 
 ## Explorer “ghost mode” (Game Bar / UWP compatibility)
 
