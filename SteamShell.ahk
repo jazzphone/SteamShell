@@ -9,6 +9,8 @@
 ; ==============================================================================
 #Requires AutoHotkey v2.0
 #SingleInstance Force
+DEFAULT_AUDIO_PEAK_THRESHOLD := 0.02  ; Default audio peak threshold (0.0–1.0). Can be overridden in INI.
+AudioPeakThreshold := DEFAULT_AUDIO_PEAK_THRESHOLD
 SetTitleMatchMode 2
 Persistent
 
@@ -62,6 +64,27 @@ global ControllerChordHoldMs := 500 ; Long-press threshold (ms) for View/Back + 
 global ControllerMap := Map() ; key => mapping string ("Builtin:..." or "Send:...")
 global ControllerMapDisplay := Map() ; key => pretty display for Send: mappings
 InitDefaultControllerMappings()
+; Launcher cleanup (optional)
+global EnableLauncherCleanup := false ; Close selected launchers/services after Steam is foreground for N seconds
+global LauncherCleanupSteamForegroundSec := 30 ; Required seconds Steam stays foreground before cleanup runs
+global LauncherCleanupRequireNoGame := true ; Skip cleanup if a game-like fullscreen/borderless window is detected
+global LauncherCleanupCooldownSec := 300 ; Minimum seconds between cleanup runs
+global LauncherCleanupCheckIntervalMs := 2000 ; Timer interval for checking conditions
+global LauncherCleanupGracefulCloseMs := 4000 ; Wait after WinClose before hard-killing
+global LauncherCleanupHardKill := true ; If true, hard-kill any remaining launcher/service processes after GracefulCloseMs
+global LauncherCleanupUseCpuAudio := true ; Use CPU/audio heuristics (more reliable than window size alone)
+global LauncherCleanupCpuThreshold := 12 ; CPU % threshold to consider "game running" (0 disables CPU check)
+global LauncherCleanupAudioPeakThreshold := 0.02 ; Audio peak threshold for Launcher Cleanup (0.0–1.0)
+
+; Pipe-separated EXE lists (editable in INI)
+global LauncherCleanupLauncherExeListRaw := "UbisoftConnect.exe|upc.exe|EpicGamesLauncher.exe|EADesktop.exe|EALauncher.exe|Origin.exe|Battle.net.exe|RockstarGamesLauncher.exe|GalaxyClient.exe|RiotClientServices.exe|RiotClientUx.exe|wgc.exe"
+global LauncherCleanupBackgroundExeListRaw := "UbisoftConnectService.exe|UplayWebCore.exe|UplayService.exe|EpicWebHelper.exe|EABackgroundService.exe|BlizzardUpdateAgent.exe|Agent.exe|RockstarService.exe|SocialClubHelper.exe|GalaxyClientService.exe|GalaxyCommunication.exe|RiotClientUxRender.exe"
+global LauncherCleanupExcludeExeListRaw := "steam.exe|steamwebhelper.exe|SteamShell.exe"
+
+; Parsed lists/sets
+global LauncherCleanupLauncherList := []
+global LauncherCleanupBackgroundList := []
+global LauncherCleanupExcludeSet := Map()
 
 
 ; Timings (ms)
@@ -273,93 +296,94 @@ EnsureSettingsIniExists() {
 ; ==================================================================================================
 
 [Paths]
-SteamPath=C:\Program Files (x86)\Steam\Steam.exe ; Full path to Steam.exe
+SteamPath=C:\Program Files (x86)\Steam\Steam.exe            ; Full path to Steam.exe
 
 [BPM]
-BpmTitle=Steam Big Picture Mode ; Big Picture window title (must match your BPM title)
+BpmTitle=Steam Big Picture Mode                             ; Big Picture window title (must match your BPM title)
 
 [Features]
-EnableSplashScreen=true ; Show a black splash overlay during boot
-EnableTaskbarHiding=true ; Hide taskbar & tray windows (kiosk feel)
-EnableWindowManagement=true ; Center windows; maximize large windows (skips OSK + Steam KB)
-EnableAutoHideCursor=true ; Hide cursor after MouseHideDelay inactivity
-EnableSteamRefocusMode=true ; Refocus BPM after SteamRefocusDelay when nothing else is visible
-EnableGameForegroundAssist=true ; Detect fullscreen-ish games and bring them to front
-EnableAlwaysFocus=true ; Allow specific apps (ExeList) to always win focus over Steam
-EnableMouseParkOnBoot=true ; Park cursor off-screen to the right at startup
-EnableMouseParkEveryRefocus=true ; Park cursor off-screen whenever SteamShell activates a window
+EnableSplashScreen=true                                     ; Show a black splash overlay during boot
+EnableTaskbarHiding=true                                    ; Hide taskbar & tray windows (kiosk feel)
+EnableWindowManagement=true                                 ; Center windows; maximize large windows (skips OSK + Steam KB)
+EnableAutoHideCursor=true                                   ; Hide cursor after MouseHideDelay inactivity
+EnableSteamRefocusMode=true                                 ; Refocus BPM after SteamRefocusDelay when nothing else is visible
+EnableGameForegroundAssist=true                             ; Detect fullscreen-ish games and bring them to front
+EnableAlwaysFocus=true                                      ; Allow specific apps (ExeList) to always win focus over Steam
+EnableMouseParkOnBoot=true                                  ; Park cursor off-screen to the right at startup
+EnableMouseParkEveryRefocus=true                            ; Park cursor off-screen whenever SteamShell activates a window
 
 [Timing]
-SplashScreenDuration=10000 ; Splash duration in milliseconds (0 disables fade)
-WindowCheckInterval=500 ; How often to center/maximize new windows (ms)
-SteamRefocusPollingInterval=1000 ; How often to run focus checks (ms)
-MouseMonitorInterval=250 ; Mouse polling interval (ms)
-MouseHideDelay=1000 ; Hide cursor after this many ms without movement
-SteamRefocusDelay=3000 ; Wait this many ms before refocusing BPM (when no windows remain)
+SplashScreenDuration=10000                                  ; Splash duration in milliseconds (0 disables fade)
+WindowCheckInterval=500                                     ; How often to center/maximize new windows (ms)
+SteamRefocusPollingInterval=1000                            ; How often to run focus checks (ms)
+MouseMonitorInterval=250                                    ; Mouse polling interval (ms)
+MouseHideDelay=1000                                         ; Hide cursor after this many ms without movement
+SteamRefocusDelay=3000                                      ; Wait this many ms before refocusing BPM (when no windows remain)
 
 
 [Splash]
-Mode=Black ; Black | Video
-VideoPath= ; Full path to startup video (mp4/wmv). Leave blank for Black.
-Mute=false ; Mute video audio
-PlayFullDuration=true ; If true, play full video before fading out (safety timeout still applies)
-SafetyMaxMs=15000 ; Failsafe max time to keep splash up in Video+PlayFullDuration mode. Set LONGER than your video length.
-FadeOutMs=300 ; Fade out duration in ms (0 = no fade)
-TopmostGuardMs=500 ; Re-assert topmost while visible (0 disables)
+Mode=Black                                                  ; Black | Video
+VideoPath=                                                  ; Full path to startup video (mp4/wmv). Leave blank for Black.
+Mute=false                                                  ; Mute video audio
+PlayFullDuration=true                                       ; If true, play full video before fading out (safety timeout still applies)
+SafetyMaxMs=15000                                           ; Failsafe max time to keep splash up in Video+PlayFullDuration mode. Set LONGER than your video length.
+FadeOutMs=300                                               ; Fade out duration in ms (0 = no fade)
+TopmostGuardMs=500                                          ; Re-assert topmost while visible (0 disables)
 
-MpvPath= ; Full path to mpv.exe (required when Mode=Video)
-ForceSDR=true ; Force MPV to output SDR (prevents HDR/Dolby Vision mode switching)
-DebugOverlay=false ; If true, shows the reason video failed on the splash screen
+MpvPath=                                                    ; Full path to mpv.exe (required when Mode=Video)
+ForceSDR=true                                               ; Force MPV to output SDR (prevents HDR/Dolby Vision mode switching)
+DebugOverlay=false                                          ; If true, shows the reason video failed on the splash screen
 
 
 [WindowManagement]
-MinWidthPercent=0.20 ; Only maximize windows wider than this % of screen width
-ExcludeExeList= ; Optional: Pipe-separated EXEs to skip (e.g. GameBar.exe|YourTool.exe)
-ExcludeClassList= ; Optional: Pipe-separated window classes to skip (e.g. UnityWndClass|Chrome_WidgetWin_1)
+MinWidthPercent=0.20                                        ; Only maximize windows wider than this % of screen width
+ExcludeExeList=                                             ; Optional: Pipe-separated EXEs to skip (e.g. GameBar.exe|YourTool.exe)
+ExcludeClassList=                                           ; Optional: Pipe-separated window classes to skip (e.g. UnityWndClass|Chrome_WidgetWin_1)
 
 [AlwaysFocus]
-ExeList= ; Pipe-separated EXEs: Example SplitSecond.exe|EADesktop.exe
-AlwaysFocusCooldownMs=1000 ; Minimum time between re-activating an AlwaysFocus window
+ExeList=                                                    ; Pipe-separated EXEs: Example SplitSecond.exe|EADesktop.exe
+AlwaysFocusCooldownMs=1000                                  ; Minimum time between re-activating an AlwaysFocus window
 
 [GameForegroundAssist]
-GameCPUThresholdPercent=5.0 ; CPU % that adds a score bonus
-FullscreenTolerance=0.98 ; Window must be >= this % of screen size to count as fullscreen-ish
-FullscreenPosTolerancePx=2 ; Window position must be within this many px of 0,0 for fullscreen-ish
-GameForegroundCooldownMs=1500 ; Minimum time between forced game activations
-GameAllowZeroCpuAsCandidate=true ; If CPU samples 0, still allow candidate
-GameRequireSteamForeground=true ; Only run game assist when Steam is foreground (safe default)
-GameAssistLogEvenWhenSkipped=false ; Log candidates even when skipped due to Steam not foreground
+GameCPUThresholdPercent=5.0                                 ; CPU % that adds a score bonus
+FullscreenTolerance=0.98                                    ; Window must be >= this % of screen size to count as fullscreen-ish
+FullscreenPosTolerancePx=2                                  ; Window position must be within this many px of 0,0 for fullscreen-ish
+AudioPeakThreshold=0.02                                     ; Advanced: audio peak (0.0–1.0) to treat as “active game audio”
+GameForegroundCooldownMs=1500                               ; Minimum time between forced game activations
+GameAllowZeroCpuAsCandidate=true                            ; If CPU samples 0, still allow candidate
+GameRequireSteamForeground=true                             ; Only run game assist when Steam is foreground (safe default)
+GameAssistLogEvenWhenSkipped=false                          ; Log candidates even when skipped due to Steam not foreground
 
-EnableAudioAssist=true ; Add score if the process is outputting audio
-ScoreAudioActive=30 ; Score bonus when audio peak is detected
+EnableAudioAssist=true                                      ; Add score if the process is outputting audio
+ScoreAudioActive=30                                         ; Score bonus when audio peak is detected
 
-ScoreFullscreen=70 ; Base score when fullscreen-ish
-ScoreBorderlessLarge=45 ; Base score when large borderless but not at 0,0
-ScoreTitleBonus=10 ; Score bonus if window has a non-trivial title
-ScoreCpuAboveThreshold=20 ; Score bonus if CPU >= GameCPUThresholdPercent
-ScoreCpuNonZeroBonus=15 ; Score bonus if CPU > 0 but below threshold
-GameMinScoreToActivate=60 ; Minimum score required to activate the best candidate
+ScoreFullscreen=70                                          ; Base score when fullscreen-ish
+ScoreBorderlessLarge=45                                     ; Base score when large borderless but not at 0,0
+ScoreTitleBonus=10                                          ; Score bonus if window has a non-trivial title
+ScoreCpuAboveThreshold=20                                   ; Score bonus if CPU >= GameCPUThresholdPercent
+ScoreCpuNonZeroBonus=15                                     ; Score bonus if CPU > 0 but below threshold
+GameMinScoreToActivate=60                                   ; Minimum score required to activate the best candidate
 
 [Logging]
-EnableGameScoreLogging=false ; Write scoring/decisions to SteamShell.log
-GameLogMode=OFF ; OFF|ACTIVATIONS|TOPN|DIAGNOSTIC
-GameLogTopN=3 ; When TOPN/DIAGNOSTIC, log this many top candidates
-GameLogIntervalMs=3000 ; Rate limit for TOPN/DIAGNOSTIC logging
-GameLogIncludeTitles=true ; Include window titles in the log
-GameLogRejectNearCandidates=true ; In DIAGNOSTIC, also log near-fullscreen rejects
-GameLogRejectMinAreaPercent=0.85 ; Only log rejects with >= this % of screen area
-GameLogRotateMaxKB=256 ; Rotate log when it exceeds this many KB
-GameLogRotateBackups=2 ; Keep this many rotated backups
+EnableGameScoreLogging=false                                ; Write scoring/decisions to SteamShell.log
+GameLogMode=OFF                                             ; OFF|ACTIVATIONS|TOPN|DIAGNOSTIC
+GameLogTopN=3                                               ; When TOPN/DIAGNOSTIC, log this many top candidates
+GameLogIntervalMs=3000                                      ; Rate limit for TOPN/DIAGNOSTIC logging
+GameLogIncludeTitles=true                                   ; Include window titles in the log
+GameLogRejectNearCandidates=true                            ; In DIAGNOSTIC, also log near-fullscreen rejects
+GameLogRejectMinAreaPercent=0.85                            ; Only log rejects with >= this % of screen area
+GameLogRotateMaxKB=256                                      ; Rotate log when it exceeds this many KB
+GameLogRotateBackups=2                                      ; Keep this many rotated backups
 
 [MousePark]
-MouseParkRightOffsetPx=50 ; Park cursor this many px beyond the right edge
-MouseParkYPercent=0.50 ; Park cursor at this % of screen height
+MouseParkRightOffsetPx=50                                   ; Park cursor this many px beyond the right edge
+MouseParkYPercent=0.50                                      ; Park cursor at this % of screen height
 
 
 
 [StartupPrograms]
-Enable=false ; Start additional user-defined programs at boot (hidden)
-DelayMs=2000 ; Wait this long after SteamShell starts before launching them
+Enable=false                                                ; Start additional user-defined programs at boot (hidden)
+DelayMs=2000                                                ; Wait this long after SteamShell starts before launching them
 ; Define programs as Program1..Program20. Format:
 ; ProgramN="C:\Path\App.exe" --arg1 --arg2
 ; Quotes recommended if the path contains spaces. Everything after the exe is treated as arguments.
@@ -367,16 +391,41 @@ DelayMs=2000 ; Wait this long after SteamShell starts before launching them
 Program1=
 Program2=
 
+[LauncherCleanup]
+; Optional: automatically close common game launchers after you’ve returned to Steam.
+; This runs only when Steam is in the foreground for SteamForegroundSec seconds.
+; NOTE: Closing background services is aggressive. Use RequireNoGame=true for safety.
+
+Enable=false
+SteamForegroundSec=30
+RequireNoGame=true
+CooldownSec=300
+CheckIntervalMs=2000
+GracefulCloseMs=4000
+HardKill=true
+
+
+; Advanced (only used when RequireNoGame=true and UseCpuAudio=true)
+UseCpuAudio=true
+CpuThreshold=12
+AudioPeakThreshold=0.02
+; Pipe-separated EXEs (case-insensitive). If an entry has no .exe, it will be appended.
+LauncherExeList=UbisoftConnect.exe|upc.exe|EpicGamesLauncher.exe|EADesktop.exe|EALauncher.exe|Origin.exe|Battle.net.exe|RockstarGamesLauncher.exe|GalaxyClient.exe|RiotClientServices.exe|RiotClientUx.exe|wgc.exe
+BackgroundExeList=UbisoftConnectService.exe|UplayWebCore.exe|UplayService.exe|EpicWebHelper.exe|EABackgroundService.exe|BlizzardUpdateAgent.exe|Agent.exe|RockstarService.exe|SocialClubHelper.exe|GalaxyClientService.exe|GalaxyCommunication.exe|RiotClientUxRender.exe
+
+; Safety: never kill these
+ExcludeExeList=steam.exe|steamwebhelper.exe|SteamShell.exe
+
 [Controller]
-EnableControllerMouseMode=true ; Enable controller mouse/keyboard mapping (hold View/Back)
-ControllerIndex=0 ; 0=first controller
-ControllerPollIntervalMs=16 ; Poll rate (ms)
-ControllerDeadzone=8000 ; Stick deadzone (0-32767)
-ControllerMouseSpeed=100 ; Pixels per poll tick at full deflection
-ControllerMouseFastMultiplier=2.5 ; Multiplier while RT is held
-ControllerScrollIntervalMs=80 ; Min ms between scroll ticks
-ControllerScrollStep=1 ; Wheel notches per scroll tick
-ControllerChordHoldMs=500 ; Long-press threshold (ms) for B/X/Y secondary actions
+EnableControllerMouseMode=true                              ; Enable controller mouse/keyboard mapping (hold View/Back)
+ControllerIndex=0                                           ; 0=first controller
+ControllerPollIntervalMs=16                                 ; Poll rate (ms)
+ControllerDeadzone=8000                                     ; Stick deadzone (0-32767)
+ControllerMouseSpeed=100                                    ; Pixels per poll tick at full deflection
+ControllerMouseFastMultiplier=2.5                           ; Multiplier while RT is held
+ControllerScrollIntervalMs=80                               ; Min ms between scroll ticks
+ControllerScrollStep=1                                      ; Wheel notches per scroll tick
+ControllerChordHoldMs=500                                   ; Long-press threshold (ms) for B/X/Y secondary actions
 )"
  try FileAppend(txt, SettingsPath, "UTF-8")
 }
@@ -408,12 +457,40 @@ IniReadS(section, key, default := "") {
 }
 
 ToBool(v, default := false) {
- s := StrLower(Trim(v))
- if (s = "1" || s = "true" || s = "yes" || s = "on")
- return true
- if (s = "0" || s = "false" || s = "no" || s = "off")
- return false
- return default
+    ; Always returns a true/false (numeric 1/0) result.
+    ; Accepts common boolean strings: 1/0, true/false, yes/no, on/off.
+
+    b := _TryParseBool(v)
+    if (b != "")
+        return b
+
+    b := _TryParseBool(default)
+    if (b != "")
+        return b
+
+    ; Fallback: if default is numeric/bool, coerce it; if it's any other non-empty string, treat as true.
+    try return (default + 0) != 0
+    catch {
+        return Trim(default "") != ""
+    }
+}
+
+_TryParseBool(x) {
+    try {
+        ; Numeric?
+        if IsNumber(x)
+            return (x + 0) != 0
+    } catch {
+        ; Ignore
+    }
+
+    s := StrLower(Trim(x ""))
+    if (s = "1" || s = "true" || s = "yes" || s = "on")
+        return true
+    if (s = "0" || s = "false" || s = "no" || s = "off" || s = "")
+        return false
+
+    return ""  ; unknown token
 }
 
 ToInt(v, default := 0) {
@@ -531,6 +608,8 @@ WriteBoolIni(section, key, b) {
 }
 
 LoadSettings() {
+    global AudioPeakThreshold, DEFAULT_AUDIO_PEAK_THRESHOLD
+    AudioPeakThreshold := ClampFloat(ToFloat(IniReadS("GameForegroundAssist","AudioPeakThreshold","0.02"), DEFAULT_AUDIO_PEAK_THRESHOLD), 0.0, 1.0)
  global SteamPath, BpmTitle
  global EnableSplashScreen, EnableTaskbarHiding, EnableWindowManagement, EnableAutoHideCursor
  global EnableSteamRefocusMode, EnableGameForegroundAssist, EnableAlwaysFocus
@@ -550,6 +629,10 @@ LoadSettings() {
  global EnableGameScoreLogging, GameLogMode, GameLogTopN, GameLogIntervalMs, GameLogIncludeTitles
  global GameLogRejectNearCandidates, GameLogRejectMinAreaPercent, GameLogRotateMaxKB, GameLogRotateBackups
  global MouseParkRightOffsetPx, MouseParkYPercent
+ global EnableLauncherCleanup, LauncherCleanupSteamForegroundSec, LauncherCleanupRequireNoGame, LauncherCleanupUseCpuAudio, LauncherCleanupCpuThreshold, LauncherCleanupAudioPeakThreshold
+ global LauncherCleanupCooldownSec, LauncherCleanupCheckIntervalMs, LauncherCleanupGracefulCloseMs, LauncherCleanupHardKill
+ global LauncherCleanupLauncherExeListRaw, LauncherCleanupBackgroundExeListRaw, LauncherCleanupExcludeExeListRaw
+ global LauncherCleanupLauncherList, LauncherCleanupBackgroundList, LauncherCleanupExcludeSet
 global EnableControllerMouseMode, ControllerIndex, ControllerPollIntervalMs, ControllerDeadzone, ControllerMouseSpeed, ControllerMouseFastMultiplier, ControllerScrollIntervalMs, ControllerScrollStep
 
  SteamPath := IniReadS("Paths", "SteamPath", SteamPath)
@@ -634,6 +717,34 @@ global EnableControllerMouseMode, ControllerIndex, ControllerPollIntervalMs, Con
  MouseParkRightOffsetPx := ClampInt(ToInt(IniReadS("MousePark","MouseParkRightOffsetPx","50"), 50), 0, 5000)
  MouseParkYPercent := ClampFloat(ToFloat(IniReadS("MousePark","MouseParkYPercent","0.50"), 0.50), 0.0, 1.0)
 
+ ; Launcher cleanup (optional)
+ EnableLauncherCleanup := ToBool(IniReadS("LauncherCleanup","Enable","false"), false)
+ LauncherCleanupSteamForegroundSec := ClampInt(ToInt(IniReadS("LauncherCleanup","SteamForegroundSec","30"), 30), 1, 600)
+ LauncherCleanupRequireNoGame := ToBool(IniReadS("LauncherCleanup","RequireNoGame","true"), true)
+ LauncherCleanupCooldownSec := ClampInt(ToInt(IniReadS("LauncherCleanup","CooldownSec","300"), 300), 0, 86400)
+ LauncherCleanupCheckIntervalMs := ClampInt(ToInt(IniReadS("LauncherCleanup","CheckIntervalMs","2000"), 2000), 200, 60000)
+ LauncherCleanupGracefulCloseMs := ClampInt(ToInt(IniReadS("LauncherCleanup","GracefulCloseMs","4000"), 4000), 0, 60000)
+ LauncherCleanupHardKill := ToBool(IniReadS("LauncherCleanup","HardKill","true"), true)
+
+LauncherCleanupUseCpuAudio := ToBool(IniReadS("LauncherCleanup","UseCpuAudio","true"), true)
+LauncherCleanupCpuThreshold := ClampInt(ToInt(IniReadS("LauncherCleanup","CpuThreshold","12"), 12), 0, 500)
+
+LauncherCleanupAudioPeakThreshold := ClampFloat(ToFloat(IniReadS("LauncherCleanup","AudioPeakThreshold","0.02"), 0.02), 0.0, 1.0)
+ LauncherCleanupLauncherExeListRaw := IniReadS("LauncherCleanup","LauncherExeList", LauncherCleanupLauncherExeListRaw)
+ LauncherCleanupBackgroundExeListRaw := IniReadS("LauncherCleanup","BackgroundExeList", LauncherCleanupBackgroundExeListRaw)
+ LauncherCleanupExcludeExeListRaw := IniReadS("LauncherCleanup","ExcludeExeList", LauncherCleanupExcludeExeListRaw)
+
+ LauncherCleanupLauncherList := ParseExeListPipe(LauncherCleanupLauncherExeListRaw)
+ LauncherCleanupBackgroundList := ParseExeListPipe(LauncherCleanupBackgroundExeListRaw)
+
+ ; Build exclude set (always includes Steam + SteamShell)
+ LauncherCleanupExcludeSet := Map()
+ for _, ex in ParseExeListPipe(LauncherCleanupExcludeExeListRaw)
+ LauncherCleanupExcludeSet[ex] := true
+ LauncherCleanupExcludeSet["steam.exe"] := true
+ LauncherCleanupExcludeSet["steamwebhelper.exe"] := true
+ LauncherCleanupExcludeSet["steamshell.exe"] := true
+
  ; Controller mouse mode (XInput / Xbox)
  EnableControllerMouseMode := ToBool(IniReadS("Controller","EnableControllerMouseMode","true"), true)
  ControllerIndex := ClampInt(ToInt(IniReadS("Controller","ControllerIndex","0"), 0), 0, 3)
@@ -651,13 +762,15 @@ ApplyRuntimeTimers() {
  global WindowCheckInterval, SteamRefocusPollingInterval, MouseMonitorInterval
  global EnableWindowManagement, EnableAutoHideCursor
  global EnableSteamRefocusMode, EnableGameForegroundAssist, EnableAlwaysFocus
- global EnableControllerMouseMode, ControllerPollIntervalMs
+  global EnableLauncherCleanup, LauncherCleanupCheckIntervalMs
+global EnableControllerMouseMode, ControllerPollIntervalMs
 
  SetTimer(MonitorShell, 0)
  SetTimer(CheckWindows, 0)
  SetTimer(MouseWatch, 0)
  SetTimer(SteamRefocusPolling, 0)
  SetTimer(PollController, 0)
+ SetTimer(CheckLauncherCleanup, 0)
 
  SetTimer(MonitorShell, WindowCheckInterval)
 
@@ -672,6 +785,9 @@ ApplyRuntimeTimers() {
 
  if (EnableControllerMouseMode)
  SetTimer(PollController, ControllerPollIntervalMs)
+
+ if (EnableLauncherCleanup)
+ SetTimer(CheckLauncherCleanup, LauncherCleanupCheckIntervalMs)
 }
 
 ReloadSettings() {
@@ -2074,11 +2190,11 @@ IsCloaked(hwnd) {
 ; ==============================================================================
 ; EXCLUSIONS (never touch OSK or Steam Keyboard)
 ; ==============================================================================
-IsExcludedForCenterMax(title, class, proc) {
+IsExcludedForCenterMax(title, winClass, proc) {
  global WmExcludeExeSet, WmExcludeClassSet
 
  t := StrLower(title)
- c := StrLower(class)
+ c := StrLower(winClass)
  p := StrLower(proc)
 
  ; INI-driven exclusions for window-management (center/maximize)
@@ -2152,17 +2268,17 @@ CheckWindows() {
  if !(style & 0x10000000)
  continue
 
- title := "", class := ""
+ title := "", winClass := ""
  try {
  title := WinGetTitle(id)
- class := WinGetClass(id)
+ winClass := WinGetClass(id)
  } catch {
  continue
  }
 
  if (title = "" || title = BpmTitle)
  continue
- if (class = "Progman" || class = "WorkerW" || class = "Shell_TrayWnd")
+ if (winClass = "Progman" || winClass = "WorkerW" || winClass = "Shell_TrayWnd")
  continue
 
  proc := ""
@@ -2172,7 +2288,7 @@ CheckWindows() {
  proc := ""
  }
 
- if IsExcludedForCenterMax(title, class, proc)
+ if IsExcludedForCenterMax(title, winClass, proc)
  continue
 
  try {
@@ -2668,17 +2784,17 @@ TryBringFullscreenCandidateToFront(forceRun := false, forceActivate := false) {
  } catch {
  }
 
- title := "", class := ""
+ title := "", winClass := ""
  try {
  title := WinGetTitle(id)
- class := WinGetClass(id)
+ winClass := WinGetClass(id)
  } catch {
  continue
  }
 
  if (title = "" || title = BpmTitle)
  continue
- if (class = "Progman" || class = "WorkerW" || class = "Shell_TrayWnd")
+ if (winClass = "Progman" || winClass = "WorkerW" || winClass = "Shell_TrayWnd")
  continue
 
  proc := ""
@@ -2692,7 +2808,7 @@ TryBringFullscreenCandidateToFront(forceRun := false, forceActivate := false) {
 
  if (proc = "steam.exe")
  continue
- if (proc = "osk.exe" || class = "OSKMainClass" || InStr(tLower, "on-screen keyboard"))
+ if (proc = "osk.exe" || winClass = "OSKMainClass" || InStr(tLower, "on-screen keyboard"))
  continue
  if (proc = "steam.exe" && InStr(tLower, "keyboard"))
  continue
@@ -2754,7 +2870,7 @@ TryBringFullscreenCandidateToFront(forceRun := false, forceActivate := false) {
  if (EnableAudioAssist && pid) {
  if (!IsObject(audioMap))
  audioMap := GetActiveAudioPidPeaksCached()
- if (audioMap.Has(pid) && audioMap[pid] > 0.01) {
+ if (audioMap.Has(pid) && audioMap[pid] > AudioPeakThreshold) {
  score += ScoreAudioActive
  audioActive := true
  }
@@ -2902,17 +3018,17 @@ SteamRefocusPolling() {
  if !(style & 0x10000000)
  continue
 
- title := "", class := "", proc := ""
+ title := "", winClass := "", proc := ""
  try {
  title := WinGetTitle(id)
- class := WinGetClass(id)
+ winClass := WinGetClass(id)
  } catch {
  continue
  }
 
  if (title = "" || title = BpmTitle)
  continue
- if (class = "Progman" || class = "WorkerW" || class = "Shell_TrayWnd")
+ if (winClass = "Progman" || winClass = "WorkerW" || winClass = "Shell_TrayWnd")
  continue
 
  try {
@@ -2973,16 +3089,16 @@ SteamRefocusPolling() {
  if !(style & 0x10000000)
  continue
 
- title := "", class := ""
+ title := "", winClass := ""
  try {
  title := WinGetTitle(id)
- class := WinGetClass(id)
+ winClass := WinGetClass(id)
  } catch {
  continue
  }
 
  if (title != "" && title != BpmTitle
- && class != "Progman" && class != "WorkerW" && class != "Shell_TrayWnd") {
+ && winClass != "Progman" && winClass != "WorkerW" && winClass != "Shell_TrayWnd") {
  anyOpen := true
  break
  }
@@ -3030,17 +3146,17 @@ GetTopRunningApps(maxCount := 5) {
  if !(style & 0x10000000)
  continue
 
- title := "", class := "", proc := ""
+ title := "", winClass := "", proc := ""
  try {
  title := WinGetTitle(id)
- class := WinGetClass(id)
+ winClass := WinGetClass(id)
  } catch {
  continue
  }
 
  if (title = "" || title = BpmTitle)
  continue
- if (class = "Progman" || class = "WorkerW" || class = "Shell_TrayWnd")
+ if (winClass = "Progman" || winClass = "WorkerW" || winClass = "Shell_TrayWnd")
  continue
 
  try {
@@ -4358,6 +4474,435 @@ StartUserStartupProgramsNow() {
  RunHiddenCommandLine(cmdline)
  }
 }
+; LAUNCHER CLEANUP (Optional)
+; ==============================================================================
+CheckLauncherCleanup() {
+ global EnableLauncherCleanup, LauncherCleanupSteamForegroundSec, LauncherCleanupRequireNoGame, LauncherCleanupUseCpuAudio
+ global LauncherCleanupCooldownSec, LauncherCleanupGracefulCloseMs, LauncherCleanupHardKill
+ global LauncherCleanupLauncherList, LauncherCleanupBackgroundList, LauncherCleanupExcludeSet
+
+ static steamFgSinceTick := 0
+ static lastCleanupTick := 0
+ static inRun := false
+
+ if (!EnableLauncherCleanup)
+     return
+
+ if inRun
+     return
+
+ if !IsSteamForeground() {
+     steamFgSinceTick := 0
+     return
+ }
+
+ if (!steamFgSinceTick) {
+     steamFgSinceTick := A_TickCount
+     return
+ }
+
+ if ((A_TickCount - steamFgSinceTick) < (LauncherCleanupSteamForegroundSec * 1000))
+     return
+
+ if (LauncherCleanupCooldownSec > 0 && (A_TickCount - lastCleanupTick) < (LauncherCleanupCooldownSec * 1000))
+     return
+
+ if (LauncherCleanupRequireNoGame) {
+     try {
+         if (LauncherCleanupUseCpuAudio) {
+             ; CPU/Audio only gate (avoids "game-like window" false positives in Steam/BPM/launchers)
+             if HasGameRunningRobust(LauncherCleanupExcludeSet, false)
+                 return
+         } else {
+             if HasGameLikeWindow(LauncherCleanupExcludeSet)
+                 return
+         }
+     } catch {
+         ; If detection fails for any reason, be conservative and skip cleanup.
+         return
+     }
+ }
+
+ inRun := true
+ try {
+     ; If any service-backed helpers are running, attempt to stop their services first (best-effort).
+     needles := []
+     for _, ex in LauncherCleanupBackgroundList {
+         exl := StrLower(ex)
+         ; Most service-backed helpers include "service" in the exe name (e.g., UbisoftConnectService.exe, EABackgroundService.exe)
+         if InStr(exl, "service")
+             needles.Push(exl)
+     }
+     if (needles.Length)
+         StopRunningServicesByExeNeedles(needles)
+
+     ; Close launcher UI processes first (graceful then optional kill)
+     for _, exe in LauncherCleanupLauncherList {
+         CloseExeProcesses(exe, true, LauncherCleanupGracefulCloseMs, LauncherCleanupHardKill, LauncherCleanupExcludeSet)
+
+         ; EA App is notorious for "close-to-tray"/fast respawn. A couple extra passes help it stick.
+         if (StrLower(exe) = "eadesktop.exe") {
+             Sleep(400)
+             CloseExeProcesses(exe, true, 0, LauncherCleanupHardKill, LauncherCleanupExcludeSet)
+             Sleep(400)
+             CloseExeProcesses(exe, false, 0, LauncherCleanupHardKill, LauncherCleanupExcludeSet)
+         }
+     }
+
+     ; Then close background service/helper processes (typically no windows)
+     for _, exe in LauncherCleanupBackgroundList
+         CloseExeProcesses(exe, false, 0, LauncherCleanupHardKill, LauncherCleanupExcludeSet)
+
+     lastCleanupTick := A_TickCount
+ } finally {
+     inRun := false
+ }
+}
+
+
+HasGameLikeWindow(excludeSet) {
+ global FullscreenTolerance, FullscreenPosTolerancePx, ScriptPid, BpmTitle
+ global LauncherCleanupLauncherList, LauncherCleanupBackgroundList
+
+ ; Build an ignore set (lowercase exe names) so we don't treat Steam/launchers as "games"
+ ignore := Map()
+ if (IsObject(excludeSet)) {
+     for k, _ in excludeSet
+         ignore[k] := true
+ }
+ ; Also ignore the launchers/helpers we intend to close
+ if (IsObject(LauncherCleanupLauncherList)) {
+     for _, ex in LauncherCleanupLauncherList
+         ignore[StrLower(ex)] := true
+ }
+ if (IsObject(LauncherCleanupBackgroundList)) {
+     for _, ex in LauncherCleanupBackgroundList
+         ignore[StrLower(ex)] := true
+ }
+
+ ; Always ignore Steam + overlay + ourself
+ ignore["steam.exe"] := true
+ ignore["steamwebhelper.exe"] := true
+ ignore["gameoverlayui.exe"] := true
+ ignore["steamshell.exe"] := true
+
+
+ for hwnd in WinGetList() {
+     if !DllCall("IsWindow", "Ptr", hwnd)
+         continue
+     if IsCloaked(hwnd)
+         continue
+
+     id := "ahk_id " hwnd
+
+     try {
+         style := WinGetStyle(id)
+         if !(style & 0x10000000)
+             continue
+     } catch {
+         continue
+     }
+
+     try {
+         if (WinGetMinMax(id) = -1)
+             continue
+     } catch {
+     }
+
+     proc := ""
+     try proc := StrLower(WinGetProcessName(id))
+     catch {
+         proc := ""
+     }
+
+     if (proc = "" || ignore.Has(proc))
+         continue
+
+     ; Ignore our own GUI windows
+     try {
+         if (WinGetPID(id) = ScriptPid)
+             continue
+     } catch {
+     }
+
+     title := ""
+     try title := WinGetTitle(id)
+     catch {
+         title := ""
+     }
+
+     if (title = "" || title = BpmTitle)
+         continue
+
+     x := 0, y := 0, w := 0, h := 0
+     try WinGetPos(&x, &y, &w, &h, id)
+     catch {
+         continue
+     }
+     nearFS := (w >= (A_ScreenWidth * FullscreenTolerance)
+         && h >= (A_ScreenHeight * FullscreenTolerance)
+         && Abs(x) <= FullscreenPosTolerancePx
+         && Abs(y) <= FullscreenPosTolerancePx)
+
+     bigBorderless := (w >= (A_ScreenWidth * 0.90) && h >= (A_ScreenHeight * 0.90))
+
+     if (nearFS || bigBorderless)
+         return true
+ }
+ return false
+}
+
+HasGameRunningRobust(excludeSet, useWindowHeuristic := true) {
+ ; More reliable "game running" detection for Launcher Cleanup:
+ ; 1) Fast window-size check (fullscreen / big borderless)
+ ; 2) Active audio session (peak meter) from non-launcher, non-Steam processes
+ ; 3) CPU usage threshold from non-launcher, non-Steam processes
+
+ global LauncherCleanupCpuThreshold, LauncherCleanupAudioPeakThreshold
+ global LauncherCleanupLauncherList, LauncherCleanupBackgroundList
+
+ ; Optional fast path: fullscreen/borderless window present
+ if (useWindowHeuristic && HasGameLikeWindow(excludeSet))
+     return true
+
+ ; Build a unified ignore set by EXE name (lowercase)
+ ignore := Map()
+ if IsObject(excludeSet) {
+ for k, _ in excludeSet
+ ignore[k] := true
+ }
+
+ for _, ex in LauncherCleanupLauncherList
+     ignore[StrLower(ex)] := true
+ for _, ex in LauncherCleanupBackgroundList
+     ignore[StrLower(ex)] := true
+
+ ; Always ignore Steam + ourself + audio engine
+ ignore["steam.exe"] := true
+ ignore["steamwebhelper.exe"] := true
+ ignore["steamshell.exe"] := true
+ ignore["audiodg.exe"] := true
+
+ audioMap := 0
+ try audioMap := GetActiveAudioPidPeaksCached()
+ catch {
+     audioMap := 0
+ }
+
+ ; Audio heuristic: any non-ignored pid with peak above threshold means "something game-like is still active"
+ if (IsObject(audioMap) && LauncherCleanupAudioPeakThreshold > 0) {
+     for pid, peak in audioMap {
+         if (pid <= 0)
+             continue
+         if ((peak + 0) < LauncherCleanupAudioPeakThreshold)
+             continue
+
+         proc := ""
+         try proc := StrLower(ProcessGetName(pid))
+         catch {
+             proc := ""
+         }
+
+         if (proc = "" || ignore.Has(proc))
+             continue
+
+         return true
+     }
+ }
+
+ ; CPU heuristic: any non-ignored pid above threshold means "something heavy is still active"
+ if (LauncherCleanupCpuThreshold <= 0)
+ return false
+
+ pids := Map()
+
+ ; Collect pids from visible windows (covers most games even if minimized)
+ try {
+ for hwnd in WinGetList() {
+ if !DllCall("IsWindow", "Ptr", hwnd)
+ continue
+ id := "ahk_id " hwnd
+ pid := 0
+ try pid := WinGetPID(id)
+ catch {
+     pid := 0
+ }
+ if (pid)
+ pids[pid] := true
+ }
+ } catch {
+ }
+
+ ; Also include audio pids (covers some cases where window is hidden/minimized)
+ if IsObject(audioMap) {
+ for pid, _ in audioMap
+ if (pid)
+ pids[pid] := true
+ }
+
+ for pid, _ in pids {
+ proc := ""
+ try proc := StrLower(ProcessGetName(pid))
+ catch {
+     proc := ""
+ }
+
+ if (proc = "" || ignore.Has(proc))
+ continue
+
+ cpu := 0
+ try cpu := GetCPUUsage(pid)
+ catch {
+     cpu := 0
+ }
+
+ if ((cpu + 0) >= LauncherCleanupCpuThreshold)
+ return true
+ }
+
+ return false
+}
+
+
+; Attempt to stop any running Windows services whose PathName contains any of the provided exe substrings.
+; Best-effort; may require admin/service permissions. "needles" should be lowercase exe names, e.g. ["eabackgroundservice.exe"].
+StopRunningServicesByExeNeedles(needles) {
+ if !IsObject(needles)
+     return 0
+ if (needles.Length = 0)
+     return 0
+
+ stopped := 0
+ try {
+     wmi := ComObjGet("winmgmts:{impersonationLevel=impersonate}!\\.\root\cimv2")
+     svcs := wmi.ExecQuery("SELECT * FROM Win32_Service WHERE State='Running'")
+     for svc in svcs {
+         path := ""
+         try path := svc.PathName ""
+         catch {
+             path := ""
+         }
+         if (path = "")
+             continue
+
+         pl := StrLower(path)
+         hit := false
+         for _, needle in needles {
+             if (needle != "" && InStr(pl, needle)) {
+                 hit := true
+                 break
+             }
+         }
+         if !hit
+             continue
+
+         try {
+             svc.StopService()
+             stopped += 1
+         } catch {
+             ; ignore
+         }
+     }
+ } catch {
+     return stopped
+ }
+
+ if (stopped)
+     Sleep(750)
+
+ return stopped
+}
+
+
+
+
+
+CloseExeProcesses(exeName, tryWinClose := true, gracefulMs := 2000, hardKill := true, excludeSet := 0) {
+ if (exeName = "")
+     return
+
+ exe := StrLower(Trim(exeName))
+ if !InStr(exe, ".exe")
+     exe .= ".exe"
+
+ if (IsObject(excludeSet) && excludeSet.Has(exe))
+     return
+
+ ; Try to close any windows first (best-effort)
+ if (tryWinClose) {
+     try {
+         for hwnd in WinGetList("ahk_exe " exe) {
+             try WinClose("ahk_id " hwnd)
+         }
+     } catch {
+     }
+     if (gracefulMs > 0)
+         Sleep(gracefulMs)
+ }
+
+ if (!hardKill)
+     return
+
+ ; Best-effort: stop known services before killing service-backed executables.
+ if (exe = "ubisoftconnectservice.exe") {
+     try RunWait(A_ComSpec " /c sc stop UbisoftConnectService", , "Hide")
+     Sleep(750)
+ } else if (exe = "eabackgroundservice.exe") {
+     try RunWait(A_ComSpec " /c sc stop EABackgroundService", , "Hide")
+     Sleep(750)
+ }
+
+ ; Kill remaining processes by name (best-effort)
+ for _, pid in GetPidsByExeName(exe) {
+     try ProcessClose(pid)
+
+     ; EA App can respawn quickly; PID-based taskkill helps ensure it actually exits.
+     if (exe = "eadesktop.exe" || exe = "ealauncher.exe" || exe = "origin.exe") {
+         try RunWait(A_ComSpec " /c taskkill /F /T /PID " pid, , "Hide")
+     }
+ }
+
+ ; Last resort: taskkill by image name (handles cases where PID enumeration fails)
+ try RunWait(A_ComSpec " /c taskkill /F /T /IM " exe, , "Hide")
+}
+
+
+GetPidsByExeName(exeName) {
+ pids := []
+ exe := StrLower(Trim(exeName))
+ if (exe = "")
+     return pids
+ if !InStr(exe, ".exe")
+     exe .= ".exe"
+
+ ; Prefer Toolhelp snapshot enumeration (more reliable than WMI for some launchers)
+ snap := DllCall("CreateToolhelp32Snapshot", "UInt", 0x00000002, "UInt", 0, "Ptr") ; TH32CS_SNAPPROCESS
+ if (snap = -1 || snap = 0)
+     return pids
+
+ size := (A_PtrSize = 8) ? 568 : 556 ; PROCESSENTRY32W
+ pe := Buffer(size, 0)
+ NumPut("UInt", size, pe, 0)
+
+ if !DllCall("Process32FirstW", "Ptr", snap, "Ptr", pe) {
+     DllCall("CloseHandle", "Ptr", snap)
+     return pids
+ }
+
+ loop {
+     pid := NumGet(pe, 8, "UInt")
+     name := StrLower(StrGet(pe.Ptr + ((A_PtrSize = 8) ? 44 : 36), "UTF-16"))
+     if (name = exe)
+         pids.Push(pid)
+     if !DllCall("Process32NextW", "Ptr", snap, "Ptr", pe)
+         break
+ }
+
+ DllCall("CloseHandle", "Ptr", snap)
+ return pids
+}
+
+
 
 RunHiddenCommandLine(cmdline) {
  target := ""
