@@ -75,10 +75,12 @@ global LauncherCleanupHardKill := true ; If true, hard-kill any remaining launch
 global LauncherCleanupUseCpuAudio := true ; Use CPU/audio heuristics (more reliable than window size alone)
 global LauncherCleanupCpuThreshold := 12 ; CPU % threshold to consider "game running" (0 disables CPU check)
 global LauncherCleanupAudioPeakThreshold := 0.02 ; Audio peak threshold for Launcher Cleanup (0.0–1.0)
+global LauncherCleanupDownloadGuard := false ; If true, skip cleanup while launchers appear busy (possible download/update)
+global LauncherCleanupDownloadGuardMode := "Balanced" ; Off|Balanced|Strict (controls internal thresholds)
 
 ; Pipe-separated EXE lists (editable in INI)
-global LauncherCleanupLauncherExeListRaw := "UbisoftConnect.exe|upc.exe|EpicGamesLauncher.exe|EADesktop.exe|EALauncher.exe|Origin.exe|Battle.net.exe|RockstarGamesLauncher.exe|GalaxyClient.exe|RiotClientServices.exe|RiotClientUx.exe|wgc.exe"
-global LauncherCleanupBackgroundExeListRaw := "UbisoftConnectService.exe|UplayWebCore.exe|UplayService.exe|EpicWebHelper.exe|EABackgroundService.exe|BlizzardUpdateAgent.exe|Agent.exe|RockstarService.exe|SocialClubHelper.exe|GalaxyClientService.exe|GalaxyCommunication.exe|RiotClientUxRender.exe"
+global LauncherCleanupLauncherExeListRaw := "UbisoftConnect.exe|upc.exe|EpicGamesLauncher.exe|EADesktop.exe|EALauncher.exe|Origin.exe|Battle.net.exe|RockstarGamesLauncher.exe|GalaxyClient.exe|RiotClientServices.exe|RiotClientUx.exe|wgc.exe|Heroic.exe"
+global LauncherCleanupBackgroundExeListRaw := "UbisoftConnectService.exe|UplayWebCore.exe|UplayService.exe|EpicWebHelper.exe|EABackgroundService.exe|BlizzardUpdateAgent.exe|Agent.exe|RockstarService.exe|SocialClubHelper.exe|GalaxyClientService.exe|GalaxyCommunication.exe|RiotClientUxRender.exe|legendary.exe|gogdl.exe|nile.exe"
 global LauncherCleanupExcludeExeListRaw := "steam.exe|steamwebhelper.exe|SteamShell.exe"
 
 ; Parsed lists/sets
@@ -86,7 +88,19 @@ global LauncherCleanupLauncherList := []
 global LauncherCleanupBackgroundList := []
 global LauncherCleanupExcludeSet := Map()
 
+; Launcher Cleanup — UI status (Control Panel)
+; These are updated by CheckLauncherCleanup() so the Control Panel can explain
+; why launchers are still running (cooldown, Steam not foreground, game detected, busy guard, etc.).
+global LC_SteamFgSinceTick := 0
+global LC_LastCleanupTick := 0
+global LC_LastDecisionStamp := ""
+global LC_LastDecisionText := "-"
+global LC_FoundText := "-"          ; Launchers/helpers currently detected (by EXE list)
+global LC_GateText := "-"           ; Current gating/why cleanup isn't running
+global LC_ConfigText := "-"         ; One-line config summary (enabled/guard/hardkill)
 
+
+global LC_LastGateCat := ""        ; Internal: last gate category recorded for LC Last
 ; Timings (ms)
 global SplashScreenDuration := 10000
 
@@ -239,6 +253,19 @@ StrRepeat(s, count) {
 
 NowStamp() {
  return FormatTime(A_Now, "yyyy-MM-dd HH:mm:ss")
+}
+
+
+; Record LC Last based on gate state transitions (prevents constant updates during countdowns).
+LC_RecordGateIfChanged(gateText, cat) {
+    global LC_LastGateCat, LC_LastDecisionStamp, LC_LastDecisionText
+    if (cat = "")
+        return
+    if (LC_LastGateCat != cat) {
+        LC_LastGateCat := cat
+        LC_LastDecisionStamp := NowStamp()
+        LC_LastDecisionText := gateText
+    }
 }
 
 GetLastLines(text, maxLines, newestFirst := false) {
@@ -409,9 +436,12 @@ HardKill=true
 UseCpuAudio=true
 CpuThreshold=12
 AudioPeakThreshold=0.02
+; Busy guard (optional): skip cleanup if launchers appear to be actively downloading/updating
+DownloadGuard=false
+DownloadGuardMode=Balanced
 ; Pipe-separated EXEs (case-insensitive). If an entry has no .exe, it will be appended.
-LauncherExeList=UbisoftConnect.exe|upc.exe|EpicGamesLauncher.exe|EADesktop.exe|EALauncher.exe|Origin.exe|Battle.net.exe|RockstarGamesLauncher.exe|GalaxyClient.exe|RiotClientServices.exe|RiotClientUx.exe|wgc.exe
-BackgroundExeList=UbisoftConnectService.exe|UplayWebCore.exe|UplayService.exe|EpicWebHelper.exe|EABackgroundService.exe|BlizzardUpdateAgent.exe|Agent.exe|RockstarService.exe|SocialClubHelper.exe|GalaxyClientService.exe|GalaxyCommunication.exe|RiotClientUxRender.exe
+LauncherExeList=UbisoftConnect.exe|upc.exe|EpicGamesLauncher.exe|EADesktop.exe|EALauncher.exe|Origin.exe|Battle.net.exe|RockstarGamesLauncher.exe|GalaxyClient.exe|RiotClientServices.exe|RiotClientUx.exe|wgc.exe|Heroic.exe
+BackgroundExeList=UbisoftConnectService.exe|UplayWebCore.exe|UplayService.exe|EpicWebHelper.exe|EABackgroundService.exe|BlizzardUpdateAgent.exe|Agent.exe|RockstarService.exe|SocialClubHelper.exe|GalaxyClientService.exe|GalaxyCommunication.exe|RiotClientUxRender.exe|legendary.exe|gogdl.exe|nile.exe
 
 ; Safety: never kill these
 ExcludeExeList=steam.exe|steamwebhelper.exe|SteamShell.exe
@@ -629,7 +659,7 @@ LoadSettings() {
  global EnableGameScoreLogging, GameLogMode, GameLogTopN, GameLogIntervalMs, GameLogIncludeTitles
  global GameLogRejectNearCandidates, GameLogRejectMinAreaPercent, GameLogRotateMaxKB, GameLogRotateBackups
  global MouseParkRightOffsetPx, MouseParkYPercent
- global EnableLauncherCleanup, LauncherCleanupSteamForegroundSec, LauncherCleanupRequireNoGame, LauncherCleanupUseCpuAudio, LauncherCleanupCpuThreshold, LauncherCleanupAudioPeakThreshold
+ global EnableLauncherCleanup, LauncherCleanupSteamForegroundSec, LauncherCleanupRequireNoGame, LauncherCleanupUseCpuAudio, LauncherCleanupCpuThreshold, LauncherCleanupAudioPeakThreshold, LauncherCleanupDownloadGuard, LauncherCleanupDownloadGuardMode
  global LauncherCleanupCooldownSec, LauncherCleanupCheckIntervalMs, LauncherCleanupGracefulCloseMs, LauncherCleanupHardKill
  global LauncherCleanupLauncherExeListRaw, LauncherCleanupBackgroundExeListRaw, LauncherCleanupExcludeExeListRaw
  global LauncherCleanupLauncherList, LauncherCleanupBackgroundList, LauncherCleanupExcludeSet
@@ -730,6 +760,10 @@ LauncherCleanupUseCpuAudio := ToBool(IniReadS("LauncherCleanup","UseCpuAudio","t
 LauncherCleanupCpuThreshold := ClampInt(ToInt(IniReadS("LauncherCleanup","CpuThreshold","12"), 12), 0, 500)
 
 LauncherCleanupAudioPeakThreshold := ClampFloat(ToFloat(IniReadS("LauncherCleanup","AudioPeakThreshold","0.02"), 0.02), 0.0, 1.0)
+ LauncherCleanupDownloadGuard := ToBool(IniReadS("LauncherCleanup","DownloadGuard","false"), false)
+ LauncherCleanupDownloadGuardMode := StrUpper(IniReadS("LauncherCleanup","DownloadGuardMode","Balanced"))
+ if (LauncherCleanupDownloadGuardMode != "OFF" && LauncherCleanupDownloadGuardMode != "BALANCED" && LauncherCleanupDownloadGuardMode != "STRICT")
+     LauncherCleanupDownloadGuardMode := "BALANCED"
  LauncherCleanupLauncherExeListRaw := IniReadS("LauncherCleanup","LauncherExeList", LauncherCleanupLauncherExeListRaw)
  LauncherCleanupBackgroundExeListRaw := IniReadS("LauncherCleanup","BackgroundExeList", LauncherCleanupBackgroundExeListRaw)
  LauncherCleanupExcludeExeListRaw := IniReadS("LauncherCleanup","ExcludeExeList", LauncherCleanupExcludeExeListRaw)
@@ -3399,8 +3433,10 @@ SetLiveLogging(enable) {
 UpdateStatusIndicators() {
  global ControlGui, LiveLogGui
  global HandsOffUntilTick, LastActionText, LastBestCandidateText, AlwaysFocusList
- global CPStat1Ctrl, CPStat2Ctrl, CPStat3Ctrl, CPStat4Ctrl
- global LLStat1Ctrl, LLStat2Ctrl, LLStat3Ctrl, LLStat4Ctrl
+ global CPStat1Ctrl, CPStat2Ctrl, CPStat3Ctrl, CPStat4Ctrl, CPStat5Ctrl, CPStat6Ctrl, CPStat7Ctrl, CPStat8Ctrl
+ global LLStat1Ctrl, LLStat2Ctrl, LLStat3Ctrl, LLStat4Ctrl, LLStat5Ctrl, LLStat6Ctrl, LLStat7Ctrl, LLStat8Ctrl
+ global EnableLauncherCleanup, LauncherCleanupDownloadGuard, LauncherCleanupDownloadGuardMode
+ global LC_ConfigText, LC_FoundText, LC_GateText, LC_LastDecisionStamp, LC_LastDecisionText
 
  ; Status runs on a timer. It must never throw or spam errors.
  try {
@@ -3454,17 +3490,56 @@ UpdateStatusIndicators() {
  txt3 := "Best Candidate: " bestTxt " AlwaysFocus entries: " afCount
  txt4 := "Last Action: " actTxt
 
+ ; Launcher Cleanup status (populated by CheckLauncherCleanup)
+ lc1 := "Launcher Cleanup: -"
+ lc2 := "LC Found: -"
+ lc3 := "LC Gate: -"
+ lc4 := "LC Last: -"
+ try {
+     if (EnableLauncherCleanup)
+         lc1 := (LC_ConfigText != "" && !IsObject(LC_ConfigText)) ? LC_ConfigText : "Launcher Cleanup: ON"
+     else
+         lc1 := "Launcher Cleanup: OFF"
+ } catch {
+     lc1 := "Launcher Cleanup: -"
+ }
+ try {
+     if (LC_FoundText != "" && !IsObject(LC_FoundText))
+         lc2 := "LC Found: " LC_FoundText
+ } catch {
+ }
+ try {
+     gate := (LC_GateText != "" && !IsObject(LC_GateText)) ? LC_GateText : "-"
+     lastStamp := LC_LastDecisionStamp
+     lastText  := LC_LastDecisionText
+     lc3 := "LC Gate: " gate
+     if (lastStamp != "" && lastText != "")
+         lc4 := "LC Last: " lastStamp " — " lastText
+     else
+         lc4 := "LC Last: -"
+
+ } catch {
+ }
+
  ; Control Panel
  if (IsSet(CPStat1Ctrl) && IsObject(CPStat1Ctrl)) {
  try CPStat1Ctrl.Text := txt1
  try CPStat2Ctrl.Text := txt2
  try CPStat3Ctrl.Text := txt3
  try CPStat4Ctrl.Text := txt4
+ try CPStat5Ctrl.Text := lc1
+ try CPStat6Ctrl.Text := lc2
+ try CPStat7Ctrl.Text := lc3
+ try CPStat8Ctrl.Text := lc4
  } else if IsSet(ControlGui) {
  try ControlGui["stat1"].Text := txt1
  try ControlGui["stat2"].Text := txt2
  try ControlGui["stat3"].Text := txt3
  try ControlGui["stat4"].Text := txt4
+ try ControlGui["stat5"].Text := lc1
+ try ControlGui["stat6"].Text := lc2
+ try ControlGui["stat7"].Text := lc3
+ try ControlGui["stat8"].Text := lc4
  }
 
  ; Live Log window
@@ -3473,11 +3548,19 @@ UpdateStatusIndicators() {
  try LLStat2Ctrl.Text := txt2
  try LLStat3Ctrl.Text := txt3
  try LLStat4Ctrl.Text := txt4
+ try LLStat5Ctrl.Text := lc1
+ try LLStat6Ctrl.Text := lc2
+ try LLStat7Ctrl.Text := lc3
+ try LLStat8Ctrl.Text := lc4
  } else if IsSet(LiveLogGui) {
  try LiveLogGui["stat1"].Text := txt1
  try LiveLogGui["stat2"].Text := txt2
  try LiveLogGui["stat3"].Text := txt3
  try LiveLogGui["stat4"].Text := txt4
+ try LiveLogGui["stat5"].Text := lc1
+ try LiveLogGui["stat6"].Text := lc2
+ try LiveLogGui["stat7"].Text := lc3
+ try LiveLogGui["stat8"].Text := lc4
  }
  } catch {
  return
@@ -3884,12 +3967,23 @@ ShowControlPanel(*) {
  stat3 := ControlGui.AddText("x" x2 " y+2 w" colW " vstat3", "Best Candidate: -")
  stat4 := ControlGui.AddText("x" x2 " y+2 w" colW " vstat4", "Last Action: -")
 
+ ; Launcher Cleanup status (why launchers are still running / what was detected)
+ stat5 := ControlGui.AddText("x" x2 " y+8 w" colW " vstat5 +Wrap", "Launcher Cleanup: -")
+ stat6 := ControlGui.AddText("x" x2 " y+2 w" colW " vstat6 +Wrap", "LC Found: -")
+ stat7 := ControlGui.AddText("x" x2 " y+2 w" colW " vstat7 +Wrap", "LC Gate: -")
+stat8 := ControlGui.AddText("x" x2 " y+2 w" colW " vstat8 +Wrap", "LC Last: -")
+
  ; Keep direct handles for reliability (no dependence on name lookup)
  global CPStat1Ctrl, CPStat2Ctrl, CPStat3Ctrl, CPStat4Ctrl
+ global CPStat5Ctrl, CPStat6Ctrl, CPStat7Ctrl, CPStat8Ctrl
  CPStat1Ctrl := stat1
  CPStat2Ctrl := stat2
  CPStat3Ctrl := stat3
  CPStat4Ctrl := stat4
+ CPStat5Ctrl := stat5
+ CPStat6Ctrl := stat6
+ CPStat7Ctrl := stat7
+ CPStat8Ctrl := stat8
 
  btnClose := ControlGui.AddButton("x" x2 " y+14 w" colW, "Close")
  btnClose.OnEvent("Click", (*) => HideControlPanel())
@@ -3998,12 +4092,23 @@ ShowLiveLogWindow(*) {
  ll3 := LiveLogGui.AddText("xm y+2 w860 vstat3", "Best Candidate: -")
  ll4 := LiveLogGui.AddText("xm y+2 w860 vstat4", "Last Action: -")
 
+ ; Launcher Cleanup status (why launchers are still running / what was detected)
+ ll5 := LiveLogGui.AddText("xm y+8 w860 vstat5 +Wrap", "Launcher Cleanup: -")
+ ll6 := LiveLogGui.AddText("xm y+2 w860 vstat6 +Wrap", "LC Found: -")
+ ll7 := LiveLogGui.AddText("xm y+2 w860 vstat7 +Wrap", "LC Gate: -")
+ll8 := LiveLogGui.AddText("xm y+2 w860 vstat8 +Wrap", "LC Last: -")
+
  ; Keep direct handles for reliability (no dependence on name lookup)
  global LLStat1Ctrl, LLStat2Ctrl, LLStat3Ctrl, LLStat4Ctrl
+ global LLStat5Ctrl, LLStat6Ctrl, LLStat7Ctrl, LLStat8Ctrl
  LLStat1Ctrl := ll1
  LLStat2Ctrl := ll2
  LLStat3Ctrl := ll3
  LLStat4Ctrl := ll4
+ LLStat5Ctrl := ll5
+ LLStat6Ctrl := ll6
+ LLStat7Ctrl := ll7
+ LLStat8Ctrl := ll8
 
  LiveLogGui.AddEdit("xm y+10 w860 r16 ReadOnly -Wrap vdetLogView", "")
 
@@ -4477,52 +4582,128 @@ StartUserStartupProgramsNow() {
 ; LAUNCHER CLEANUP (Optional)
 ; ==============================================================================
 CheckLauncherCleanup() {
- global EnableLauncherCleanup, LauncherCleanupSteamForegroundSec, LauncherCleanupRequireNoGame, LauncherCleanupUseCpuAudio
+ global EnableLauncherCleanup, LauncherCleanupSteamForegroundSec, LauncherCleanupRequireNoGame, LauncherCleanupUseCpuAudio, LauncherCleanupDownloadGuard, LauncherCleanupDownloadGuardMode
  global LauncherCleanupCooldownSec, LauncherCleanupGracefulCloseMs, LauncherCleanupHardKill
  global LauncherCleanupLauncherList, LauncherCleanupBackgroundList, LauncherCleanupExcludeSet
+ global LC_SteamFgSinceTick, LC_LastCleanupTick, LC_ConfigText, LC_FoundText, LC_GateText, LC_LastDecisionStamp, LC_LastDecisionText
 
- static steamFgSinceTick := 0
- static lastCleanupTick := 0
  static inRun := false
 
- if (!EnableLauncherCleanup)
-     return
+ ; Build a one-line config summary for the Control Panel
+ try {
+     guardTxt := (LauncherCleanupDownloadGuard && LauncherCleanupDownloadGuardMode != "OFF") ? LauncherCleanupDownloadGuardMode : "Off"
+     hkTxt := LauncherCleanupHardKill ? "true" : "false"
+     LC_ConfigText := EnableLauncherCleanup ? ("Launcher Cleanup: ON (Guard=" guardTxt ", HardKill=" hkTxt ")") : "Launcher Cleanup: OFF"
+ } catch {
+     LC_ConfigText := EnableLauncherCleanup ? "Launcher Cleanup: ON" : "Launcher Cleanup: OFF"
+ }
 
- if inRun
+ ; Detect which launchers/helpers are currently running (by EXE lists)
+ lProc := 0, lExe := 0, bProc := 0, bExe := 0
+ launchTxt := GetRunningExeCountsText(LauncherCleanupLauncherList, &lProc, &lExe)
+ backTxt := GetRunningExeCountsText(LauncherCleanupBackgroundList, &bProc, &bExe)
+ LC_FoundText := "Launchers: " launchTxt " | Helpers: " backTxt
+
+ anyTargets := ((lProc + bProc) > 0)
+
+ if (!EnableLauncherCleanup) {
+     LC_GateText := anyTargets ? "Disabled (targets running)" : "Disabled"
      return
+ }
+
+ if inRun {
+     LC_GateText := "Running cleanup..."
+    LC_RecordGateIfChanged("Running cleanup...", "running")
+     return
+ }
 
  if !IsSteamForeground() {
-     steamFgSinceTick := 0
+     LC_SteamFgSinceTick := 0
+     LC_GateText := anyTargets ? "Waiting: Steam not foreground" : "Idle: no targets running"
+    if (anyTargets)
+        LC_RecordGateIfChanged("Waiting: Steam not foreground", "steam_not_fg")
+    else
+        LC_RecordGateIfChanged("Idle: no targets running", "idle_no_targets")
      return
  }
 
- if (!steamFgSinceTick) {
-     steamFgSinceTick := A_TickCount
+ if (!LC_SteamFgSinceTick) {
+     LC_SteamFgSinceTick := A_TickCount
+     LC_GateText := "Waiting: Steam foreground " LauncherCleanupSteamForegroundSec "s"
+    LC_RecordGateIfChanged("Waiting: Steam foreground timer", "steam_fg_wait")
      return
  }
 
- if ((A_TickCount - steamFgSinceTick) < (LauncherCleanupSteamForegroundSec * 1000))
+ needMs := LauncherCleanupSteamForegroundSec * 1000
+ elapsed := A_TickCount - LC_SteamFgSinceTick
+ if (elapsed < needMs) {
+     rem := Ceil((needMs - elapsed) / 1000)
+     LC_GateText := "Waiting: Steam foreground " rem "s remaining"
+    LC_RecordGateIfChanged("Waiting: Steam foreground timer", "steam_fg_wait")
      return
+ }
 
- if (LauncherCleanupCooldownSec > 0 && (A_TickCount - lastCleanupTick) < (LauncherCleanupCooldownSec * 1000))
+ if (LauncherCleanupCooldownSec > 0 && LC_LastCleanupTick && (A_TickCount - LC_LastCleanupTick) < (LauncherCleanupCooldownSec * 1000)) {
+     rem := Ceil(((LauncherCleanupCooldownSec * 1000) - (A_TickCount - LC_LastCleanupTick)) / 1000)
+     LC_GateText := "Cooldown: " rem "s remaining"
+    LC_RecordGateIfChanged("Cooldown active", "cooldown")
      return
+ }
 
+ ; Nothing to close
+ if (!anyTargets) {
+     LC_GateText := "No launcher/helper processes detected"
+    LC_RecordGateIfChanged("No launcher/helper processes detected", "no_targets")
+     return
+ }
+
+ ; Optional gate: skip cleanup when a game appears to be running
  if (LauncherCleanupRequireNoGame) {
      try {
          if (LauncherCleanupUseCpuAudio) {
              ; CPU/Audio only gate (avoids "game-like window" false positives in Steam/BPM/launchers)
-             if HasGameRunningRobust(LauncherCleanupExcludeSet, false)
+             if HasGameRunningRobust(LauncherCleanupExcludeSet, false) {
+                 LC_GateText := "Blocked: game detected (CPU/audio)"
+                 LC_LastDecisionStamp := NowStamp()
+                 LC_LastDecisionText := "Skip (game detected)"
                  return
+             }
          } else {
-             if HasGameLikeWindow(LauncherCleanupExcludeSet)
+             if HasGameLikeWindow(LauncherCleanupExcludeSet) {
+                 LC_GateText := "Blocked: game-like window detected"
+                 LC_LastDecisionStamp := NowStamp()
+                 LC_LastDecisionText := "Skip (game window)"
                  return
+             }
          }
      } catch {
-         ; If detection fails for any reason, be conservative and skip cleanup.
+         ; Be conservative: if detection fails, skip cleanup.
+         LC_GateText := "Blocked: game detection error"
+         LC_LastDecisionStamp := NowStamp()
+         LC_LastDecisionText := "Skip (detection error)"
          return
      }
  }
 
+ ; Optional: skip cleanup if launchers appear busy (possible download/update)
+ if (LauncherCleanupDownloadGuard && LauncherCleanupDownloadGuardMode != "OFF") {
+     try {
+         if LauncherCleanupBusyGuard(LauncherCleanupDownloadGuardMode, LauncherCleanupLauncherList, LauncherCleanupBackgroundList) {
+             LC_GateText := "Blocked: launcher busy (download/update)"
+             LC_LastDecisionStamp := NowStamp()
+             LC_LastDecisionText := "Skip (busy guard)"
+             return
+         }
+     } catch {
+         LC_GateText := "Blocked: busy guard error"
+         LC_LastDecisionStamp := NowStamp()
+         LC_LastDecisionText := "Skip (busy guard error)"
+         return
+     }
+ }
+
+ ; Run cleanup
+ LC_GateText := "Running cleanup..."
  inRun := true
  try {
      ; If any service-backed helpers are running, attempt to stop their services first (best-effort).
@@ -4536,24 +4717,81 @@ CheckLauncherCleanup() {
      if (needles.Length)
          StopRunningServicesByExeNeedles(needles)
 
+     ; Close/kills summary counters (for Status panel last-action details)
+     launcherRemovedTotal := 0
+     helperRemovedTotal := 0
+     launcherDetails := []
+     helperDetails := []
+
      ; Close launcher UI processes first (graceful then optional kill)
      for _, exe in LauncherCleanupLauncherList {
-         CloseExeProcesses(exe, true, LauncherCleanupGracefulCloseMs, LauncherCleanupHardKill, LauncherCleanupExcludeSet)
+         exl := StrLower(exe)
+         removedThis := 0
+
+         res := CloseExeProcesses(exe, true, LauncherCleanupGracefulCloseMs, LauncherCleanupHardKill, LauncherCleanupExcludeSet)
+         if (IsObject(res) && res.Has("removed"))
+             removedThis += res["removed"]
 
          ; EA App is notorious for "close-to-tray"/fast respawn. A couple extra passes help it stick.
-         if (StrLower(exe) = "eadesktop.exe") {
+         if (exl = "eadesktop.exe") {
              Sleep(400)
-             CloseExeProcesses(exe, true, 0, LauncherCleanupHardKill, LauncherCleanupExcludeSet)
+             res2 := CloseExeProcesses(exe, true, 0, LauncherCleanupHardKill, LauncherCleanupExcludeSet)
+             if (IsObject(res2) && res2.Has("removed"))
+                 removedThis += res2["removed"]
+
              Sleep(400)
-             CloseExeProcesses(exe, false, 0, LauncherCleanupHardKill, LauncherCleanupExcludeSet)
+             res3 := CloseExeProcesses(exe, false, 0, LauncherCleanupHardKill, LauncherCleanupExcludeSet)
+             if (IsObject(res3) && res3.Has("removed"))
+                 removedThis += res3["removed"]
+         }
+
+         if (removedThis > 0) {
+             launcherRemovedTotal += removedThis
+             launcherDetails.Push(exe " x" removedThis)
          }
      }
 
      ; Then close background service/helper processes (typically no windows)
-     for _, exe in LauncherCleanupBackgroundList
-         CloseExeProcesses(exe, false, 0, LauncherCleanupHardKill, LauncherCleanupExcludeSet)
+     for _, exe in LauncherCleanupBackgroundList {
+         removedThis := 0
+         res := CloseExeProcesses(exe, false, 0, LauncherCleanupHardKill, LauncherCleanupExcludeSet)
+         if (IsObject(res) && res.Has("removed"))
+             removedThis += res["removed"]
 
-     lastCleanupTick := A_TickCount
+         if (removedThis > 0) {
+             helperRemovedTotal += removedThis
+             helperDetails.Push(exe " x" removedThis)
+         }
+     }
+
+LC_LastCleanupTick := A_TickCount
+     LC_LastDecisionStamp := NowStamp()
+LC_LastDecisionText := "Cleanup: removed L=" launcherRemovedTotal ", H=" helperRemovedTotal
+try {
+    det := ""
+    if (launcherDetails.Length) {
+        det := "L: " JoinDetails(launcherDetails, 3)
+    }
+    if (helperDetails.Length) {
+        if (det != "")
+            det .= "; "
+        det .= "H: " JoinDetails(helperDetails, 3)
+    }
+    if (det != "")
+        LC_LastDecisionText .= " [" det "]"
+} catch {
+}
+
+     ; Refresh detection text after cleanup so the panel shows what remains.
+     lProc2 := 0, lExe2 := 0, bProc2 := 0, bExe2 := 0
+     launchTxt2 := GetRunningExeCountsText(LauncherCleanupLauncherList, &lProc2, &lExe2)
+     backTxt2 := GetRunningExeCountsText(LauncherCleanupBackgroundList, &bProc2, &bExe2)
+     LC_FoundText := "Launchers: " launchTxt2 " | Helpers: " backTxt2
+
+     if ((lProc2 + bProc2) > 0)
+         LC_GateText := "Cleanup ran, but some processes remain"
+     else
+         LC_GateText := "Cleanup completed (no targets running)"
  } finally {
      inRun := false
  }
@@ -4817,16 +5055,41 @@ StopRunningServicesByExeNeedles(needles) {
 
 
 
+
+
+JoinDetails(arr, maxItems := 3) {
+ if (!IsObject(arr) || arr.Length = 0)
+     return ""
+ out := ""
+ lim := Min(arr.Length, maxItems)
+ Loop lim {
+     if (A_Index > 1)
+         out .= ", "
+     out .= arr[A_Index]
+ }
+ if (arr.Length > maxItems)
+     out .= ", +" (arr.Length - maxItems) " more"
+ return out
+}
+
 CloseExeProcesses(exeName, tryWinClose := true, gracefulMs := 2000, hardKill := true, excludeSet := 0) {
  if (exeName = "")
-     return
+     return Map("before", 0, "after", 0, "removed", 0)
 
  exe := StrLower(Trim(exeName))
  if !InStr(exe, ".exe")
      exe .= ".exe"
 
  if (IsObject(excludeSet) && excludeSet.Has(exe))
-     return
+     return Map("before", 0, "after", 0, "removed", 0)
+
+ ; Track process count before attempting to close/kill (for status summaries)
+ beforeCount := 0
+ try {
+     beforeCount := GetPidsByExeName(exe).Length
+ } catch {
+     beforeCount := 0
+ }
 
  ; Try to close any windows first (best-effort)
  if (tryWinClose) {
@@ -4840,8 +5103,18 @@ CloseExeProcesses(exeName, tryWinClose := true, gracefulMs := 2000, hardKill := 
          Sleep(gracefulMs)
  }
 
- if (!hardKill)
-     return
+ if (!hardKill) {
+     ; Report what changed just from WinClose (best-effort)
+     afterCount := 0
+     try afterCount := GetPidsByExeName(exe).Length
+     catch {
+     afterCount := 0
+ }
+     removed := beforeCount - afterCount
+     if (removed < 0)
+         removed := 0
+     return Map("before", beforeCount, "after", afterCount, "removed", removed)
+ }
 
  ; Best-effort: stop known services before killing service-backed executables.
  if (exe = "ubisoftconnectservice.exe") {
@@ -4864,6 +5137,18 @@ CloseExeProcesses(exeName, tryWinClose := true, gracefulMs := 2000, hardKill := 
 
  ; Last resort: taskkill by image name (handles cases where PID enumeration fails)
  try RunWait(A_ComSpec " /c taskkill /F /T /IM " exe, , "Hide")
+
+ ; Compute how many remain after close/kill (best-effort)
+ afterCount := 0
+ try {
+     afterCount := GetPidsByExeName(exe).Length
+ } catch {
+     afterCount := 0
+ }
+ removed := beforeCount - afterCount
+ if (removed < 0)
+     removed := 0
+ return Map("before", beforeCount, "after", afterCount, "removed", removed)
 }
 
 
@@ -4902,6 +5187,196 @@ GetPidsByExeName(exeName) {
  return pids
 }
 
+
+GetRunningExeCountsText(exeList, &procCount, &exeCount, maxItems := 4) {
+    procCount := 0
+    exeCount := 0
+    if (!IsObject(exeList))
+        return "None"
+
+    parts := []
+    for _, ex in exeList {
+        pids := []
+        try {
+            pids := GetPidsByExeName(ex)
+        } catch {
+            pids := []
+        }
+
+        c := 0
+        try {
+            c := (IsObject(pids) ? pids.Length : 0)
+        } catch {
+            c := 0
+        }
+
+        if (c > 0) {
+            exeCount += 1
+            procCount += c
+            if (parts.Length < maxItems)
+                parts.Push(ex " (" c ")")
+        }
+    }
+
+    if (exeCount <= 0)
+        return "None"
+
+    out := ""
+    for i, p in parts
+        out .= (i > 1 ? ", " : "") p
+    if (exeCount > maxItems)
+        out .= ", +" (exeCount - maxItems) " more"
+    return out
+}
+
+
+; ==============================================================================
+; Launcher Cleanup — Download/Update Guard (Disk I/O heuristic)
+; ------------------------------------------------------------------------------
+; If enabled, SteamShell will skip Launcher Cleanup when launcher/helper processes
+; appear to be actively downloading/updating (sustained write I/O).
+; ==============================================================================
+LauncherCleanupBusyGuard(mode, launcherList, backgroundList) {
+    global LauncherCleanupCheckIntervalMs
+
+    static lastWrite := Map()     ; pid -> last WriteTransferCount (bytes)
+    static lastTick  := Map()     ; pid -> last sample tick
+    static busySec   := Map()     ; pid -> consecutive "busy" seconds
+    static lastLogTick := 0
+
+    ; Normalize mode
+    m := StrUpper(Trim(mode))
+    if (m = "" || m = "OFF")
+        return false
+
+    ; Internal presets (keep user-facing settings simple)
+    ; Balanced: catch real installs/downloads without being overly sensitive
+    ; Strict:   more conservative (more likely to skip cleanup)
+    thresholdBps := (m = "STRICT") ? (64 * 1024) : (256 * 1024)  ; bytes/sec
+    windowSec    := (m = "STRICT") ? 10 : 6                      ; required sustained busy time
+
+    ; Collect current PIDs for launcher + helpers
+    pids := Map()
+    if (IsObject(launcherList)) {
+        for _, exe in launcherList {
+            for _, pid in GetPidsByExeName(exe)
+                pids[pid] := true
+        }
+    }
+    if (IsObject(backgroundList)) {
+        for _, exe in backgroundList {
+            for _, pid in GetPidsByExeName(exe)
+                pids[pid] := true
+        }
+    }
+
+    ; Nothing to guard against
+    if (pids.Count = 0)
+        return false
+
+    now := A_TickCount
+    needWarmup := false
+    anyReadable := false
+    isBusy := false
+
+    ; Remove stale PIDs from state maps
+    stale := []
+    for pid, _ in lastWrite {
+        if !pids.Has(pid)
+            stale.Push(pid)
+    }
+    for _, pid in stale {
+        try lastWrite.Delete(pid)
+        try lastTick.Delete(pid)
+        try busySec.Delete(pid)
+    }
+
+    ; Sample each PID once (non-blocking)
+    for pid, _ in pids {
+        w := GetProcessWriteTransferBytes(pid)
+        if (w < 0) {
+            ; Can't read this process (permissions, exited, etc.) — don't block cleanup.
+            continue
+        }
+        anyReadable := true
+
+        if (!lastWrite.Has(pid) || !lastTick.Has(pid)) {
+            ; First observation — set baseline, delay cleanup until next check.
+            lastWrite[pid] := w
+            lastTick[pid] := now
+            busySec[pid] := 0
+            needWarmup := true
+            continue
+        }
+
+        prevW := lastWrite[pid]
+        prevT := lastTick[pid]
+        dt := (now - prevT) / 1000.0
+        if (dt <= 0)
+            dt := (LauncherCleanupCheckIntervalMs > 0) ? (LauncherCleanupCheckIntervalMs / 1000.0) : 2.0
+        if (dt > 30)
+            dt := 2.0
+
+        delta := w - prevW
+        if (delta < 0)
+            delta := 0
+
+        bps := delta / dt
+
+        lastWrite[pid] := w
+        lastTick[pid] := now
+
+        if (bps >= thresholdBps) {
+            busySec[pid] := busySec.Has(pid) ? (busySec[pid] + dt) : dt
+            if (busySec[pid] >= windowSec) {
+                isBusy := true
+                break
+            }
+        } else {
+            busySec[pid] := 0
+        }
+    }
+
+    ; If we couldn't read any relevant process counters, don't block cleanup.
+    if (!anyReadable)
+        return false
+
+    ; If we need warmup (first baseline), delay cleanup briefly but don't spam logs.
+    if (needWarmup)
+        return true
+
+    if (isBusy) {
+        if ((now - lastLogTick) > 15000) {
+            Log("LauncherCleanup: skipped (launcher busy: possible download/update)")
+            lastLogTick := now
+        }
+        return true
+    }
+
+    return false
+}
+
+GetProcessWriteTransferBytes(pid) {
+    ; Returns WriteTransferCount (bytes) from GetProcessIoCounters(), or -1 on failure.
+    static PROCESS_QUERY_LIMITED_INFORMATION := 0x1000
+    static PROCESS_QUERY_INFORMATION := 0x0400
+
+    h := DllCall("OpenProcess", "UInt", PROCESS_QUERY_LIMITED_INFORMATION, "Int", false, "UInt", pid, "Ptr")
+    if (!h)
+        h := DllCall("OpenProcess", "UInt", PROCESS_QUERY_INFORMATION, "Int", false, "UInt", pid, "Ptr")
+    if (!h)
+        return -1
+
+    buf := Buffer(48, 0) ; IO_COUNTERS = 6 * ULONGLONG
+    ok := DllCall("GetProcessIoCounters", "Ptr", h, "Ptr", buf, "Int")
+    DllCall("CloseHandle", "Ptr", h)
+
+    if (!ok)
+        return -1
+
+    ; Offsets: 0 ReadOps, 8 WriteOps, 16 OtherOps, 24 ReadBytes, 32 WriteBytes, 40 OtherBytes
+    return NumGet(buf, 32, "UInt64")
+}
 
 
 RunHiddenCommandLine(cmdline) {
@@ -5022,8 +5497,8 @@ if (EnableSplashScreen)
 ApplyRuntimeTimers()
 OnExit(ExitCleanup)
 
-; Hotkeys
-^!+e::ExitToDesktop(true)
-^!+r::ReloadSettings()
-^!+g::ForceGameAssistOnce()
-^!+p::ShowControlPanel()
+; Hotkeys (registered dynamically so they never break if code is refactored into functions)
+Hotkey("^!+e", (*) => ExitToDesktop(true))
+Hotkey("^!+r", (*) => ReloadSettings())
+Hotkey("^!+g", (*) => ForceGameAssistOnce())
+Hotkey("^!+p", (*) => ShowControlPanel())
