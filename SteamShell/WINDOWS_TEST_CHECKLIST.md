@@ -555,8 +555,14 @@ endpoint selection uses Windows' PolicyConfig interface and needs confirmation o
   notification on every press.
 - Select `Custom` from `120` and confirm the frame rate does **not** change — landing on Custom only reveals the
   row, seeded from whatever is live.
-- On the Custom FPS row, press and hold Right. Confirm the step escalates 1 → 5 → 10, and that after a pause a
-  single press moves by exactly 1.
+- On the Custom FPS row, press Right repeatedly. Confirm the step escalates and that coarse steps land on round
+  numbers — from 63 it should reach 65, then 70, not 68 and 73. After a pause, a single press must move by 1.
+- **The frame rate must not chase the number while scrolling.** RTSS is written once, after about 400 ms of no
+  input, not on every press. Watch the RTSS overlay: the cap should change once when you stop, not continuously.
+- Scroll to a value, then immediately cycle away to a preset before stopping. Confirm the preset sticks and the
+  half-dialled custom value does not land a moment later.
+- Scroll to a value and immediately choose **Save Limit to Profile**. Confirm the profile receives the value shown
+  on screen, not the previous one.
 - Confirm every change lands on RTSS's **global** profile and that no per-game profile is modified.
 - Temporarily use an RTSS build without `SetProfileProperty`/`SaveProfile`/`UpdateProfiles`, or rename the DLL.
   Confirm the cap shows **read-only** and that Overlay and limiter control still work.

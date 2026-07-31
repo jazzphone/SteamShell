@@ -16,6 +16,19 @@
   couch device is nobody. A message now displaces the button hint for four
   seconds when the menu is open, and the hint returns on its own. Matches XFE's
   `SetStatus`.
+- Stopped writing to RTSS on **every press** of the Custom FPS row. Each press
+  was a `LoadProfile` + `SetProfileProperty` + `SaveProfile` — a disk write —
+  plus `UpdateProfiles`, so the limiter was genuinely reconfigured a dozen times
+  while scrolling and the frame rate chased the number. The value is now held
+  pending, the row shows it immediately, and RTSS is written once the user stops.
+- Snapped coarse steps to their own grid. Escalating from an arbitrary value
+  landed on arbitrary values — 63 stepping by 5 gave 68, 73, 78, and 60 or 90
+  were unreachable without slowing down to creep. 63 by 5 now goes to 65, then
+  70; a single press still moves by exactly 1.
+- Cancelled a pending value when a preset is chosen. Without it, the deferred
+  commit could fire *after* the preset and overwrite it. Save Limit to Profile
+  flushes it instead, so the profile gets the value on screen rather than a stale
+  one.
 - Stopped the window engine centring **dropdown menus and other popups**. They
   are real top-level windows, so nothing excluded them, but centring one is
   actively wrong rather than untidy: a dropdown is positioned relative to the

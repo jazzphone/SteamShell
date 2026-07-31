@@ -261,6 +261,9 @@ global RtssFrameCapCustomMode := false
 ; a value it just replaced.
 global RtssFrameLimitCacheFps := 0
 global RtssFrameLimitCacheTick := 0
+; Value the user is currently dialling in, before it reaches RTSS. 0 = nothing
+; pending. See AdjustRtssCustomFrameCap.
+global RtssPendingFrameCap := 0
 
 ; Controller mappings are active while View/Back is held.
 global ControllerMap := Map()
@@ -7331,8 +7334,11 @@ QuickMenuGetRows() {
                         RtssFrameCapValueText(), "rtssFrameLimit", true))
                     capState := GetRtssFrameCapState()
                     if (IsObject(capState) && capState["mode"] = "custom")
+                        ; A pending value is what the user is looking at and
+                        ; adjusting; the live one has not caught up yet by design.
                         rows.Push(MenuRow("rtssFrameLimitCustom", "Custom FPS",
-                            "‹ " capState["fps"] " FPS ›",
+                            "‹ " (RtssPendingFrameCap > 0
+                                ? RtssPendingFrameCap : capState["fps"]) " FPS ›",
                             "rtssFrameLimitCustom", true))
                     ; Always present, even with nothing to save to: the value
                     ; column explains why rather than the row disappearing,
@@ -7738,6 +7744,9 @@ CycleRtssFrameCap(direction) {
         return
     }
 
+    ; Anything still being dialled in on the Custom row must not land after this.
+    CancelPendingRtssFrameCap()
+
     ; One ordered list: Off, every preset, then Custom.
     entries := ["off"]
     for _, preset in RtssFrameCapPresets
@@ -7868,6 +7877,8 @@ SaveRtssFrameLimitToProfile() {
     if !IsObject(api)
         return false
 
+    ; Flush anything still pending so the profile gets the value on screen.
+    CommitRtssPendingFrameCap()
     fps := RtssGlobalFrameLimit()
     value := Buffer(4, 0)
     NumPut("UInt", fps, value, 0)
@@ -7910,7 +7921,46 @@ SaveRtssFrameLimitToProfile() {
 ; step of 1 would need sixty presses to get from 60 to 120. Consecutive presses
 ; in the same direction therefore escalate 1 -> 5 -> 10, and any pause or
 ; reversal drops back to 1 so a single press is still a single frame.
+; Cancels a value that was being dialled in but must not land.
+;
+; Needed because the commit is deferred: cycling from Custom to a preset while a
+; pending value is still in flight would otherwise let the timer fire afterwards
+; and overwrite the preset the user just chose.
+CancelPendingRtssFrameCap() {
+    global RtssPendingFrameCap
+    RtssPendingFrameCap := 0
+    SetTimer(CommitRtssPendingFrameCap, 0)
+}
+
+CommitRtssPendingFrameCap() {
+    global RtssPendingFrameCap
+    if (RtssPendingFrameCap <= 0)
+        return
+    value := RtssPendingFrameCap
+    RtssPendingFrameCap := 0
+    SetRtssGlobalFrameLimit(value)
+}
+
+; Left/Right on the Custom FPS row.
+;
+; Two things make naive stepping unpleasant, and they are separate problems.
+;
+; 1. WRITING ON EVERY PRESS. SetRtssGlobalFrameLimit is a LoadProfile plus a
+;    SetProfileProperty plus a SaveProfile -- a disk write -- plus UpdateProfiles.
+;    Doing that per press means the limiter is genuinely reconfigured a dozen
+;    times while the user scrolls, and the frame rate chases the number. So the
+;    value is held pending, the row shows it immediately, and RTSS is written
+;    once the user stops.
+;
+; 2. ESCALATING OFF-GRID. Quick Menu navigation is edge-triggered with no
+;    auto-repeat, so a fixed step of 1 needs sixty presses to cross 60->120 and
+;    the step has to grow. But growing it from an arbitrary value lands on
+;    arbitrary values: 63 stepping by 5 gives 68, 73, 78, and 60 or 90 become
+;    unreachable without slowing down and creeping. Coarse steps therefore snap
+;    to their own grid -- 63 by 5 goes to 65, then 70 -- so fast stepping lands
+;    on round numbers and fine stepping still moves by exactly 1.
 AdjustRtssCustomFrameCap(direction) {
+    global RtssPendingFrameCap
     static lastTick := 0
     static lastDirection := 0
     static runLength := 0
@@ -7928,10 +7978,18 @@ AdjustRtssCustomFrameCap(direction) {
     lastDirection := direction
 
     step := runLength >= 6 ? 10 : (runLength >= 3 ? 5 : 1)
-    current := RtssGlobalFrameLimit()
+    current := RtssPendingFrameCap > 0 ? RtssPendingFrameCap : RtssGlobalFrameLimit()
     if (current <= 0)
         current := 60
-    SetRtssGlobalFrameLimit(Max(10, Min(1000, current + (direction * step))))
+    if (step = 1)
+        target := current + direction
+    else if (direction > 0)
+        target := Ceil((current + 1) / step) * step
+    else
+        target := Floor((current - 1) / step) * step
+
+    RtssPendingFrameCap := Max(10, Min(1000, target))
+    SetTimer(CommitRtssPendingFrameCap, -ESCALATE_WINDOW_MS)
 }
 
 ToggleQuickMenu(*) {
