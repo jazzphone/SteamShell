@@ -3558,6 +3558,45 @@ DescribeForegroundWindow() {
  return detail
 }
 
+; The handoff is verified once, at open. That proves the menu ACQUIRED the
+; foreground; it does not prove it KEPT it.
+;
+; A game that re-asserts focus a moment later produces exactly the symptom the
+; open-time check was meant to catch -- controller input reaching the game while
+; the menu is up -- and produces it silently, because nothing looks again. Those
+; are three different problems with three different answers:
+;
+;   never acquired   the two ShowQuickMenu/EnsureForeground lines
+;   acquired, lost   this line
+;   held throughout  neither -- the game is polling XInput while unfocused, which
+;                    nothing in user mode can prevent
+;
+; Logged once per menu session rather than per poll: the poll runs at ~16 ms and
+; this is a state, not an event.
+QuickMenuWatchForegroundLoss() {
+ global QuickMenuGui, QuickMenuVisible
+ static reported := false
+ static lastCheckTick := 0
+ if (!QuickMenuVisible || !IsSet(QuickMenuGui)) {
+     reported := false
+     return
+ }
+ if (A_TickCount - lastCheckTick < 500)
+     return
+ lastCheckTick := A_TickCount
+ foreground := 0
+ try foreground := DllCall("User32\GetForegroundWindow", "Ptr")
+ if (foreground = QuickMenuGui.Hwnd) {
+     reported := false
+     return
+ }
+ if reported
+     return
+ reported := true
+ LogLine("Quick Menu lost the foreground while open; the game may be receiving "
+     . "controller input. Foreground is held by: " DescribeForegroundWindow())
+}
+
 QuickMenuEnsureForeground() {
  global QuickMenuGui, QuickMenuVisible
  if (!QuickMenuVisible || !IsSet(QuickMenuGui))
@@ -7094,6 +7133,7 @@ PollController() {
  ; While the quick menu owns focus, route controller presses to it before
  ; evaluating the normal View/Back modifier mappings.
  if (QuickMenuVisible) {
+     QuickMenuWatchForegroundLoss()
      QuickMenuHandleController(pressed, released, lx, ly)
      return
  }
