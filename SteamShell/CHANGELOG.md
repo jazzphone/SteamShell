@@ -16,6 +16,20 @@
   couch device is nobody. A message now displaces the button hint for four
   seconds when the menu is open, and the hint returns on its own. Matches XFE's
   `SetStatus`.
+- Stopped the window engine centring **dropdown menus and other popups**. They
+  are real top-level windows, so nothing excluded them, but centring one is
+  actively wrong rather than untidy: a dropdown is positioned relative to the
+  control that opened it, and moving it to the middle of the screen detaches it
+  from its parent. Centring had no size or structure test at all — its only
+  condition was being more than two pixels off centre, whereas maximising has
+  always been gated by `MinWidthPercent` *and* the window having a maximise box.
+- Filtered those by **structure rather than name**: child windows, non-activatable
+  windows, owned windows with no caption, owned tool windows, and the classic
+  popup classes. A class blacklist alone cannot keep up, since every UI framework
+  invents its own popup class, while the styles that make something a popup are
+  the ones Windows itself uses to decide it is not a normal application window.
+  Owned-and-captionless is the discriminator that separates a dropdown from a
+  dialog, which is owned but keeps its title bar and *is* worth centring.
 - Gave every operational log line a **timestamp and a level**, matching XFE.
   Standalone's `LogLine` added neither, so the log recorded what happened but not
   when — two lines could be a second or an hour apart with nothing to say which,

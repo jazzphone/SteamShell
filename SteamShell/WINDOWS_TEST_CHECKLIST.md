@@ -331,6 +331,17 @@ these states. Drop `SteamStartupGraceMs` to about `20000` while testing so each 
   pointer emulation, which is the wrong thing to depend on when Explorer may be dead.
 - Confirm Retry re-runs the restore and that declining leaves SteamShell running with controller input working.
 
+### Popups must not be centred
+
+- Open a dropdown, a combo box list, and a right-click context menu in a normal application. Confirm none of
+  them jump to the centre of the screen. They are positioned relative to the control that opened them, so
+  centring detaches them from their parent.
+- Confirm a real **dialog** — one with a title bar — is still centred. Dialogs are owned like dropdowns are, and
+  the two are told apart by the caption, so this is the case a too-broad filter would break.
+- Confirm ordinary application windows are still centred and maximised as before.
+- With an older game that presents a titled ToolWindow surface, confirm it is still managed. Unowned tool
+  windows are deliberately left eligible for that reason.
+
 ### Quick Menu status line
 
 - Trigger a warning with the Quick Menu open — easiest is an RTSS action with RTSS stopped, or an audio

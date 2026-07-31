@@ -7519,9 +7519,60 @@ WindowEngineValidateItem(item) {
  }
 }
 
+; Distinguishes an application window from a popup that merely happens to be one.
+;
+; Dropdown lists, menus, auto-complete lists and tooltips are all real top-level
+; windows, and centring one is actively wrong rather than merely untidy: it is
+; positioned relative to the control that opened it, so moving it to the middle
+; of the screen detaches it from its parent and leaves it floating on its own.
+; Reported from hardware on dropdown menus.
+;
+; Tested by structure rather than by name. A class blacklist cannot keep up --
+; every UI framework invents its own popup class -- whereas the window styles
+; that make something a popup are the same ones Windows itself uses to decide it
+; is not a normal application window.
+WindowEngineIsMovableAppWindow(item) {
+ static WS_CHILD         := 0x40000000
+ static WS_CAPTION       := 0x00C00000
+ static WS_EX_TOOLWINDOW := 0x00000080
+ static WS_EX_NOACTIVATE := 0x08000000
+ static POPUP_CLASSES := Map(
+     "#32768", true,                 ; menus, including combo and context menus
+     "combolbox", true,              ; the list a combo box drops down
+     "dropdown", true,
+     "tooltips_class32", true,
+     "auto-suggest dropdown", true)
+ style := item["style"]
+ exStyle := item["exStyle"]
+
+ ; A child window's coordinates are relative to its parent's client area, not
+ ; the screen, so "centre it on the screen" is not even a meaningful operation.
+ if (style & WS_CHILD)
+     return false
+ ; A window that cannot be activated is by definition not the one being worked
+ ; in. Menus and tooltips are the common case.
+ if (exStyle & WS_EX_NOACTIVATE)
+     return false
+ ; The giveaway for a popup is being OWNED and having no title bar. A dialog is
+ ; also owned, but keeps its caption -- and dialogs are worth centring. Testing
+ ; for a missing caption alone would wrongly skip legitimately borderless
+ ; application windows, which are not owned; the two conditions only mean
+ ; "popup" together.
+ if (item["owner"] && !(style & WS_CAPTION))
+     return false
+ ; An owned tool window is a palette or popup. Unowned tool windows are left
+ ; alone here on purpose: older games sometimes present their main surface that
+ ; way, and those are still worth managing.
+ if (item["owner"] && (exStyle & WS_EX_TOOLWINDOW))
+     return false
+ return !POPUP_CLASSES.Has(item["classLower"])
+}
+
 WindowEngineIsGeometryCandidate(item) {
  if (item["scriptOwned"] || item["desktop"] || item["title"] = ""
      || item["bpm"] || item["minMax"] != 0)
+     return false
+ if !WindowEngineIsMovableAppWindow(item)
      return false
  return !IsExcludedForCenterMax(item["title"], item["class"], item["proc"])
 }
