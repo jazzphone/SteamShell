@@ -21,6 +21,15 @@
   plus `UpdateProfiles`, so the limiter was genuinely reconfigured a dozen times
   while scrolling and the frame rate chased the number. The value is now held
   pending, the row shows it immediately, and RTSS is written once the user stops.
+- Restored the **native Windows menu** on tray right-click, matching XFE.
+  Double-click still opens the Quick Menu via the menu's default item. The
+  interception that replaced right-click with the Quick Menu existed because a
+  native menu freezes controller polling — true, but it had the context
+  backwards: reaching a tray icon means using a pointer, and a controller user
+  opens the Quick Menu by chord or hotkey. It optimised for a case that barely
+  happens at the cost of the one that happens constantly. The freeze is accepted
+  rather than forgotten, and the validator now asserts the interception has *not*
+  returned so it cannot come back by accident.
 - Replaced press-count escalation with **hold-to-repeat**. Growing the step after
   several quick presses meant tapping quickly silently changed what a tap did —
   the same gesture produced 1, 5 or 10 depending on timing the user could not

@@ -451,11 +451,13 @@ Run every item below on a disposable test sign-in. Several deliberately kill Exp
 
 **Tray right-click**
 
-- Right-click the SteamShell tray icon and confirm the **Quick Menu** opens rather than a native Windows menu.
-- Immediately after it opens, confirm controller-as-mouse still moves the pointer, and that the D-pad navigates
-  the Quick Menu. A native menu would freeze both — AutoHotkey does not run timers while a menu is displayed.
-- Drive the whole flow with the controller only, no keyboard or mouse: point at the icon, right-click via the
-  mapped button, then navigate to System ▸ Return to SteamShell and activate it.
+- Right-click the SteamShell tray icon and confirm the **ordinary Windows menu** appears where you clicked, with
+  Open Quick Menu, Open Settings, Open Diagnostics, the desktop/shell actions, Reload Settings and Exit.
+- Confirm **double-clicking** the icon opens the Quick Menu, via the menu's default item.
+- Note that controller polling stops while that native menu is displayed; this is known and accepted. Confirm
+  Escape or a click elsewhere dismisses it and polling resumes.
+- Drive the whole flow with the controller only, no keyboard or mouse — but using the **chord**, not the tray:
+  L3 + R3 to open the Quick Menu, then System ▸ Return to SteamShell. The tray is a pointer surface by design.
 - Confirm Settings ▸ Reload Settings works from the Quick Menu, since it is no longer reachable from the tray.
 - Confirm double-clicking the tray icon still opens the Quick Menu via the menu's default action.
 

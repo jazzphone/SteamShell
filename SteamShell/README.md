@@ -232,14 +232,28 @@ While SteamShell owns presentation the taskbar is hidden, so the icon is present
 but not visible. It becomes the primary control surface in **desktop mode**
 (below).
 
-**Right-clicking the icon opens the Quick Menu, not a native Windows menu.** This
-is deliberate. AutoHotkey will not run a timer while a menu is displayed, and
-controller polling is a timer — so a native tray menu freezes controller-as-mouse
-for exactly as long as it is open. A controller user could open the menu and then
-be unable to move the pointer onto it. The Quick Menu is an ordinary window, so
-polling keeps running and controller, mouse, and keyboard all drive it.
+**Right-clicking the icon opens the ordinary Windows menu**, matching XFE.
+Double-clicking opens the Quick Menu, via the menu's default item.
 
-Every action the tray menu offered is reachable from the Quick Menu:
+It briefly did not. AutoHotkey will not run a timer while a menu is displayed and
+controller polling is a timer, so a native tray menu freezes controller-as-mouse
+for as long as it is open — meaning a controller user could open the menu and
+then be unable to move the pointer onto it. The right-click was taken over and
+the Quick Menu shown instead.
+
+That had the context backwards. Reaching a tray icon at all means using a
+pointer, and a controller user opens the Quick Menu with L3 + R3 or
+`Ctrl+Alt+Shift+Q` rather than steering a cursor into the notification area. The
+interception optimised for a case that barely happens, at the cost of the one
+that happens constantly: someone at a keyboard and mouse wanting a small, fast
+menu where they clicked.
+
+The freeze is accepted rather than forgotten. Anyone who does reach the menu by
+controller emulation dismisses it the way any menu is dismissed — Escape, or a
+click elsewhere — both available to whatever pointer opened it.
+
+Every action in the tray menu is also reachable from the Quick Menu, so a
+controller user never needs the notification area at all:
 
 | Action | Where |
 |---|---|
@@ -250,10 +264,6 @@ Every action the tray menu offered is reachable from the Quick Menu:
 | Return to SteamShell | System ▸ Return to SteamShell (desktop mode) |
 | Exit Steam to Desktop | System ▸ Exit Steam to Desktop (shell mode) |
 | Exit SteamShell | System ▸ Exit SteamShell |
-
-The native menu is still built: it supplies the icon's double-click default
-action, and it remains a fallback if the right-click interception is ever not
-applied.
 
 A session Disable action is intentionally not included because standalone
 SteamShell owns Explorer and taskbar presentation while it is running.

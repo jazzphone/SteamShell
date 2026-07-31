@@ -569,23 +569,19 @@ Assert-True (
         '(?s)ApplyTrayIconImage\(\)\s*\{.*?SteamShell\.ico' -and
     $source -match
         '(?s)InitializeTrayMenu\(\)\s*\{.*?ApplyTrayIconImage\(\).*?' +
-        'RefreshTrayMenu\(\).*?RegisterTaskbarCreatedListener\(\).*?' +
-        'RegisterTrayIconListener\(\)') (
+        'RefreshTrayMenu\(\).*?RegisterTaskbarCreatedListener\(\)') (
     "The standalone notification-area menu or icon is incomplete.")
-# AutoHotkey will not launch a timer thread while a menu is displayed, so the
-# native tray menu freezes PollController for as long as it is open. Losing this
-# interception strands a controller user in a menu they cannot navigate.
+# The tray right-click shows the ordinary Windows menu. The interception that
+# replaced it with the Quick Menu is deliberately gone -- reaching a tray icon
+# means using a pointer, and a controller user opens the Quick Menu by chord or
+# hotkey. Asserted negatively so it cannot quietly return.
 Assert-True (
-    $source -match
-        '(?s)RegisterTrayIconListener\(\)\s*\{.*?OnMessage\(0x404,\s*TrayIconNotify\)' -and
-    $source -match
-        '(?s)TrayIconNotify\(wParam,\s*lParam,\s*msg,\s*hwnd\)\s*\{.*?' +
-        'if\s*\(lParam\s*=\s*0x0204\).*?return 0.*?' +
-        'if\s*\(lParam\s*=\s*0x0205\s*\|\|\s*lParam\s*=\s*0x007B\).*?' +
-        'SetTimer\(TrayOpenQuickMenu.*?return 0') (
-    "The tray right-click no longer opens the controller-navigable Quick Menu.")
-# Every tray action must stay reachable from the Quick Menu now that the native
-# menu is not shown. Reload Settings was previously tray-only.
+    $source -notmatch 'OnMessage\(0x404' -and
+    $source -notmatch 'TrayIconNotify') (
+    "The tray right-click interception has returned; it should show the native menu.")
+# Every tray action must stay reachable from the Quick Menu as well, so a
+# controller user never needs the notification area. Reload Settings was
+# previously tray-only.
 Assert-True (
     $source -match '(?s)"settingsReload",\s*"label",\s*"Reload Settings"' -and
     $source -match '(?s)case\s+"settingsReload":\s*\r?\n\s*ReloadSettings\(\)') (

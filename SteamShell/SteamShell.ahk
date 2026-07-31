@@ -1833,32 +1833,27 @@ RegisterTaskbarCreatedListener() {
  }
 }
 
-; AutoHotkey will not launch a timer thread while a menu is displayed, and the
-; native tray menu runs a modal loop. That stops PollController for as long as
-; the menu is open, so a controller user can right-click the icon and then be
-; unable to move the pointer onto the menu they just opened. Take over the
-; right-click and show the Quick Menu instead: it is an ordinary window, so
-; polling keeps running and controller, mouse, and keyboard all drive it.
+; The tray right-click shows the ordinary Windows menu, matching XFE.
 ;
-; The native menu is still built. It supplies the double-click default action,
-; and it remains a fallback if this interception is ever not applied.
-RegisterTrayIconListener() {
- try OnMessage(0x404, TrayIconNotify) ; AHK_NOTIFYICON
-}
-
-TrayIconNotify(wParam, lParam, msg, hwnd) {
- ; Returning a value suppresses AutoHotkey's own handling of this message.
- ; Both halves of the right-click are claimed, because which one raises the
- ; native menu is an AutoHotkey implementation detail.
- if (lParam = 0x0204) ; WM_RBUTTONDOWN
-     return 0
- if (lParam = 0x0205 || lParam = 0x007B) { ; WM_RBUTTONUP / WM_CONTEXTMENU
-     ; Deferred so the click finishes and this handler returns promptly rather
-     ; than creating and foregrounding a window inside a message monitor.
-     SetTimer(TrayOpenQuickMenu, -50)
-     return 0
- }
-}
+; It previously did not. AutoHotkey will not launch a timer thread while a menu
+; is displayed and the native menu runs a modal loop, so PollController stops for
+; as long as it is open -- meaning a controller user could right-click the icon
+; and then be unable to move the pointer onto the menu they had just opened. The
+; right-click was taken over and the Quick Menu shown instead, which is an
+; ordinary window and stays navigable.
+;
+; That reasoning had the context backwards. Reaching a tray icon at all means
+; using a pointer, and a controller user opens the Quick Menu with L3+R3 or
+; Ctrl+Alt+Shift+Q rather than steering a cursor to the notification area. The
+; interception optimised for a case that barely occurs, at the cost of the case
+; that occurs constantly: someone at a keyboard and mouse wanting a small, fast
+; menu where they clicked.
+;
+; The freeze is real and is accepted, not forgotten. Anyone who does reach the
+; menu by controller emulation dismisses it the same way any menu is dismissed --
+; Escape, or a click elsewhere -- both of which are available to whatever pointer
+; opened it. Double-click still opens the Quick Menu, via the menu's default
+; item, so the controller-friendly surface is one gesture away.
 
 TaskbarCreatedHandler(*) {
  ; Explorer is still building the tray when it sends this. Re-assert shortly
@@ -1902,7 +1897,6 @@ InitializeTrayMenu() {
  ApplyTrayIconImage()
  RefreshTrayMenu()
  RegisterTaskbarCreatedListener()
- RegisterTrayIconListener()
 }
 
 ; SPLASH
