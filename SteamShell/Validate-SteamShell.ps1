@@ -87,7 +87,7 @@ Assert-True (
     $runtimeSchemaMatch.Groups[1].Value -eq
     $defaultSchemaMatch.Groups[1].Value) (
     "The runtime and embedded settings schema versions do not match.")
-Assert-True ($runtimeSchemaMatch.Groups[1].Value -eq "12") (
+Assert-True ($runtimeSchemaMatch.Groups[1].Value -eq "13") (
     "The feature-parity settings schema is not version 11.")
 Assert-True (
     $embeddedSchema.Contains("MousePark`0MouseParkEdge") -and
@@ -98,7 +98,9 @@ Assert-True (
     $embeddedSchema.Contains("Steam`0QuickAccessShortcut") -and
     $embeddedSchema.Contains("Steam`0OverlayShortcut") -and
     $embeddedSchema.Contains("Controller`0AutoMouseExeList") -and
-    $embeddedSchema.Contains("Features`0EnableAutoMouseMode")) (
+    $embeddedSchema.Contains("Features`0EnableAutoMouseMode") -and
+    $embeddedSchema.Contains("QuickMenu`0AccentColor") -and
+    $embeddedSchema.Contains("QuickMenu`0AccentColorCustom")) (
     "Elevation, mouse parking, live RTSS, or Steam Quick Menu options are absent from the settings schema.")
 Assert-True (-not $embeddedSchema.Contains("WindowEngine`0TickIntervalMs")) (
     "Low-level Window Engine timing controls must remain internal.")
@@ -600,6 +602,22 @@ Assert-True (
     $source -match
         '(?s)EnableAutoMouseMode\s*:=\s*ToBool\(IniReadS\("Features","EnableAutoMouseMode"') (
     "Automatic mouse mode has no working kill switch independent of its EXE list.")
+
+# The selected-row fill must stay DERIVED from the accent. Storing it separately
+# is what would let a green accent sit on a blue-grey fill, which is the exact
+# mismatch the derivation exists to prevent.
+Assert-True (
+    $source -match
+        '(?s)QM_ROW_SELECTED\s*:=\s*BlendHexColor\(QM_BG,\s*hex,\s*QM_ACCENT_BLEND\)') (
+    "The Quick Menu selected-row fill is no longer derived from the accent color.")
+
+# A malformed custom hex or an unknown preset must fall back to a readable
+# default rather than reaching the painter.
+Assert-True (
+    $source -match '(?s)NormalizeHexColor\(value\)\s*\{.*?return ""' -and
+    $source -match
+        '(?s)QuickMenuApplyAccent\(.*?if\s*\(hex\s*=\s*""\)\s*\{.*?QuickMenuAccentPresetHex\("Steam Blue"\)') (
+    "An invalid Quick Menu accent color no longer falls back to the default.")
 
 # Every tray action must stay reachable from the Quick Menu as well, so a
 # controller user never needs the notification area. Reload Settings was

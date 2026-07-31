@@ -35,7 +35,7 @@ CoordMode "Mouse", "Screen"
 global SettingsPath := A_ScriptDir "\SteamShellSettings.ini"
 ; Back-compat alias used by some helper functions
 global IniPath := SettingsPath
-global CurrentSettingsSchemaVersion := 12
+global CurrentSettingsSchemaVersion := 13
 global LogPath := A_ScriptDir "\SteamShell.log"
 global ShellRegKey := "HKEY_CURRENT_USER\Software\Microsoft\Windows NT\CurrentVersion\Winlogon"
 global SteamShellRegKey := "HKEY_CURRENT_USER\Software\SteamShell"
@@ -132,12 +132,38 @@ global QuickMenuValueCtrls := []
 global SteamMenuShortcut := "^1"
 global SteamQuickAccessShortcut := "^2"
 global SteamOverlayShortcut := "+{Tab}"
-global QM_BG := "171A21"
-global QM_ROW_SELECTED := "222C3A"
-global QM_ACCENT := "66C0F4"
-global QM_LABEL := "C6CCD8"
+global QM_BG := "171A21"          ; window background
+global QM_ROW_SELECTED := "222C3A" ; selected row fill, derived from the accent
+global QM_ACCENT := "66C0F4"      ; selected row bar, outline and value
+global QM_LABEL := "C6CCD8"       ; unselected label
 global QM_LABEL_SELECTED := "FFFFFF"
-global QM_VALUE := "7E8899"
+global QM_VALUE := "7E8899"       ; unselected value, dimmer for hierarchy
+
+; Quick Menu accent. One setting drives the whole selected-row palette.
+;
+; The fill is derived rather than stored, because the two are not independent.
+; Measured against the original Steam blue, QM_ROW_SELECTED was a ~12% blend of
+; the accent into the background -- that relationship is what makes the fill read
+; as deliberate instead of as a grey that happens to sit under a colored bar.
+; Deriving it means green or purple gets the same treatment automatically rather
+; than leaving a blue-grey fill under a green accent.
+global QM_ACCENT_BLEND := 0.12
+global QuickMenuAccentName := "Steam Blue"
+global QuickMenuAccentCustomHex := "A970FF"
+
+; Ordered deliberately: an array, not a Map, because AutoHotkey v2 Map
+; enumeration order is unspecified and this list is shown to the user.
+global QM_ACCENT_PRESETS := [
+    ["Steam Blue", "66C0F4"],
+    ["Blue", "4C8DFF"],
+    ["Purple", "A970FF"],
+    ["Magenta", "FF6FD8"],
+    ["Red", "FF5C5C"],
+    ["Orange", "FF9F45"],
+    ["Yellow", "FFD166"],
+    ["Green", "5CD65C"],
+    ["Teal", "2DD4BF"],
+    ["Custom", ""]]
 global PinnedForegroundHwnd := 0
 global PinnedForegroundTitle := ""
 global PinnedForegroundExe := ""
@@ -713,7 +739,7 @@ GetDefaultSettingsIniText() {
 ; ==================================================================================================
 
 [SteamShell]
-SettingsSchemaVersion=12                                   ; Internal schema used for safe settings upgrades
+SettingsSchemaVersion=13                                   ; Internal schema used for safe settings upgrades
 
 [Paths]
 SteamPath=C:\Program Files (x86)\Steam\Steam.exe            ; Full path to Steam.exe
@@ -881,6 +907,8 @@ ChordHoldMs=700                                             ; Required L3+R3 hol
 TaskForceCloseHoldMs=1200                                   ; Hold X this long in Task Switcher to force-close a process
 MainOrder=Audio|Display|RTSS|SteamMenu|SteamQuickAccess|Layout|Tasks|GameBar|Settings|System
 HiddenItems=                                                ; Optional rows to hide; Settings and System stay available
+AccentColor=Steam Blue                                      ; Steam Blue|Blue|Purple|Magenta|Red|Orange|Yellow|Green|Teal|Custom
+AccentColorCustom=A970FF                                    ; RRGGBB used when AccentColor=Custom; invalid values fall back to Steam Blue
 
 [AudioQuickControls]
 Enable=true                                                 ; Volume and mute controls in the quick menu
@@ -1667,6 +1695,11 @@ LauncherCleanupAudioPeakThreshold := ClampFloat(ToFloat(IniReadS("LauncherCleanu
      "QuickMenu", "MainOrder",
      "Audio|Display|RTSS|SteamMenu|SteamQuickAccess|Layout|Tasks|GameBar|Settings|System")
  QuickMenuHiddenItemsRaw := IniReadS("QuickMenu", "HiddenItems", "")
+ ; Resolved through QuickMenuApplyAccent so an unknown preset or malformed hex
+ ; falls back to the default instead of reaching the painter.
+ QuickMenuApplyAccent(
+     IniReadS("QuickMenu", "AccentColor", "Steam Blue"),
+     IniReadS("QuickMenu", "AccentColorCustom", "A970FF"))
  QuickMenuMainOrder := ParseQuickMenuMainOrder(QuickMenuMainOrderRaw)
  QuickMenuHiddenItems := Map()
  for _, itemName in StrSplit(QuickMenuHiddenItemsRaw, "|") {
@@ -3897,6 +3930,7 @@ QuickMenuGetDefinitions() {
      rows.Push(Map("id", "qBlackout", "label", "Black Desktop Background"))
      rows.Push(Map("id", "qAudioControls", "label", "Quick Menu Audio"))
      rows.Push(Map("id", "qDisplayControls", "label", "Quick Menu Display"))
+     rows.Push(Map("id", "qAccentColor", "label", "Quick Menu Accent"))
      return rows
  }
 
@@ -4067,6 +4101,98 @@ QuickMenuGetDefinitions() {
          rows.Push(available[requiredName])
  }
  return rows
+}
+
+; ---------------------------------------------------------------------------
+; Quick Menu accent resolution.
+;
+; This block is character-for-character identical in SteamShell-XFE apart from
+; indentation and the two settings reads, which use each tree's own INI helper.
+; Keeping it that way is deliberate: the accent is one design applied to both,
+; so a fix to the blend or the fallback should be a copy, not a re-derivation.
+; ---------------------------------------------------------------------------
+
+QuickMenuAccentPresetNames() {
+ global QM_ACCENT_PRESETS
+ names := []
+ for _, pair in QM_ACCENT_PRESETS
+     names.Push(pair[1])
+ return names
+}
+
+QuickMenuAccentPresetHex(name) {
+ global QM_ACCENT_PRESETS
+ wanted := StrLower(Trim(name))
+ for _, pair in QM_ACCENT_PRESETS {
+     if (StrLower(pair[1]) = wanted)
+         return pair[2]
+ }
+ return ""
+}
+
+; Accepts "RRGGBB", "#RRGGBB" or "0xRRGGBB" and returns a bare uppercase
+; "RRGGBB", or "" if the value is not a color. Returning "" rather than a
+; guessed color is what lets the caller fall back visibly instead of painting
+; the menu an unreadable shade.
+NormalizeHexColor(value) {
+ text := Trim(value)
+ if (SubStr(text, 1, 1) = "#")
+     text := SubStr(text, 2)
+ else if (StrLower(SubStr(text, 1, 2)) = "0x")
+     text := SubStr(text, 3)
+ if !RegExMatch(text, "^[0-9A-Fa-f]{6}$")
+     return ""
+ return StrUpper(text)
+}
+
+HexColorChannel(hex, index) {
+ return Integer("0x" SubStr(hex, (index * 2) - 1, 2))
+}
+
+; Linear per-channel blend. Not gamma-correct, which is the right call here:
+; the original QM_ROW_SELECTED was picked by eye in sRGB, so matching it means
+; blending the same way it was chosen.
+BlendHexColor(baseHex, mixHex, ratio) {
+ out := ""
+ Loop 3 {
+     base := HexColorChannel(baseHex, A_Index)
+     mix := HexColorChannel(mixHex, A_Index)
+     value := Round(base + ((mix - base) * ratio))
+     out .= Format("{:02X}", Max(0, Min(255, value)))
+ }
+ return out
+}
+
+; Custom shows the hex actually in use, so a malformed value is visible as the
+; Steam Blue fallback rather than silently looking like it applied.
+QuickMenuAccentValueText() {
+ global QuickMenuAccentName, QM_ACCENT
+ return (StrLower(QuickMenuAccentName) = "custom")
+     ? "Custom · " QM_ACCENT
+     : QuickMenuAccentName
+}
+
+; Resolves the configured accent into the live palette. Safe to call repeatedly;
+; the Quick Menu calls it whenever the setting changes so the change is visible
+; without a restart.
+QuickMenuApplyAccent(presetName, customHex) {
+ global QM_ACCENT, QM_ROW_SELECTED, QM_BG, QM_ACCENT_BLEND
+ global QuickMenuAccentName, QuickMenuAccentCustomHex
+ name := Trim(presetName)
+ custom := NormalizeHexColor(customHex)
+ hex := (StrLower(name) = "custom")
+     ? custom
+     : NormalizeHexColor(QuickMenuAccentPresetHex(name))
+ if (hex = "") {
+     ; An unknown preset or a malformed custom hex falls back to the default
+     ; rather than leaving the menu unreadable. The configured name is kept as
+     ; the user wrote it so Settings still shows what they chose.
+     hex := QuickMenuAccentPresetHex("Steam Blue")
+ }
+ QuickMenuAccentName := (name != "") ? name : "Steam Blue"
+ QuickMenuAccentCustomHex := (custom != "") ? custom : "A970FF"
+ QM_ACCENT := hex
+ QM_ROW_SELECTED := BlendHexColor(QM_BG, hex, QM_ACCENT_BLEND)
 }
 
 QuickMenuBuildGui() {
@@ -4802,6 +4928,7 @@ QuickMenuValue(id) {
  global EnableSteamRefocusMode, EnableGameForegroundAssist, EnableAlwaysFocus, EnableWindowManagement
  global RtssOverlayControlMode, RtssFrameLimiterControlMode
  global SteamMenuShortcut, SteamQuickAccessShortcut, SteamOverlayShortcut
+ global QuickMenuAccentName, QM_ACCENT
 
  if (QuickMenuConfirmAction = id && A_TickCount < QuickMenuConfirmUntilTick)
      return "SELECT AGAIN TO CONFIRM"
@@ -4963,6 +5090,8 @@ QuickMenuValue(id) {
      return StrUpper(RtssFrameLimiterControlMode)
  case "qFrameCap":
      return RtssCustomFrameCap > 0 ? RtssCustomFrameCap " FPS" : "NOT SET"
+ case "qAccentColor":
+     return QuickMenuAccentValueText()
  case "layout":
      return "View mappings"
  case "settings":
@@ -5273,7 +5402,7 @@ IsQuickMenuToggleSetting(id) {
 }
 
 IsQuickMenuAdjustSetting(id) {
- static ids := QuickMenuIdSet("qMouseSpeed|qMouseHideDelay|qFrameCap")
+ static ids := QuickMenuIdSet("qMouseSpeed|qMouseHideDelay|qFrameCap|qAccentColor")
  return ids.Has(id)
 }
 
@@ -5331,7 +5460,25 @@ ToggleQuickMenuSetting(id) {
 
 AdjustQuickMenuSetting(id, direction) {
  global SettingsPath, ControllerMouseSpeed, MouseHideDelay, RtssCustomFrameCap
+ global QuickMenuAccentName
  switch id {
+ case "qAccentColor":
+     ; Wraps at both ends. A color list has no meaningful first or last, and
+     ; stopping at Teal would make the default feel like a dead end.
+     names := QuickMenuAccentPresetNames()
+     index := 1
+     for candidateIndex, candidateName in names {
+         if (StrLower(candidateName) = StrLower(QuickMenuAccentName)) {
+             index := candidateIndex
+             break
+         }
+     }
+     index += direction
+     if (index < 1)
+         index := names.Length
+     else if (index > names.Length)
+         index := 1
+     PersistQuickMenuSetting("QuickMenu", "AccentColor", names[index])
  case "qMouseSpeed":
      nextValue := ClampInt(ControllerMouseSpeed + (direction * 5), 5, 200)
      PersistQuickMenuSetting("Controller", "ControllerMouseSpeed", nextValue)
@@ -12736,6 +12883,8 @@ ShowSettingsEditor(*) {
  SettingsEditorAddCheckbox(category, "QuickMenu", "Enable", "Enable the controller-first Quick Menu", &y, "true")
  SettingsEditorAddCheckbox(category, "AudioQuickControls", "Enable", "Show Audio controls in the Quick Menu", &y, "true")
  SettingsEditorAddCheckbox(category, "DisplayQuickControls", "Enable", "Show Display and HDR controls in the Quick Menu", &y, "true")
+ SettingsEditorAddChoice(category, "QuickMenu", "AccentColor", "Quick Menu accent color", QuickMenuAccentPresetNames(), &y, "Steam Blue")
+ SettingsEditorAddTextField(category, "QuickMenu", "AccentColorCustom", "Custom accent (RRGGBB, used when accent is Custom)", &y, "A970FF")
  SettingsEditorAddTextField(category, "QuickMenu", "ChordHoldMs", "Quick Menu L3+R3 hold time (ms)", &y, "700", "integer", 300, 3000)
  SettingsEditorAddTextField(category, "QuickMenu", "TaskForceCloseHoldMs", "Task Switcher force-close hold time (ms)", &y, "1200", "integer", 600, 3000)
  SettingsEditorAddTextField(category, "BPM", "BpmTitle", "Steam Big Picture window title", &y, "Steam Big Picture Mode")

@@ -759,6 +759,32 @@ Assert-True $schemaVersion.Success "Runtime settings schema version is missing."
 Assert-True (
     $sample -match "(?m)^SettingsSchemaVersion=$($schemaVersion.Groups[1].Value)$") (
     "Sample and runtime settings schema versions do not match.")
+# The accent is one design applied to both trees. The selected-row fill must
+# stay DERIVED from it: storing the fill separately is what would let a green
+# accent sit on a blue-grey fill, the exact mismatch the derivation prevents.
+Assert-True (
+    $source -match
+        '(?s)QM_ROW_SELECTED\s*:=\s*BlendHexColor\(QM_BG,\s*hex,\s*QM_ACCENT_BLEND\)') (
+    "The Quick Menu selected-row fill is no longer derived from the accent color.")
+
+# A malformed custom hex or an unknown preset must fall back to a readable
+# default rather than reaching the painter.
+Assert-True (
+    $source -match '(?s)NormalizeHexColor\(value\)\s*\{.*?return ""' -and
+    $source -match
+        '(?s)QuickMenuApplyAccent\(.*?if\s*\(hex\s*=\s*""\)\s*\{.*?QuickMenuAccentPresetHex\("Steam Blue"\)') (
+    "An invalid Quick Menu accent color no longer falls back to the default.")
+
+# Persisting is the transaction boundary: the palette must not repaint in a
+# color the portable INI could not record.
+Assert-True (
+    $source -match
+        '(?s)CycleQuickMenuAccent\(direction\)\s*\{.*?try\s*\{\s*\r?\n\s*IniWrite\(chosen,.*?catch as err.*?return\s*\r?\n\s*\}\s*\r?\n\s*QuickMenuApplyAccent\(') (
+    "The Quick Menu accent repaints before confirming it was persisted.")
+
+Assert-True ($sample -match '(?m)^AccentColor=Steam Blue') (
+    "The sample settings file is missing the Quick Menu accent default.")
+
 Assert-True ($sample -match '(?m)^ControllerDeadzone=4000$') (
     "The sample controller deadzone default must remain 4000.")
 
