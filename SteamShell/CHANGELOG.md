@@ -16,6 +16,16 @@
   couch device is nobody. A message now displaces the button hint for four
   seconds when the menu is open, and the hint returns on its own. Matches XFE's
   `SetStatus`.
+- Gave every operational log line a **timestamp and a level**, matching XFE.
+  Standalone's `LogLine` added neither, so the log recorded what happened but not
+  when — two lines could be a second or an hour apart with nothing to say which,
+  and elapsed time is exactly what a startup stall, a focus handoff, or a
+  sustained-exit window has to be reasoned about in. The only timestamped lines
+  were the game-score rows, which stamped themselves.
+- Split `LogRawLine` out for that game-score table. It is columnar and formats
+  its own leading timestamp, so a second prefix would misalign every row.
+  `ShowNotification` now passes its level to `LogLine` instead of embedding
+  `NOTICE [Warning]:` in the message text.
 - Logged **what holds the foreground** when the Quick Menu fails to take it. The
   existing lines reported only that the handoff failed, which is not actionable:
   a game holding focus, Steam holding it, and a Windows surface holding it need

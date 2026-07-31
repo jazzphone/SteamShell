@@ -1758,7 +1758,7 @@ ShowNotification(message, kind := "Info") {
  ; footer is the transient surface, used only when the menu is already open.
  if (Trim(message) = "")
      return
- try LogLine("NOTICE [" kind "]: " message)
+ try LogLine(message, kind)
  LastStatusText := message
  LastStatusLevel := kind
  LastStatusTick := A_TickCount
@@ -8608,10 +8608,25 @@ RotateLogIfNeeded() {
  try FileMove(LogPath, LogPath ".1", 1)
 }
 
-LogLine(line) {
+; Writes a line exactly as given, with no prefix.
+;
+; Only for the game-score diagnostic table. That table is columnar and formats
+; its own leading timestamp, so a second prefix would misalign every row of it.
+LogRawLine(line) {
  global LogPath
  RotateLogIfNeeded()
  try FileAppend(line "`r`n", LogPath, "UTF-8")
+}
+
+; Every operational line gets a timestamp and a level, matching XFE.
+;
+; Without the timestamp the log records what happened but not when, so two lines
+; could be one second or one hour apart and nothing said which -- and elapsed
+; time is exactly what a startup stall, a focus handoff, or a sustained-exit
+; window has to be reasoned about in. Until now the only timestamped lines were
+; the game-score rows, which stamped themselves.
+LogLine(message, level := "Info") {
+ LogRawLine(FormatTime(A_Now, "yyyy-MM-dd HH:mm:ss") " [" level "] " message)
 }
 
 ShouldLogRateLimited() {
@@ -8924,20 +8939,20 @@ WindowEngineEvaluateGame(snapshot, forceRun, &allowActivate, &skipReason) {
 
  if (EnableGameScoreLogging && (GameLogMode = "TOPN" || GameLogMode = "DIAGNOSTIC") && ShouldLogRateLimited()) {
      if (candidates.Length = 0) {
-         LogLine(LogRow(
+         LogRawLine(LogRow(
              NowStamp(), "TOPN", "---", "-", "------", FmtCpu(0, false),
              "-", "-", "-", "----------", "NO_CANDIDATES", "-"))
      } else {
          header := "min=" GameMinScoreToActivate
          if (!allowActivate && skipReason != "")
              header := "SKIP_" skipReason " " header
-         LogLine(LogRow(
+         LogRawLine(LogRow(
              NowStamp(), "TOPN", "---", "-", "------", FmtCpu(0, false),
              "-", "-", "-", "----------", header, "-"))
          maxN := Min(candidates.Length, GameLogTopN)
          Loop maxN {
              candidate := candidates[A_Index]
-             LogLine(LogRow(
+             LogRawLine(LogRow(
                  NowStamp(), "CAND#" A_Index,
                  FmtScore(candidate["score"], true),
                  candidate["proc"], FmtPid(candidate["pid"]),
@@ -8950,7 +8965,7 @@ WindowEngineEvaluateGame(snapshot, forceRun, &allowActivate, &skipReason) {
      }
      if (GameLogMode = "DIAGNOSTIC") {
          for _, line in rejects
-             LogLine(line)
+             LogRawLine(line)
      }
  }
  return candidates.Length ? candidates[1] : 0
@@ -8976,7 +8991,7 @@ WindowEngineActivate(item, reason) {
          logText := NowStamp() " ACTIVATE " reason
          if (GameLogIncludeTitles && item["title"] != "")
              logText .= " | " item["title"]
-         LogLine(logText)
+         LogRawLine(logText)
      }
  }
  WindowEngineLastDecision := reason " " (ok ? "activated" : "failed")
