@@ -333,14 +333,19 @@ these states. Drop `SteamStartupGraceMs` to about `20000` while testing so each 
 
 ### Popups must not be centred
 
-- Open a dropdown, a combo box list, and a right-click context menu in a normal application. Confirm none of
-  them jump to the centre of the screen. They are positioned relative to the control that opened them, so
+- Open a dropdown, a combo box list, and a right-click context menu in **Explorer and in a Qt application such
+  as PCSX2**. Confirm none of them jump to the centre of the screen. Qt popups are unowned, which is why an
+  ownership-based filter caught Explorer's and missed these. They are positioned relative to the control that opened them, so
   centring detaches them from their parent.
 - Confirm a real **dialog** — one with a title bar — is still centred. Dialogs are owned like dropdowns are, and
   the two are told apart by the caption, so this is the case a too-broad filter would break.
 - Confirm ordinary application windows are still centred and maximised as before.
-- With an older game that presents a titled ToolWindow surface, confirm it is still managed. Unowned tool
-  windows are deliberately left eligible for that reason.
+- With an older game that presents a titled ToolWindow surface, confirm it is still managed. Tool windows are
+  only rejected when they are also small, so a full-size game surface still qualifies.
+- Confirm a **borderless fullscreen** application is still centred/maximised. Captionless windows are judged by
+  size, and a borderless window is meant to pass that test where a dropdown does not.
+- If a popup still gets centred, set `GameLogMode=DIAGNOSTIC` and reproduce. The `Geometry: centred ...` line
+  reports the class, size, style, exStyle and owner of whatever was moved — send that rather than the app name.
 
 ### Quick Menu status line
 

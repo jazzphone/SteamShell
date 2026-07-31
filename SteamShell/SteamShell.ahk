@@ -316,6 +316,12 @@ global DesktopBackdropRect := ""
 
 ; Window management
 global MinWidthPercent := 0.20
+; Fraction of the screen a CAPTIONLESS window must cover in both dimensions
+; before the engine treats it as an application window rather than a popup.
+; Captioned windows ignore this: a small dialog has a title bar and is worth
+; centring. Not an INI key -- it separates two categories rather than expressing
+; a preference, and the settings schema would need a version bump to add it.
+global MinCenterCoverage := 0.40
 
 ; Window management exclusion lists (INI-driven)
 global WmExcludeExeListRaw := "" ; Pipe-separated EXEs to skip in auto center/max
@@ -7532,6 +7538,7 @@ WindowEngineValidateItem(item) {
 ; that make something a popup are the same ones Windows itself uses to decide it
 ; is not a normal application window.
 WindowEngineIsMovableAppWindow(item) {
+ global MinCenterCoverage
  static WS_CHILD         := 0x40000000
  static WS_CAPTION       := 0x00C00000
  static WS_EX_TOOLWINDOW := 0x00000080
@@ -7553,17 +7560,29 @@ WindowEngineIsMovableAppWindow(item) {
  ; in. Menus and tooltips are the common case.
  if (exStyle & WS_EX_NOACTIVATE)
      return false
- ; The giveaway for a popup is being OWNED and having no title bar. A dialog is
- ; also owned, but keeps its caption -- and dialogs are worth centring. Testing
- ; for a missing caption alone would wrongly skip legitimately borderless
- ; application windows, which are not owned; the two conditions only mean
- ; "popup" together.
- if (item["owner"] && !(style & WS_CAPTION))
-     return false
- ; An owned tool window is a palette or popup. Unowned tool windows are left
- ; alone here on purpose: older games sometimes present their main surface that
- ; way, and those are still worth managing.
- if (item["owner"] && (exStyle & WS_EX_TOOLWINDOW))
+ ; A window with no title bar is either a popup or a deliberately borderless
+ ; application window, and SIZE is what separates them. A dropdown is small; a
+ ; borderless game or player fills most of the screen.
+ ;
+ ; The first attempt at this required the window to be OWNED as well, on the
+ ; reasoning that a dialog is owned but keeps its caption. That caught Explorer's
+ ; dropdowns and missed Qt's -- PCSX2's menus are unowned, so they passed
+ ; straight through. Ownership turned out to be a framework detail; size is not.
+ ;
+ ; Captioned windows are exempt from the size test on purpose: a small dialog
+ ; has a title bar and is worth centring, which is the case a bare size floor
+ ; would wrongly skip.
+ if !(style & WS_CAPTION) {
+     if (item["w"] < A_ScreenWidth * MinCenterCoverage
+         || item["h"] < A_ScreenHeight * MinCenterCoverage)
+         return false
+ }
+ ; Tool windows are palettes, popups and notification surfaces. Older games that
+ ; present a titled ToolWindow surface are still covered, because a game window
+ ; passes the size test above and this one only rejects the small ones.
+ if ((exStyle & WS_EX_TOOLWINDOW)
+     && (item["w"] < A_ScreenWidth * MinCenterCoverage
+         || item["h"] < A_ScreenHeight * MinCenterCoverage))
      return false
  return !POPUP_CLASSES.Has(item["classLower"])
 }
@@ -7583,6 +7602,7 @@ WindowEngineGeometrySignature(item) {
 
 WindowEngineApplyGeometry(snapshot) {
  global EnableWindowManagement, MinWidthPercent
+ global EnableGameScoreLogging, GameLogMode
  global WindowEngineGeometryState, WindowEngineGeometryRetryMs
  global WindowEngineGeometryMaxAttempts, WindowEngineGeometryActions
  if !EnableWindowManagement
@@ -7657,6 +7677,17 @@ WindowEngineApplyGeometry(snapshot) {
              WinMove(targetX, targetY,,, id)
              actionSucceeded := true
          }
+         ; Records exactly what was moved and why it qualified. Popups keep
+         ; turning out to be real top-level windows that pass whatever filter is
+         ; currently in place -- Explorer's, then Qt's -- and each round of that
+         ; was diagnosed by guessing at the framework instead of reading the
+         ; window. This makes the next one name itself.
+         if (EnableGameScoreLogging && GameLogMode = "DIAGNOSTIC")
+             LogLine("Geometry: centred " item["proc"] " [" item["class"] "] "
+                 . item["w"] "x" item["h"] " style 0x" Format("{:08X}", item["style"])
+                 . " exStyle 0x" Format("{:08X}", item["exStyle"])
+                 . " owner " (item["owner"] ? "yes" : "no")
+                 . " | " item["title"])
      }
      if needsMaximize {
          try {

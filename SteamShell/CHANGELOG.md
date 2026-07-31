@@ -24,12 +24,22 @@
   condition was being more than two pixels off centre, whereas maximising has
   always been gated by `MinWidthPercent` *and* the window having a maximise box.
 - Filtered those by **structure rather than name**: child windows, non-activatable
-  windows, owned windows with no caption, owned tool windows, and the classic
-  popup classes. A class blacklist alone cannot keep up, since every UI framework
-  invents its own popup class, while the styles that make something a popup are
-  the ones Windows itself uses to decide it is not a normal application window.
-  Owned-and-captionless is the discriminator that separates a dropdown from a
-  dialog, which is owned but keeps its title bar and *is* worth centring.
+  windows, captionless windows below a size floor, small tool windows, and the
+  classic popup classes. A class blacklist alone cannot keep up, since every UI
+  framework invents its own popup class, while the styles that make something a
+  popup are the ones Windows itself uses to decide it is not a normal application
+  window.
+- Used **size, not ownership**, as the discriminator for captionless windows. The
+  first attempt required the window to be owned as well, reasoning that a dialog
+  is owned but keeps its caption. That fixed Explorer's dropdowns and missed
+  Qt's — PCSX2's menus are unowned and passed straight through. Ownership is a
+  framework detail; size is not. A dropdown is small, a borderless game fills the
+  screen, and a captioned window is exempt entirely so small dialogs are still
+  centred.
+- Added a diagnostic line recording what the engine centred and why it qualified
+  — process, class, size, style, exStyle, owner — under `GameLogMode=DIAGNOSTIC`.
+  Two rounds of this bug were diagnosed by guessing at the UI framework instead
+  of reading the window; the next one names itself.
 - Gave every operational log line a **timestamp and a level**, matching XFE.
   Standalone's `LogLine` added neither, so the log recorded what happened but not
   when — two lines could be a second or an hour apart with nothing to say which,
