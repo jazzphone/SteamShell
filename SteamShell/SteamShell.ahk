@@ -35,7 +35,7 @@ CoordMode "Mouse", "Screen"
 global SettingsPath := A_ScriptDir "\SteamShellSettings.ini"
 ; Back-compat alias used by some helper functions
 global IniPath := SettingsPath
-global CurrentSettingsSchemaVersion := 10
+global CurrentSettingsSchemaVersion := 11
 global LogPath := A_ScriptDir "\SteamShell.log"
 global ShellRegKey := "HKEY_CURRENT_USER\Software\Microsoft\Windows NT\CurrentVersion\Winlogon"
 global SteamShellRegKey := "HKEY_CURRENT_USER\Software\SteamShell"
@@ -330,6 +330,13 @@ global MinCenterCoverage := 0.40
 global WmExcludeExeListRaw := "" ; Pipe-separated EXEs to skip in auto center/max
 global WmExcludeClassListRaw := "" ; Pipe-separated Win32 classes to skip in auto center/max
 global WmExcludeExeSet := Map() ; Built from WmExcludeExeListRaw
+
+; Automatic mouse mode. While one of these executables owns the foreground, the
+; View/Back mappings apply without holding View/Back -- the same mappings, not a
+; second set, so there is nothing extra to learn or configure. Empty by default:
+; naming an executable is the whole opt-in.
+global AutoMouseExeListRaw := ""
+global AutoMouseExeSet := Map()
 global WmExcludeClassSet := Map() ; Built from WmExcludeClassListRaw
 
 ; AlwaysFocus list
@@ -700,7 +707,7 @@ GetDefaultSettingsIniText() {
 ; ==================================================================================================
 
 [SteamShell]
-SettingsSchemaVersion=10                                   ; Internal schema used for safe settings upgrades
+SettingsSchemaVersion=11                                   ; Internal schema used for safe settings upgrades
 
 [Paths]
 SteamPath=C:\Program Files (x86)\Steam\Steam.exe            ; Full path to Steam.exe
@@ -859,6 +866,7 @@ ControllerMouseFastMultiplier=2.5                           ; Multiplier while R
 ControllerScrollIntervalMs=80                               ; Min ms between scroll ticks
 ControllerScrollStep=1                                      ; Wheel notches per scroll tick
 ControllerChordHoldMs=500                                   ; Long-press threshold (ms) for View/Back + button actions
+AutoMouseExeList=                                           ; EXEs where the View/Back mappings apply WITHOUT holding View/Back
 
 [QuickMenu]
 Enable=true                                                 ; Hold L3+R3 to open/close the living-room quick menu
@@ -1454,6 +1462,7 @@ LoadSettings() {
  global MouseHideDelay, SteamRefocusDelay
  global MinWidthPercent
  global WmExcludeExeListRaw, WmExcludeClassListRaw, WmExcludeExeSet, WmExcludeClassSet
+ global AutoMouseExeListRaw, AutoMouseExeSet
  global AlwaysFocusExeListRaw, AlwaysFocusCooldownMs, AlwaysFocusList
  global GameCPUThresholdPercent, FullscreenTolerance, FullscreenPosTolerancePx, GameForegroundCooldownMs
  global GameAllowZeroCpuAsCandidate, GameRequireSteamForeground, GameAssistLogEvenWhenSkipped
@@ -1534,6 +1543,10 @@ LoadSettings() {
  MinWidthPercent := ClampFloat(ToFloat(IniReadS("WindowManagement","MinWidthPercent","0.20"), 0.20), 0.05, 1.00)
 
  ; Window-management exclusion lists (optional)
+ AutoMouseExeListRaw := IniReadS("Controller", "AutoMouseExeList", "")
+ AutoMouseExeSet := Map()
+ for _, exe in ParseExeListPipe(AutoMouseExeListRaw)
+     AutoMouseExeSet[exe] := true
  WmExcludeExeListRaw := IniReadS("WindowManagement", "ExcludeExeList", "")
  WmExcludeClassListRaw := IniReadS("WindowManagement", "ExcludeClassList", "")
 
@@ -6437,6 +6450,36 @@ GetQuickMenuPreviousExe() {
  return ""
 }
 
+; True while the foreground application is one the user has named for automatic
+; mouse mode.
+;
+; The mechanism is deliberately "pretend View/Back is held" rather than a second
+; input mode. The View mappings are already a complete desktop mouse by default --
+; right stick moves, left stick scrolls, D-pad arrows, RB left-click, RT
+; right-click, Start opens the Start menu -- so reusing them means nothing new to
+; design, nothing new to configure, and no second keymap that can drift from the
+; first. What happens automatically is exactly what holding View/Back does.
+;
+; Cached briefly: this is evaluated on every poll tick at ~16 ms, and the
+; foreground process cannot change faster than a person can alt-tab.
+AutoMouseModeActive() {
+ global AutoMouseExeSet, ScriptPid
+ static cachedResult := false
+ static cachedTick := 0
+ if (AutoMouseExeSet.Count = 0)
+     return false
+ if (cachedTick && A_TickCount - cachedTick < 250)
+     return cachedResult
+ cachedTick := A_TickCount
+ cachedResult := false
+ try {
+     hwnd := DllCall("User32\GetForegroundWindow", "Ptr")
+     if (hwnd && WinGetPID("ahk_id " hwnd) != ScriptPid)
+         cachedResult := AutoMouseExeSet.Has(StrLower(WinGetProcessName("ahk_id " hwnd)))
+ }
+ return cachedResult
+}
+
 IsSteamProcess(exeName) {
  exeName := StrLower(Trim(exeName))
  return exeName = "steam.exe" || exeName = "steamwebhelper.exe"
@@ -7267,7 +7310,22 @@ PollController() {
      return
  }
 
-viewDown := (buttons & 0x0020)
+; Automatic mouse mode is expressed as a virtual View/Back hold, so every branch
+; below is reached identically whether the user is holding the button or the
+; foreground application is on their list.
+;
+; Deliberately evaluated AFTER the Quick Menu and Settings chords above, which
+; test the real button state. That is what keeps a misconfigured list
+; recoverable: name a game by mistake and the controller becomes a mouse inside
+; it, but L3+R3 still opens the Quick Menu and the Settings chord still opens
+; Settings, so the list can be corrected without a keyboard.
+autoMouse := AutoMouseModeActive()
+if (autoMouse && MouseHidden) {
+    ; Moving a pointer that cannot be seen is not a usable mode.
+    SystemCursor("Show")
+    MouseHidden := false
+}
+viewDown := (buttons & 0x0020) || autoMouse
 if (!viewDown) {
  prevViewDown := false
  ; Reset press tracking so Short/Long doesn't misfire when View/Back is not held.
@@ -12752,6 +12810,10 @@ ShowSettingsEditor(*) {
  SettingsEditorAddChoice(category, "MousePark", "MouseParkEdge", "Mouse parking edge", ["Right", "Left"], &y, "Right")
  SettingsEditorAddActionButton(category, "Open Controller Mapping…", ShowControllerMappingWindow, 255, y + 5, 260)
  SettingsEditorAddActionButton(category, "Test / Calibrate Controller…", ShowControllerTest, 525, y + 5, 260)
+ autoMouseY := y + 48
+ SettingsEditorAddExeListField(
+     category, "Controller", "AutoMouseExeList",
+     "Automatic mouse mode for these EXEs", 255, autoMouseY, 690)
 
  ; Focus
  category := "Focus & Windows"

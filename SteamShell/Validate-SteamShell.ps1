@@ -87,8 +87,8 @@ Assert-True (
     $runtimeSchemaMatch.Groups[1].Value -eq
     $defaultSchemaMatch.Groups[1].Value) (
     "The runtime and embedded settings schema versions do not match.")
-Assert-True ($runtimeSchemaMatch.Groups[1].Value -eq "10") (
-    "The feature-parity settings schema is not version 10.")
+Assert-True ($runtimeSchemaMatch.Groups[1].Value -eq "11") (
+    "The feature-parity settings schema is not version 11.")
 Assert-True (
     $embeddedSchema.Contains("MousePark`0MouseParkEdge") -and
     $embeddedSchema.Contains("RTSS`0UseDllIntegration") -and
@@ -96,7 +96,8 @@ Assert-True (
     $embeddedSchema.Contains("Features`0EnableDesktopBlackout") -and
     $embeddedSchema.Contains("Steam`0MenuShortcut") -and
     $embeddedSchema.Contains("Steam`0QuickAccessShortcut") -and
-    $embeddedSchema.Contains("Steam`0OverlayShortcut")) (
+    $embeddedSchema.Contains("Steam`0OverlayShortcut") -and
+    $embeddedSchema.Contains("Controller`0AutoMouseExeList")) (
     "Elevation, mouse parking, live RTSS, or Steam Quick Menu options are absent from the settings schema.")
 Assert-True (-not $embeddedSchema.Contains("WindowEngine`0TickIntervalMs")) (
     "Low-level Window Engine timing controls must remain internal.")
@@ -579,6 +580,17 @@ Assert-True (
     $source -notmatch 'OnMessage\(0x404' -and
     $source -notmatch 'TrayIconNotify') (
     "The tray right-click interception has returned; it should show the native menu.")
+# Automatic mouse mode is a virtual View/Back hold, deliberately reusing the
+# existing mappings rather than introducing a second keymap that could drift from
+# them. It must also be evaluated after the escape chords, which read the real
+# button state, so a misconfigured list stays recoverable without a keyboard.
+Assert-True (
+    $source -match
+        '(?s)viewDown\s*:=\s*\(buttons\s*&\s*0x0020\)\s*\|\|\s*autoMouse' -and
+    $source -match
+        '(?s)quickChordNow\s*:=.*?autoMouse\s*:=\s*AutoMouseModeActive\(\)') (
+    "Automatic mouse mode is not a virtual View hold evaluated after the escape chords.")
+
 # Every tray action must stay reachable from the Quick Menu as well, so a
 # controller user never needs the notification area. Reload Settings was
 # previously tray-only.

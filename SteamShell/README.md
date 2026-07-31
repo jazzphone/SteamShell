@@ -65,6 +65,27 @@ in a temporary copy and replace the live INI only after every change succeeds.
 Every View/Back mapping, including these Start actions, can be reassigned in the Controller Mapping window. Quick
 Menu and Control Panel remain available as optional built-in actions but are unassigned by default.
 
+### Automatic mouse mode
+
+`[Controller] AutoMouseExeList` names executables where those same mappings apply **without holding View/Back**.
+Settings ▸ Controller & Cursor ▸ **Automatic mouse mode for these EXEs** edits the list; it is **empty by default**,
+so naming an executable is the entire opt-in.
+
+It is deliberately not a second input mode. The View/Back mappings are already a complete desktop mouse out of the
+box — right stick moves, left stick scrolls, D-pad arrows, RB left-clicks, RT right-clicks, X opens the touch
+keyboard, Start opens the Start menu — so automatic mode reuses them rather than inventing a parallel keymap that
+could drift from the one you configured. What happens automatically is exactly what holding View/Back does, and
+holding View/Back while it is active changes nothing.
+
+Reasonable entries are `explorer.exe` and a browser such as `brave.exe`. Note that `explorer.exe` is also the
+desktop and the taskbar, not just File Explorer, so listing it engages automatic mode for those too.
+
+**Do not list a game.** If you do, the controller becomes a mouse inside it — but the escape chords still work,
+because they are evaluated before automatic mode and read the real button state. L3 + R3 opens the Quick Menu and
+the held six-button chord opens Full Settings, so the list can always be corrected without reaching for a keyboard.
+
+The cursor is unhidden when automatic mode engages; moving a pointer that cannot be seen is not a usable mode.
+
 ## Administrator startup
 
 By default, SteamShell restores the behavior used by versions 1.2 and 1.3: if it starts without administrator

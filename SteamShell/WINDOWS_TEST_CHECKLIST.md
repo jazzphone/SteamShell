@@ -232,6 +232,22 @@ uncompiled script on the HTPC before replacing the current shell executable.
 - Leave the sticks untouched for the three-second center sample, apply the suggested deadzone, and confirm the new
   value is written to the INI and reflected in Full Settings.
 
+## Automatic mouse mode
+
+- Confirm `AutoMouseExeList` is **empty** on a fresh install and that behaviour is unchanged: the controller does
+  nothing without View/Back held.
+- Add `explorer.exe` from Settings ▸ Controller & Cursor. With File Explorer foreground and **View/Back not held**,
+  confirm the right stick moves the pointer, the left stick scrolls, the D-pad sends arrows, RB left-clicks and
+  RT right-clicks — the same actions holding View/Back gives.
+- Confirm holding View/Back while automatic mode is active changes nothing, rather than double-firing.
+- Switch to a non-listed application and confirm the controller goes inert again without View/Back.
+- With the cursor auto-hidden, switch to a listed application and confirm the pointer becomes visible.
+- **The recovery case:** add a game's EXE to the list deliberately, launch it, and confirm the controller becomes a
+  mouse — then confirm **L3 + R3 still opens the Quick Menu** and the held six-button chord still opens Full
+  Settings. Remove the entry from Settings. This is the path that makes a mistake survivable, so it is worth
+  proving rather than assuming.
+- Confirm an upgraded INI gains `AutoMouseExeList=` with an empty value and that no other setting changed.
+
 ## Focus
 
 - Confirm Health Check reports the coordinated engine inventory size, scan duration, and most recent decision.

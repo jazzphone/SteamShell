@@ -1,5 +1,27 @@
 # SteamShell changelog
 
+## Unreleased
+
+- Added **automatic mouse mode**. `[Controller] AutoMouseExeList` names
+  executables where the View/Back mappings apply without holding View/Back, edited
+  from Settings ▸ Controller & Cursor. Empty by default; naming an executable is
+  the entire opt-in.
+- Implemented it as a **virtual View/Back hold** rather than a second input mode.
+  The existing mappings are already a complete desktop mouse — right stick moves,
+  left stick scrolls, D-pad arrows, RB left-click, RT right-click, Start opens the
+  Start menu — so there was nothing to design and no parallel keymap that could
+  drift from the configured one. What happens automatically is exactly what
+  holding View/Back does.
+- Evaluated it **after** the Quick Menu and Full Settings chords, which read the
+  real button state. That is what keeps a misconfigured list recoverable: name a
+  game by mistake and the controller becomes a mouse inside it, but both chords
+  still work, so the list can be corrected without a keyboard.
+- Unhid the cursor when the mode engages. Moving a pointer that cannot be seen is
+  not a usable mode.
+- Settings schema is now **11**. The only change is the new key, which
+  `SyncSettingsIniSchema` adds to existing files with its empty default, so
+  upgrading changes no existing value.
+
 ## 1.7.2 — 2026-07-31
 
 Field fixes from hardware testing, a recovery-path audit, and the logging and
