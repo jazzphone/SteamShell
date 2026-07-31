@@ -16,6 +16,18 @@
   couch device is nobody. A message now displaces the button hint for four
   seconds when the menu is open, and the hint returns on its own. Matches XFE's
   `SetStatus`.
+- Logged **what holds the foreground** when the Quick Menu fails to take it. The
+  existing lines reported only that the handoff failed, which is not actionable:
+  a game holding focus, Steam holding it, and a Windows surface holding it need
+  completely different responses. The line now names the process, window class,
+  size, and whether it covers its monitor — an exclusive-fullscreen game is the
+  usual reason the handoff is refused, and that cannot be told from a borderless
+  one by process name alone.
+- Deliberately did **not** add further retry attempts. The handoff is refused by
+  rule rather than by timing, so more attempts do not change the outcome, and
+  against a game that re-asserts itself they become a focus fight — which on an
+  exclusive-fullscreen title means repeated minimise/restore churn, worse than
+  the problem being solved. The reasoning is recorded at the call site.
 - Fixed **Save Limit to Profile** reporting `No game in foreground` while a game
   was plainly running and the Task Switcher was listing it. The row used only the
   raw foreground window captured when the Quick Menu opened, and that is

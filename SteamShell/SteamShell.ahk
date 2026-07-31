@@ -3518,19 +3518,59 @@ ShowQuickMenu(*) {
  if IsSet(QuickMenuGui) {
      gotFocus := ForceForegroundWindow(QuickMenuGui.Hwnd)
      if !gotFocus {
-         LogLine("Quick Menu was shown but did not initially acquire the foreground.")
+         LogLine("Quick Menu was shown but did not initially acquire the "
+             . "foreground. Held by: " DescribeForegroundWindow())
          SetTimer(QuickMenuEnsureForeground, -75)
      }
      HandleCursorAfterManagedFocus(QuickMenuGui.Hwnd, false)
  }
 }
 
+; Names what actually holds the foreground.
+;
+; "The handoff failed" is not actionable on its own. A game holding focus, Steam
+; holding it, and a Windows surface holding it need completely different
+; responses, and this log line is the only place the difference can be seen. The
+; monitor-coverage note is there because an exclusive-fullscreen game is the
+; usual reason the handoff is refused, and it cannot be told apart from a
+; borderless one by process name.
+DescribeForegroundWindow() {
+ hwnd := 0
+ try hwnd := DllCall("User32\GetForegroundWindow", "Ptr")
+ if !hwnd
+     return "nothing (no foreground window)"
+ proc := "?"
+ cls := "?"
+ try proc := WinGetProcessName("ahk_id " hwnd)
+ try cls := WinGetClass("ahk_id " hwnd)
+ detail := proc " [class " cls "] hwnd 0x" Format("{:X}", hwnd)
+ try {
+     WinGetPos(&wx, &wy, &ww, &wh, "ahk_id " hwnd)
+     GetMouseParkMonitorBounds(hwnd, &left, &top, &right, &bottom)
+     monitorW := right - left
+     monitorH := bottom - top
+     if (monitorW > 0 && monitorH > 0) {
+         covers := (ww >= monitorW * 0.98 && wh >= monitorH * 0.98)
+         detail .= " " ww "x" wh
+             . (covers ? " (covers its monitor -- possibly exclusive fullscreen)" : "")
+     }
+ }
+ return detail
+}
+
 QuickMenuEnsureForeground() {
  global QuickMenuGui, QuickMenuVisible
  if (!QuickMenuVisible || !IsSet(QuickMenuGui))
      return
- if !ForceForegroundWindow(QuickMenuGui.Hwnd)
-     LogLine("Quick Menu foreground retry failed; Steam may still receive controller input.")
+ if ForceForegroundWindow(QuickMenuGui.Hwnd)
+     return
+ ; Deliberately not retried further. The handoff is refused by rule, not by
+ ; timing, so more attempts do not change the outcome -- and against a game that
+ ; re-asserts itself they turn into a focus fight, which on an
+ ; exclusive-fullscreen title means repeated minimise/restore churn. Report what
+ ; is holding it instead.
+ LogLine("Quick Menu foreground retry failed; the game may still receive "
+     . "controller input. Foreground is held by: " DescribeForegroundWindow())
 }
 
 QuickMenuHideThenSend(shortcut, delayMs := 150) {
