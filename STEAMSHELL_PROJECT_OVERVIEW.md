@@ -1,9 +1,9 @@
 # SteamShell Project Overview
 
 **Document status:** July 31, 2026  
-**Stable SteamShell release:** 1.7.2 (locked at `releases/1.7.2/`)  
+**Stable SteamShell release:** 1.7.3 (locked at `releases/1.7.3/`)  
 **Stable SteamShell-XFE release:** 0.1.16 (locked at `releases/XFE-0.1.16/`)  
-**Development line:** None; both trees are locked  
+**Development line:** Quick Menu rendering rewrite, in progress in both trees  
 
 ## Executive summary
 
@@ -110,7 +110,7 @@ Coverage rather than title is the discriminator on purpose. It survives client u
 | Area | SteamShell 1.7 | SteamShell-XFE |
 |---|---|---|
 | Status | Stable, frozen source release | Stable, frozen source release |
-| Current version | 1.7.2 | 0.1.16 |
+| Current version | 1.7.3 | 0.1.16 |
 | Primary role | Complete Steam-centered Windows shell | Utility companion to Xbox FSE |
 | Owns the Windows shell | Yes, when installed or registered as the shell | No |
 | Launches and monitors Steam | Yes | No |
@@ -153,11 +153,11 @@ It coordinates the entire session:
 
 ## Current release state
 
-- **Stable release:** 1.7.2, frozen in `releases/1.7.2`
-- **Active source:** 1.7.2 in `SteamShell/`
+- **Stable release:** 1.7.3, frozen in `releases/1.7.3`
+- **Active source:** 1.7.3 in `SteamShell/`
 - **Runtime:** AutoHotkey v2, 64-bit
 - **Validated compiler baseline:** AutoHotkey v2.0.26 64-bit
-- **Settings schema:** 10
+- **Settings schema:** 12
 - **Distribution model:** One portable executable, with optional installation/registration
 
 The `releases/1.7.0` directory is the permanent release snapshot and should not
@@ -908,7 +908,7 @@ workspace-root/
 
 | File | Purpose |
 |---|---|
-| `SteamShell/SteamShell.ahk` | Current SteamShell source, matching the locked 1.7.2 release. |
+| `SteamShell/SteamShell.ahk` | Current SteamShell source, matching the locked 1.7.3 release. |
 | `SteamShell/assets/` | Standalone notification-area and compiled executable icon assets. |
 | `SteamShell/SteamShellSettings_SAMPLE.ini` | Documented configuration template. Runtime settings are written to `SteamShellSettings.ini`. |
 | `SteamShell/SteamShell.reg` | Optional registry setup/reference for configuring SteamShell as the per-user shell. |
@@ -980,7 +980,10 @@ Compiled executables are build artifacts. The authoritative project history is t
 
 ## SteamShell 1.7
 
-Treat 1.7.2 as the current completed checkpoint. Its predecessors 1.7.0 and 1.7.1 remain frozen:
+Treat 1.7.3 as the current checkpoint. It is a **revert point taken on request**
+immediately before the Quick Menu rendering rewrite, not a release held until
+hardware sign-off — automatic mouse mode ships in it unconfirmed on hardware.
+Its predecessors 1.7.2, 1.7.1 and 1.7.0 remain frozen:
 
 - Work through the Desktop mode and Desktop blackout sections of
   `WINDOWS_TEST_CHECKLIST.md` before treating either as settled.
