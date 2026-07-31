@@ -35,7 +35,7 @@ CoordMode "Mouse", "Screen"
 global SettingsPath := A_ScriptDir "\SteamShellSettings.ini"
 ; Back-compat alias used by some helper functions
 global IniPath := SettingsPath
-global CurrentSettingsSchemaVersion := 11
+global CurrentSettingsSchemaVersion := 12
 global LogPath := A_ScriptDir "\SteamShell.log"
 global ShellRegKey := "HKEY_CURRENT_USER\Software\Microsoft\Windows NT\CurrentVersion\Winlogon"
 global SteamShellRegKey := "HKEY_CURRENT_USER\Software\SteamShell"
@@ -330,14 +330,20 @@ global MinCenterCoverage := 0.40
 global WmExcludeExeListRaw := "" ; Pipe-separated EXEs to skip in auto center/max
 global WmExcludeClassListRaw := "" ; Pipe-separated Win32 classes to skip in auto center/max
 global WmExcludeExeSet := Map() ; Built from WmExcludeExeListRaw
+global WmExcludeClassSet := Map() ; Built from WmExcludeClassListRaw
 
 ; Automatic mouse mode. While one of these executables owns the foreground, the
 ; View/Back mappings apply without holding View/Back -- the same mappings, not a
 ; second set, so there is nothing extra to learn or configure. Empty by default:
 ; naming an executable is the whole opt-in.
+;
+; EnableAutoMouseMode is a separate kill switch so the behaviour can be turned
+; off for a session without discarding a curated list -- the list is the thing
+; that took effort to build, and "is this feature causing what I am seeing?" is
+; a question worth being able to answer without destroying it.
+global EnableAutoMouseMode := true
 global AutoMouseExeListRaw := ""
 global AutoMouseExeSet := Map()
-global WmExcludeClassSet := Map() ; Built from WmExcludeClassListRaw
 
 ; AlwaysFocus list
 global AlwaysFocusExeListRaw := "" ; Example: SplitSecond.exe|EADesktop.exe
@@ -707,7 +713,7 @@ GetDefaultSettingsIniText() {
 ; ==================================================================================================
 
 [SteamShell]
-SettingsSchemaVersion=11                                   ; Internal schema used for safe settings upgrades
+SettingsSchemaVersion=12                                   ; Internal schema used for safe settings upgrades
 
 [Paths]
 SteamPath=C:\Program Files (x86)\Steam\Steam.exe            ; Full path to Steam.exe
@@ -727,6 +733,7 @@ EnableTaskbarHiding=true                                    ; Hide taskbar & tra
 EnableDesktopBlackout=true                                  ; Black backdrop instead of the wallpaper and desktop icons
 EnableWindowManagement=true                                 ; Center windows; maximize large windows (skips OSK + Steam KB)
 EnableAutoHideCursor=true                                   ; Hide cursor after MouseHideDelay inactivity
+EnableAutoMouseMode=true                                    ; Allow AutoMouseExeList to act as a virtual View/Back hold (list still required)
 EnableSteamRefocusMode=true                                 ; Refocus BPM after SteamRefocusDelay when nothing else is visible
 EnableGameForegroundAssist=true                             ; Detect fullscreen-ish games and bring them to front
 EnableAlwaysFocus=true                                      ; Allow specific apps (ExeList) to always win focus over Steam
@@ -1462,7 +1469,7 @@ LoadSettings() {
  global MouseHideDelay, SteamRefocusDelay
  global MinWidthPercent
  global WmExcludeExeListRaw, WmExcludeClassListRaw, WmExcludeExeSet, WmExcludeClassSet
- global AutoMouseExeListRaw, AutoMouseExeSet
+ global EnableAutoMouseMode, AutoMouseExeListRaw, AutoMouseExeSet
  global AlwaysFocusExeListRaw, AlwaysFocusCooldownMs, AlwaysFocusList
  global GameCPUThresholdPercent, FullscreenTolerance, FullscreenPosTolerancePx, GameForegroundCooldownMs
  global GameAllowZeroCpuAsCandidate, GameRequireSteamForeground, GameAssistLogEvenWhenSkipped
@@ -1543,10 +1550,6 @@ LoadSettings() {
  MinWidthPercent := ClampFloat(ToFloat(IniReadS("WindowManagement","MinWidthPercent","0.20"), 0.20), 0.05, 1.00)
 
  ; Window-management exclusion lists (optional)
- AutoMouseExeListRaw := IniReadS("Controller", "AutoMouseExeList", "")
- AutoMouseExeSet := Map()
- for _, exe in ParseExeListPipe(AutoMouseExeListRaw)
-     AutoMouseExeSet[exe] := true
  WmExcludeExeListRaw := IniReadS("WindowManagement", "ExcludeExeList", "")
  WmExcludeClassListRaw := IniReadS("WindowManagement", "ExcludeClassList", "")
 
@@ -1557,6 +1560,14 @@ LoadSettings() {
  WmExcludeClassSet := Map()
  for _, cls in ParseClassListPipe(WmExcludeClassListRaw)
  WmExcludeClassSet[cls] := true
+
+ ; Automatic mouse mode (optional). Both gates must pass: the toggle allows the
+ ; feature, the list decides where it applies.
+ EnableAutoMouseMode := ToBool(IniReadS("Features","EnableAutoMouseMode","true"), true)
+ AutoMouseExeListRaw := IniReadS("Controller", "AutoMouseExeList", "")
+ AutoMouseExeSet := Map()
+ for _, exe in ParseExeListPipe(AutoMouseExeListRaw)
+ AutoMouseExeSet[exe] := true
 
  AlwaysFocusExeListRaw := IniReadS("AlwaysFocus","ExeList","")
  AlwaysFocusCooldownMs := ClampInt(ToInt(IniReadS("AlwaysFocus","AlwaysFocusCooldownMs","1000"), 1000), 0, 60000)
@@ -6463,10 +6474,12 @@ GetQuickMenuPreviousExe() {
 ; Cached briefly: this is evaluated on every poll tick at ~16 ms, and the
 ; foreground process cannot change faster than a person can alt-tab.
 AutoMouseModeActive() {
- global AutoMouseExeSet, ScriptPid
+ global EnableAutoMouseMode, AutoMouseExeSet, ScriptPid
  static cachedResult := false
  static cachedTick := 0
- if (AutoMouseExeSet.Count = 0)
+ ; Checked ahead of the cache so turning the feature off in Settings takes
+ ; effect on the next poll rather than up to 250 ms later.
+ if (!EnableAutoMouseMode || AutoMouseExeSet.Count = 0)
      return false
  if (cachedTick && A_TickCount - cachedTick < 250)
      return cachedResult
@@ -12808,6 +12821,7 @@ ShowSettingsEditor(*) {
  SettingsEditorAddCheckbox(category, "Features", "EnableMouseParkOnBoot", "Park the mouse at the display edge once during startup", &y, "true")
  SettingsEditorAddCheckbox(category, "Features", "EnableMouseParkOnFocusChange", "Park once after a managed focus change", &y, "true")
  SettingsEditorAddChoice(category, "MousePark", "MouseParkEdge", "Mouse parking edge", ["Right", "Left"], &y, "Right")
+ SettingsEditorAddCheckbox(category, "Features", "EnableAutoMouseMode", "Automatic mouse mode in the applications listed below", &y, "true")
  SettingsEditorAddActionButton(category, "Open Controller Mapping…", ShowControllerMappingWindow, 255, y + 5, 260)
  SettingsEditorAddActionButton(category, "Test / Calibrate Controller…", ShowControllerTest, 525, y + 5, 260)
  autoMouseY := y + 48

@@ -71,6 +71,12 @@ Menu and Control Panel remain available as optional built-in actions but are una
 Settings ▸ Controller & Cursor ▸ **Automatic mouse mode for these EXEs** edits the list; it is **empty by default**,
 so naming an executable is the entire opt-in.
 
+`[Features] EnableAutoMouseMode` (Settings ▸ Controller & Cursor ▸ **Automatic mouse mode in the applications listed
+below**) is a separate switch, on by default. It exists so the behaviour can be turned off without discarding the
+list: the list is the part that takes effort to build, and *is this feature causing what I am seeing?* is a question
+worth being able to answer without having to rebuild it afterwards. Both gates must pass — the toggle allows the
+feature, the list decides where it applies — so clearing either one is enough to stop it.
+
 It is deliberately not a second input mode. The View/Back mappings are already a complete desktop mouse out of the
 box — right stick moves, left stick scrolls, D-pad arrows, RB left-clicks, RT right-clicks, X opens the touch
 keyboard, Start opens the Start menu — so automatic mode reuses them rather than inventing a parallel keymap that

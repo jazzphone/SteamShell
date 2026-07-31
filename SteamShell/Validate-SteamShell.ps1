@@ -87,7 +87,7 @@ Assert-True (
     $runtimeSchemaMatch.Groups[1].Value -eq
     $defaultSchemaMatch.Groups[1].Value) (
     "The runtime and embedded settings schema versions do not match.")
-Assert-True ($runtimeSchemaMatch.Groups[1].Value -eq "11") (
+Assert-True ($runtimeSchemaMatch.Groups[1].Value -eq "12") (
     "The feature-parity settings schema is not version 11.")
 Assert-True (
     $embeddedSchema.Contains("MousePark`0MouseParkEdge") -and
@@ -97,7 +97,8 @@ Assert-True (
     $embeddedSchema.Contains("Steam`0MenuShortcut") -and
     $embeddedSchema.Contains("Steam`0QuickAccessShortcut") -and
     $embeddedSchema.Contains("Steam`0OverlayShortcut") -and
-    $embeddedSchema.Contains("Controller`0AutoMouseExeList")) (
+    $embeddedSchema.Contains("Controller`0AutoMouseExeList") -and
+    $embeddedSchema.Contains("Features`0EnableAutoMouseMode")) (
     "Elevation, mouse parking, live RTSS, or Steam Quick Menu options are absent from the settings schema.")
 Assert-True (-not $embeddedSchema.Contains("WindowEngine`0TickIntervalMs")) (
     "Low-level Window Engine timing controls must remain internal.")
@@ -590,6 +591,15 @@ Assert-True (
     $source -match
         '(?s)quickChordNow\s*:=.*?autoMouse\s*:=\s*AutoMouseModeActive\(\)') (
     "Automatic mouse mode is not a virtual View hold evaluated after the escape chords.")
+
+# The feature must be disableable without discarding the EXE list, and the
+# toggle must be read ahead of the result cache or turning it off would linger.
+Assert-True (
+    $source -match
+        '(?s)AutoMouseModeActive\(\)\s*\{.*?if\s*\(!EnableAutoMouseMode\s*\|\|\s*AutoMouseExeSet\.Count\s*=\s*0\)\s*\r?\n\s*return false' -and
+    $source -match
+        '(?s)EnableAutoMouseMode\s*:=\s*ToBool\(IniReadS\("Features","EnableAutoMouseMode"') (
+    "Automatic mouse mode has no working kill switch independent of its EXE list.")
 
 # Every tray action must stay reachable from the Quick Menu as well, so a
 # controller user never needs the notification area. Reload Settings was

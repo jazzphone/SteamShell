@@ -246,7 +246,11 @@ uncompiled script on the HTPC before replacing the current shell executable.
   mouse — then confirm **L3 + R3 still opens the Quick Menu** and the held six-button chord still opens Full
   Settings. Remove the entry from Settings. This is the path that makes a mistake survivable, so it is worth
   proving rather than assuming.
-- Confirm an upgraded INI gains `AutoMouseExeList=` with an empty value and that no other setting changed.
+- With `explorer.exe` still listed, clear **Automatic mouse mode in the applications listed below** in Settings.
+  Confirm the controller goes inert in File Explorer without View/Back, that View/Back itself still works normally,
+  and that the EXE list is **still populated** when the checkbox is re-ticked.
+- Confirm an upgraded INI gains `AutoMouseExeList=` with an empty value and `EnableAutoMouseMode=true`, and that no
+  other setting changed.
 
 ## Focus
 

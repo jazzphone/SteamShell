@@ -16,10 +16,14 @@
   real button state. That is what keeps a misconfigured list recoverable: name a
   game by mistake and the controller becomes a mouse inside it, but both chords
   still work, so the list can be corrected without a keyboard.
+- Added `[Features] EnableAutoMouseMode`, on by default, as a kill switch that
+  is independent of the EXE list. Disabling a feature should not require deleting
+  the configuration that took effort to build, and it is checked ahead of the
+  result cache so turning it off takes effect on the next poll.
 - Unhid the cursor when the mode engages. Moving a pointer that cannot be seen is
   not a usable mode.
-- Settings schema is now **11**. The only change is the new key, which
-  `SyncSettingsIniSchema` adds to existing files with its empty default, so
+- Settings schema is now **12**. The only changes are the two new keys, which
+  `SyncSettingsIniSchema` adds to existing files with their defaults, so
   upgrading changes no existing value.
 
 ## 1.7.2 — 2026-07-31
