@@ -21,10 +21,18 @@
   plus `UpdateProfiles`, so the limiter was genuinely reconfigured a dozen times
   while scrolling and the frame rate chased the number. The value is now held
   pending, the row shows it immediately, and RTSS is written once the user stops.
-- Snapped coarse steps to their own grid. Escalating from an arbitrary value
-  landed on arbitrary values — 63 stepping by 5 gave 68, 73, 78, and 60 or 90
-  were unreachable without slowing down to creep. 63 by 5 now goes to 65, then
-  70; a single press still moves by exactly 1.
+- Replaced press-count escalation with **hold-to-repeat**. Growing the step after
+  several quick presses meant tapping quickly silently changed what a tap did —
+  the same gesture produced 1, 5 or 10 depending on timing the user could not
+  see. A press is now always exactly one step, however fast presses arrive.
+- Made speed come from **holding**, and accelerated the repeat *rate* rather than
+  the step: 80 ms, then 40 ms after 1.2 s, then 20 ms after 2.5 s. Every change
+  stays 1, so the value is predictable and can be stopped exactly where wanted;
+  holding just delivers more of them. This also removed grid-snapping, which only
+  existed to make large steps land on round numbers.
+- Limited repeat to rows whose value is a **number**, not a list. Scrubbing audio
+  output or resolution at fifty changes a second would be useless and would fire
+  real device work per step.
 - Cancelled a pending value when a preset is chosen. Without it, the deferred
   commit could fire *after* the preset and overwrite it. Save Limit to Profile
   flushes it instead, so the profile gets the value on screen rather than a stale

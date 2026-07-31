@@ -5047,10 +5047,25 @@ RegisterQuickMenuKeys() {
  HotIf
 }
 
-QuickMenuHandleController(pressed, released := 0, lx := 0, ly := 0) {
+; Rows whose value is a number the user dials, rather than a list they step
+; through. Only these accept hold-to-repeat.
+QuickMenuRowAcceptsRepeat() {
+ global QuickMenuRows, QuickMenuSelected
+ static ids := QuickMenuIdSet("rtssFrameLimitCustom|volume|qMouseSpeed")
+ if (QuickMenuRows.Length = 0
+     || QuickMenuSelected < 1 || QuickMenuSelected > QuickMenuRows.Length)
+     return false
+ return ids.Has(QuickMenuRows[QuickMenuSelected]["id"])
+}
+
+QuickMenuHandleController(pressed, released := 0, lx := 0, ly := 0, buttons := 0) {
  global QuickMenuSelected, QuickMenuPage, TaskForceCloseHoldMs
+ global QuickMenuRows
  static stickDir := ""
  static lastStickTick := 0
+ static holdDir := 0
+ static holdSince := 0
+ static lastRepeatTick := 0
  static taskXDownTick := 0
  static taskXHwnd := 0
  static taskXLongFired := false
@@ -5118,6 +5133,43 @@ QuickMenuHandleController(pressed, released := 0, lx := 0, ly := 0) {
          pressed |= 0x0004
      else if (newDir = "RIGHT")
          pressed |= 0x0008
+ }
+
+ ; Hold-to-repeat for Left/Right, on rows that are a number rather than a list.
+ ;
+ ; A press is ALWAYS exactly one step, no matter how fast presses arrive. The
+ ; earlier design grew the step after several quick presses, which meant tapping
+ ; quickly silently changed what a tap did -- the same gesture producing 1 or 5
+ ; or 10 depending on timing the user could not see.
+ ;
+ ; Speed comes from holding instead, and it accelerates the REPEAT RATE rather
+ ; than the step. Every change stays 1, so the value is always predictable and
+ ; can be stopped exactly where wanted; holding simply delivers more of them.
+ ; That also removes the need to snap to a grid, which only existed to make
+ ; large steps land on round numbers.
+ ;
+ ; List-valued rows (audio output, resolution) are excluded: scrubbing those at
+ ; 50 changes a second would be useless and would fire real device work per step.
+ if (QuickMenuRowAcceptsRepeat()) {
+     dpadDir := (buttons & 0x0008) ? 1 : ((buttons & 0x0004) ? -1 : 0)
+     if (!dpadDir) {
+         holdDir := 0
+     } else if (dpadDir != holdDir) {
+         holdDir := dpadDir
+         holdSince := A_TickCount
+         lastRepeatTick := A_TickCount
+     } else {
+         heldMs := A_TickCount - holdSince
+         if (heldMs >= 400) {
+             interval := heldMs >= 2500 ? 20 : (heldMs >= 1200 ? 40 : 80)
+             if (A_TickCount - lastRepeatTick >= interval) {
+                 lastRepeatTick := A_TickCount
+                 pressed |= (dpadDir > 0 ? 0x0008 : 0x0004)
+             }
+         }
+     }
+ } else {
+     holdDir := 0
  }
 
  if (pressed & 0x0001) { ; D-pad up
@@ -6796,35 +6848,17 @@ CommitRtssPendingFrameCap() {
 ;    on round numbers and fine stepping still moves by exactly 1.
 AdjustRtssCustomFrameCap(direction) {
  global RtssPendingFrameCap
- static lastTick := 0
- static lastDirection := 0
- static runLength := 0
- static ESCALATE_WINDOW_MS := 400
+ static COMMIT_DELAY_MS := 400
 
  if !RtssFrameCapWritable() {
      ShowNotification("This RTSS build cannot set the frame cap directly", "Warning")
      return
  }
- if (A_TickCount - lastTick > ESCALATE_WINDOW_MS || direction != lastDirection)
-     runLength := 0
- else
-     runLength += 1
- lastTick := A_TickCount
- lastDirection := direction
-
- step := runLength >= 6 ? 10 : (runLength >= 3 ? 5 : 1)
  current := RtssPendingFrameCap > 0 ? RtssPendingFrameCap : RtssGlobalFrameLimit()
  if (current <= 0)
      current := 60
- if (step = 1)
-     target := current + direction
- else if (direction > 0)
-     target := Ceil((current + 1) / step) * step
- else
-     target := Floor((current - 1) / step) * step
-
- RtssPendingFrameCap := ClampInt(target, 10, 1000)
- SetTimer(CommitRtssPendingFrameCap, -ESCALATE_WINDOW_MS)
+ RtssPendingFrameCap := ClampInt(current + direction, 10, 1000)
+ SetTimer(CommitRtssPendingFrameCap, -COMMIT_DELAY_MS)
 }
 
 NotifyRtssSettingsChanged() {
@@ -7198,7 +7232,7 @@ PollController() {
  ; evaluating the normal View/Back modifier mappings.
  if (QuickMenuVisible) {
      QuickMenuWatchForegroundLoss()
-     QuickMenuHandleController(pressed, released, lx, ly)
+     QuickMenuHandleController(pressed, released, lx, ly, buttons)
      return
  }
 

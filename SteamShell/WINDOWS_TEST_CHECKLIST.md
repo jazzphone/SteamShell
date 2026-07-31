@@ -555,8 +555,13 @@ endpoint selection uses Windows' PolicyConfig interface and needs confirmation o
   notification on every press.
 - Select `Custom` from `120` and confirm the frame rate does **not** change — landing on Custom only reveals the
   row, seeded from whatever is live.
-- On the Custom FPS row, press Right repeatedly. Confirm the step escalates and that coarse steps land on round
-  numbers — from 63 it should reach 65, then 70, not 68 and 73. After a pause, a single press must move by 1.
+- On the Custom FPS row, tap Right **as fast as you can**. Every tap must move the value by exactly 1 — no
+  acceleration from tapping speed, which was the previous behaviour and made a tap mean different things at
+  different times.
+- **Hold** Right. Confirm the value starts climbing after about 0.4 s and speeds up the longer it is held, while
+  still moving one at a time. Release and confirm it stops immediately where you left it.
+- Move to a list-valued row — audio Output, or Resolution — and hold Left/Right. Confirm it does **not** repeat;
+  those step once per press on purpose.
 - **The frame rate must not chase the number while scrolling.** RTSS is written once, after about 400 ms of no
   input, not on every press. Watch the RTSS overlay: the cap should change once when you stop, not continuously.
 - Scroll to a value, then immediately cycle away to a preset before stopping. Confirm the preset sticks and the
