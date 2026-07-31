@@ -323,6 +323,21 @@ these states. Drop `SteamStartupGraceMs` to about `20000` while testing so each 
 - **Exit still works.** Quit Steam from Big Picture and confirm the desktop restore still happens after
   `SteamExitConfirmMs`.
 
+### Desktop-restore failure screen
+
+- Force a restore failure (deny the shell registry write, or block Explorer from starting). Confirm the
+  **DESKTOP RESTORE FAILED** screen appears with Retry Restore / Open Settings / Keep SteamShell Running.
+- Drive it with the **controller only** — D-pad moves between buttons, A activates. It previously required
+  pointer emulation, which is the wrong thing to depend on when Explorer may be dead.
+- Confirm Retry re-runs the restore and that declining leaves SteamShell running with controller input working.
+
+### Quick Menu status line
+
+- Trigger a warning with the Quick Menu open — easiest is an RTSS action with RTSS stopped, or an audio
+  action on a machine with endpoint switching unavailable. Confirm the message replaces the footer hint.
+- Confirm the hint returns by itself after about four seconds without touching anything.
+- Confirm the message still reaches `SteamShell.log`; the footer is additional, not a replacement.
+
 ### Startup curtain must yield
 
 - With the splash enabled, open Full Settings during the curtain using the controller chord. Confirm Settings

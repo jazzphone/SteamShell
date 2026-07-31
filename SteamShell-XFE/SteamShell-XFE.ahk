@@ -2705,6 +2705,11 @@ global LearnBaseline := 0
 global LearnRestNoise := 0
 global LearnRestSampling := false
 global LearnRestCount := 0
+; Peak magnitude per axis across the post-save rest window, and how many samples
+; it covers. Declared here rather than created on first use so they behave like
+; every other script-scope variable.
+global RestCheckPeak := Map()
+global RestCheckSamples := 0
 ; Before a controller is selected, keep one baseline per RawInput device. The
 ; wizard therefore honours "press any button" even when several pads are
 ; connected and another one is continuously publishing idle reports.
@@ -4074,7 +4079,7 @@ ControllerLearnSave() {
     ; A bad axis reading does not fail quietly -- it drives the pointer across the
     ; screen and makes the machine hard to use. Verify the profile against the
     ; controller at rest before leaving the user with it.
-    SetTimer(ControllerProfileRestCheck, -1500)
+    ControllerProfileRestCheckBegin()
     TopmostMsgBox("Profile saved and activated for " LearnDeviceKey ".",
         "Learn controller", "Iconi")
 }
@@ -4083,36 +4088,66 @@ ControllerLearnSave() {
 ;
 ; An axis learned with the wrong neutral, direction or extent reads as permanently
 ; deflected, and the controller mouse then flies across the screen -- which also
-; makes it hard to reach Settings to undo. This samples the decoded state a moment
-; after saving, and if any stick is pegged with the controller at rest it says so
-; plainly and offers to delete the profile there and then.
+; makes it hard to reach Settings to undo. If any stick is pegged with the
+; controller at rest this says so plainly and offers to delete the profile there
+; and then.
+;
+; Sampled over a WINDOW rather than at one instant. A statically mis-learned axis
+; reads wrong in every report, so one sample would find it -- but an axis
+; mis-bound to a motion sensor oscillates, and a single sample can catch it as it
+; passes through neutral. That is not hypothetical: the 8BitDo Ultimate 2 that
+; motivated the free-running filter had RT bound to a gyro byte, and the axis a
+; motion sensor is bound to is exactly the axis that will not hold still. Peak
+; magnitude across the window is what a pegged axis cannot hide from.
+ControllerProfileRestCheckBegin() {
+    global RestCheckPeak, RestCheckSamples
+    RestCheckPeak := Map("LX", 0, "LY", 0, "RX", 0, "RY", 0, "LT", 0, "RT", 0)
+    RestCheckSamples := 0
+    SetTimer(ControllerProfileRestCheck, 120)
+}
+
 ControllerProfileRestCheck() {
     global RawInputState, RawInputLastReportTick, ControllerDeadzone
-    if !RawInputLastReportTick
+    global RestCheckPeak, RestCheckSamples
+    static WINDOW_SAMPLES := 12          ; ~1.4 s at the 120 ms tick
+    if !RawInputLastReportTick {
+        SetTimer(ControllerProfileRestCheck, 0)
         return
-    lx := NumGet(RawInputState, 8, "Short")
-    ly := NumGet(RawInputState, 10, "Short")
-    rx := NumGet(RawInputState, 12, "Short")
-    ry := NumGet(RawInputState, 14, "Short")
-    lt := NumGet(RawInputState, 6, "UChar")
-    rt := NumGet(RawInputState, 7, "UChar")
+    }
+    RestCheckSamples += 1
+    for name, offset in Map("LX", 8, "LY", 10, "RX", 12, "RY", 14) {
+        value := Abs(NumGet(RawInputState, offset, "Short"))
+        if (value > RestCheckPeak[name])
+            RestCheckPeak[name] := value
+    }
+    for name, offset in Map("LT", 6, "RT", 7) {
+        value := NumGet(RawInputState, offset, "UChar")
+        if (value > RestCheckPeak[name])
+            RestCheckPeak[name] := value
+    }
+    if (RestCheckSamples < WINDOW_SAMPLES)
+        return
+    SetTimer(ControllerProfileRestCheck, 0)
+
     ; Generous: this is looking for an axis that is pegged, not for drift.
     limit := Max(ControllerDeadzone * 2, 12000)
     offenders := ""
-    for name, value in Map("LX", lx, "LY", ly, "RX", rx, "RY", ry) {
-        if (Abs(value) > limit)
-            offenders .= (offenders != "" ? ", " : "") name "=" value
+    for _, name in ["LX", "LY", "RX", "RY"] {
+        if (RestCheckPeak[name] > limit)
+            offenders .= (offenders != "" ? ", " : "") name "=" RestCheckPeak[name]
     }
-    if (lt > 80)
-        offenders .= (offenders != "" ? ", " : "") "LT=" lt
-    if (rt > 80)
-        offenders .= (offenders != "" ? ", " : "") "RT=" rt
+    for _, name in ["LT", "RT"] {
+        if (RestCheckPeak[name] > 80)
+            offenders .= (offenders != "" ? ", " : "") name "=" RestCheckPeak[name]
+    }
     if (offenders = "") {
-        LogLine("Controller profile: rest check passed; all axes read neutral.")
+        LogLine("Controller profile: rest check passed over " RestCheckSamples
+            . " samples; all axes read neutral.")
         return
     }
-    LogLine("Controller profile: rest check FAILED. With nothing touched: "
-        . offenders ". The pointer will drift or run away.", "Error")
+    LogLine("Controller profile: rest check FAILED over " RestCheckSamples
+        . " samples. Peak with nothing touched: " offenders
+        . ". The pointer will drift or run away.", "Error")
     answer := TopmostMsgBox("The saved controller profile reads as if the controller is "
         . "being held, with nothing touched:`n`n" offenders "`n`n"
         . "This makes the pointer run across the screen. Delete the profile and "

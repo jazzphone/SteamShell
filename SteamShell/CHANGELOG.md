@@ -1,5 +1,24 @@
 # SteamShell changelog
 
+## Unreleased
+
+- Made the desktop-restore failure screen **controller-navigable**. It was a
+  native `MsgBox`, which the controller poll loop has no handling for, so
+  answering it needed pointer emulation — hold View/Back, right stick, mapped
+  click — and only if controller mouse or the Quick Menu happened to be enabled.
+  That is the more severe of the two recovery states: Explorer may be dead, so
+  there is no taskbar and no other application to reach. It now matches the
+  Steam-did-not-start screen, which was already a controller-first GUI, and both
+  share one input handler.
+- Surfaced warnings in the Quick Menu footer. `ShowNotification` is log-only by
+  design — the old bottom-corner overlay was distracting and is not coming back —
+  but that left 52 warnings visible only to someone who opens the log, which on a
+  couch device is nobody. A message now displaces the button hint for four
+  seconds when the menu is open, and the hint returns on its own. Matches XFE's
+  `SetStatus`.
+- Corrected the RTSS page's footer hint, which still read `Left/Right Off/On`
+  after the Frame Limit row replaced the separate limiter row.
+
 ## 1.7.1 — 2026-07-31
 
 Startup reliability, live RTSS frame-cap control, and a codebase audit. Settings

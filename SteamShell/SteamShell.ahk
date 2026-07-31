@@ -115,6 +115,18 @@ global QuickMenuTaskPage := 1
 global QuickMenuTitleCtrl := 0
 global QuickMenuSubtitleCtrl := 0
 global QuickMenuFooterCtrl := 0
+; Transient status shown in the Quick Menu footer in place of the button hint.
+;
+; ShowNotification is log-only by design -- the old bottom-corner overlay was
+; distracting over the menu and was removed. But that left 50-odd warnings
+; ("RTSS did not accept the frame cap", "Windows volume control is unavailable")
+; visible only to someone who opens the log, which on a couch device is nobody.
+; The footer is already on screen and already transient, so it costs no new
+; surface. Matches XFE's SetStatus.
+global LastStatusText := ""
+global LastStatusLevel := ""
+global LastStatusTick := 0
+global StatusVisibleMs := 4000
 global QuickMenuLabelCtrls := []
 global QuickMenuValueCtrls := []
 global SteamMenuShortcut := "^1"
@@ -381,6 +393,11 @@ global SteamStartupWarningLogged := false
 ; title, is the signal.
 global SteamStartupSurfaceMinCoverage := 0.6
 global StartupRecoveryGui := unset
+; Desktop-restore failure dialog. Kept controller-navigable for the same reason
+; the startup recovery screen is: it appears when Explorer may be dead, so there
+; is no taskbar and no other application to reach for.
+global DesktopRecoveryGui := unset
+global DesktopRecoveryChoice := ""
 
 global SplashGui := unset
 
@@ -1734,11 +1751,23 @@ InitDpiAwareness() {
 ; ==============================================================================
 
 ShowNotification(message, kind := "Info") {
+ global LastStatusText, LastStatusLevel, LastStatusTick, StatusVisibleMs
+ global QuickMenuVisible
  ; The former bottom-corner notification GUI was distracting over the Quick
- ; Menu. Keep call sites useful for diagnostics without displaying an overlay.
+ ; Menu and is not coming back. The log remains the record; the Quick Menu
+ ; footer is the transient surface, used only when the menu is already open.
  if (Trim(message) = "")
      return
  try LogLine("NOTICE [" kind "]: " message)
+ LastStatusText := message
+ LastStatusLevel := kind
+ LastStatusTick := A_TickCount
+ if QuickMenuVisible {
+     try QuickMenuRefresh()
+     ; Repaint once the message expires so the hint returns on its own rather
+     ; than whenever the menu next happens to redraw.
+     SetTimer(QuickMenuRefresh, -(StatusVisibleMs + 100))
+ }
 }
 
 TrayOpenQuickMenu(*) {
@@ -4076,12 +4105,17 @@ QuickMenuBottomMargin() {
 
 QuickMenuHintText() {
  global QuickMenuPage
+ global LastStatusText, LastStatusTick, StatusVisibleMs
+ ; A fresh message displaces the hint. The hint is always re-derivable; a
+ ; warning that scrolls past unseen is not.
+ if (LastStatusText != "" && A_TickCount - LastStatusTick < StatusVisibleMs)
+     return LastStatusText
  if (QuickMenuPage = "TASKS")
      return "D-pad move  •  A switch  •  Y switch + lock  •  X close  •  Hold X force close  •  B back"
  if (QuickMenuPage = "DISPLAY")
      return "D-pad move  •  Left/Right change  •  A select  •  B back"
  if (QuickMenuPage = "RTSS")
-     return "D-pad move  •  Left/Right Off/On  •  A select  •  B back"
+     return "D-pad move  •  Left/Right change  •  A select  •  B back"
  if (SubStr(QuickMenuPage, 1, 8) = "SETTINGS")
      return "D-pad move  •  A or Left/Right toggle  •  B back"
  return "D-pad move  •  A select  •  B back"
@@ -4838,6 +4872,7 @@ QuickMenuValue(id) {
 QuickMenuRefresh() {
  global QuickMenuRows, QuickMenuSelected, QuickMenuConfirmAction, QuickMenuConfirmUntilTick
  global QM_BG, QM_ROW_SELECTED, QM_ACCENT, QM_LABEL, QM_LABEL_SELECTED, QM_VALUE
+ global QuickMenuFooterCtrl
  if (QuickMenuRows.Length = 0)
      return
 
@@ -4848,6 +4883,8 @@ QuickMenuRefresh() {
      QuickMenuSelected := QuickMenuRows.Length
  if (QuickMenuSelected > QuickMenuRows.Length)
      QuickMenuSelected := 1
+
+ try QuickMenuFooterCtrl.Text := GuiLiteralText(QuickMenuHintText())
 
  for index, row in QuickMenuRows {
      selected := (index = QuickMenuSelected)
@@ -6950,8 +6987,12 @@ PollController() {
  settingsPrevLtDown := settingsLtDown
  settingsPrevRtDown := settingsRtDown
 
+ if DesktopRecoveryControllerActive() {
+     RecoveryDialogHandleController(pressed)
+     return
+ }
  if StartupRecoveryControllerActive() {
-     StartupRecoveryHandleController(pressed)
+     RecoveryDialogHandleController(pressed)
      return
  }
 
@@ -8077,6 +8118,67 @@ ShowStartupRecovery(reason) {
  LogLine("Recovery screen shown: " reason)
 }
 
+; The desktop restore failed. Explorer may be dead, the taskbar is gone, and on a
+; handheld there may be no keyboard -- so this must be operable with a controller
+; alone. It replaces a native MsgBox, which the poll loop has no handling for and
+; which therefore needed pointer emulation to answer.
+;
+; Blocks like the MsgBox it replaces, so ExitToDesktop's control flow is
+; unchanged. Sleep still services timers, so controller polling keeps running
+; while this waits.
+ShowDesktopRestoreRecovery(reason) {
+ global DesktopRecoveryGui, DesktopRecoveryChoice
+ DesktopRecoveryChoice := ""
+ try {
+     if IsSet(DesktopRecoveryGui)
+         DesktopRecoveryGui.Destroy()
+ }
+ DesktopRecoveryGui := Gui("+AlwaysOnTop +ToolWindow -MaximizeBox", "SteamShell Desktop Recovery")
+ DesktopRecoveryGui.Opt("+OwnDialogs")
+ DesktopRecoveryGui.SetFont("s11", "Segoe UI")
+ DesktopRecoveryGui.MarginX := 22
+ DesktopRecoveryGui.MarginY := 20
+ title := DesktopRecoveryGui.AddText("xm w560 Center", "DESKTOP RESTORE FAILED")
+ title.SetFont("s17 Bold", "Segoe UI")
+ DesktopRecoveryGui.AddText("xm y+12 w560 h56 +Wrap Center", reason)
+ DesktopRecoveryGui.AddText("xm y+6 w560 Center",
+     "SteamShell is still running. Windows may have no visible shell until this succeeds.")
+ retryButton := DesktopRecoveryGui.AddButton("xm y+18 w170 h38 Default", "Retry Restore")
+ settingsButton := DesktopRecoveryGui.AddButton("x+12 yp w170 h38", "Open Settings")
+ stayButton := DesktopRecoveryGui.AddButton("x+12 yp w196 h38", "Keep SteamShell Running")
+ retryButton.OnEvent("Click", (*) => DesktopRecoveryChoice := "retry")
+ settingsButton.OnEvent("Click", (*) => ShowSettingsEditor())
+ stayButton.OnEvent("Click", (*) => DesktopRecoveryChoice := "stay")
+ ; No Close/Escape dismissal: leaving with no choice made would drop the user on
+ ; a shell-less desktop with nothing on screen explaining it.
+ DesktopRecoveryGui.OnEvent("Close", (*) => 0)
+ DesktopRecoveryGui.OnEvent("Escape", (*) => 0)
+ DesktopRecoveryGui.Show("AutoSize Center")
+ try retryButton.Focus()
+ SystemCursor("Show")
+ LogLine("Desktop recovery screen shown: " reason)
+
+ while (DesktopRecoveryChoice = "")
+     Sleep(50)
+ choice := DesktopRecoveryChoice
+ try DesktopRecoveryGui.Destroy()
+ DesktopRecoveryGui := unset
+ LogLine("Desktop recovery choice: " choice)
+ return choice
+}
+
+DesktopRecoveryControllerActive() {
+ global DesktopRecoveryGui
+ if !IsSet(DesktopRecoveryGui)
+     return false
+ try {
+     return DllCall("IsWindowVisible", "Ptr", DesktopRecoveryGui.Hwnd, "Int")
+         && WinActive("ahk_id " DesktopRecoveryGui.Hwnd)
+ } catch {
+     return false
+ }
+}
+
 HideStartupRecovery() {
  global StartupRecoveryGui
  try {
@@ -8098,7 +8200,10 @@ StartupRecoveryControllerActive() {
  }
 }
 
-StartupRecoveryHandleController(pressed) {
+; Shared by both recovery dialogs. Tab/Shift-Tab across the button row, A to
+; activate -- deliberately the simplest possible model, because these screens
+; appear exactly when nothing else is working.
+RecoveryDialogHandleController(pressed) {
  if (pressed & 0x0001) || (pressed & 0x0004) {
      try SendInput("+{Tab}")
      return
@@ -13439,12 +13544,7 @@ ExitToDesktop(PermanentRestore := false, ExitAfterRestore := false) {
  ; Explorer may be dead here. Restore controller input so the Quick Menu and
  ; pointer emulation stay reachable while the user decides what to do.
  ResumeControllerPolling()
- result := MsgBox(
-     "SteamShell could not fully restore the Windows desktop.`n`n"
-     . restoreMessage
-     . "`n`nSteamShell is still running. Retry the restore?",
-     "SteamShell Desktop Recovery", "RetryCancel Iconx 262144")
- if (result = "Retry")
+ if (ShowDesktopRestoreRecovery(restoreMessage) = "retry")
      return ExitToDesktop(PermanentRestore, ExitAfterRestore)
  return false
 }
