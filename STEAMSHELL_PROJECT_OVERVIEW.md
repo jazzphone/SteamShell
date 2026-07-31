@@ -1,8 +1,8 @@
 # SteamShell Project Overview
 
 **Document status:** July 31, 2026  
-**Stable SteamShell release:** 1.7.1 (locked at `releases/1.7.1/`)  
-**Stable SteamShell-XFE release:** 0.1.15 (locked at `releases/XFE-0.1.15/`)  
+**Stable SteamShell release:** 1.7.2 (locked at `releases/1.7.2/`)  
+**Stable SteamShell-XFE release:** 0.1.16 (locked at `releases/XFE-0.1.16/`)  
 **Development line:** None; both trees are locked  
 
 ## Executive summary
@@ -23,7 +23,7 @@ desktop, and it can replace the wallpaper and desktop icons with a black backdro
 in the gaps around Steam. `releases/1.7.0/` is the immutable release checkpoint;
 `releases/1.6.0/` and `releases/1.5.0/` remain unchanged as its baselines.
 
-## What 1.7.1 and 0.1.15 added
+## What 1.7.1 / 0.1.15 and 1.7.2 / 0.1.16 added
 
 Both were locked on 2026-07-31 after maintainer validation on hardware. Their
 `RELEASE.md` files record scope, verification status, known limits, and
@@ -47,6 +47,43 @@ Both validators were updated in step; their RTSS parity assertions still
 described the removed `rtssLimiterState` row and would otherwise have failed the
 build — which is exactly what happened, and is the reason the regex assertions
 are now replayed in Python on the development machine before every build.
+
+**SteamShell 1.7.2** — almost entirely fixes found by running it:
+
+- **Save Limit to Profile** reported `No game in foreground` while a game was running and the Task Switcher listed it. The row used only the foreground captured when the menu opened, which is regularly `steam.exe`; it now falls back to the window engine's detected game.
+- The window engine **centred dropdown menus**. Centring had no size or structure test at all, while maximising has always had two. Popups are now filtered structurally — and by size rather than ownership, after the first attempt fixed Explorer's dropdowns and missed Qt's.
+- **Every log line has a timestamp and a level.** Only the game-score rows had one, because they stamped themselves; the operational log recorded what happened but not when.
+- The desktop-restore failure screen is **controller-navigable**, matching the Steam-did-not-start screen. It was a native `MsgBox` the poll loop has no handling for — in the state where Explorer may be dead.
+- Warnings **surface in the Quick Menu footer**. 52 of them were log-only, which on a couch device means nobody.
+- The tray right-click shows the **native Windows menu** again. See *Reversed: the tray right-click interception* below.
+- Custom FPS stepping is **debounced and hold-repeating**. See *Reversed: frame-cap step escalation* below.
+
+**SteamShell-XFE 0.1.16:**
+
+- The same debounced write and hold-to-repeat, applied in the same pass.
+- The Save Limit to Profile fallback, using the last foreground that looked game-like.
+
+### Reversed: frame-cap step escalation (July 31, 2026)
+
+The Custom FPS row could not auto-repeat, because Quick Menu navigation is edge-triggered — the poll loop reports `buttons & ~prevButtons` and the menu handler only ever received edges. A fixed step of 1 therefore needed sixty presses to cross 60→120, so the step grew after several fast presses: 1, then 5, then 10.
+
+**That made a tap mean different things at different times.** The same gesture produced 1, 5 or 10 depending on timing the user could not see, and fast tapping — the natural response to a value moving too slowly — silently became the thing that made it jump. Reported from hardware twice, the second time precisely: *"single press, regardless of how much time is in between, is still only a single increase."*
+
+The fix was to stop treating presses as the speed control. The held button state is now passed into the menu handler, and speed comes from **holding**, accelerating the repeat *rate* rather than the step — 80 ms, then 40 ms, then 20 ms. Every change stays 1, so the value can be stopped exactly where wanted. That also removed grid-snapping, which existed only to make large steps land on round numbers.
+
+Separately, each press had been writing straight to RTSS: a `LoadProfile` plus a `SetProfileProperty` plus a `SaveProfile` — a disk write — plus `UpdateProfiles`. The limiter was genuinely reconfigured a dozen times during a scroll and the frame rate chased the number. The value is now held pending and committed once, ~400 ms after input stops.
+
+**Lesson.** An escalating step is a reasonable answer to "no auto-repeat", and it was the wrong one, because it makes the same input mean different things without telling the user. The constraint that produced it — edges only — was itself removable; the handler simply had never been given the held state.
+
+### Reversed: the tray right-click interception (July 31, 2026)
+
+1.7.0 took over the notification icon's right-click and showed the Quick Menu instead of the native Windows menu. The reasoning was sound as far as it went: AutoHotkey will not run a timer while a menu is displayed, controller polling is a timer, so a native tray menu freezes controller-as-mouse for as long as it is open — and a controller user could open a menu they were then unable to navigate.
+
+**It had the context backwards.** Reaching a tray icon at all means using a pointer, and a controller user opens the Quick Menu with L3+R3 or `Ctrl+Alt+Shift+Q` rather than steering a cursor into the notification area. The interception optimised for a case that barely occurs at the cost of the one that occurs constantly: someone at a keyboard and mouse wanting a small, fast menu where they clicked.
+
+The freeze is accepted rather than forgotten — anyone who does reach the menu by controller emulation dismisses it the way any menu is dismissed, and the pointer that opened it can do that. Double-click still opens the Quick Menu.
+
+**Lesson, and it generalises.** The original decision reasoned correctly about the *mechanism* and never asked who is holding what when the situation arises. A guard against an input method is only worth its cost where that input method is actually in use.
 
 ### Solved: black screen after login (July 31, 2026)
 
@@ -73,7 +110,7 @@ Coverage rather than title is the discriminator on purpose. It survives client u
 | Area | SteamShell 1.7 | SteamShell-XFE |
 |---|---|---|
 | Status | Stable, frozen source release | Stable, frozen source release |
-| Current version | 1.7.1 | 0.1.15 |
+| Current version | 1.7.2 | 0.1.16 |
 | Primary role | Complete Steam-centered Windows shell | Utility companion to Xbox FSE |
 | Owns the Windows shell | Yes, when installed or registered as the shell | No |
 | Launches and monitors Steam | Yes | No |
@@ -116,8 +153,8 @@ It coordinates the entire session:
 
 ## Current release state
 
-- **Stable release:** 1.7.1, frozen in `releases/1.7.1`
-- **Active source:** 1.7.1 in `SteamShell/`
+- **Stable release:** 1.7.2, frozen in `releases/1.7.2`
+- **Active source:** 1.7.2 in `SteamShell/`
 - **Runtime:** AutoHotkey v2, 64-bit
 - **Validated compiler baseline:** AutoHotkey v2.0.26 64-bit
 - **Settings schema:** 10
@@ -403,8 +440,8 @@ The companion should remain alive if Steam closes or restarts. Its useful functi
 
 ## Current state
 
-- **Version:** 0.1.15
-- **Status:** Stable source release, frozen in `releases/XFE-0.1.15`
+- **Version:** 0.1.16
+- **Status:** Stable source release, frozen in `releases/XFE-0.1.16`
 - **Runtime:** AutoHotkey v2, 64-bit
 - **Settings schema:** 3
 - **Privilege target:** Standard user
@@ -768,6 +805,7 @@ The recurring failure was reasoning from an assumption instead of a measurement,
 | 0.1.14 | Locked release. Steam returns to the Task Switcher even when its Big Picture window is published as a tool window; in-game Steam Overlay injection uses a timed Shift+Tab chord; Quick Menu Settings toggles write before applying and remain synchronized with full Settings; System diagnostics were removed from the couch menu while remaining in Advanced; Settings uses its visible DPI-scaled frame for vertical centring; fullscreen/game-entry cursor parking is enabled by default; the Windows build has a double-clickable CMD launcher and reliable GUI-process exit-code handling. |
 
 | 0.1.15 | Combined **Frame Limit** Quick Menu row — Off · 30 · 40 · 60 · 90 · 120 · Custom — folding RTSS's global limiter flag and the profile's `FramerateLimit` into one control, with a conditional Custom FPS row whose step escalates 1 → 5 → 10 because Quick Menu navigation never auto-repeats. "Off" maps to the flag and never writes `0`, so a cap survives an off/on round trip. Writes go to the global profile only, except the explicit two-press **Save Limit to Profile** row, which copies the current cap into the foreground executable's own profile. Adds the `SetProfileProperty`/`SaveProfile`/`UpdateProfiles` exports, all optional — a build without them shows the cap read-only. Plus: motion-sensor exclusion in the learner's axis search; a bounds guard on the wizard's Skip button; removal of the handler cases and functions left dead by the row merge; and matching validator assertions. |
+| 0.1.16 | RTSS frame-cap input: the write is debounced and committed once after input stops rather than on every press, and the Custom FPS row uses hold-to-repeat with an accelerating rate instead of an escalating step, so a press is always exactly one change. Save Limit to Profile falls back to the last game-like foreground when the captured one is Steam. |
 
 The older ZIP files in the XFE directory are retained source checkpoints from
 the diagnostic phase.
@@ -870,7 +908,7 @@ workspace-root/
 
 | File | Purpose |
 |---|---|
-| `SteamShell/SteamShell.ahk` | Current SteamShell source, matching the locked 1.7.1 release. |
+| `SteamShell/SteamShell.ahk` | Current SteamShell source, matching the locked 1.7.2 release. |
 | `SteamShell/assets/` | Standalone notification-area and compiled executable icon assets. |
 | `SteamShell/SteamShellSettings_SAMPLE.ini` | Documented configuration template. Runtime settings are written to `SteamShellSettings.ini`. |
 | `SteamShell/SteamShell.reg` | Optional registry setup/reference for configuring SteamShell as the per-user shell. |
@@ -904,7 +942,7 @@ SHA-256 manifest.
 
 | File | Purpose |
 |---|---|
-| `SteamShell-XFE.ahk` | Current XFE companion source, matching the locked 0.1.15 release. |
+| `SteamShell-XFE.ahk` | Current XFE companion source, matching the locked 0.1.16 release. |
 | `assets/SteamShell-XFE.ico` | Multi-resolution Windows executable and notification-area icon. |
 | `assets/SteamShell-XFE-icon.png` | Transparent high-resolution preview/source for the XFE icon. |
 | `SteamShell-XFE_SAMPLE.ini` | Documented XFE configuration template. Runtime settings are written to `SteamShell-XFE.ini`. |
@@ -942,7 +980,7 @@ Compiled executables are build artifacts. The authoritative project history is t
 
 ## SteamShell 1.7
 
-Treat 1.7.0 as a completed checkpoint, and 1.7.1 as unverified work on top of it that still owes hardware testing:
+Treat 1.7.2 as the current completed checkpoint. Its predecessors 1.7.0 and 1.7.1 remain frozen:
 
 - Work through the Desktop mode and Desktop blackout sections of
   `WINDOWS_TEST_CHECKLIST.md` before treating either as settled.
@@ -962,7 +1000,7 @@ The two questions that gated the whole project are now answered:
 1. ~~Prove background controller input inside Xbox FSE.~~ **Solved in 0.1.5 via RawInput.** XInput and GameInput are both gated; RawInput reads underneath and receives everything.
 2. ~~Prove the Quick Menu presentation model inside Xbox FSE.~~ **Confirmed working.** FSE displays the Quick Menu, and keyboard hotkeys reach the background companion.
 
-Treat 0.1.14 as a completed stability checkpoint, and 0.1.15 as unverified work on top of it:
+Treat 0.1.16 as the current completed checkpoint. Its predecessors 0.1.14 and 0.1.15 remain frozen:
 
 3. Prefer extended play and sleep/resume testing over broad feature work.
 4. Record reproducible regressions before changing RawInput, display safety,
