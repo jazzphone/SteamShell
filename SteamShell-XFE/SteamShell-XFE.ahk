@@ -272,6 +272,10 @@ global LastMouseX := -99999
 global LastMouseY := -99999
 global LastMouseMoveTick := A_TickCount
 global LastObservedForegroundExe := ""
+; The last foreground executable that looked game-like, kept separately because
+; LastObservedForegroundExe is overwritten the moment Steam comes forward -- and
+; "which game is running" has to survive that.
+global LastObservedGameExe := ""
 global LastObservedForegroundHwnd := 0
 global LastObservedForegroundWasGame := false
 
@@ -1417,6 +1421,7 @@ ForegroundWindowLooksGameLike(hwnd, exe) {
 ObserveForeground() {
     global LastObservedForegroundExe, LastObservedForegroundHwnd
     global LastObservedForegroundWasGame, ParkOnGameStart, ParkOnSteamReturn
+    global LastObservedGameExe
     hwnd := 0
     try hwnd := WinExist("A")
     if (!hwnd || IsOurWindow(hwnd))
@@ -1434,6 +1439,8 @@ ObserveForeground() {
     LastObservedForegroundExe := exe
     LastObservedForegroundHwnd := hwnd
     LastObservedForegroundWasGame := isGame
+    if (isGame && !isSteam)
+        LastObservedGameExe := exe
     if (ParkOnGameStart && isGame && (!wasGame || hwnd != previousHwnd))
         SetTimer(ParkCursorIfStillForeground.Bind(hwnd,
             "game/fullscreen window entered the foreground"), -500)
@@ -7787,21 +7794,50 @@ CycleRtssFrameCap(direction) {
 ; menu opened; asking now would always answer SteamShell-XFE. Steam's own
 ; surfaces are excluded because a profile named steam.exe or steamwebhelper.exe
 ; caps the client rather than a game, which is never what this row means.
-RtssProfileTargetExe() {
-    global QuickMenuPreviousExe
-    exeName := Trim(QuickMenuPreviousExe)
+; A profile named steam.exe caps the Steam client rather than a game, and one
+; named after the companion or Explorer is meaningless.
+IsUsableProfileExe(exeName) {
+    exeName := StrLower(Trim(exeName))
     if (exeName = "" || IsSteamProcess(exeName))
-        return ""
-    if (StrLower(exeName) = "steamshell-xfe.exe" || StrLower(exeName) = "explorer.exe")
-        return ""
-    return exeName
+        return false
+    return exeName != "steamshell-xfe.exe" && exeName != "explorer.exe"
 }
 
+; Two sources, in order of directness.
+;
+; What owned the screen before the menu opened is the best answer when it is
+; usable. It is not always: a borderless game can sit behind a Steam surface, and
+; Xbox FSE can return to Steam on its own -- in both cases the captured exe is
+; steam.exe, which is excluded, and the row reads "No game in foreground" while a
+; game is plainly running.
+;
+; So fall back to the last foreground that looked game-like, which the foreground
+; observer already tracks and which survives Steam coming forward afterwards.
+RtssProfileTargetExe() {
+    global QuickMenuPreviousExe, LastObservedGameExe
+    exeName := Trim(QuickMenuPreviousExe)
+    if IsUsableProfileExe(exeName)
+        return exeName
+    exeName := Trim(LastObservedGameExe)
+    if IsUsableProfileExe(exeName)
+        return exeName
+    return ""
+}
+
+; Names what it actually saw rather than reporting a bare negative. "Steam is in
+; front and no game was detected" and "nothing is running" are different
+; problems, and the row is the only place the difference is visible.
 RtssSaveProfileValueText() {
+    global QuickMenuPreviousExe
     if !RtssFrameCapWritable()
         return "Unavailable"
     exeName := RtssProfileTargetExe()
-    return exeName != "" ? exeName : "No game in foreground"
+    if (exeName != "")
+        return exeName
+    previous := Trim(QuickMenuPreviousExe)
+    if (previous != "" && IsSteamProcess(previous))
+        return "Steam in front, no game detected"
+    return "No game in foreground"
 }
 
 ; Copies the current global frame cap into the foreground executable's own RTSS
@@ -7816,7 +7852,7 @@ RtssSaveProfileValueText() {
 ; so this is a persistent change the user will not see again until it surprises
 ; them. Hence the confirmation at the call site and the log line here.
 SaveRtssFrameLimitToProfile() {
-    global RtssFrameLimitCacheTick
+    global RtssFrameLimitCacheTick, QuickMenuPreviousExe, LastObservedGameExe
     exeName := RtssProfileTargetExe()
     if (exeName = "") {
         SetStatus("No foreground game to save a profile for", "Warning")
@@ -7853,7 +7889,9 @@ SaveRtssFrameLimitToProfile() {
         ; so the Frame Limit row keeps reading the value it is supposed to show.
         try DllCall(api["loadProfile"], "AStr", "")
         RtssFrameLimitCacheTick := 0
-        LogLine("RTSS profile " exeName " saved with FramerateLimit " fps ".")
+        LogLine("RTSS profile " exeName " saved with FramerateLimit " fps
+            . " (foreground was '" QuickMenuPreviousExe "', last game '"
+            . LastObservedGameExe "').")
         SetStatus(exeName ": " (fps > 0 ? fps " FPS" : "uncapped") " saved")
         return true
     } catch as err {

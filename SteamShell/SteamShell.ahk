@@ -6542,20 +6542,52 @@ CycleRtssFrameCap(direction) {
 ; would always answer SteamShell. Steam's own surfaces are excluded because a
 ; profile named steam.exe or steamwebhelper.exe caps the client rather than a
 ; game, which is never what this row means.
-RtssProfileTargetExe() {
- exeName := Trim(GetQuickMenuPreviousExe())
+; A profile named steam.exe caps the Steam client rather than a game, and one
+; named after the shell or Explorer is meaningless.
+IsUsableProfileExe(exeName) {
+ exeName := StrLower(Trim(exeName))
  if (exeName = "" || IsSteamProcess(exeName))
-     return ""
- if (StrLower(exeName) = "steamshell.exe" || StrLower(exeName) = "explorer.exe")
-     return ""
- return exeName
+     return false
+ return exeName != "steamshell.exe" && exeName != "explorer.exe"
 }
 
+; Two sources, in order of directness.
+;
+; What owned the screen before the menu opened is the best answer when it is
+; usable. It is not always: the window engine's Steam refocus can pull Big
+; Picture forward moments before the menu opens, and a borderless game can sit
+; behind a Steam surface -- in both cases the raw foreground is steam.exe, which
+; is excluded, and the row read "No game in foreground" while Task Switcher was
+; still listing the game.
+;
+; So fall back to the window engine's detected game. That is the same detection
+; driving Game Foreground Assist and the Task Switcher's view of what is running,
+; which is precisely what a user looking at this row means by "the game".
+RtssProfileTargetExe() {
+ global LastBestCandidateProc
+ exeName := Trim(GetQuickMenuPreviousExe())
+ if IsUsableProfileExe(exeName)
+     return exeName
+ exeName := Trim(LastBestCandidateProc)
+ if IsUsableProfileExe(exeName)
+     return exeName
+ return ""
+}
+
+; Names what it actually saw rather than reporting a bare negative. "Steam is in
+; front and no game was detected" and "nothing is running" are different
+; problems, and the row is the only place the difference is visible.
 RtssSaveProfileValueText() {
+ global LastBestCandidateProc
  if !RtssFrameCapWritable()
      return "Unavailable"
  exeName := RtssProfileTargetExe()
- return exeName != "" ? exeName : "No game in foreground"
+ if (exeName != "")
+     return exeName
+ previous := Trim(GetQuickMenuPreviousExe())
+ if (previous != "" && IsSteamProcess(previous))
+     return "Steam in front, no game detected"
+ return "No game in foreground"
 }
 
 ; Copies the current global frame cap into the foreground executable's own RTSS
@@ -6570,7 +6602,7 @@ RtssSaveProfileValueText() {
 ; so this is a persistent change the user will not see again until it surprises
 ; them. Hence the confirmation at the call site and the log line here.
 SaveRtssFrameLimitToProfile() {
- global RtssFrameLimitCacheTick
+ global RtssFrameLimitCacheTick, LastBestCandidateProc
  exeName := RtssProfileTargetExe()
  if (exeName = "") {
      ShowNotification("No foreground game to save a profile for", "Warning")
@@ -6589,6 +6621,8 @@ SaveRtssFrameLimitToProfile() {
  fps := RtssGlobalFrameLimit()
  value := Buffer(4, 0)
  NumPut("UInt", fps, value, 0)
+ LogLine("RTSS profile target " exeName " (foreground was '"
+     . GetQuickMenuPreviousExe() "', engine game '" LastBestCandidateProc "').")
  try {
      ; Load the game's existing profile so unrelated properties are preserved.
      DllCall(api["loadProfile"], "AStr", exeName)

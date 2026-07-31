@@ -16,6 +16,17 @@
   couch device is nobody. A message now displaces the button hint for four
   seconds when the menu is open, and the hint returns on its own. Matches XFE's
   `SetStatus`.
+- Fixed **Save Limit to Profile** reporting `No game in foreground` while a game
+  was plainly running and the Task Switcher was listing it. The row used only the
+  raw foreground window captured when the Quick Menu opened, and that is
+  regularly `steam.exe` — the window engine's Steam refocus can pull Big Picture
+  forward moments beforehand, and a borderless game can sit behind a Steam
+  surface. Both are excluded on purpose, so the row went blank. It now falls back
+  to the window engine's detected game, which is the same detection driving Game
+  Foreground Assist and what the Task Switcher reflects.
+- Made that row say what it saw. `Steam in front, no game detected` and
+  `No game in foreground` are different problems, and this row is the only place
+  the difference is visible. The save also logs both candidate sources.
 - Corrected the RTSS page's footer hint, which still read `Left/Right Off/On`
   after the Frame Limit row replaced the separate limiter row.
 
