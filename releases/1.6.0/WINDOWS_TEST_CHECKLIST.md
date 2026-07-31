@@ -1,0 +1,441 @@
+# SteamShell 1.6.0 Acceptance Test Checklist
+
+This development workspace cannot execute AutoHotkey, XInput, Windows display/audio APIs, or RTSS. Test the
+uncompiled script on the HTPC before replacing the current shell executable.
+
+## Safe first launch
+
+1. Keep the existing working `SteamShell.exe` available under a different filename.
+2. Keep a keyboard connected and verify `Ctrl+Alt+Shift+E` still restores the desktop.
+3. Run `SteamShell.ahk` from a normal Explorer desktop before installing it as the Winlogon shell.
+4. Run the compiled EXE with `/selftest` and confirm all core invariant checks pass.
+5. Open Quick Menu with `Ctrl+Alt+Shift+Q`. Confirm the menu takes foreground
+   focus and arrows, Enter/Space, Backspace, Home/End, and Task Switcher Delete
+   operate it without moving Steam Big Picture behind it.
+6. Keep Task Manager available during initial shell testing. Hard-crash recovery is the same EXE:
+   `%LocalAppData%\SteamShell\SteamShell.exe /restore`.
+
+## Single-EXE installation and recovery
+
+- From a normal Explorer desktop, compile SteamShell and open Full Settings.
+- Select Install SteamShell as Shell and confirm the EXE is copied to
+  `%LocalAppData%\SteamShell\SteamShell.exe`.
+- Confirm the emergency Restore Windows Desktop shortcut appears in the current user's Start menu.
+- Confirm the existing customized INI is copied only when the installed folder does not already contain one.
+- Read the current-user Winlogon `Shell` value and confirm it contains the quoted installed EXE path.
+- Select Repair SteamShell Installation and confirm it succeeds without changing existing settings.
+- Run the installed EXE with `/restore`; confirm Explorer and a visible taskbar appear and remain registered for
+  the next sign-in.
+- Reinstall, force-end SteamShell, use Task Manager > Run new task to execute `/restore`, and confirm the normal
+  desktop returns.
+- With **Run SteamShell as administrator on startup** enabled, confirm normal startup requests elevation when
+  required and Health Check reports administrator privileges.
+- From a compiled EXE in a disposable portable path, select Register Current EXE as Shell. Confirm the warning
+  displays the exact current path, then verify the current-user Winlogon `Shell` value contains that quoted path.
+- Confirm direct registration preserves the previous shell metadata and creates the Restore Windows Desktop
+  shortcut without copying the EXE to `%LocalAppData%\SteamShell`.
+- Permanently Restore Explorer after the direct-registration test and confirm the Winlogon `Shell` value returns
+  to `explorer.exe`.
+
+## Settings migration
+
+- Start once with a copy of an older customized `SteamShellSettings.ini`.
+- Confirm all existing values remain unchanged, including deliberately blank values.
+- Confirm an existing UTF-8 INI is backed up as `.pre-unicode.bak`, converted to UTF-16, and still retains Unicode
+  paths and deliberately blank RTSS shortcuts.
+- Confirm missing current options and `[SteamShell] SettingsSchemaVersion=9` are added.
+- Confirm `SteamShellSettings.ini.pre-schema-0.bak` contains the original file.
+- Confirm an old default `Start.Short=Builtin:None` and `Start.Long=Builtin:None` migrate to
+  `Builtin:StartMenu` and `Builtin:Explorer`.
+- Confirm custom Start short/long mappings remain unchanged during migration.
+- Confirm the former default `ControllerDeadzone=8000` migrates to `4000`, while a different customized deadzone
+  remains unchanged.
+- Confirm the former default `GameMinScoreToActivate=60` migrates to `55`, while a different customized threshold
+  remains unchanged.
+- Confirm schema 7's Quick Menu order migrates to the XFE-parity row set, the three new Steam shortcut settings are
+  added, applicable hidden-row choices are preserved, and Steam Menu, Steam Quick Access, and Game Bar start visible.
+- Confirm `EnableMouseParkEveryRefocus` transfers to `EnableMouseParkOnFocusChange` only when the replacement is
+  absent, then is removed.
+- Confirm legacy `Timing.WindowCheckInterval`, `Timing.SteamRefocusPollingInterval`, all five `[WindowEngine]`
+  tuning keys, `Features.EnableCursorHideOnBoot`, `Features.EnableCursorHideOnRefocus`, and
+  `Logging.EnableGameScoreLogging` are removed. Their safe behavior is now internal and
+  `Logging.GameLogMode=OFF` is the single logging disable state.
+- Confirm retired `FrameCapOptions`, `FrameCap0Shortcut`, and numbered `FrameCap...Shortcut` entries are removed.
+- Start SteamShell again and confirm the INI and backup are not rewritten when no migration is needed.
+- Make the settings file read-only, attempt a Settings-editor save, and confirm the original file remains intact and
+  the editor reports the failure.
+
+## Quick Menu settings
+
+- Confirm the main Quick Menu matches XFE's borderless panel: no DWM outline, caption edge, or backdrop frame.
+- Move repeatedly through rows and pages; confirm the existing window repaints in place without a square-corner
+  flash, blank frame, visible control-by-control assembly, or whole-window flicker.
+- Confirm the XFE-style title, inset continuous selection bar, aligned value column, and left-aligned footer hint
+  remain consistent on Main and every submenu.
+- Open Quick Menu > Settings and confirm General, Controller, Focus, and RTSS categories fit without clipping.
+- Confirm Focus reports Window Management as `ON • COORDINATED`.
+- Toggle a persistent option, close and reopen SteamShell, and confirm the value remains changed.
+- Confirm startup-only rows show `NEXT BOOT`.
+- Adjust controller mouse speed, cursor hide delay, and the custom frame cap with left/right.
+- Disable auto-hide while the cursor is hidden and confirm the cursor becomes visible.
+- Open Controller Mapping and Full Settings Editor from the Quick Menu.
+- Press B in a Settings category to return to the Settings page, then press B again to return to the main page.
+
+## Full Settings editor
+
+- Open the editor with `Ctrl+Alt+Shift+S` and confirm all eight categories switch without overlapping controls.
+- Confirm `Ctrl+Alt+Shift+P` opens Control Panel and `Ctrl+Alt+Shift+S` opens Full Settings.
+- Confirm the window has a normal title bar: Close and Minimize work, Maximize is visible but disabled, and the
+  window still resizes vertically without allowing its width to change.
+- Immediately after the first open, confirm `SteamShell.log` contains
+  `Settings layout audit passed for all categories.` and no `Settings layout audit found` warning.
+- Inspect every category at the minimum 450-pixel window height, its initial monitor-fitted height, and the maximum
+  660-pixel height. Scroll each long category from top to bottom and confirm no row is clipped beneath a heading,
+  category list, scrollbar, divider, status line, or footer.
+- Confirm headings and category rows display literal ampersands in `Startup & Splash`, `Controller & Cursor`,
+  `Focus & Windows`, `RTSS & Performance`, and `Advanced & Logging`.
+- In General, confirm the Steam Menu, Steam Quick Access, and in-game overlay shortcut fields and Record buttons
+  are aligned, remain reachable at the minimum window height, and save/reload without changing unrelated settings.
+- At the HTPC's Windows scaling level, confirm the editor fits inside the monitor work area and the Save, Reload,
+  and Close buttons remain visible.
+- Without holding View/Back, use the right stick and RB click in Settings, a
+  file picker, Controller Mapping, AlwaysFocus Manager, Health Check,
+  Diagnostics, and Live Log. Confirm automatic pointer control continues in
+  each window and returns to Settings when it closes.
+- In a companion window, press LT/RT or Y and confirm it does not switch the
+  hidden Settings category or save Settings; those commands remain scoped to
+  the main Settings window.
+- On a monitor with additional vertical space, confirm the editor opens taller than the former 620-pixel limit.
+  Drag its lower resize edge up and down and confirm the category list, content viewport, scrollbar, status line,
+  divider, and footer buttons resize together without overlap. Confirm the window width remains fixed.
+- Drag and page through the native scrollbar in long categories, then use the mouse wheel; confirm both remain
+  synchronized and the scrollbar disappears in categories whose content already fits.
+- Repeat scrollbar dragging and mouse-wheel scrolling at 100%, 125%, and 150% display scaling; confirm controls
+  do not smear, trail, overlap, or leave stale pixels behind.
+- Repeat the initial-open fit check at 300% scaling on the 4K display. Confirm the title bar and footer both remain
+  inside the monitor work area, long field labels are complete, and Advanced actions form two aligned columns.
+- In Controller & Cursor, confirm the Mouse Parking Edge dropdown is fully separated from the two action buttons,
+  and that both `Right` and `Left` save and reload correctly.
+- In RTSS & Performance, confirm the full DLL-integration checkbox label is visible, the shortcut rows and Launch
+  Selected RTSS button do not overlap it or one another, and the category scrolls far enough to reveal the button.
+- Switch each RTSS control mode between `Toggle` and `Separate`; confirm only its applicable shortcut field(s) are
+  enabled. Toggle DLL integration separately and confirm the shortcut fields remain available as fallback controls.
+- In Focus & Windows, confirm Window Management is available, Foreground Sensitivity defaults to
+  `Responsive (55)`, and the other choices are `Balanced (60)` and `Conservative (70)`.
+- Confirm Maximize Width Threshold fits on one line, displays `20` rather than a raw fraction, accepts values from
+  5 through 100, and saves `20` as `WindowManagement.MinWidthPercent=0.2` without floating-point noise.
+- Load a custom `GameMinScoreToActivate` value such as `65`, open and save Full Settings without changing its
+  `Custom (65)` selection, and confirm the value remains `65`.
+- In Launcher Cleanup, confirm the `Launcher EXEs to close` and `Never close these EXEs` lists display
+  side by side without overlap.
+- Browse for an EXE in each list, confirm duplicate additions are rejected, remove an entry, save, and verify
+  the INI values are written as pipe-separated filenames without full paths.
+- In Startup Programs, confirm the mouse wheel over the program list scrolls that list rather than the entire page.
+- Use Add Program to select an EXE and confirm it fills the selected empty slot or the next available slot.
+- Add optional arguments in the selected-command field, apply them, change rows, and confirm they remain intact.
+- Use Browse Selected to replace the EXE and confirm its existing arguments are preserved.
+- Remove the selected program, then add another and confirm the newly empty slot is reused.
+- Move startup entries up and down, save, and confirm commands remain attached to their new slot numbers.
+- Test Launch a harmless program and confirm it starts without waiting for the next boot.
+- Test Hidden, Minimized, and Normal startup window modes with disposable programs.
+- With the Settings window foreground, confirm D-pad/left-stick navigation automatically reveals and focuses each
+  control, left/right adjusts choices and numeric fields, A activates controls, and LT/RT changes categories once
+  per pull.
+- Confirm the right stick moves the pointer without holding Back and the configured RB short action (Left Click by
+  default) clicks the control beneath it. Confirm both also operate the pointer in a Settings file picker. In the
+  main Settings window, hold Back and verify the other normal configured mappings work without causing a stale
+  trigger-based category change after Back is released.
+- Select an edit field with A and confirm the Windows touch keyboard opens. Confirm Y saves changes.
+- Confirm opening the touch keyboard does not terminate `TextInputHost.exe`. Close it and invoke it again, then
+  confirm the modern keyboard presents even when `TabTip.exe` was already running in the background.
+- Open Task Manager, select its search box, invoke the modern touch keyboard with the controller, and confirm it
+  appears and enters text while SteamShell and Task Manager both report elevated.
+- Confirm the X long-press classic OSK fallback still opens independently of the modern touch keyboard.
+- With no pending changes, confirm B closes Settings. With pending changes, confirm B leaves Settings open and
+  instructs the user to save or explicitly discard rather than silently losing changes.
+- Browse to Steam.exe, mpv.exe, a startup video, and RTSS.exe; cancel each picker once and confirm no value changes.
+- Confirm every file picker opens above Settings and remains interactive; Settings should regain always-on-top
+  focus only after the picker is accepted or cancelled, without moving or resizing the Settings window.
+- Configure a startup-program slot with an executable plus arguments, change slots, return to it, and confirm the
+  command remains intact.
+- Save, reopen the editor, and confirm edited values and startup-program commands persisted.
+- Enter an invalid numeric value and confirm Save identifies the field and does not partially write other changes.
+- Make an unsaved change and confirm Close allows saving, discarding with No, or cancelling.
+- Confirm the save/discard prompt stays centered above Settings, never appears behind it, and neither window
+  maximizes or expands to fill the screen.
+- While that prompt is open, confirm D-pad/left-stick changes the selected response, A accepts it, and B cancels.
+- Confirm Reload INI asks before discarding unsaved changes.
+- Record each RTSS overlay and frame-limiter shortcut, confirm the friendly chord is reported, then save and verify
+  the corresponding AutoHotkey send string is written to the INI.
+- Confirm Pause / Resume Focus, Run Game Assist, Reload Runtime, Open INI in Notepad, Open Live Log, Diagnostics
+  Panel, Restore Category Defaults, Controller Mapping, and AlwaysFocus Manager
+  remain reachable.
+- In AlwaysFocus Manager, add a visible running application with `Add Selected`, then browse to a different EXE
+  with `Browse / Add EXE`; confirm both appear as filenames without full paths.
+- Confirm duplicate AlwaysFocus additions are rejected, `Remove Selected` updates the session list, and
+  `Write to INI` persists the displayed list as a pipe-separated value.
+- Open AlwaysFocus Manager from SteamShell Settings and confirm its EXE picker appears in front of both windows.
+- In Focus & Windows, add and remove an EXE from `Never center or maximize these EXEs`, then save and confirm the
+  pipe-separated `WindowManagement.ExcludeExeList` value.
+- Confirm low-level Window Engine timing/retry fields no longer appear in Settings or the synchronized INI.
+- Change RTSS Overlay and Frame Limiter control modes; confirm only the shortcut fields used by the selected mode
+  remain enabled.
+- Toggle Launcher Cleanup Require No Game, CPU/audio detection, and Download Guard; confirm dependent controls
+  enable only when they can affect behavior.
+- Change Game Log Detail between OFF, ACTIVATIONS, TOPN, and DIAGNOSTIC; confirm irrelevant logging controls are
+  disabled and ACTIVATIONS records an actual game activation.
+- Open AlwaysFocus Manager and confirm its explanation says Steam is managed separately. Confirm Steam is omitted
+  while other visible applications remain available.
+- In Launcher Cleanup, add a Background Helper EXE and use Preview Running Cleanup Targets; confirm the preview
+  does not close anything.
+- Customize the Quick Menu order, hide one optional row, save, and confirm the menu updates. Confirm Settings and
+  System cannot be hidden.
+- Create and export a settings backup, import it again, and confirm the previous INI was backed up first.
+- Reset one category and confirm unrelated categories remain unchanged. Reset all settings using a disposable INI
+  and confirm a pre-reset backup is retained.
+- Run Health Check with one intentionally invalid startup path and confirm it reports a warning.
+- Export a diagnostic ZIP and confirm it contains HealthCheck, SystemInfo, sanitized settings, and recent log files.
+- Open Setup Assistant and confirm Steam/RTSS pickers, Controller Test, Health Check, portable mode, and installation
+  actions stay in front and remain usable.
+
+## Controller
+
+- After a normal sign-in, confirm SteamShell shows **Elevated: Yes** in Task Manager. Run Health Check and confirm
+  **Runtime privileges** reports administrator privileges.
+- Launch `SteamShell.exe /safe` from a non-elevated prompt and confirm the elevated replacement retains `/safe`
+  rather than starting a normal shell session.
+- In **Startup & Splash**, turn off **Run SteamShell as administrator on startup**, save, and restart SteamShell.
+  Confirm it does not request elevation and Health Check warns that control of elevated applications may be
+  blocked. Turn it back on, restart, and confirm elevation returns.
+- Holding L3 + R3 for about 0.7 seconds opens and closes Quick Menu.
+- Holding Back and tapping Start opens the Windows Start menu.
+- Holding Back and holding Start past `ControllerChordHoldMs` opens File Explorer without also opening Start.
+- The six-button fallback chord opens Full Settings without also opening Quick Menu.
+- D-pad and left stick navigate.
+- A selects and B closes/goes back.
+- Existing Back + button mappings still work.
+- Close every existing Task Manager instance, then use the mapped Task Manager action. Confirm Windows opens it
+  through Ctrl+Shift+Esc, the window centers/maximizes after settling, and the normal Back-modified controller
+  pointer and click mappings work.
+- Disable Controller Mouse Mode while leaving Quick Menu enabled. Confirm L3+R3 and Quick Menu navigation still
+  work, but Back mappings, stick mouse movement, scrolling, and D-pad passthrough do not.
+- Disconnect and reconnect the controller while holding a button. Confirm reconnecting does not fire a stale short
+  press, long press, Task Switcher close, or Quick Menu action.
+- Open Controller Test and confirm buttons, triggers, and raw axes update without sending mapped actions elsewhere.
+- Leave the sticks untouched for the three-second center sample, apply the suggested deadzone, and confirm the new
+  value is written to the INI and reflected in Full Settings.
+
+## Focus
+
+- Confirm Health Check reports the coordinated engine inventory size, scan duration, and most recent decision.
+- Launch Unreal Tournament 2004 (or another older DirectX title). Confirm an untitled/ToolWindow render surface
+  appears in Task Switcher using its executable as the fallback label, can be selected and locked, and is brought
+  forward by Game Foreground Assist.
+- Let Steam steal focus so the legacy exclusive-fullscreen window minimizes. Confirm it remains in Task Switcher
+  despite its tiny minimized rectangle and Game Foreground Assist restores it when its retained window style is
+  a captionless popup.
+- While that legacy game is running, confirm Steam does not reclaim focus and Launcher Cleanup does not treat the
+  session as having no game.
+- Leave only Steam Big Picture usable, with another application minimized, and confirm Steam becomes foreground
+  after the configured refocus delay without requiring Alt+Tab.
+- Move a titled test window entirely off-screen, then return to Steam and confirm the off-screen window does not
+  indefinitely block Steam fallback.
+- Leave auxiliary Steam or `steamwebhelper.exe` windows present and confirm they do not count as another open
+  application. Confirm the largest Big Picture title match is selected.
+- Set `BpmTitle` to a valid substring of the complete Big Picture title and confirm refocus still works.
+- Keep a meaningful non-Steam application visible and confirm Diagnostics identifies its executable and truncated
+  title as the reason Steam fallback is waiting.
+- Open several normal windows and confirm the engine performs one inventory pass per tick rather than separate
+  geometry, game, AlwaysFocus, Task Switcher, and Launcher Cleanup window enumerations.
+- Open Task Manager and another application whose window grows during startup. Confirm the engine waits for the
+  initial layout to settle, then centers/maximizes the final normal window rather than exhausting its correction
+  attempts against an intermediate startup size.
+- Move a managed normal window repeatedly and confirm SteamShell stops correcting it after the configured recent
+  action budget, then safely reconsiders it after the suppression window.
+- Confirm a newly centered/maximized window does not trigger a focus activation during the same engine cycle.
+- With competing candidates present, verify the priority order is Task Switcher lock, AlwaysFocus, game, then
+  Steam fallback, with no two windows alternating focus.
+- Open a dialog belonging to a pinned process and confirm the dialog remains in front.
+- Run Game Foreground Assist twice several seconds apart and confirm the second CPU sample becomes known without
+  a WMI service/query delay.
+- Open Quick Menu over Steam and confirm the menu becomes the foreground window. Use D-pad and A throughout the
+  main page and a submenu; Steam Big Picture must not move or activate anything behind it.
+- Closing it restores Steam.
+- Opening it over a borderless game and closing it restores the game.
+- Focus Assistance can still be paused and resumed from Quick Menu Settings.
+- Task Switcher lists visible application windows but omits SteamShell, the desktop, and taskbars.
+- Pressing A on a task activates it once, does not report `LOCKED`, and does not keep pulling it back to the front.
+- Pressing Y on a task activates it and the main menu reports `LOCKED`.
+- Pressing X on a task requests that window to close and refreshes the task list.
+- Confirm the Task Switcher footer explicitly shows `Hold X force close`.
+- An application with unsaved work can show its normal save/close confirmation; the Quick Menu gets out of its
+  way and the process is not force-terminated.
+- Holding X for about 1.2 seconds force-closes the selected process without also sending the normal close action.
+- Verify the force-close test with a disposable application: unsaved work can be lost and all windows belonging
+  to that process can close.
+- Pressing X on Back, paging, or Release Focus Lock rows does nothing.
+- Confirm Steam, Explorer, SteamShell, and Windows shell-host processes cannot be force-closed from Task Switcher.
+- Another unrelated application does not permanently steal focus from the Y-locked task.
+- Dialogs belonging to the selected application remain usable.
+- Release Focus Lock clears the task lock.
+- Closing the selected window clears the task lock automatically.
+
+## Desktop restoration
+
+- Leave the controller untouched and confirm Health Check's Windows input idle value steadily increases even when
+  SteamShell parks the cursor after a managed focus change. Confirm the configured Windows display-off and sleep
+  timeouts occur normally.
+- If idle time increases but sleep still does not occur, run `powercfg /requests` from an elevated terminal to
+  identify a driver or application power request outside SteamShell.
+- Confirm Health Check reports Taskbar Guard active, the primary taskbar hidden, and either
+  `event hook + periodic safety` or the periodic-only recovery mode.
+- While SteamShell is active, invoke the Start menu, Game Bar, and File Explorer several times; confirm neither
+  the primary nor a secondary-monitor taskbar remains visible.
+- Restart Explorer during a disposable test session and confirm a recreated taskbar is hidden again. Verify the
+  log reports periodic-only mode if Windows refuses the event hook.
+- During a deliberately slow or failed Steam launch, background `explorer.exe` may run for Game Bar support, but
+  the taskbar and desktop never replace SteamShell merely because the startup-warning delay expires.
+- Confirm the log records a single startup warning after `SteamStartupGraceMs` while automatic restoration remains
+  disarmed until `steam.exe` has actually been observed.
+- Configure an invalid Steam path and confirm the recovery window appears after the splash, remains above other
+  windows, and offers Retry Steam, Open Settings, and Restore Desktop.
+- In that recovery window, confirm D-pad changes the focused action and A activates it.
+- After Steam has been observed running, a brief `steam.exe` restart shorter than `SteamExitConfirmMs` does not
+  restore the desktop.
+- Exit Steam to Desktop asks Steam to close gracefully.
+- Explorer, the taskbar, and normal desktop startup complete exactly as they do after exiting Steam directly.
+- If Steam refuses to close, SteamShell remains active and does not expose a partially restored desktop.
+- Exiting Steam directly and using the Quick Menu both restore a visible `Shell_TrayWnd` taskbar.
+- Desktop restoration verifies the shell registry write, retries Explorer, and logs whether its taskbar appeared.
+- Simulate one failed Explorer launch and confirm SteamShell retries. Simulate all restore attempts failing and
+  confirm SteamShell remains running with a Retry/Cancel prompt rather than exiting into a blank desktop.
+- A normal session restore puts the configured SteamShell value back for the next sign-in after the handoff completes.
+- Disable the startup splash and confirm window management becomes active after startup rather than remaining
+  permanently disarmed.
+- Run the compiled EXE with `/safe`; confirm Explorer and Settings open, Steam/startup programs do not launch, the
+  taskbar remains visible, and reloading settings does not reactivate focus, window, cursor, or cleanup automation.
+
+## Audio
+
+- Confirm the submenu matches XFE exactly: Back, Output, Volume, and Mute.
+- Current default playback-device name appears.
+- Left/right switches among active playback devices.
+- Volume changes in 5% steps.
+- Mute toggles.
+
+If endpoint switching reports an error, disable `[AudioQuickControls]` temporarily and retain the log. Default
+endpoint selection uses Windows' PolicyConfig interface and needs confirmation on the target Windows build.
+
+## Display
+
+- Current resolution and refresh rate are correct.
+- Confirm the submenu matches XFE: Back, HDR, Resolution, Refresh rate, Scale,
+  and Apply. It must not show the old paginated resolution/refresh combinations.
+- Cycle Resolution and confirm Refresh rate immediately remains valid for that
+  resolution. Cycle Refresh rate independently; neither action changes Windows
+  until Apply is selected.
+- Stage a resolution, refresh rate, and—when available—Scale change together.
+  Select Apply and confirm it performs one guarded transaction.
+- Confirm Apply changes to `Select to KEEP (15s)` and counts down. Select it
+  again to keep the transaction; repeat and ignore it to restore the old mode
+  and scale after 15 seconds.
+- Verify the Quick Menu re-centers after Windows finishes applying a new DPI.
+- On an HDR-capable primary display, confirm the row reports live On/Off state;
+  A toggles it and Left/Right explicitly select Off/On.
+- On a driver without Advanced Color state, confirm the row reports Unsupported
+  or Unavailable and cannot claim or apply an unverified state.
+
+## RTSS
+
+- Confirm the submenu matches XFE: Back; the applicable disabled/start/missing
+  or Overlay/Frame Limiter controls; and RTSS Settings.
+- With integration disabled, confirm `RTSS Integration — Disabled`.
+- With integration enabled, RTSS stopped, and the configured executable present,
+  confirm `Start RTSS — Launch configured executable` starts it.
+- Confirm generated settings prefill the standard RTSS path and `UseDllIntegration=true`.
+- Enable `[RTSS] EnableIntegration=true`.
+- With RTSS running, confirm the main row reports live Overlay and Limiter state.
+- Confirm A and Left/Right directly toggle each global state and the menu refreshes
+  to the state RTSS reports.
+- Give the test game's application profile a distinct frame limit and confirm the
+  limiter row shows that value when the menu opens over the game.
+- Temporarily turn administrator startup Off, run RTSS elevated, and start
+  SteamShell unelevated; if Windows blocks a write, confirm SteamShell logs a
+  warning rather than claiming success. Restore administrator startup afterward.
+- Temporarily remove/rename `RTSSHooks64.dll`, or set `UseDllIntegration=false`,
+  and confirm the shortcut fallback below remains available.
+- Configure RTSS HotkeyHandler for fallback testing.
+- Confirm the generated settings prefill `OverlayToggleShortcut=^+o` (Ctrl+Shift+O).
+- Confirm the configured overlay shortcut works outside SteamShell.
+- In Toggle mode, confirm Quick Menu sends Ctrl+Shift+O, labels the action TOGGLE, and does not claim the overlay
+  itself is on or off.
+- Confirm RTSS Settings reports Setup required, Ready to start, Running, or Not
+  found as appropriate and opens Full Settings directly to RTSS & Performance.
+- Confirm Steam Menu and Steam Quick Access display and send Ctrl+1 and Ctrl+2,
+  never `CtrlShift+1` or `CtrlShift+2`.
+- Open Quick Menu over a borderless game and select Steam Menu. Confirm the game
+  regains focus before the paced Shift+Tab chord is sent and Steam's in-game
+  overlay opens reliably.
+- In Separate mode, confirm Overlay On sends Ctrl+Shift+1 and Overlay Off sends Ctrl+Shift+2.
+- Leave one Separate-mode shortcut blank and confirm the main menu reports OVERLAY INCOMPLETE.
+- In limiter Toggle mode, confirm Ctrl+Shift+F is sent and the menu says TOGGLE without claiming an on/off state.
+- Set an unusual `CustomFrameCap` value (for example 117), reload settings, and confirm `117 FPS` appears beside
+  the toggle action.
+- In limiter Separate mode, confirm Frame Limiter On sends Ctrl+Shift+5 and Frame Limiter Off sends Ctrl+Shift+6.
+- Leave one limiter Separate-mode shortcut blank and confirm the main menu reports LIMITER INCOMPLETE.
+- Confirm old numbered frame-cap preset fields have no effect.
+- Verify hiding the OSD does not disable the limiter.
+
+## Visuals and logging
+
+- Control Panel, mapping window, log window, and shortcut recorder use readable native Windows styling.
+- Record Win+G and Alt+F4 shortcuts and confirm the recorder captures them without opening Game Bar or closing the
+  recorder/application behind it.
+- Quick Menu fits at the HTPC's Windows scaling setting and centers on the display containing Steam or the active game.
+- With `EnableMouseParkOnBoot=true`, test `MouseParkEdge=Right` and `Left`;
+  the pointer parks two pixels inside the selected vertical edge of the active display.
+- Physical mouse movement restores the cursor; it hides again after `MouseHideDelay`.
+- Opening or closing the Quick Menu, selecting a Task Switcher window, or moving between Steam and a game parks the
+  pointer once after the new window receives focus and its short settle period completes.
+- Move the pointer over a visible Steam tile, launch a game, and close it normally. Confirm Steam may restore itself
+  without a forced activation, the pointer moves to the selected edge within about one second, and the old tile is no
+  longer hovered when the cursor becomes visible.
+- During the focus settle period, physically move the mouse or switch to another application. Confirm the pending park
+  is cancelled and does not pull the pointer away from the user's new position.
+- Repeated focus polling while the same window is already active does not move the pointer or reset the idle timer.
+- With only Steam Big Picture idle, Windows display-off and automatic sleep timers still expire normally.
+- Confirm the compact main page lists, in order: Audio, Display & HDR, RTSS & Performance, Steam Menu,
+  Steam Quick Access, Controller Layout, Task Switcher, Game Bar, Settings, and System.
+- Confirm the main page uses summaries/descriptions rather than arrows: live Audio/Display/RTSS state, actual Steam
+  shortcuts, `View mappings`, the window count, `Win + G`, `Features & configuration`, and `Power & diagnostics`.
+- Confirm the main page opens Audio, Display, RTSS, Controller Layout, Task Switcher, Settings, and System submenus
+  without clipping. Confirm Steam Menu, Steam Quick Access, and Game Bar close the menu, restore the prior
+  foreground, and then send the displayed shortcut.
+- Page changes reuse the same Quick Menu window with no visible teardown/rebuild.
+- At 100%, 150%, 200%, and the HTPC's normal Windows scale, the first Quick Menu
+  appearance is fully visible and rounded; no region clips through a row.
+- With the Quick Menu focused, verify arrows, Enter/Space, Backspace, Home/End,
+  and Task Switcher Delete match controller behavior.
+- No bottom-corner SteamShell notification overlay appears.
+- Controller Layout reflects the mappings currently loaded from the INI.
+- Action and warning messages remain available in `SteamShell.log`.
+- Leave game-score logging disabled and confirm operational startup, recovery, and desktop-restore messages still
+  appear in `SteamShell.log`.
+
+## Compile
+
+After the script passes the checks above:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\Build-SteamShell.ps1
+```
+
+Also double-click `Build-SteamShell.cmd` and confirm it keeps the result visible
+and returns the PowerShell build's failure/success exit code.
+
+The compiled executable is written to `dist\SteamShell.exe`.
+Confirm the build output identifies `AutoHotkey64.exe`; do not use `AutoHotkey32.exe` as the Ahk2Exe Base File.
+- Confirm the compiled executable and notification-area entry use the standalone
+  charcoal/cyan SteamShell “S” controller icon.
+- Right-click the notification-area icon and verify Quick Menu, Settings,
+  Diagnostics, Reload Settings, and Exit to Desktop.

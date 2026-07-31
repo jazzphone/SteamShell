@@ -1,0 +1,26 @@
+# macOS
+.DS_Store
+
+# Python bytecode (Test-ControllerProfiles.py)
+__pycache__/
+*.pyc
+
+# Build output in the WORKING trees only.
+#
+# Deliberately anchored rather than a bare `dist/`: some frozen snapshots under
+# releases/ do contain a compiled EXE, and those are part of the historical
+# record. A bare pattern would silently drop them.
+/SteamShell/dist/
+/SteamShell-XFE/dist/
+
+# Runtime state. These are created beside the executable at run time and are
+# machine-specific; the tracked files are the *_SAMPLE.ini templates.
+*.log
+*.log.[0-9]
+SteamShellSettings.ini
+SteamShell-XFE.ini
+SteamShell-XFE-Controllers.ini
+*.bak
+
+# Local tool settings, not project configuration
+.claude/settings.local.json
