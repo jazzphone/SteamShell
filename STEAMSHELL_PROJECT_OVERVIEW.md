@@ -1,9 +1,12 @@
 # SteamShell Project Overview
 
-**Document status:** July 31, 2026  
-**Stable SteamShell release:** 1.7.3 (locked at `releases/1.7.3/`)  
-**Stable SteamShell-XFE release:** 0.1.16 (locked at `releases/XFE-0.1.16/`)  
-**Development line:** Quick Menu rendering rewrite, in progress in both trees  
+**Document status:** July 31, 2026
+
+**Stable SteamShell release:** 1.7.4 (locked at `releases/1.7.4/`)
+
+**Stable SteamShell-XFE release:** 0.1.17 (locked at `releases/XFE-0.1.17/`)
+
+**Development line:** Patch releases locked; extended Windows regression testing remains recommended
 
 ## Executive summary
 
@@ -12,7 +15,41 @@ SteamShell is a living-room Windows gaming project with two related, but intenti
 1. **SteamShell 1.7** is the complete home-theater PC shell. It launches Steam Big Picture, manages Windows Explorer and the taskbar, decides which game or application should be in front, provides controller-driven system controls, and restores the normal Windows desktop when the gaming session ends.
 2. **SteamShell-XFE** is an experimental companion for Microsoft's Xbox Full Screen Experience (Xbox FSE). Xbox FSE remains responsible for the shell, application presentation, and Home app lifecycle. The companion is intended to add SteamShell's useful controller controls without competing with Xbox FSE.
 
-SteamShell 1.7.0 is the locked stable release and the recommended choice for the established Steam-centered console experience. SteamShell-XFE 0.1.14 is the locked release for Xbox FSE systems: its controller input, Quick Menu, Settings, display/HDR controls, RTSS integration, notification-area control, and optional startup curtain function inside Xbox FSE while Xbox FSE retains ownership of the shell and application presentation.
+SteamShell 1.7.4 is the locked stable release and the recommended choice for the established Steam-centered console experience. SteamShell-XFE 0.1.17 is the locked release for Xbox FSE systems: its controller input, Quick Menu, Settings, display/HDR controls, RTSS integration, notification-area control, and optional startup curtain function inside Xbox FSE while Xbox FSE retains ownership of the shell and application presentation.
+
+Both locked releases paint their Quick Menu rows
+as one opaque GDI+ bitmap at physical pixel size, with rounded selected fill,
+accent outline, left bar, padded/DPI-scaled glow, neutral charcoal base, and a
+shared preset/custom accent setting. Windows 11 supplies composited outer corners
+with its border color suppressed; Windows 10 retains the region fallback. The
+first Windows pass found and corrected the clipped glow, blue-black base, outer
+border, recovery-text clipping, and standalone automatic-mouse scope error. The
+second pass darkened the base to `#242424` and removed the erase phases that
+caused a flash during row and submenu navigation. Unselected labels and values
+now use neutral grays rather than the earlier blue-gray palette. The menu does
+not force a custom exterior shadow: doing so reliably would require a more
+fragile layered companion window, so the single opaque window is retained.
+Desktop restoration also destroys and flushes the menu's DWM surface, then
+latches recreation off before Steam begins shutting down. This prevents a stale,
+non-interactive image of its title, rows, or footer surviving the handoff to
+Explorer.
+
+## What 1.7.4 / 0.1.17 added
+
+- A shared opaque, high-DPI GDI+ Quick Menu renderer with rounded selection,
+  configurable accent, glow, neutral charcoal/gray palette, and no native outer
+  border. Atomic in-session repaints reduce navigation flicker.
+- Closed menus destroy their HWND and owned bitmap rather than retaining a
+  hidden compositor surface that can return scrambled after a fullscreen game.
+- Display mode discovery reads until Windows reports the true end of the driver
+  table; the former 512-entry ceiling could stop a 4K TV at `1280×1024`.
+- Recovery headings and wrapped explanations size correctly at high DPI.
+- SteamShell 1.7.4 additionally fixes automatic-mouse cursor scope, expands an
+  `explorer.exe` allowlist entry across Start/Search shell hosts, adds
+  desktop-wide automatic mouse with exclusions and a tray toggle, and makes
+  Return to SteamShell launch Steam Big Picture automatically.
+- Settings schema advances 12→14 in SteamShell and 3→4 in XFE. Existing values
+  remain authoritative; only missing new keys receive defaults.
 
 1.6.0 completed the XFE parity port; 1.7.0 is the first release whose headline
 features have no XFE counterpart, because they follow directly from standalone
@@ -110,7 +147,7 @@ Coverage rather than title is the discriminator on purpose. It survives client u
 | Area | SteamShell 1.7 | SteamShell-XFE |
 |---|---|---|
 | Status | Stable, frozen source release | Stable, frozen source release |
-| Current version | 1.7.3 | 0.1.16 |
+| Current version | 1.7.4 | 0.1.17 |
 | Primary role | Complete Steam-centered Windows shell | Utility companion to Xbox FSE |
 | Owns the Windows shell | Yes, when installed or registered as the shell | No |
 | Launches and monitors Steam | Yes | No |
@@ -153,11 +190,11 @@ It coordinates the entire session:
 
 ## Current release state
 
-- **Stable release:** 1.7.3, frozen in `releases/1.7.3`
-- **Active source:** 1.7.3 in `SteamShell/`
+- **Stable release:** 1.7.4, frozen in `releases/1.7.4`
+- **Active source:** 1.7.4 in `SteamShell/`
 - **Runtime:** AutoHotkey v2, 64-bit
 - **Validated compiler baseline:** AutoHotkey v2.0.26 64-bit
-- **Settings schema:** 12
+- **Settings schema:** 14
 - **Distribution model:** One portable executable, with optional installation/registration
 
 The `releases/1.7.0` directory is the permanent release snapshot and should not
@@ -193,9 +230,19 @@ The desktop exit operation does not permanently remove SteamShell as the configu
 5. Restores SteamShell's shell registration for the next boot.
 6. Enters **desktop mode** rather than exiting.
 
-Since 1.7.0, a session restore leaves SteamShell resident. Explorer owns the desktop again, but the notification-area icon, controller-as-mouse, and Quick Menu keep working on the normal Windows desktop. Shell monitoring, the window engine, the taskbar guard, cursor handling, and launcher cleanup are unscheduled while controller polling stays alive; no persisted setting is modified, so returning is a pure rescheduling operation.
+Since 1.7.0, a session restore leaves SteamShell resident. Explorer owns the desktop again, but the notification-area icon, controller-as-mouse, and Quick Menu keep working on the normal Windows desktop. Shell monitoring, the window engine, the taskbar guard, cursor handling, and launcher cleanup are unscheduled while controller polling stays alive; no persisted setting is modified, and returning re-enables them after the Big Picture launch request is accepted.
 
-Returning to the shell is explicit — Quick Menu or the tray — with one exception: the Quick Menu's **Launch Steam** row, which appears whenever Steam is not running, both starts Big Picture and re-arms shell mode. Steam started by hand from the desktop deliberately does not re-arm, so browsing a library from the desktop never takes the desktop away.
+SteamShell 1.7.4 enables controller mouse mappings across all ordinary
+foreground applications while desktop mode is active. A persisted tray/Settings
+toggle can disable that behavior immediately, and an explicit executable
+exclusion list protects games or other applications that need raw controller
+input. SteamShell presentation continues to use the narrower opt-in allowlist.
+
+Returning to the shell is explicit — Quick Menu or the tray — and always passes
+through SteamShell's Big Picture launch helper before re-arming shell mode. The
+Quick Menu's **Launch Steam** row uses the same transaction. Steam started by
+hand from the desktop deliberately does not re-arm, so browsing a library from
+the desktop never takes the desktop away.
 
 A **permanent** restore still exits the process, because it has deregistered SteamShell as the Windows shell and there is nothing left to own. **Exit SteamShell** fully terminates: directly from desktop mode, or via the guarded restore first from shell mode, so it can never leave the user with a hidden taskbar and no shell.
 
@@ -273,11 +320,12 @@ Mappings are configurable and can target built-in actions or recorded keyboard s
 
 ## Quick Menu
 
-The Quick Menu is a persistent, borderless controller-first overlay for common
-living-room actions. It takes foreground ownership so Steam does not process
-navigation underneath it, supports keyboard navigation, updates rows without
-recreating the window, and uses DPI-aware centering and shaping. Its layout can
-be customized, and unnecessary items can be hidden.
+The Quick Menu is a borderless controller-first overlay for common living-room
+actions. During one open session it takes foreground ownership, supports keyboard
+navigation, and updates rows/pages without recreating the window. Closing it
+destroys the HWND and row bitmap so DWM cannot carry a hidden stale surface across
+fullscreen game transitions. It uses DPI-aware centering and shaping; its layout
+can be customized, and unnecessary items can be hidden.
 
 Available functions include:
 
@@ -440,14 +488,14 @@ The companion should remain alive if Steam closes or restarts. Its useful functi
 
 ## Current state
 
-- **Version:** 0.1.16
-- **Status:** Stable source release, frozen in `releases/XFE-0.1.16`
+- **Version:** 0.1.17
+- **Status:** Stable source release, frozen in `releases/XFE-0.1.17`
 - **Runtime:** AutoHotkey v2, 64-bit
-- **Settings schema:** 3
+- **Settings schema:** 4
 - **Privilege target:** Standard user
 - **Distribution model:** Portable companion executable
 
-The application works when launched and tested from the normal Windows desktop. Its Quick Menu and Settings UI have been adjusted to use rendered dimensions for centering, and the Quick Menu is kept alive instead of being recreated for every navigation event.
+The application works when launched and tested from the normal Windows desktop. Its Quick Menu and Settings UI use rendered dimensions for centering. Quick Menu controls persist while the menu is open and the complete window is destroyed on close, preventing stale DWM surfaces across fullscreen transitions.
 
 ## Included features
 
@@ -806,6 +854,7 @@ The recurring failure was reasoning from an assumption instead of a measurement,
 
 | 0.1.15 | Combined **Frame Limit** Quick Menu row — Off · 30 · 40 · 60 · 90 · 120 · Custom — folding RTSS's global limiter flag and the profile's `FramerateLimit` into one control, with a conditional Custom FPS row whose step escalates 1 → 5 → 10 because Quick Menu navigation never auto-repeats. "Off" maps to the flag and never writes `0`, so a cap survives an off/on round trip. Writes go to the global profile only, except the explicit two-press **Save Limit to Profile** row, which copies the current cap into the foreground executable's own profile. Adds the `SetProfileProperty`/`SaveProfile`/`UpdateProfiles` exports, all optional — a build without them shows the cap read-only. Plus: motion-sensor exclusion in the learner's axis search; a bounds guard on the wizard's Skip button; removal of the handler cases and functions left dead by the row merge; and matching validator assertions. |
 | 0.1.16 | RTSS frame-cap input: the write is debounced and committed once after input stops rather than on every press, and the Custom FPS row uses hold-to-repeat with an accelerating rate instead of an escalating step, so a press is always exactly one change. Save Limit to Profile falls back to the last game-like foreground when the captured one is Steam. |
+| 0.1.17 | Shared Quick Menu rendering release: opaque high-DPI GDI+ rows, configurable accent and derived fill, neutral charcoal palette, glow and border suppression, atomic open-session repaint, destroy-on-close compositor lifecycle, recovery-title sizing, and complete driver-reported resolution/refresh enumeration beyond the former 512-mode ceiling. Settings schema 4 adds the accent options. |
 
 The older ZIP files in the XFE directory are retained source checkpoints from
 the diagnostic phase.
@@ -821,6 +870,10 @@ in `SteamShell-XFE/` and must use a later version.
 
 **0.1.15 is locked** at `releases/XFE-0.1.15/` — the Frame Limit row, the
 motion-sensor fix, and the Skip bounds guard.
+
+**0.1.17 is locked** at `releases/XFE-0.1.17/` — the shared Quick Menu renderer,
+closed-window lifecycle fix, recovery layout, accent schema, and complete
+display-mode enumeration. `releases/XFE-0.1.16/` remains unchanged.
 
 The matching shareable archive is
 `releases/SteamShell-XFE-0.1.14-source.zip` (SHA-256
@@ -881,10 +934,14 @@ workspace-root/
 │   │   └── frozen SteamShell 1.6 source, assets, documentation, and build files
 │   ├── 1.7.0/
 │   │   └── frozen SteamShell 1.7 source, assets, documentation, and build files
+│   ├── 1.7.4/
+│   │   └── current locked SteamShell source release and checksum manifest
 │   ├── XFE-0.1.9/
 │   │   └── locked XFE learned-controller diagnostic checkpoint
-│   └── XFE-0.1.14/
-│       └── frozen XFE 0.1.14 source release, assets, checksums, and tests
+│   ├── XFE-0.1.14/
+│   │   └── frozen XFE 0.1.14 source release, assets, checksums, and tests
+│   └── XFE-0.1.17/
+│       └── current locked XFE source release and checksum manifest
 └── SteamShell-XFE/
     ├── assets/
     │   ├── SteamShell-XFE.ico
@@ -908,7 +965,7 @@ workspace-root/
 
 | File | Purpose |
 |---|---|
-| `SteamShell/SteamShell.ahk` | Current SteamShell source, matching the locked 1.7.3 release. |
+| `SteamShell/SteamShell.ahk` | Current SteamShell source, matching the locked 1.7.4 release. |
 | `SteamShell/assets/` | Standalone notification-area and compiled executable icon assets. |
 | `SteamShell/SteamShellSettings_SAMPLE.ini` | Documented configuration template. Runtime settings are written to `SteamShellSettings.ini`. |
 | `SteamShell/SteamShell.reg` | Optional registry setup/reference for configuring SteamShell as the per-user shell. |
@@ -929,10 +986,12 @@ The `releases` directory contains frozen source snapshots:
 - `releases/1.4.0` preserves the previous stable architecture.
 - `releases/1.5.0` is the source of truth for the locked SteamShell 1.5 release.
 - `releases/1.7.0` is the source of truth for the locked SteamShell 1.7 release.
+- `releases/1.7.4` is the current locked SteamShell patch release.
 - `releases/XFE-0.1.9` is the SteamShell-XFE companion at the point the controller-learning wizard was confirmed working on hardware. A test-candidate checkpoint, not a finished release; its `RELEASE.md` is explicit about which parts have never run.
 - `releases/XFE-0.1.14` is the first locked SteamShell-XFE release, preserving
   the complete source, build launchers, icon assets, configuration sample,
   documentation, validation, simulation, and checksums.
+- `releases/XFE-0.1.17` is the current locked SteamShell-XFE patch release.
 
 Each release directory is self-contained enough to inspect, validate, and rebuild that version. Release snapshots should only change to correct packaging mistakes; feature development should create a later version instead.
 `releases/1.7.0/RELEASE.md` records the 1.7 scope, verification boundary, and
@@ -942,7 +1001,7 @@ SHA-256 manifest.
 
 | File | Purpose |
 |---|---|
-| `SteamShell-XFE.ahk` | Current XFE companion source, matching the locked 0.1.16 release. |
+| `SteamShell-XFE.ahk` | Current XFE companion source, matching the locked 0.1.17 release. |
 | `assets/SteamShell-XFE.ico` | Multi-resolution Windows executable and notification-area icon. |
 | `assets/SteamShell-XFE-icon.png` | Transparent high-resolution preview/source for the XFE icon. |
 | `SteamShell-XFE_SAMPLE.ini` | Documented XFE configuration template. Runtime settings are written to `SteamShell-XFE.ini`. |
@@ -980,10 +1039,8 @@ Compiled executables are build artifacts. The authoritative project history is t
 
 ## SteamShell 1.7
 
-Treat 1.7.3 as the current checkpoint. It is a **revert point taken on request**
-immediately before the Quick Menu rendering rewrite, not a release held until
-hardware sign-off — automatic mouse mode ships in it unconfirmed on hardware.
-Its predecessors 1.7.2, 1.7.1 and 1.7.0 remain frozen:
+Treat 1.7.4 as the current checkpoint. Keep 1.7.3 as the pre-rendering-rewrite
+revert point. Its predecessors 1.7.3, 1.7.2, 1.7.1 and 1.7.0 remain frozen:
 
 - Work through the Desktop mode and Desktop blackout sections of
   `WINDOWS_TEST_CHECKLIST.md` before treating either as settled.
@@ -1003,7 +1060,8 @@ The two questions that gated the whole project are now answered:
 1. ~~Prove background controller input inside Xbox FSE.~~ **Solved in 0.1.5 via RawInput.** XInput and GameInput are both gated; RawInput reads underneath and receives everything.
 2. ~~Prove the Quick Menu presentation model inside Xbox FSE.~~ **Confirmed working.** FSE displays the Quick Menu, and keyboard hotkeys reach the background companion.
 
-Treat 0.1.16 as the current completed checkpoint. Its predecessors 0.1.14 and 0.1.15 remain frozen:
+Treat 0.1.17 as the current completed checkpoint. Its predecessors 0.1.14,
+0.1.15, and 0.1.16 remain frozen:
 
 3. Prefer extended play and sleep/resume testing over broad feature work.
 4. Record reproducible regressions before changing RawInput, display safety,
