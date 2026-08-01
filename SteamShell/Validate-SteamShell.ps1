@@ -418,13 +418,43 @@ Assert-True (
 Assert-True (
     $source -match
         '(?s)QuickMenuBuildGui\(\)\s*\{.*?if\s+!QuickMenuVisible.*?' +
-        'Loop\s+14.*?QuickMenuSetRedraw\(false\).*?' +
+        'QuickMenuRowsCtrl\s*:=\s*QuickMenuGui\.AddText.*?QuickMenuSetRedraw\(false\).*?' +
         'PositionQuickMenuOnTarget.*?RevealWindow.*?' +
         'ApplyRoundedCorners.*?QuickMenuSetRedraw\(true\)' -and
     $source -notmatch
         '(?s)QuickMenuBuildGui\(\)\s*\{.*?' +
         '(?:QuickMenuGui\.Destroy\(\)|ApplyModernWindowStyle\()') (
     "The Quick Menu is no longer persistent, borderless, or repaint-in-place.")
+
+# The rows are one painted surface, not a pool of Static controls. A Win32
+# static cannot draw a rounded corner, an outline or a glow, which is why the
+# pool was replaced rather than restyled.
+Assert-True (
+    $source -match '(?s)QuickMenuRefresh\(\)\s*\{.*?QuickMenuPaintRows\(\)' -and
+    $source -notmatch 'QuickMenuLabelCtrls' -and
+    $source -notmatch 'QuickMenuValueCtrls') (
+    "The Quick Menu rows are no longer painted as a single GDI+ surface.")
+
+# Painting must stay OPAQUE and non-layered. The menu's job is appearing over a
+# running game; per-pixel alpha over fullscreen D3D is where overlays fail.
+Assert-True (
+    $source -notmatch 'UpdateLayeredWindow' -and
+    $source -match '(?s)QuickMenuPaintRows\(\).*?GdipSetTextRenderingHint.*?"Int",\s*5') (
+    "Quick Menu painting is layered, or has given up ClearType text.")
+
+# STM_SETIMAGE hands back the bitmap it replaced. The menu repaints on every
+# keypress, so failing to delete it leaks a bitmap per press.
+Assert-True (
+    $source -match
+        '(?s)replaced\s*:=\s*SendMessage\(0x0172.*?if\s*\(replaced\s*&&\s*replaced\s*!=\s*bitmap\).*?DeleteObject') (
+    "The Quick Menu row painter leaks the bitmap it replaces.")
+
+# The surface is built at the control's physical size. Building it at
+# AutoHotkey's logical size would stretch every row on a high-DPI handheld.
+Assert-True (
+    $source -match
+        '(?s)QuickMenuPaintRows\(\).*?GetClientRect.*?scale\s*:=\s*width\s*/\s*QuickMenuWidth\(\)') (
+    "The Quick Menu row surface is no longer built at physical pixel size.")
 Assert-True (
     $source -match
         '(?s)GetDefaultQuickMenuOrder\(\)\s*\{.*?' +

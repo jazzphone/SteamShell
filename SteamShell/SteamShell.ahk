@@ -127,8 +127,9 @@ global LastStatusText := ""
 global LastStatusLevel := ""
 global LastStatusTick := 0
 global StatusVisibleMs := 4000
-global QuickMenuLabelCtrls := []
-global QuickMenuValueCtrls := []
+global QuickMenuRowsCtrl := 0
+global QuickMenuRowsBitmap := 0
+global GdiPlusToken := 0
 global SteamMenuShortcut := "^1"
 global SteamQuickAccessShortcut := "^2"
 global SteamOverlayShortcut := "+{Tab}"
@@ -4195,10 +4196,301 @@ QuickMenuApplyAccent(presetName, customHex) {
  QM_ROW_SELECTED := BlendHexColor(QM_BG, hex, QM_ACCENT_BLEND)
 }
 
+; ---------------------------------------------------------------------------
+; Quick Menu row painter (GDI+).
+;
+; The rows used to be 28 Static controls whose only styling lever was a flat
+; background colour, which is why they could never have rounded corners, an
+; outline or a glow -- a Win32 static has no way to draw one. They are now a
+; single bitmap painted with GDI+ and shown in one control.
+;
+; Deliberately NOT a layered window. The Quick Menu's whole job is appearing
+; over a running game, that works today, and per-pixel alpha over fullscreen
+; D3D is exactly where overlays historically fail. Painting into an opaque
+; bitmap keeps the existing window composition untouched.
+;
+; The bitmap is built at the control's PHYSICAL pixel size rather than at
+; AutoHotkey's logical size, so nothing is stretched on a high-DPI handheld.
+; Because the surface is opaque, text can still use ClearType.
+;
+; This block is character-for-character identical in SteamShell-XFE apart from
+; indentation.
+; ---------------------------------------------------------------------------
+
+EnsureGdiPlus() {
+ global GdiPlusToken
+ if (GdiPlusToken)
+     return true
+ if !DllCall("LoadLibrary", "Str", "gdiplus", "Ptr")
+     return false
+ ; GdiplusStartupInput: version, then a pointer and two BOOLs.
+ input := Buffer(A_PtrSize = 8 ? 24 : 16, 0)
+ NumPut("UInt", 1, input, 0)
+ token := 0
+ if (DllCall("gdiplus\GdiplusStartup", "Ptr*", &token, "Ptr", input, "Ptr", 0, "UInt") != 0)
+     return false
+ GdiPlusToken := token
+ return true
+}
+
+ShutdownGdiPlus() {
+ global GdiPlusToken
+ if !GdiPlusToken
+     return
+ try DllCall("gdiplus\GdiplusShutdown", "Ptr", GdiPlusToken)
+ GdiPlusToken := 0
+}
+
+; The last painted bitmap is owned by this script, not by the control, so it
+; outlives the GUI unless it is released explicitly.
+ReleaseQuickMenuPaintResources() {
+ global QuickMenuRowsBitmap
+ if QuickMenuRowsBitmap {
+     try DllCall("DeleteObject", "Ptr", QuickMenuRowsBitmap)
+     QuickMenuRowsBitmap := 0
+ }
+ ShutdownGdiPlus()
+}
+
+QuickMenuArgb(hex, alpha := 255) {
+ return (alpha << 24) | Integer("0x" hex)
+}
+
+; Four arcs and a close. GDI+ has no rounded-rectangle primitive.
+QuickMenuAddRoundedPath(path, x, y, w, h, radius) {
+ radius := Min(radius, Min(w, h) / 2)
+ if (radius <= 0) {
+     DllCall("gdiplus\GdipAddPathRectangle", "Ptr", path
+         , "Float", x, "Float", y, "Float", w, "Float", h)
+     return
+ }
+ d := radius * 2
+ DllCall("gdiplus\GdipAddPathArc", "Ptr", path, "Float", x, "Float", y
+     , "Float", d, "Float", d, "Float", 180, "Float", 90)
+ DllCall("gdiplus\GdipAddPathArc", "Ptr", path, "Float", x + w - d, "Float", y
+     , "Float", d, "Float", d, "Float", 270, "Float", 90)
+ DllCall("gdiplus\GdipAddPathArc", "Ptr", path, "Float", x + w - d, "Float", y + h - d
+     , "Float", d, "Float", d, "Float", 0, "Float", 90)
+ DllCall("gdiplus\GdipAddPathArc", "Ptr", path, "Float", x, "Float", y + h - d
+     , "Float", d, "Float", d, "Float", 90, "Float", 90)
+ DllCall("gdiplus\GdipClosePathFigure", "Ptr", path)
+}
+
+QuickMenuFillRounded(graphics, x, y, w, h, radius, argb) {
+ path := 0
+ DllCall("gdiplus\GdipCreatePath", "Int", 0, "Ptr*", &path)
+ if !path
+     return
+ QuickMenuAddRoundedPath(path, x, y, w, h, radius)
+ brush := 0
+ DllCall("gdiplus\GdipCreateSolidFill", "UInt", argb, "Ptr*", &brush)
+ if brush {
+     DllCall("gdiplus\GdipFillPath", "Ptr", graphics, "Ptr", brush, "Ptr", path)
+     DllCall("gdiplus\GdipDeleteBrush", "Ptr", brush)
+ }
+ DllCall("gdiplus\GdipDeletePath", "Ptr", path)
+}
+
+QuickMenuStrokeRounded(graphics, x, y, w, h, radius, argb, width) {
+ path := 0
+ DllCall("gdiplus\GdipCreatePath", "Int", 0, "Ptr*", &path)
+ if !path
+     return
+ QuickMenuAddRoundedPath(path, x, y, w, h, radius)
+ pen := 0
+ DllCall("gdiplus\GdipCreatePen1", "UInt", argb, "Float", width, "Int", 2, "Ptr*", &pen)
+ if pen {
+     DllCall("gdiplus\GdipDrawPath", "Ptr", graphics, "Ptr", pen, "Ptr", path)
+     DllCall("gdiplus\GdipDeletePen", "Ptr", pen)
+ }
+ DllCall("gdiplus\GdipDeletePath", "Ptr", path)
+}
+
+; GDI+ has no blur. The glow is concentric strokes stepping outward with
+; falling alpha, which is cheap, needs no second surface, and at these radii is
+; visually indistinguishable from a real one.
+QuickMenuDrawGlow(graphics, x, y, w, h, radius, hex, steps, maxAlpha) {
+ Loop steps {
+     spread := A_Index
+     fade := (steps - spread + 1) / steps
+     alpha := Round(maxAlpha * fade * fade)
+     if (alpha < 2)
+         continue
+     QuickMenuStrokeRounded(graphics
+         , x - spread, y - spread, w + (spread * 2), h + (spread * 2)
+         , radius + spread, QuickMenuArgb(hex, alpha), 1.6)
+ }
+}
+
+; The one line of the painter that differs between the two trees, isolated so
+; the rest can stay identical: standalone resolves a row's value live, while XFE
+; rebuilds its whole row list per repaint and already carries it.
+QuickMenuRowValueText(row) {
+ return QuickMenuValue(row["id"])
+}
+
+QuickMenuMakeFont(pixelSize, bold) {
+ family := 0
+ DllCall("gdiplus\GdipCreateFontFamilyFromName", "Str", "Segoe UI", "Ptr", 0, "Ptr*", &family)
+ if !family
+     return 0
+ font := 0
+ DllCall("gdiplus\GdipCreateFont", "Ptr", family, "Float", pixelSize
+     , "Int", bold ? 1 : 0, "Int", 2, "Ptr*", &font)
+ DllCall("gdiplus\GdipDeleteFontFamily", "Ptr", family)
+ return font
+}
+
+; align: 0 near, 1 centre, 2 far. Vertically centred and never wrapped, with an
+; ellipsis when a value is too long -- the old Static controls clipped instead,
+; which read as a rendering fault rather than as truncation.
+QuickMenuDrawText(graphics, text, font, argb, x, y, w, h, align) {
+ if (text = "" || !font)
+     return
+ layout := Buffer(16, 0)
+ NumPut("Float", x, layout, 0)
+ NumPut("Float", y, layout, 4)
+ NumPut("Float", w, layout, 8)
+ NumPut("Float", h, layout, 12)
+ format := 0
+ DllCall("gdiplus\GdipCreateStringFormat", "Int", 0, "Int", 0, "Ptr*", &format)
+ if !format
+     return
+ DllCall("gdiplus\GdipSetStringFormatAlign", "Ptr", format, "Int", align)
+ DllCall("gdiplus\GdipSetStringFormatLineAlign", "Ptr", format, "Int", 1)
+ DllCall("gdiplus\GdipSetStringFormatTrimming", "Ptr", format, "Int", 3)
+ DllCall("gdiplus\GdipSetStringFormatFlags", "Ptr", format, "Int", 0x1000)
+ brush := 0
+ DllCall("gdiplus\GdipCreateSolidFill", "UInt", argb, "Ptr*", &brush)
+ if brush {
+     DllCall("gdiplus\GdipDrawString", "Ptr", graphics, "Str", text, "Int", -1
+         , "Ptr", font, "Ptr", layout, "Ptr", format, "Ptr", brush)
+     DllCall("gdiplus\GdipDeleteBrush", "Ptr", brush)
+ }
+ DllCall("gdiplus\GdipDeleteStringFormat", "Ptr", format)
+}
+
+; Paints every row into one bitmap and hands it to the row control. Called on
+; each refresh; there is no partial repaint, because composing the whole band is
+; already well under a frame and a partial one would have to reason about which
+; neighbours a glow spills onto.
+QuickMenuPaintRows() {
+ global QuickMenuRowsCtrl, QuickMenuRowsBitmap, QuickMenuRows, QuickMenuSelected
+ global QM_BG, QM_ROW_SELECTED, QM_ACCENT, QM_LABEL, QM_LABEL_SELECTED, QM_VALUE
+ if (!IsSet(QuickMenuRowsCtrl) || !QuickMenuRowsCtrl)
+     return
+ if !EnsureGdiPlus()
+     return
+
+ ; Physical pixels. AutoHotkey scales the control from logical units, so asking
+ ; the control itself is the only way to match the surface to the screen.
+ clientRect := Buffer(16, 0)
+ if !DllCall("GetClientRect", "Ptr", QuickMenuRowsCtrl.Hwnd, "Ptr", clientRect)
+     return
+ width := NumGet(clientRect, 8, "Int")
+ height := NumGet(clientRect, 12, "Int")
+ if (width < 1 || height < 1)
+     return
+ rowCount := QuickMenuRows.Length
+ if (rowCount < 1)
+     return
+
+ ; One scale factor derived from the control itself, so every measurement below
+ ; is in logical units and DPI is handled in exactly one place.
+ scale := width / QuickMenuWidth()
+ px(value) => value * scale
+
+ screenDC := DllCall("GetDC", "Ptr", 0, "Ptr")
+ memDC := DllCall("CreateCompatibleDC", "Ptr", screenDC, "Ptr")
+ header := Buffer(40, 0)
+ NumPut("UInt", 40, header, 0)
+ NumPut("Int", width, header, 4)
+ NumPut("Int", -height, header, 8) ; top-down, so y grows downward as drawn
+ NumPut("UShort", 1, header, 12)
+ NumPut("UShort", 32, header, 14)
+ bits := 0
+ bitmap := DllCall("CreateDIBSection", "Ptr", memDC, "Ptr", header, "UInt", 0
+     , "Ptr*", &bits, "Ptr", 0, "UInt", 0, "Ptr")
+ previous := DllCall("SelectObject", "Ptr", memDC, "Ptr", bitmap, "Ptr")
+ graphics := 0
+ DllCall("gdiplus\GdipCreateFromHDC", "Ptr", memDC, "Ptr*", &graphics)
+ if graphics {
+     DllCall("gdiplus\GdipSetSmoothingMode", "Ptr", graphics, "Int", 4)
+     ; The surface is opaque, so ClearType is available and text quality does
+     ; not regress against the Static controls this replaced.
+     DllCall("gdiplus\GdipSetTextRenderingHint", "Ptr", graphics, "Int", 5)
+     QuickMenuFillRounded(graphics, 0, 0, width, height, 0, QuickMenuArgb(QM_BG))
+
+     labelFont := QuickMenuMakeFont(px(16), false)
+     labelFontBold := QuickMenuMakeFont(px(16), true)
+     valueFont := QuickMenuMakeFont(px(14.7), false)
+     rowHeight := QuickMenuRowHeight()
+     inset := QuickMenuRowInset()
+     rowWidth := QuickMenuWidth() - (inset * 2)
+     radius := px(10)
+     textPad := px(16)
+     barWidth := px(4)
+
+     for index, row in QuickMenuRows {
+         selected := (index = QuickMenuSelected)
+         ; A gap inside the row's slot, so adjacent highlights never touch and
+         ; the rounded corners are actually visible.
+         top := px(((index - 1) * rowHeight) + 3)
+         boxHeight := px(rowHeight - 6)
+         left := px(inset)
+         boxWidth := px(rowWidth)
+         if selected {
+             QuickMenuDrawGlow(graphics, left, top, boxWidth, boxHeight, radius
+                 , QM_ACCENT, 6, 46)
+             QuickMenuFillRounded(graphics, left, top, boxWidth, boxHeight, radius
+                 , QuickMenuArgb(QM_ROW_SELECTED))
+             QuickMenuStrokeRounded(graphics, left, top, boxWidth, boxHeight, radius
+                 , QuickMenuArgb(QM_ACCENT), px(2))
+             ; The accent bar. This is the element that makes the selection
+             ; readable across a room, more than the fill or the glow does.
+             QuickMenuFillRounded(graphics
+                 , left + px(6), top + px(7), barWidth, boxHeight - px(14)
+                 , barWidth / 2, QuickMenuArgb(QM_ACCENT))
+         }
+         labelLeft := left + textPad + (selected ? px(10) : 0)
+         labelWidth := (boxWidth * 0.52) - textPad
+         QuickMenuDrawText(graphics, row["label"]
+             , selected ? labelFontBold : labelFont
+             , QuickMenuArgb(selected ? QM_LABEL_SELECTED : QM_LABEL)
+             , labelLeft, top, labelWidth, boxHeight, 0)
+         valueLeft := left + (boxWidth * 0.52)
+         QuickMenuDrawText(graphics, QuickMenuRowValueText(row), valueFont
+             , QuickMenuArgb(selected ? QM_ACCENT : QM_VALUE)
+             , valueLeft, top, (boxWidth * 0.48) - textPad, boxHeight, 2)
+     }
+
+     if labelFont
+         DllCall("gdiplus\GdipDeleteFont", "Ptr", labelFont)
+     if labelFontBold
+         DllCall("gdiplus\GdipDeleteFont", "Ptr", labelFontBold)
+     if valueFont
+         DllCall("gdiplus\GdipDeleteFont", "Ptr", valueFont)
+     DllCall("gdiplus\GdipDeleteGraphics", "Ptr", graphics)
+ }
+
+ DllCall("SelectObject", "Ptr", memDC, "Ptr", previous)
+ DllCall("DeleteDC", "Ptr", memDC)
+ DllCall("ReleaseDC", "Ptr", 0, "Ptr", screenDC)
+
+ ; STM_SETIMAGE returns the bitmap it replaced. Not deleting it leaks one
+ ; bitmap per repaint, and the menu repaints on every keypress.
+ replaced := SendMessage(0x0172, 0, bitmap, QuickMenuRowsCtrl)
+ if (replaced && replaced != bitmap)
+     try DllCall("DeleteObject", "Ptr", replaced)
+ if (QuickMenuRowsBitmap && QuickMenuRowsBitmap != bitmap && QuickMenuRowsBitmap != replaced)
+     try DllCall("DeleteObject", "Ptr", QuickMenuRowsBitmap)
+ QuickMenuRowsBitmap := bitmap
+}
+
 QuickMenuBuildGui() {
  global QuickMenuGui, QuickMenuRows, QuickMenuPage, QuickMenuVisible
  global QuickMenuTitleCtrl, QuickMenuFooterCtrl
- global QuickMenuLabelCtrls, QuickMenuValueCtrls
+ global QuickMenuRowsCtrl
  global QuickMenuPreviousHwnd
  global QM_BG, QM_LABEL, QM_VALUE, QM_LABEL_SELECTED
 
@@ -4222,23 +4514,14 @@ QuickMenuBuildGui() {
      QuickMenuGui.SetFont("s17 c" QM_LABEL_SELECTED " Bold", "Segoe UI")
      QuickMenuTitleCtrl := QuickMenuGui.AddText(
          "x" (rowInset + 12) " y20 w" (rowWidth - 12) " h30", "")
-     QuickMenuLabelCtrls := []
-     QuickMenuValueCtrls := []
-     Loop 14 {
-         index := A_Index
-         y := QuickMenuRowTop() + ((index - 1) * QuickMenuRowHeight())
-         QuickMenuGui.SetFont("s12 c" QM_LABEL " Norm", "Segoe UI")
-         labelCtrl := QuickMenuGui.AddText(
-             "x" rowInset " y" y " w" labelWidth " h32 +0x200 Background" QM_BG, "")
-         QuickMenuGui.SetFont("s11 c" QM_VALUE " Norm", "Segoe UI")
-         valueCtrl := QuickMenuGui.AddText(
-             "x" (rowInset + labelWidth) " y" y
-             . " w" (rowWidth - labelWidth) " h32 Right +0x200 Background" QM_BG, "")
-         labelCtrl.OnEvent("Click", QuickMenuMouseSelect.Bind(index))
-         valueCtrl.OnEvent("Click", QuickMenuMouseSelect.Bind(index))
-         QuickMenuLabelCtrls.Push(labelCtrl)
-         QuickMenuValueCtrls.Push(valueCtrl)
-     }
+     ; One painted surface replaces the 28 Static controls the rows used to be.
+     ; 0x0E is SS_BITMAP, 0x40 is SS_REALSIZECONTROL so the static keeps the
+     ; size we gave it instead of resizing itself to the bitmap, and 0x100 is
+     ; SS_NOTIFY so it still reports clicks.
+     QuickMenuRowsCtrl := QuickMenuGui.AddText(
+         "x0 y" QuickMenuRowTop() " w" menuW " h" (14 * QuickMenuRowHeight()), "")
+     QuickMenuRowsCtrl.Opt("+0x14E")
+     QuickMenuRowsCtrl.OnEvent("Click", QuickMenuRowsClick)
      QuickMenuGui.SetFont("s9 c" QM_VALUE " Norm", "Segoe UI")
      QuickMenuFooterCtrl := QuickMenuGui.AddText(
          "x" (rowInset + 12) " y600 w" (rowWidth - 12) " h36 +Wrap", "")
@@ -4251,22 +4534,14 @@ QuickMenuBuildGui() {
  try {
      QuickMenuTitleCtrl.Text := GuiLiteralText(QuickMenuTitleText())
      QuickMenuRows := []
-     Loop QuickMenuLabelCtrls.Length {
-         index := A_Index
-         labelCtrl := QuickMenuLabelCtrls[index]
-         valueCtrl := QuickMenuValueCtrls[index]
-         if (index > defs.Length) {
-             labelCtrl.Visible := false
-             valueCtrl.Visible := false
-             continue
-         }
-         def := defs[index]
-         labelCtrl.Visible := true
-         valueCtrl.Visible := true
-         QuickMenuRows.Push(Map(
-             "id", def["id"], "label", def["label"],
-             "labelCtrl", labelCtrl, "valueCtrl", valueCtrl))
+     Loop Min(defs.Length, 14) {
+         def := defs[A_Index]
+         QuickMenuRows.Push(Map("id", def["id"], "label", def["label"]))
      }
+     ; The painted band is sized to the rows actually on this page, so a short
+     ; page leaves no dead surface for a glow to spill onto.
+     QuickMenuRowsCtrl.Move(0, QuickMenuRowTop(), menuW
+         , Max(1, QuickMenuRows.Length) * QuickMenuRowHeight())
 
      QuickMenuFooterCtrl.Move(
          rowInset + 12, QuickMenuStatusY(defs.Length),
@@ -4493,6 +4768,21 @@ ApplyRoundedCorners(guiObj, radius) {
  try visible := DllCall("IsWindowVisible", "Ptr", guiObj.Hwnd, "Int") != 0
  if !visible
      return
+ ; Windows 11 rounds the window itself, antialiased and composited by DWM.
+ ; DWMWA_WINDOW_CORNER_PREFERENCE is 33, DWMWCP_ROUND is 2. The region path
+ ; below is a 1-bit mask with visibly stepped corners, so it is now only the
+ ; Windows 10 fallback rather than what everyone sees.
+ try {
+     preference := Buffer(4, 0)
+     NumPut("Int", 2, preference, 0)
+     if (DllCall("dwmapi\DwmSetWindowAttribute", "Ptr", guiObj.Hwnd
+         , "UInt", 33, "Ptr", preference, "UInt", 4, "UInt") = 0) {
+         ; A region set by an earlier call would clip the rounded corners DWM
+         ; is now drawing, so it has to be cleared.
+         try WinSetRegion("", "ahk_id " guiObj.Hwnd)
+         return
+     }
+ }
  try {
      WinGetPos(, , &realWidth, &realHeight, "ahk_id " guiObj.Hwnd)
      if (realWidth > 0 && realHeight > 0) {
@@ -5124,23 +5414,34 @@ QuickMenuRefresh() {
 
  try QuickMenuFooterCtrl.Text := GuiLiteralText(QuickMenuHintText())
 
- for index, row in QuickMenuRows {
-     selected := (index = QuickMenuSelected)
-     rowBackground := selected ? QM_ROW_SELECTED : QM_BG
-     row["labelCtrl"].Opt("+Background" rowBackground)
-     row["valueCtrl"].Opt("+Background" rowBackground)
-     row["labelCtrl"].Text := "  " GuiLiteralText(row["label"])
-     row["valueCtrl"].Text := GuiLiteralText(QuickMenuValue(row["id"])) "  "
-     if (selected) {
-         try row["labelCtrl"].SetFont("s12 Bold c" QM_LABEL_SELECTED, "Segoe UI")
-         try row["valueCtrl"].SetFont("s11 Norm c" QM_ACCENT, "Segoe UI")
-     } else {
-         try row["labelCtrl"].SetFont("s12 Norm c" QM_LABEL, "Segoe UI")
-         try row["valueCtrl"].SetFont("s11 Norm c" QM_VALUE, "Segoe UI")
-     }
-     try row["labelCtrl"].Redraw()
-     try row["valueCtrl"].Redraw()
- }
+ ; Every row is one bitmap, so selection, value text and colour all change in a
+ ; single repaint rather than by touching 28 controls individually.
+ QuickMenuPaintRows()
+}
+
+; Maps a click on the painted band back to a row. The Static controls used to
+; carry their own index; with one surface the index has to be recovered from
+; where the pointer actually is.
+QuickMenuRowsClick(*) {
+ global QuickMenuRowsCtrl, QuickMenuRows
+ if (!IsSet(QuickMenuRowsCtrl) || !QuickMenuRowsCtrl || QuickMenuRows.Length = 0)
+     return
+ point := Buffer(8, 0)
+ if !DllCall("GetCursorPos", "Ptr", point)
+     return
+ if !DllCall("ScreenToClient", "Ptr", QuickMenuRowsCtrl.Hwnd, "Ptr", point)
+     return
+ clientRect := Buffer(16, 0)
+ if !DllCall("GetClientRect", "Ptr", QuickMenuRowsCtrl.Hwnd, "Ptr", clientRect)
+     return
+ height := NumGet(clientRect, 12, "Int")
+ if (height < 1)
+     return
+ y := NumGet(point, 4, "Int")
+ if (y < 0 || y >= height)
+     return
+ index := Floor((y / height) * QuickMenuRows.Length) + 1
+ QuickMenuMouseSelect(ClampInt(index, 1, QuickMenuRows.Length))
 }
 
 QuickMenuKeyboardActive(*) {
@@ -14161,6 +14462,7 @@ ExitCleanup(ExitReason, ExitCode) {
  ; recreates the desktop windows from scratch.
  StopDesktopBlackout(true)
  ShutdownRtssHooksApi()
+ ReleaseQuickMenuPaintResources()
  SystemCursor("Show")
  if IsObject(DisplayPendingOldMode) {
      oldMode := DisplayPendingOldMode
