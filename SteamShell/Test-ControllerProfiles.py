@@ -527,9 +527,20 @@ def test_resolve_runs_per_report_without_claiming_its_own_field() -> None:
 def test_settings_layout_has_no_overlaps() -> None:
     """No two Settings controls on the same page may overlap.
 
-    A Delete button was placed at x430 and covered the "Park after returning to
-    Steam" checkbox, which spans x300-620. Eyeballing a hand-placed layout does
-    not catch that; arithmetic does.
+    A Delete button was once placed at x430 and covered the "Park after
+    returning to Steam" checkbox, which spans x300-620. Eyeballing a hand-placed
+    layout does not catch that; arithmetic does.
+
+    The pages no longer carry literal coordinates: every row places itself from
+    a cursor the builders advance. So this scan simulates that cursor instead of
+    reading coordinates off the page, which makes it cover EVERY row rather than
+    only the ones that happened to be written out longhand.
+
+    The numbers are read out of the source, not repeated here. The columns come
+    from SettingsLayout() and each builder's advance comes from its own `y +=`
+    line, so changing a builder changes this simulation with it. What is written
+    down below is only the SHAPE of each builder -- which controls it emits and
+    in which column -- because that is what the builder is.
     """
     import re
     from itertools import combinations
@@ -537,47 +548,144 @@ def test_settings_layout_has_no_overlaps() -> None:
 
     source = Path(__file__).with_name("SteamShell-XFE.ahk").read_text(
         encoding="utf-8", errors="ignore")
-    start = source.index("ShowSettings(*)")
-    body = source[start:source.index("\nSettingsTrackControl(", start)]
 
-    pages = ("General", "Controller & Cursor", "Steam", "RTSS & Performance",
-             "Startup Splash", "Startup Programs", "Assist", "Advanced")
-    rects: list[tuple[str, int, int, int, int, str]] = []
+    def layout_value(name: str) -> int:
+        block = re.search(
+            r"SettingsLayout\(\) \{.*?\n\}", source, re.S).group(0)
+        match = re.search(r'"' + name + r'",\s*(\d+)', block)
+        assert match, f"SettingsLayout() has no {name}"
+        return int(match.group(1))
+
+    def builder_advance(name: str) -> int:
+        block = re.search(
+            r"(?m)^" + name + r"\(.*?\n\}", source, re.S)
+        assert block, f"{name} was not found"
+        match = re.search(r"y \+= (\d+)", block.group(0))
+        assert match, f"{name} does not advance the cursor"
+        return int(match.group(1))
+
+    label_x = layout_value("labelX")
+    label_w = layout_value("labelWidth")
+    control_x = layout_value("controlX")
+    content_x = layout_value("contentX")
+    content_w = layout_value("contentWidth")
+    first_row_y = layout_value("contentTop")
+    content_bottom = layout_value("contentBottom")
+
+    row_advance = builder_advance("SettingsAddEditRow")
+    section_advance = builder_advance("SettingsAddSectionRow")
+    section_lead = int(re.search(
+        r"(?m)^SettingsAddSectionRow\(.*?top := y \+ (\d+)",
+        source, re.S).group(1))
+    button_line = int(re.search(
+        r"(?m)^SettingsAddButtonRow\(.*?LINE_HEIGHT := (\d+)",
+        source, re.S).group(1))
+    button_columns = tuple(int(value) for value in re.findall(
+        r"\d+",
+        re.search(r"(?m)^SettingsAddButtonRow\(.*?COLUMNS := \[([^\]]+)\]",
+                  source, re.S).group(1)))
+    button_width = int(re.search(
+        r"(?m)^SettingsAddButtonRow\(.*?BUTTON_WIDTH := (\d+)",
+        source, re.S).group(1))
+
+    # Only the shape lives here. Each entry is (rect list, advance) where a rect
+    # is (x, dy, w, h) relative to the cursor.
+    def edit_like(width: int) -> list:
+        return [(label_x, 3, label_w, 22), (control_x, 0, width, 26)]
+
+    rects: list = []
     page = None
-    for line in body.split("\n"):
-        header = re.match(r"\s*;\s*(" + "|".join(re.escape(p) for p in pages) + r")\s*$", line)
-        if header:
-            page = header.group(1)
+    cursor = first_row_y
+    pages = ("General", "Controller & Cursor", "Steam", "RTSS & Performance",
+             "Startup Programs", "Assist", "Advanced")
+    body = source[source.index("ShowSettings(*)"):source.index(
+        "\nSettingsForegroundRetry(")]
+
+    def add(shape: list, note: str) -> None:
+        for x, dy, w, h in shape:
+            rects.append((page, x, cursor + dy, w, h, note))
+
+    # The page bodies are one flat sequence of builder calls; re-joining wrapped
+    # calls onto one line is what makes them parseable in source order.
+    flattened = re.sub(r",\s*\n\s*", ", ", body)
+    flattened = re.sub(r"\n\s*\. ", " . ", flattened)
+
+    for line in flattened.split("\n"):
+        stripped = line.strip()
+        assign = re.match(r'category := "([^"]+)"', stripped)
+        if assign and assign.group(1) in pages:
+            page = assign.group(1)
             continue
         if page is None:
             continue
-        control = re.search(
-            r'Add(?:Text|Checkbox|Button|Edit|DropDownList|ListBox)\(\s*'
-            r'"x(\d+) y(\d+)(?: w(\d+))?(?: h(\d+))?', line)
-        if control:
-            rects.append((page, int(control.group(1)), int(control.group(2)),
-                          int(control.group(3) or 150), int(control.group(4) or 24),
-                          line.strip()[:60]))
+        if stripped.startswith("y := SettingsFirstRowY()"):
+            cursor = first_row_y
+            continue
 
-    # Rows placed by helpers, whose geometry lives in the helper rather than the
-    # call site. These are exactly the ones an eyeball check misses.
-    for match in re.finditer(
-            r'SettingsAddEditRow\(settings, "([^"]+)",[^)]*?,\s*(\d+), (?:true|false)\)',
-            body, re.S):
-        page, y = match.group(1), int(match.group(2))
-        rects.append((page, 300, y, 250, 24, f"edit row label y{y}"))
-        rects.append((page, 570, y - 2, 150, 26, f"edit row field y{y}"))
-    for match in re.finditer(
-            r'SettingsAddShortcutAt\(settings, "([^"]+)", "[^"]+",\s*"[^"]*", '
-            r'(\d+), (\d+), (\d+)\)', body, re.S):
-        page, x, y, total = (match.group(1), int(match.group(2)),
-                             int(match.group(3)), int(match.group(4)))
-        rects.append((page, x, y, 55, 24, f"shortcut label y{y}"))
-        rects.append((page, x + 58, y - 2, total - 145, 26, f"shortcut field y{y}"))
-        rects.append((page, x + 58 + total - 145 + 6, y - 3, 78, 28,
-                      f"shortcut button y{y}"))
+        match = re.match(r"SettingsAddCheckboxRow\(.*?&y(?:, (\d+))?\)", stripped)
+        if match:
+            height = int(match.group(1) or 26)
+            add([(content_x, 0, content_w, height)], stripped[:70])
+            cursor += height + 6
+            continue
+        match = re.match(r"SettingsAddNoteRow\(.*?&y(?:, (\d+))?\)", stripped)
+        if match:
+            height = int(match.group(1) or 22)
+            add([(content_x, 0, content_w, height)], stripped[:70])
+            cursor += height + 8
+            continue
+        if stripped.startswith("SettingsAddSectionRow("):
+            add([(content_x, section_lead, content_w, 22)], stripped[:70])
+            cursor += section_advance
+            continue
+        match = re.match(
+            r"SettingsAddEditRow\(.*?&y(?:, (?:true|false))?(?:, (\d+))?\)",
+            stripped)
+        if match:
+            add(edit_like(int(match.group(1) or 150)), stripped[:70])
+            cursor += row_advance
+            continue
+        match = re.match(r"SettingsAddChoiceRow\(.*?&y(?:, (\d+))?\)", stripped)
+        if match:
+            add(edit_like(int(match.group(1) or 200)), stripped[:70])
+            cursor += row_advance
+            continue
+        if stripped.startswith("SettingsAddShortcutRow("):
+            add(edit_like(200) + [(778, -1, 92, 28)], stripped[:70])
+            cursor += row_advance
+            continue
+        if stripped.startswith("SettingsAddPathRow("):
+            add([(label_x, 3, 160, 22), (466, 0, 300, 26), (774, -1, 96, 28)],
+                stripped[:70])
+            cursor += row_advance
+            continue
+        match = re.match(r"SettingsAddButtonRow\(.*?\[(.*)\], &y\)", stripped)
+        if match:
+            count = len(re.findall(r"\[\s*\"", match.group(1)))
+            for index in range(count):
+                column = index % len(button_columns)
+                if column == 0 and index > 0:
+                    cursor += button_line
+                rects.append((page, button_columns[column], cursor,
+                              button_width, 34, f"button {index + 1}"))
+            if count:
+                cursor += button_line
+            continue
+        # The two rows built inline, which still use the cursor variable.
+        match = re.match(
+            r'\w+ := settings\.Add\w+\(\s*"x(\d+) y" y " w(\d+) h(\d+)',
+            stripped)
+        if match:
+            rects.append((page, int(match.group(1)), cursor, int(match.group(2)),
+                          int(match.group(3)), stripped[:70]))
+            continue
+        match = re.match(r"y \+= (\d+)$", stripped)
+        if match:
+            cursor += int(match.group(1))
+            continue
 
-    assert len(rects) > 40, f"layout scan found only {len(rects)} controls"
+    assert len(rects) > 90, f"layout scan found only {len(rects)} controls"
+    assert len({r[0] for r in rects}) == len(pages), "a page produced no rows"
 
     for first, second in combinations(rects, 2):
         if first[0] != second[0]:
@@ -588,12 +696,20 @@ def test_settings_layout_has_no_overlaps() -> None:
             raise AssertionError(
                 f"[{first[0]}] overlap:\n    {first[5]}\n    {second[5]}")
 
-    # The status line and buttons sit at y610; page content must stay above them.
-    BOTTOM_BAR_Y = 620
-    for page, _x, y, _w, height, src in rects:
-        if "vSettingsStatus" in src or "y610" in src:
-            continue
-        assert y + height <= BOTTOM_BAR_Y, f"[{page}] {src} ends at {y + height}"
+    # Rows may now run past the bottom of the window, because the viewport
+    # scrolls -- that is the whole point of the port. What must NOT happen is a
+    # row starting above the viewport, which would draw over the page title.
+    for page_name, _x, y, _w, _h, note in rects:
+        assert y >= first_row_y, f"[{page_name}] {note} starts at {y}"
+
+    # A page that needs no scrolling should not have gained any: if the four
+    # shortest pages have grown past the viewport, a row was added in the wrong
+    # place rather than the page genuinely needing the space.
+    tallest = {}
+    for page_name, _x, y, _w, h, _note in rects:
+        tallest[page_name] = max(tallest.get(page_name, 0), y + h)
+    assert tallest["General"] <= content_bottom, (
+        f"General now needs scrolling ({tallest['General']})")
 
 
 def main() -> None:

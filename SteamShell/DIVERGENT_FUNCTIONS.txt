@@ -1,0 +1,108 @@
+# Functions defined in BOTH SteamShell.ahk and SteamShell-XFE.ahk that the
+# fingerprint gate has flagged as the same routine written twice, and which are
+# allowed to stay that way -- each with the reason recorded beside it.
+#
+# Why this file exists
+# --------------------
+# SHARED_FUNCTIONS.txt records what IS defined once. This records what is not,
+# and why. Until the gate existed there was no third state: a function was
+# either shared or it was two copies nobody was counting.
+#
+# The gate compares a naming- and comment-blind CALL SEQUENCE, because text
+# similarity cannot see duplication in this codebase. Text is exactly what gets
+# changed when a copy is tidied -- rename a parameter, rewrap a DllCall, swap a
+# switch for a Map -- and an audit that measured text scored ControllerBindingPretty
+# at 0.26 and GetLastLines at 0.49 while both had an IDENTICAL call sequence.
+# Thirty-four pairs were being read as intentional divergence. They were not
+# intentional; they were unmeasured. That is the whole reason for this file: the
+# ones that remain have to say out loud why.
+#
+# Format
+# ------
+#   FunctionName: the reason it must differ
+#
+# An entry with no reason FAILS the build. The reason is the entire value here --
+# a bare name is the state this file was created to end. Delete an entry the
+# moment its two copies are merged; a stale entry also fails, so the file cannot
+# quietly become a list of things nobody looks at again.
+#
+# PENDING entries are a worklist, not a justification. They record consolidation
+# that is scheduled and not yet done, so the count going down is visible.
+
+# ------------------------------------------------------------------------------
+# PERMANENT -- the per-product seam
+# ------------------------------------------------------------------------------
+# SteamShell-Shared.ahk calls these precisely SO the two products can answer
+# differently. Sharing them would defeat the mechanism rather than improve it.
+
+ProductIdentity: each product names, titles and icons itself; Shared asks so it does not have to know which program it is compiled into
+ProductVersionText: standalone reports a shell version and the helper build; the companion reports its own and has no helper of its own to name
+ProductTrayBaseTip: the notification-area tooltip states what the program is, and they are not the same program
+ProductTrayItems: the companion's tray menu has no shell controls to offer, because Xbox FSE owns the shell; the shapes differ because the menus genuinely differ
+ProductSettingsScrollBar: the two Settings surfaces are separate implementations holding their scrollbar in differently named globals; revisit when Phase 4c unifies settings
+
+# ------------------------------------------------------------------------------
+# PERMANENT -- product vocabulary
+# ------------------------------------------------------------------------------
+
+ControllerBindingPretty: resolution logic is shared; the LABELS are deliberately not. The companion speaks Xbox FSE's vocabulary -- "Game Bar" for WinG, "Back / Escape" for Esc, "Close window" for AltF4 -- and offers TaskView, WindowsDesktop and Settings actions standalone does not, while standalone offers ControlPanel. Kept as a per-product label map behind one shared resolver.
+
+# ------------------------------------------------------------------------------
+# PENDING Phase 2a -- identical call sequence, moving to SteamShell-Shared.ahk
+# ------------------------------------------------------------------------------
+# Same routine, different text only: parameter names, line wrapping, an if-chain
+# against a ternary. No abstraction needed; adopt the superset version.
+
+AutoMouseModeActive: PENDING Phase 2a -- companion is standalone minus the DesktopMode branch; share once XFE declares DesktopMode/EnableDesktopAutoMouseMode as false
+ElevatedRtssRequestPath: PENDING Phase 2a -- identical call sequence, differs only in how the path is spelled
+ExecuteControllerBinding: PENDING Phase 2a -- 0.88; the builtin action sets differ, the dispatch does not
+MouseWatch: PENDING Phase 2a -- identical call sequence
+SendChordSafe: PENDING Phase 2a -- identical call sequence
+SendSteamOverlayChord: PENDING Phase 2a -- identical but for the companion's CompanionDisabled guard, which hoists to the caller
+
+# ------------------------------------------------------------------------------
+# PENDING Phase 2b -- one is a strict subset of the other
+# ------------------------------------------------------------------------------
+# Six of these eight are XFE-inside-SS. That is not two programs that grew
+# apart; it is one program copied and trimmed. Share the superset and let the
+# companion's missing state be false.
+
+QuickMenuHideThenSteamMenu: PENDING Phase 2b -- standalone is the subset here
+ToggleQuickMenu: PENDING Phase 2b -- companion is standalone minus the desktop-mode guard
+
+# ------------------------------------------------------------------------------
+# PENDING Phase 2c -- resolvable through an abstraction that already exists
+# ------------------------------------------------------------------------------
+
+SetRtssFrameLimiterState: PENDING Phase 2c -- identical but for ShowNotification against SetStatus, which is exactly what SharedNotify was built for
+SetRtssOverlayState: PENDING Phase 2c -- same, via SharedNotify
+
+# ------------------------------------------------------------------------------
+# PERMANENT -- the privilege boundary
+# ------------------------------------------------------------------------------
+# The reason SHARED_FUNCTIONS.txt already records for OpenOSK and
+# OpenWindowsSettings, which applies to these two for the same cause: standalone
+# runs elevated so high-integrity controller input works, and every ordinary
+# utility it launches must cross a verified standard-user boundary first. The
+# companion runs at normal integrity and launches directly. Sharing standalone's
+# version compiles calls to LaunchInteractiveApp and
+# DesktopShellMatchesInteractiveUser into a program that has neither, which is a
+# LOAD-time failure -- caught by the reachability check, not by review.
+
+RunViaDesktopShell: standalone launches through its de-elevation ladder; the companion calls ShellExecute directly
+OpenTouchKeyboard: standalone reaches TabTip through LaunchInteractiveApp to shed its administrator token; the companion does not have one to shed
+
+# ------------------------------------------------------------------------------
+# PERMANENT -- helper wrappers over one shared implementation
+# ------------------------------------------------------------------------------
+# SteamShell-Helper.ahk cannot #Include SteamShell-Shared.ahk, so these four names
+# necessarily exist in both. They are no longer two implementations: each is a
+# three-line wrapper binding its own global to the single definition in
+# SteamShell-Common.ahk. The name is duplicated; the behaviour cannot drift,
+# which is what the Integer()-against-Round() split proved was worth ending.
+
+ReadBool: three-line wrapper binding IniPath or SettingsPath to ReadIniBool in SteamShell-Common.ahk
+ReadInt: three-line wrapper binding IniPath or SettingsPath to ReadIniInt in SteamShell-Common.ahk
+InitXInput: three-line wrapper caching ResolveXInputDll in each program's own XInputDll global
+HasLongBinding: three-line wrapper passing each program's ControllerMap to ControllerBindingHasLong
+

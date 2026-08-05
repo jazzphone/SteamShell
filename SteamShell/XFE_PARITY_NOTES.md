@@ -5,6 +5,13 @@ was a source reference only and standalone changes belonged in `SteamShell/`;
 since 1.7.1 / 0.1.15 that is no longer true. See *`SteamShell-XFE/` is no longer
 only a reference* at the end.
 
+**`SteamShell-XFE/` no longer exists as a directory.** Both trees, the shared
+file, both validators and the one build script live in `SteamShell/`, so a
+release is a copy of one folder. Where this document says `SteamShell-XFE/` it
+is describing the layout at the time, and the file it means is now
+`SteamShell/SteamShell-XFE.ahk`. Frozen snapshots under `releases/` keep the
+two-folder layout they were locked with.
+
 ## Ported to standalone SteamShell
 
 - XFE's final borderless Quick Menu geometry, open-session window/control pool,
@@ -38,11 +45,13 @@ only a reference* at the end.
   because its own restore path restarts Explorer.
 - Desktop-wide automatic mouse and its tray toggle remain standalone-only: they
   are keyed to that explicit Explorer-owned desktop mode. XFE never performs a
-  SteamShell-to-Explorer presentation transition.
+  SteamShell-to-Explorer presentation transition. XFE briefly had an equivalent
+  and schema 11 removed it; see *A second one that should have matched* for why
+  the stand-in for `DesktopMode` could not be made correct.
 - Live RTSS global Overlay and Frame Limiter state/control through
   `RTSSHooks64.dll`, foreground-profile `FramerateLimit`, and automatic
   HotkeyHandler fallback.
-- The **combined Frame Limit row** (Off · 30 · 40 · 60 · 90 · 120 · Custom), the
+- The **combined Frame Limit row** (Off · 30 · 40 · 60 · 90 · 120 · Preset · Custom), the
   conditional Custom FPS row with hold-to-repeat, and **Save Limit to Profile**.
   This one was *not* a port in either direction: it was designed once and applied
   to both trees in the same pass, so the behaviour is identical apart from the
@@ -93,14 +102,20 @@ only a reference* at the end.
   the standalone equivalent: it hands presentation back to Explorer through the
   guarded restore rather than pausing SteamShell in place, and it is reversible
   from the same tray menu.
-- XFE startup-curtain semantics. Standalone's splash is part of its actual Steam
-  startup lifecycle rather than a presentation-only companion curtain.
+- XFE startup-curtain semantics. The presentation-only companion curtain was
+  retired in XFE 0.1.19 because AnyFSE starts Steam before the companion, making
+  the cover inherently late. Standalone's splash remains part of its actual
+  Steam startup lifecycle.
 
 ## Release boundary
 
-The active tree is the locked **1.7.4** source with settings schema 14. Its
-frozen release is `releases/1.7.4/`; `releases/1.7.3/` remains the deliberate
-revert point immediately before the Quick Menu rendering rewrite.
+The standalone and XFE working trees are both **1.9.9** and are locked together
+in the self-contained `releases/1.9.9/` bundle. Standalone uses settings schema
+19 and XFE uses schema 9; the post-1.9.9 working trees are at standalone
+schema 20 and XFE schema 16. The earlier `releases/1.7.7/` and
+`releases/XFE-0.1.21/` snapshots remain intact; `releases/1.7.4/` remains intact;
+`releases/1.7.3/` remains the deliberate revert point immediately before the
+Quick Menu rendering rewrite, and `releases/XFE-0.1.17/` remains intact.
 The earlier `releases/1.7.2/`, `releases/1.7.1/`, `releases/1.7.0/`, `releases/1.6.0/`,
 `releases/1.5.0/`, `releases/XFE-0.1.14/`, `releases/XFE-0.1.15/` and
 `releases/XFE-0.1.16/` directories remain unchanged.
@@ -114,7 +129,7 @@ do.
 
 The rule at the top of this file — XFE is a source reference, standalone changes
 belong in `SteamShell/` — **stopped holding in the working tree after 1.7.0**.
-`SteamShell-XFE/SteamShell-XFE.ahk` now carries changes of its own:
+`SteamShell-XFE.ahk` now carries changes of its own:
 
 - The combined Frame Limit row, Custom FPS, and Save Limit to Profile, designed
   jointly with standalone rather than ported either way.
@@ -143,3 +158,574 @@ So the rule at the top of this file now reads: **XFE is a parallel tree, not a
 reference.** Changes that belong to both — the Frame Limit row is the first —
 are designed once and applied to both in the same pass, and each keeps its own
 version and its own locked release.
+
+## August 2026 cross-tree audit
+
+A mechanical diff of every shared function found that of 143 shared names, only
+42 were identical once indentation was normalized. Most of the remaining 101 are
+legitimately different — the page models, desktop-mode gating. (`SetStatus`
+versus `ShowNotification` was cited here as an example and should not have been;
+see the correction below.) These were not, and have been corrected in both trees:
+
+- **Build exit codes.** XFE's build script documents that `$LASTEXITCODE` is
+  unreliable for GUI-subsystem executables and uses `Start-Process -Wait
+  -PassThru`; standalone used the call operator. Standalone now matches, and
+  both reject a stale output EXE.
+
+  Tested on hardware afterwards, and the audit's original severity was wrong:
+  standalone's syntax gate was *not* broken. The old code piped through
+  `ForEach-Object`, and draining that pipeline synchronizes on process exit, so
+  the exit code arrived correctly. On Windows PowerShell 5.1.26100 with
+  AutoHotkey 2.0.26 a broken source returned 2 through both mechanisms. Keep the
+  change as hardening — it survives someone later removing the pipe — but it did
+  not fix a live defect. Whatever XFE's comment was written in response to, this
+  configuration does not reproduce it.
+- **Log rotation.** Standalone had it; XFE had none at all, while logging one
+  line per controller button edge unconditionally. XFE now has the same rotation
+  (`[Companion] LogRotateMaxKB`/`LogRotateBackups`, schema 5) and the per-edge
+  line moved behind the `DiagnosticLogging` flag that already gated the
+  timer-driven diagnostic tick. Standalone's rotation no longer measures the
+  file on every line.
+- **Left-stick Quick Menu navigation.** XFE's `QuickMenuHandleController` took
+  `lx` and `ly` and never read them, so the menu could only be driven from the
+  D-pad. Standalone's stick-to-D-pad synthesis is now ported across.
+- **RTSS default-path discovery.** Standalone probed the stock install location
+  when `[RTSS] Path` was unset; XFE gave up. Both now route menu availability,
+  launch, health reporting, and hooks-DLL lookup through one resolver, so an
+  ordinary RTSS install works consistently without configuration.
+- **HDR Win+Alt+B fallback — a divergence, not a gap.** The audit read the
+  "ported to standalone" note above, saw XFE lacked the fallback, and filed it
+  as a parity gap. That was wrong, and XFE's own validator caught it on the
+  first build.
+
+  Three independent things say it was deliberate. XFE **0.1.9** drove the HDR
+  row with nothing but `SendChordSafe("#!b")` and had no DisplayConfig HDR code
+  at all; **0.1.14** has twelve DisplayConfig references, no chord, and adds the
+  `-notmatch` assertion **in that same release**. And the XFE README states the
+  rule in user-facing terms: read the primary display's Advanced Color state
+  "rather than assuming what the Win+Alt+B shortcut did", and on an unreadable
+  driver/API state show **Unavailable** "without sending a blind toggle". That
+  last clause is precisely the behaviour the port changed.
+
+  So the rule is: XFE reports an unreadable state rather than guessing at it.
+  The port was reverted and the divergence recorded in `SHARED_FUNCTIONS.txt`.
+
+  What *did* survive into both trees is splitting the fallback out of
+  `SetQuickMenuHdrState`'s `allowToggleFallback` flag — standalone now has an
+  explicit `RequestHdrToggleFallback()`, because Win+Alt+B is a toggle and the
+  flag made the requested on/off state silently meaningless.
+- **Return shapes.** `GetPrimaryHdrState` now reports `wideColorEnforced` in
+  both; `GetRtssFrameLimit` now reports the resolved profile and guards the
+  `SplitPath` result in both.
+- **Shared painter.** The GDI+ module reference is released with a matching
+  `FreeLibrary`, and a failed `CreateDIBSection` is detected and logged rather
+  than silently blanking the rows. Applied identically, so `EnsureGdiPlus`,
+  `ShutdownGdiPlus`, and `QuickMenuPaintRows` remain byte-identical across the
+  two trees.
+
+**The thing that made all of this hard to see was formatting.** Standalone
+indented with one space and XFE with four, so a raw diff of the two trees was
+100% noise and the genuinely identical shared functions showed as 100% changed.
+Drift was invisible by construction.
+
+Standalone has therefore been reindented to XFE's four-space convention, and its
+`switch`/`case` bodies indented to match. That change was mechanical and
+content-preserving: only leading whitespace moved, the embedded default INI's
+continuation section was left byte-for-byte alone, and every line's content was
+verified unchanged afterwards. At that audit checkpoint all 48 manifest
+functions were **byte-identical** across the two trees, where none were before.
+Following later manifest additions, the current manifest contains 47.
+SteamShell's 1.7.8 development line, now released as 1.9.9, deliberately removed
+`OpenOSK` and `OpenWindowsSettings`
+because standalone must cross its verified standard-user boundary while
+normal-integrity XFE launches them directly; the manifest records that
+architecture decision beside the earlier HDR exception.
+
+### The largest deliberate divergence: privilege architecture
+
+Standalone's elevated helper, Setup Assistant, installation layout, shell
+registration, and Auto-Login have **no XFE counterpart and are not candidates for
+one**. This is the biggest structural difference between the two trees and it was
+not written down anywhere until now, which made it look like an omission rather
+than a decision.
+
+The reason is what each program is. Standalone replaces the Windows shell, so it
+starts before a desktop exists, must cross a verified standard-user boundary to
+launch anything, and needs a separate High-integrity process to reach windows
+UIPI puts out of its reach. XFE is an ordinary normal-integrity companion started
+from an existing desktop: it launches applications directly, never registers
+itself as the shell, and has no elevated window to service. Porting the helper
+would give XFE an administrator process it has no use for, and porting Setup
+would give it an installer for a layout it does not have.
+
+**Part of that list has since been reversed, and it is recorded here rather than
+quietly deleted.** The original text said none of the following belonged in
+`SHARED_FUNCTIONS.txt` and none should be added later: `StartElevatedInputHelper`,
+`StopElevatedInputHelper`, `SyncElevatedInputHelperWithSettings`,
+`ElevatedHelperLocationIsProtected`, `SteamShellPathIsAdminOnlyWritable`,
+`HardenElevatedHelperDirectory`, `ControllerHandleElevatedForeground`,
+`DeploySteamShell`, the `ElevatedRtss*`/`ApplyElevatedRtss*`/
+`RequestElevatedRtssFrameLimit`/`WaitForElevatedRtssRequest` family, and the
+`SetupAssistant*`, `RegisterElevatedHelperTask`, and Auto-Login families.
+
+XFE now has an opt-in, default-off RTSS helper, so three groups moved into
+`SteamShell-Shared.ahk`:
+
+- `SteamShellPathIsAdminOnlyWritable` and `ElevatedHelperLocationIsProtected` —
+  the protection gate. It takes a path and an expected version and inspects
+  owner, DACL and readability. It knows nothing about either program.
+- `GetProcessTokenSecurity` and the token helpers, plus
+  `QuoteWindowsCommandLineArg` and `StrRepeat`. "Is that process the same user,
+  in the same session, at High integrity?" is one question, not two.
+- The `ElevatedRtss*` request channel. Both trees ask the same helper for the
+  same thing in the same words; only `ElevatedRtssRequestPath()` stays per-tree,
+  because the two programs keep their data in different places.
+
+The rest of the list stands, and the line it now draws is worth stating: **the
+gate is shared, deployment is not.** `HardenElevatedHelperDirectory`, the
+embedded payload, `ExtractEmbeddedElevatedHelper`, installation modes, the
+protected on-demand task and every `SetupAssistant*` function remain
+standalone-only, because they are properties of an installer rather than of a
+path. XFE has no embedded payload and no administrator rights: it verifies and
+launches, or it explains why it would not. `SteamShell.exe` Setup deploys the
+helper in XFE mode.
+
+`StartElevatedInputHelper` and XFE's `StartElevatedRtssHelper` also stayed
+separate, deliberately. They are different launches of the same binary:
+standalone passes `--product=standalone` and may use its protected on-demand
+task, while XFE passes `--product=xfe` and only ever uses explicit UAC.
+
+**This divergence had a user-visible consequence, and that is what changed the
+decision.** Writing RTSS's frame cap is not a convenience the helper improves —
+it is the only way it works at all for a standard user, because
+`RTSSHooks64.dll` is loaded into the calling process and RTSS installs under
+Program Files. Standalone routes both the global cap and per-game **Save Limit
+to Profile** through the helper. XFE had no helper, so on a stock RTSS install an
+unelevated XFE could read the cap and toggle the limiter flag (shared memory, no
+file) but could not change the FPS value or save a profile; its Frame Limit row
+reported itself read-only, which was accurate.
+
+That was a real gap rather than a tidy divergence, and it turned out to be the
+argument that carried — stronger than the elevated-input case, because input
+has a workaround (reach the window another way) and this had none.
+
+**Resolved: XFE now has an opt-in, default-off elevated RTSS helper**, scoped to
+that one write and to nothing else. See *Still divergent* below for what was NOT
+ported and why, which is the more important half of the decision.
+
+The one place the two trees do meet is the controller mapping vocabulary. The
+helper implements the builtin keystrokes as fixed actions and declines the five
+that start a process or raise a window; XFE implements the whole vocabulary
+directly because it is already at the right integrity to do so. If a builtin is
+added to either tree, it needs a decision about which side of the standalone
+helper boundary it falls on — see the builtin split in `README.md`.
+
+### One that should have matched all along
+
+Controller reach over the application's own windows was an enumerated list in
+standalone and a single process-wide question in XFE. The divergence was
+defended on grounds that did not survive being checked — an evaluation order
+that is not what the code does, and presentation windows that cannot be active
+because they are `WS_EX_NOACTIVATE`. Standalone now asks XFE's question.
+
+Worth recording as a pattern rather than an incident: the justification for a
+divergence is itself a claim, and an old one is worth re-testing before it is
+used to defend the next decision. `SettingsEditorControllerActive` and
+`ControllerSettingsSurfaceActive` are still separate functions because their
+surrounding globals differ, but they now implement the same rule.
+
+### A second one that should have matched: automatic mouse mode
+
+Found by using XFE rather than by reading it. Returning to the Windows desktop
+left the controller with no pointer, because XFE had no automatic mouse mode at
+all — only holding View/Back, or `EnablePersistentMouseMode` for always-on. The
+feature had simply never been ported.
+
+The adaptation was the part recorded here, and **the adaptation was wrong.** It
+is preserved below because the reasoning that produced it is the reusable part.
+
+Standalone chooses between its per-application allowlist and its blanket
+exclusion list by asking `DesktopMode`, which is a shell-replacement concept: a
+companion that never owns the shell has no equivalent, and every foreground
+window is a desktop window as far as it is concerned. The tempting reading was
+that XFE therefore only needs the blanket list — which would have made
+`AutoMouseExeList` configuration that does nothing. So `EnableDesktopAutoMouseMode`
+was introduced to make the selection in XFE: on, the pointer active everywhere
+except a `DesktopAutoMouseExcludeExeList` defaulting to Xbox FSE's shell
+surfaces; off, only in the named applications. Both settings kept the meaning
+they have in standalone, and neither became dead configuration.
+
+**Schema 11 removed the exclusion mode entirely.** The test applied above was
+"does every setting still do something?", and both settings passed it. That was
+the wrong test. The right one is *can this setting be correct?* — and the
+exclusion list could not, because the question it was really answering is **"am
+I inside Xbox FSE right now?"**, which Windows exposes no way to ask. What
+shipped was a hand-maintained list of another product's process names, which
+goes stale silently and wears a configuration field while doing it. Keeping
+`AutoMouseExeList` reachable was a good reason to reject "blanket list only"; it
+was not a good enough reason to invent a mode that cannot be right.
+
+What remains is the allowlist and its master switch: standalone's
+non-`DesktopMode` behaviour, unchanged and unadapted. Xbox FSE needs no
+exclusion because it is simply never on the list. The removal narrows behaviour
+for anyone running the old default, so `RetireDesktopAutoMouseSettings` deletes
+both keys and logs what changed rather than doing it quietly.
+
+The generalisable finding: **when a port needs a stand-in for a concept the
+other program does not have, the stand-in has to be answerable, not merely
+non-empty.** A configuration field is not a substitute for a fact the program
+cannot obtain.
+
+`AutoMouseProcessMatches` moved into the shared file, because the list means the
+same thing in both programs. `AutoMouseModeActive` stayed per-tree, and now
+differs only by the `DesktopMode` branch standalone has and XFE does not — a
+smaller divergence than the one it replaced.
+
+### Still divergent, and both are decisions rather than oversights
+
+- **The elevated INPUT helper is standalone-only, and stays that way.** The
+  premise applies equally — XFE also runs at medium integrity, so UIPI blocks
+  its input from elevated foreground windows in exactly the same way — and XFE
+  installation already requires administrator rights, so the usual objection
+  does not hold.
+
+  The reason it was still not ported is narrower, and stronger, than "runtime
+  posture", and it is worth writing down because the obvious reasoning points
+  the other way. **The helper's input implementation is XInput.** XFE exists
+  because XInput is not enough for its users: Xbox FSE withholds background
+  XInput, and a controller in DirectInput mode — measured on an 8BitDo
+  Ultimate 2 — is not an XInput device at all. Porting elevated input would
+  ship a feature that works only for the people who did not need XFE, while
+  charging every XFE user a permanently resident High-integrity process polling
+  a controller. Elevated input also has a workaround; the RTSS write does not.
+
+  If that ever changes, the work needed is not "port the helper" but "give the
+  helper RawInput and the learned-profile store", which is much larger and
+  shares its decision with the RawInput port recorded under *Deliberately not
+  ported*.
+
+- **The elevated RTSS helper is now in both trees, on different terms.** The
+  standing recommendation from the post-1.9.9 audit — opt-in and default off,
+  or not at all — was followed, with the scope narrowed further to RTSS writes
+  only. Standalone's helper is on by default, carries input and geometry, and
+  may use a protected on-demand scheduled task; XFE's is off by default, carries
+  the frame cap alone, and only ever uses explicit UAC, because its install
+  directory has no protected ancestor chain. Same binary, same protection gate,
+  different `--product`.
+- **The Settings windows are laid out by different mechanisms.** RESOLVED. XFE
+  now uses flowing row builders and a scrolling content viewport, like
+  standalone, and the four category names shared with standalone — General,
+  Controller & Cursor, RTSS & Performance, Startup Programs — present the
+  settings that exist in both in standalone's order and wording.
+
+  The precondition is worth recording, because "port the builders" was not
+  enough on its own. Flattened into single flowing columns, two of XFE's pages
+  run to roughly 800px against a 410px content area in a fixed 920x660 window.
+  Standalone only fits because it scrolls; XFE never got that, so its pages had
+  grown sideways into hand-placed columns instead. The viewport had to be ported
+  first.
+
+  What stayed different, deliberately: choice lists derive their stored value
+  from the selected index, so `OverlayControlMode`, `FrameLimiterControlMode`,
+  `WindowMode` and `ParkEdge` keep XFE's order — reordering one to match
+  standalone's wording would invert the setting, and an assertion now pins it.
+  `ControllerIndex` stays an edit here where standalone uses a dropdown, for the
+  same reason: the round-trip is a value, not an index.
+
+  The three pages with no standalone counterpart — Steam, Assist, Advanced —
+  were not aligned with anything, and standalone's Startup & Splash, Focus &
+  Windows and Launcher Cleanup have no XFE counterpart. Inventing settings on
+  either side to force symmetry would be worse than the difference.
+
+### Enforcing it
+
+The shared functions now live in **one file**. `SteamShell-Shared.ahk` sits
+beside both trees in `SteamShell/` and is `#Include`d by both at compile time, so a shared
+function can no longer drift: there is no second copy to drift from. The
+validator that used to compare two copies and fail on drift — a net that catches
+falls — now guards the arrangement instead. It fails if a shared function is
+redefined inside a tree (which would shadow the shared definition and still
+compile), if the shared file defines something the manifest does not list, if
+either tree stops including it, or if either tree stops providing the seam.
+
+Shared code may call back into exactly two per-tree functions, `LogLine` and
+`SharedPersistSettings(changes)`. The second exists because the trees write
+settings differently and both ways are right for their program: standalone stages
+a copy and replaces the live INI only after every write succeeds, because a
+half-written settings file in the Windows shell is a machine that signs in to
+nothing; XFE writes directly, because it is an ordinary application.
+
+The manifest is still a decision record, not a lock. If two functions genuinely
+need to diverge, move the function back into both trees and remove the name in
+the same commit — the point is that a divergence is written down rather than
+discovered. The checker also reports functions that have *become* identical in
+both trees and are candidates to move in, which is how the list grows.
+
+The move was deliberately conservative. A similarity scan suggested nine more
+functions were "near-identical"; on inspection only four were behaviourally
+identical. The rest differ by product — `QuickMenuMouseActivate` vs
+`QuickMenuMouseSelect`, `SetStatus` vs `ShowNotification`, `QuickMenuStatusCtrl`
+vs `QuickMenuFooterCtrl`, and the product name each embeds — and stayed where
+they were. A high similarity score is a hint, not a decision.
+
+The check has no skip path. It used to be skipped when the sibling tree was
+absent, which was the normal case inside a frozen `releases/` snapshot holding
+one tree — and a silent skip is the last thing a check like this should be
+capable of. Both trees, the shared file and the manifest are now in one folder,
+a snapshot is that whole folder, so the skip had nothing left to describe and
+was removed. The check itself lives in `Validate-Common.ps1` and runs from both
+validators.
+
+### How much is left to share
+
+Measured rather than guessed, because the intuition here is wrong. Taking the
+144 shared function names and progressively ignoring every cosmetic difference:
+
+| if we also ignore… | identical |
+|---|---|
+| nothing (as shipped) | 42 |
+| comments | 46 |
+| line wrapping | 47 |
+| `ShowNotification` vs `SetStatus` | 47 |
+| `ClampInt` vs `Max(Min())` | 48 |
+| product-identity strings | 50 |
+
+**This measurement was wrong, and the conclusion drawn from it was wrong.** It
+compared raw text, where indentation and local variable names dominate, and it
+was taken before 161 functions moved into the shared files. Re-measured
+structurally -- comments stripped, literals collapsed, notify aliases folded --
+eleven functions that "differed substantively" were the same code formatted
+differently, and all eleven are now defined once. `Report-StructuralDrift` in
+`Validate-Common.ps1` reports this figure on every build so it cannot go stale
+again. The original claim follows for the record.
+
+Unifying *everything* cosmetic buys eight functions. About **94 shared-name
+functions differ substantively** — different page models, different foreground
+semantics, desktop-mode gating, one tree owning the shell and the other refusing
+to. That is real divergence, not drift.
+
+The other direction was checked too: all standalone-only functions
+cross-compared against all XFE-only functions for same-logic-different-name
+duplication.
+
+**That check previously reported "exactly one hit, a six-line cancel helper.
+Nothing is hiding." Re-running it found five, two of them byte-identical:**
+
+| standalone | XFE | similarity | lines |
+|---|---|---|---|
+| `ShortenQuickMenuText` | `ShortenText` | **1.00** | 4 |
+| `HandleUncaughtSteamShellError` | `HandleUncaughtCompanionError` | **1.00** | 5 |
+| `StopElevatedInputHelper` | `StopElevatedRtssHelper` | 0.95 | 21 |
+| `RecordShortcutChord_Cancel` | `RecordShortcutCancel` | 0.83 | 6 |
+| `SettingsEditorMouseWheel` | `SettingsMouseWheel` | 0.75 | 16 |
+
+The cancel helper is the one the earlier figure recorded. The other four are
+either newer than that measurement or were missed by it; the earlier scan did
+not state its similarity threshold or whether it normalised comments and
+whitespace, which is why the numbers cannot be reconciled and the claim could
+not be checked without redoing the work.
+
+Both byte-identical pairs are self-contained and would belong in
+`SteamShell-Common.ahk` rather than the shared file: neither touches a global,
+and the uncaught-error handler differs from the elevated helper's equivalent for
+a real reason — the helper exits and suppresses AutoHotkey's dialog, because a
+modal error box on a shell desktop is unrecoverable.
+
+**Four of the five are now shared.** What kept each pair apart was smaller than
+the name suggested:
+
+| pair | what actually differed | now |
+|---|---|---|
+| `ShortenQuickMenuText` / `ShortenText` | nothing | `SteamShell-Common.ahk` as `ShortenText` |
+| `HandleUncaught*Error` | nothing | `SteamShell-Common.ahk` as `HandleUncaughtError` |
+| `StopElevated*Helper` | one log label | `SteamShell-Shared.ahk` as `StopElevatedHelper`, label via `ProductIdentity()["helperLabel"]` |
+| `RecordShortcut*Cancel` | one Map key: `"ih"` vs `"input"` | `SteamShell-Shared.ahk` as `RecordShortcutCancel` |
+
+**Starting** the helper stays per-tree, and the entry above still records why —
+standalone may use a protected on-demand task, XFE only ever uses explicit UAC.
+**Stopping** it is not like that: closing a process by PID and waiting is the
+same operation either way.
+
+**`SettingsEditorMouseWheel` / `SettingsMouseWheel` stays split.** Three real
+differences, not naming: XFE also guards on `SettingsVisible` (a global
+standalone does not have at all — zero references), also excludes the `ListBox`
+class, and scrolls through a differently-shaped settings window. Two seams for an
+18-line function is a worse trade than the duplication.
+
+> **Two of those three held up; the middle one was a bug wearing a rationale.**
+> `SettingsVisible` really is XFE-only (zero references in standalone), and the
+> scroll target really is a differently-shaped window. But "XFE also excludes the
+> `ListBox` class" was recorded as a product difference when standalone's
+> settings window has a category `ListBox` of its own — hovering it and scrolling
+> moved the settings page instead of the list. Standalone now excludes it too.
+>
+> The conclusion still stands: two seams for an 18-line function is a poor trade
+> and the pair stays split. What was wrong was counting a missing exclusion as
+> evidence for splitting it.
+
+**One thing this pass exposed that had nothing to do with sharing.** Moving the
+uncaught-error handler into `SteamShell-Common.ahk` meant a tree could stop
+calling `OnError` entirely while the body assertion still passed, because Common
+supplies the function either way. Only the elevated helper's registration had
+ever been asserted. Both trees now pin theirs against `$rawSource`. A shared
+definition can quietly cover for a program that never wires it up, and that is
+worth checking for wherever a per-tree registration meets a shared body.
+
+So **48 is close to the natural ceiling**, and it is not worth renaming
+`ShowNotification` to `SetStatus` across standalone to inflate it. The two status
+mechanisms genuinely differ — standalone's schedules a footer repaint when the
+message expires, XFE's does not — and collapsing the names would hide that.
+
+> **This was wrong, and it was wrong on the facts rather than on judgement.**
+> Both functions scheduled that repaint, with the same
+> `SetTimer(QuickMenuRefresh, -(StatusVisibleMs + 100))` under the same
+> `if QuickMenuVisible`, against the same five globals. They were the same
+> nineteen lines. The claimed difference was not there to be hidden.
+>
+> The name `ShowNotification` is a leftover from a bottom-corner toast the shell
+> removed for being distracting over the Quick Menu; both products have shown the
+> Quick Menu status line ever since. Because two names existed, every function
+> that reported anything looked product-specific — `SendRtssShortcut`'s entire
+> diff was four notify calls.
+>
+> The implementation now lives once in `SteamShell-Shared.ahk` as `SharedNotify`,
+> and each tree keeps a one-line alias so its own call sites are unchanged. The
+> conclusion that renaming for its own sake is not worth doing still stands. What
+> was wrong was the evidence offered for it, which nobody had checked.
+
+The corollary matters more than the number: *"how many functions are
+byte-identical" is a poor proxy for "how much do these trees benefit each
+other."* The most valuable thing this comparison turned up — XFE's typed INI
+readers making a whole bug class unrepresentable, scoped in
+`INI_READER_MIGRATION.md` — would not add a single name to the manifest.
+
+### Settings file layout — aligned in schema 12, with a stated limit
+
+The two products organised their INI files by different rules, and neither was
+wrong:
+
+| | standalone | XFE (before schema 12) |
+|---|---|---|
+| Cross-cutting feature switches | all 13 in `[Features]` | beside the settings they gate |
+| Assist / cleanup tuning | `[GameForegroundAssist]`, `[LauncherCleanup]` | one merged `[Assist]` |
+
+Both were internally consistent, which is why this was never drift. The cost was
+paid by the user rather than the code: someone who had configured one product
+looked in the wrong section in the other.
+
+Schema 12 adopts **standalone's** rule, because standalone is the larger surface
+and the one whose sections a user meets first. Six keys moved —
+`EnableAutoMouseMode` to `[Features]`, and `CooldownSec`, `GracefulCloseMs`,
+`HardKill`, `RequireNoGame`, `LauncherProcesses` to `[LauncherCleanup]`.
+
+**The limit is deliberate and worth stating, because it will look incomplete.**
+Only settings that exist in both trees *under the same name* moved. XFE's
+`TickIntervalMs` is standalone's `CheckIntervalMs`; XFE's `CpuThresholdPercent`
+is standalone's `GameCPUThresholdPercent`. Moving those into a shared section
+without renaming them helps nobody find anything, and renaming them as well
+would assert a parity that does not exist: XFE's assist features are reduced
+versions, which is precisely what the `Lite` in `EnableGameFocusLite`,
+`EnableSteamAssistLite` and `EnableLauncherCleanupLite` records. `[Assist]`
+therefore still exists and still holds the XFE-only tuning.
+
+`SettingsSchemaVersion` also stayed in `[Companion]` rather than moving to
+standalone's `[SteamShell]`. Those are each product's own identity section, not
+a mismatch; giving the companion a `[SteamShell]` section would be the error.
+
+### Current state (August 2026, end of the consolidation pass)
+
+The figures above are the record of individual audits and are left as they were
+written. These are the numbers now:
+
+| | |
+|---|---|
+| Defined once in `SteamShell-Common.ahk` (all three programs) | **90** |
+| Defined once in `SteamShell-Shared.ahk` (both trees) | **103** |
+| Same-named functions still defined in both trees | **69** |
+| ...of those, below 0.70 raw similarity | **35** |
+| ...of those, still 0.90+ once naming and formatting are ignored | **0** |
+
+The last row is the one that matters, and the reason it is zero: every function
+that was the same code wearing different names or indentation is now defined
+once. What remains below 0.70 is divergence with a reason — different page
+models, desktop-mode gating, one tree owning the shell and the other refusing to.
+
+`Report-StructuralDrift` in `Validate-Common.ps1` recomputes that last row on
+every build and reports it, so this table cannot go quietly stale the way the
+measurements above it did. It reports rather than fails: a high structural score
+is evidence, not a verdict.
+
+### Sorting the duplication by intent, not by similarity
+
+The table above counts byte-identical functions. Sorting the 83 functions
+defined in both trees by *why* they differ turned out to be the more useful
+question, and produced a different answer:
+
+| Why they differ | Count | What was done |
+|---|---|---|
+| Nothing — byte-identical | 3 | shared |
+| One product string | 3 | shared behind `ProductIdentity()` |
+| Variable or control names only | 4 | renamed, then shared |
+| A real product decision | 2 | kept, behind a seam |
+| Genuinely different | 71 | left alone |
+
+**The seams are the mechanism, and they are cheap.** `SharedNotify` already
+existed for the notification surface; `ProductIdentity()` and
+`QuickMenuMouseChoose` joined it. A seam turns "these differ, so they must be
+duplicated" into "these differ *here*, and are identical everywhere else."
+
+**Two findings worth keeping:**
+
+*A justification outlived its code.* `SHARED_FUNCTIONS.txt` recorded
+`VerifyElevatedHelperProcess` as per-tree because the trees "compare against
+different helper paths". They read the same global; only the error message
+differed. A recorded decision is only as good as the last time somebody checked
+it against the source.
+
+*Sharing a message without sharing the behaviour is its own bug.* The shared
+`SetQuickMenuHdrState` told the user to "use A to toggle" when HDR state was
+unreadable. Standalone's A falls back to the `Win+Alt+B` chord; XFE's A reports
+the same unavailability, so the advice looped. The HDR divergence itself is
+correct and stays — see `SHARED_FUNCTIONS.txt` — but the shared text now says
+only what is true in both.
+
+### Still divergent by feature, not by implementation
+
+Two things XFE has and standalone does not, where the intent applies to both.
+Recorded here because they are *ports*, not consolidation, and should not be
+mistaken for drift:
+
+- **RawInput controller backend.** Standalone reads XInput only. A controller in
+  DirectInput mode is not an XInput device, which is the reason XFE exists — and
+  the shell has the same blind spot for the same users.
+- **Steam View button tap/hold.** Standalone already has `MenuShortcut` and
+  `OverlayShortcut`, so the intent is fully present; only the tap/hold
+  resolution and its two hold thresholds are missing.
+
+### Merging the runtimes entirely — recommended against
+
+Moved here from `POST_1.9.9_STATUS.md` when that document was retired. It is a
+standing decision about the relationship between the two trees, which is what
+this file is for; it was only ever in a status note because that is where it was
+written.
+
+Measured before the shared-file work: **149 common function names**, of which 47
+were byte-identical (627 LOC, about 2% of the combined 31.5k lines) and 35 were
+genuinely different (<0.50 similarity). The functions that differ most are the
+core of each program — `PollController` is 334 vs 404 lines because standalone
+reads XInput and XFE reads RawInput through learned profiles, which is the
+reason XFE exists at all.
+
+**The argument against is not the effort.** Today an XFE change *cannot* break
+the shell, because XFE is a different binary. That isolation is the most
+valuable safety property this project has, and it is free. Merging would delete
+it to unify 627 lines.
+
+Worth revisiting after the unified installer ships, once there is evidence about
+how much duplicated maintenance actually remains.
+
+The August 2026 audit is a data point *for* keeping them separate: the automatic
+mouse mode divergence it found was not between the two trees at all, it was
+between `SteamShell.ahk` and `SteamShell-Helper.ahk` — two programs that already
+share `SteamShell-Common.ahk`. Sharing code does not by itself stop two
+processes answering the same question differently. Only having one answer does.

@@ -1,13 +1,156 @@
 # SteamShell XFE Windows test checklist
 
-For release **0.1.17**, locked at `releases/XFE-0.1.17/`.
+For release **1.9.9**. The coordinated locked source snapshot is
+`releases/1.9.9/`.
 
 Everything under *Additions since 0.1.14* arrived in 0.1.15. 0.1.16 adds the
 RTSS frame-cap input changes described in *Custom FPS stepping* below.
 0.1.17 adds the Quick Menu rendering, lifecycle, accent, recovery-layout, and
 complete display-mode enumeration changes at the top of this checklist.
+0.1.18 adds the audit-hardening checks below. 0.1.19 adds the XFE startup
+curtain retirement and Assist hardening checks. 0.1.20 adds the Quick Menu
+keyboard, persistent mouse, mappings gesture, and Windows Settings checks.
 
-Test this separately from the locked SteamShell 1.7.4 build.
+Test this separately from the standalone SteamShell 1.9.9 runtime, then run the
+combined release validator from `releases\1.9.9`.
+
+## Schema 13 — cursor and park settings renamed to standalone's
+
+- **Upgrade with non-default values, which is where a rename loses data.** On a
+  schema-12 INI set `[Cursor] EnableAutoHide=false`, `HideDelayMs=4000`,
+  `ParkEdge=left`, `ParkYPercent=0.20`, `ParkOnStartup=false`. Start the new
+  build and confirm all five arrive as `[Features] EnableAutoHideCursor=false`,
+  `[Features] EnableMouseParkOnBoot=false`, `[Timing] MouseHideDelay=4000`,
+  `[MousePark] MouseParkEdge=left`, `[MousePark] MouseParkYPercent=0.20`, with
+  the old keys gone and `moved 5 setting(s)` in the log.
+- Confirm the behaviour actually follows the migrated values: pointer hides
+  after 4 seconds, parks to the **left** edge at 20% height, and does not park
+  at startup.
+- Confirm `ParkOnGameStart`, `ParkOnSteamReturn` and `ForegroundPollMs` are
+  still in `[Cursor]` and still work — they were deliberately not renamed.
+- On a read-only INI, confirm the old `[Cursor]` values are still honoured
+  rather than reverting to defaults.
+
+## Shared-code consolidation
+
+- **On a display that cannot do HDR:** the Display page must read
+  `HDR   Not Supported`, and the D-pad must **step over** that row rather than
+  highlighting it. Same in standalone.
+- With RTSS not installed, confirm the RTSS rows are likewise skipped, and that
+  a page where every row is inert still lets you reach Back.
+
+- Confirm the Quick Menu bottom line still shows the button hint, and shows a
+  status message when there is one. `QuickMenuDestroyWindow` and the status
+  control are now shared code.
+- Confirm a **click on a Quick Menu row still activates it** in XFE (it selects
+  in standalone). That difference now runs through `QuickMenuMouseChoose`.
+- Confirm a two-press confirmation still works — Save Frame Limit To Profile is
+  the easiest — and that the message reads *"Select again within 5 seconds to
+  confirm ..."*.
+- Confirm the log still rotates at `LogRotateMaxKB` and keeps `LogRotateBackups`
+  files. `RotateLogIfNeeded` is shared now; set `LogRotateMaxKB=32` to trigger
+  it quickly.
+- **HDR:** with a display that cannot report Advanced Color state, confirm the
+  Quick Menu says *"Windows HDR state is unavailable"* and **not** "...use A to
+  toggle". Pressing A must report the same thing and must never send `Win+Alt+B`.
+- Confirm the helper-verification failure message names *the companion*, and
+  that a support bundle redacts XFE's directory as `%XFE_DIR%`.
+
+## Schema 12 — commented settings file and aligned sections
+
+None of this has executed. The reader change affects **every** setting XFE has,
+so this section comes first.
+
+### The reader must survive comments
+
+- Start XFE with the new `SteamShell-XFE_SAMPLE.ini` copied as
+  `SteamShell-XFE.ini`. Open Settings and confirm every value matches the file
+  rather than falling back to a default. The old reader would have read
+  `true  ; explanation` as an unrecognised string.
+- **The specific one to look at:** open the Quick Menu and check the accent row
+  reads `Purple`, not `Purple ; Steam Blue|Blue|Purple|...`. That is the visible
+  symptom of the old reader, and it was present in shipped samples.
+- Confirm automatic mouse mode is actually **on** with the commented file in
+  place. It defaults to on, and the old reader would have resolved the commented
+  value to off. Check `EnableViewButtonActions`, `EnableGameFocusLite`,
+  `SuspendOnShellOverlay` and `LaunchDeElevated` the same way — all default on.
+- Put a deliberate typo in a boolean (`EnableAutoHide=yse`). Confirm it falls
+  back to the setting's own default (on) rather than to `false`, and that
+  Settings shows it as on.
+- Add your own trailing comment to a value through a text editor, restart, and
+  confirm the setting is unchanged and the comment survives a Settings save.
+
+### Schema 12 migration
+
+- **Upgrade path, which is the one that can lose data.** Take an existing
+  schema-11 `SteamShell-XFE.ini`, set `[Controller] EnableAutoMouseMode=false`
+  and `[Assist] HardKill=false`, then start the new build. Confirm both values
+  arrive as `false` at `[Features] EnableAutoMouseMode` and
+  `[LauncherCleanup] HardKill`, that the old keys are gone, and that the log
+  records `moved 2 setting(s)`.
+- Confirm a **fresh** install writes `[Features]` and `[LauncherCleanup]`
+  directly and never logs a migration.
+- Run the upgrade twice. The second run must move nothing and log nothing.
+- Put a conflicting value at the destination by hand before upgrading; confirm
+  the destination wins and the source key is still removed.
+- On a read-only INI, confirm the companion still starts, logs the failure as a
+  warning, and keeps reading the old location rather than losing the setting.
+
+## Additions consolidated into 1.9.9 from 0.1.21
+
+- Open Controller Mappings directly from Quick Settings with persistent Mouse
+  Mode off. Confirm the right stick moves the visible pointer and RB clicks.
+  Repeat with every companion Settings/editor window and a native file picker.
+- Confirm schema 8 copies the old `CustomFrameCap` to `PresetFrameCap`.
+- Set Preset to 158 and Custom to 157. Cycle away and back, then restart XFE;
+  confirm each entry restores its own value.
+
+## Additions in 0.1.20
+
+- Confirm the main page order is Audio, Display & HDR, RTSS & Performance,
+  Steam Menu, Steam Quick Access, Task Switcher, Game Bar, Open Keyboard, Mouse
+  Mode, Settings, and System.
+- Select Open Keyboard and confirm Quick Settings disappears before the touch
+  keyboard appears.
+- Enable Mouse Mode and confirm controller pointer/mappings work without
+  View/Back, including while Xbox FSE/Steam is the shell surface. Restart and
+  confirm it persists; disable it and confirm the normal modifier gate returns.
+- With Mouse Mode On, close Quick Settings with B and launch Open Keyboard with
+  A. Confirm neither button fires its normal mapping again when released.
+- Hold Y on the main page and confirm the styled Controller Mappings submenu
+  opens inside Quick Settings. Confirm it shows the loaded mappings and ends
+  with **Set Controller Mappings**; selecting that row closes Quick Settings and
+  opens the full editor. A short Y tap must do nothing and no Controller Layout
+  row remains on the main page.
+- Open Settings ▸ Windows Settings and confirm the Quick Menu is dismissed before
+  Windows Settings appears. Confirm Settings reads `Features & Configuration`,
+  System reads `Power & Diagnostics`, and every static row label is title-cased.
+
+## Additions in 0.1.19
+
+- Complete **Retired XFE startup curtain** and the expanded **Assist features**
+  scenarios below.
+- Confirm schema 6 preserves a `.pre-schema-6.bak` before removing the retired
+  `[StartupSplash]` section.
+- Run the XFE validator and confirm it rejects any restored startup-curtain UI
+  or runtime entry point, the old unconditional CPU result, a Steam tool-window
+  filter regression, or an image-name-wide delayed hard kill.
+
+## Additions in 0.1.18
+
+- Confirm migration to settings schema 5 adds `Companion.LogRotateMaxKB` and
+  `LogRotateBackups` without replacing existing values. Use a low threshold and
+  verify rotation reaches multi-digit backups such as `.log.10`.
+- With `DiagnosticLogging=false`, press and release controller buttons and
+  confirm per-edge input lines are absent. Enable it and confirm they appear.
+- Navigate every Quick Menu page with the left stick as well as the D-pad.
+  Confirm held input repeats normally and neutralizing the stick stops it.
+- Configure a missing RTSS path while RTSS exists at its standard
+  `%ProgramFiles(x86)%` location. Confirm the main summary, RTSS page, Start
+  action, Health Check, and `RTSSHooks64.dll` lookup all use that installation.
+- Run `..\Run-SteamShellValidation.cmd`; confirm XFE participates in syntax,
+  static, broken-source, and locked-stale-output checks, and that a failure
+  returns a non-zero process exit code without replacing root `current\`.
 
 ## Additions in 0.1.17
 
@@ -38,12 +181,29 @@ Test this separately from the locked SteamShell 1.7.4 build.
 
 ### Frame Limit row (replaces the separate Frame Limiter row)
 
-- Cycle Left/Right through **Off · 30 · 40 · 60 · 90 · 120 · Custom** and confirm RTSS reflects each value.
+- Cycle Left/Right through **Off · 30 · 40 · 60 · 90 · 120 · Preset · Custom** and confirm RTSS reflects each value.
 - **The preset must survive an off/on round trip.** Set 72 via Custom, cycle to `Off`, press Right, and confirm it
   returns to **72** rather than 30. "Off" clears RTSS's limiter flag and must never write `0` over the value.
 - Press Left repeatedly while already on `Off` and confirm the flag write and its status message do not repeat.
-- Select `Custom` from `120` and confirm the frame rate does not change — Custom only reveals the row.
-- On Custom FPS, hold Right and confirm the step escalates 1 → 5 → 10; after a pause a single press moves by 1.
+- **The selection must survive a reboot.** Set a standard cap, then Preset, then
+  Custom, rebooting after each, and confirm the row comes back exactly as it was
+  left rather than `Off`. Repeat with the limiter left `Off` and confirm it comes
+  back `Off` with one Right press returning to the previous number, not 30.
+- Confirm the log records `Restored the last Frame Limit selection: …` and that
+  the restore did **not** launch RTSS: with RTSS closed at startup, `RTSS.exe`
+  must not appear until something else starts it, and the restore must then apply
+  on its own within about two minutes.
+- Turn off **Restore last selection when RTSS starts** in Settings ▸ RTSS &
+  Performance, reboot, and confirm XFE leaves RTSS alone.
+- Set `[RTSS] UseDllIntegration=false`, restart, and confirm the log says the
+  restore requires DLL integration rather than waiting out the full deadline.
+- Confirm Preset uses the value saved in Settings, while Custom restores the
+  last value adjusted on its own row rather than inheriting the prior selection.
+- Temporarily set Preset to 60. Confirm the cycle still reaches 90 and 120
+  normally instead of treating the same 60 FPS number as two distinct states.
+- On Custom FPS, confirm every tap changes the value by exactly 1. Hold Right
+  and confirm only the repeat rate accelerates; after release, the next tap is
+  still exactly 1.
 - Confirm every change targets the **global** profile and no per-game profile is touched.
 - **Save Limit to Profile:** confirm the row shows the foreground game's executable, requires two presses, and
   that RTSS then shows the value on that game's profile **with its other settings unchanged**. Over Big Picture
@@ -99,9 +259,13 @@ quickly:
 
 ## Build and launch
 
-- Double-click `Build-SteamShell-XFE.cmd` with AutoHotkey v2.0.26 64-bit
-  installed. Confirm the result remains visible until a key is pressed.
-- Confirm static validation passes.
+- Double-click `Build-SteamShell.cmd` with AutoHotkey v2.0.26 64-bit installed.
+  One script builds all three binaries; the companion no longer has its own.
+  Confirm the result remains visible until a key is pressed.
+- Confirm **both** validators pass — the shell's and this one — since the single
+  build runs both.
+- Confirm the companion is left at `dist\SteamShell-XFE.exe` for this test.
+  Installing it for real is Setup Assistant inside `SteamShell.exe`.
 - Launch as a standard user; do not enable **Run as administrator**.
 - Confirm a second launch leaves the original process running.
 - Confirm `SteamShell-XFE.ini` and `SteamShell-XFE.log` appear beside the EXE.
@@ -116,29 +280,87 @@ Resolved: Backend=auto, DiagnosticLogging=false, RawInputProbe=false, ...
 ## AnyFSE lifecycle
 
 - Configure Steam Big Picture as the AnyFSE Home app.
-- Add SteamShell-XFE.exe as an AnyFSE startup app, **or** use the logon task and
-  remove it from AnyFSE so it is not started twice.
+- Leave SteamShell-XFE.exe **out** of AnyFSE's startup applications. Setup
+  Assistant registers the logon task, so adding it there as well starts two
+  companions.
+- After a Setup Assistant install, reboot and confirm exactly **one**
+  `SteamShell-XFE.exe` process. Then deliberately add it to AnyFSE's startup
+  list as well, reboot, and confirm two appear — this is the misconfiguration
+  the old instruction produced, and it should be recognisable when reported.
+- Open **Settings → General** and confirm the integration note names only the
+  AnyFSE Home app and *Exit FSE when Home app exits*, and tells you not to add
+  the companion to AnyFSE's startup applications. It must no longer instruct
+  adding it as a startup app.
 - Turn **Exit FSE when Home app exits** off.
 - While Xbox FSE is active, confirm heartbeat lines continue for at least a
   minute, proving the companion survives rather than being suspended.
 - Close and relaunch Steam; confirm the same companion PID survives.
 
-## Startup splash
 
-- Leave **Startup Splash** disabled and confirm startup is unchanged.
-- Enable **Black**, set a short duration, and confirm the primary display is
-  covered immediately and fades back to Xbox FSE without taking focus.
-- Select a valid video and `mpv.exe`, enable **Video**, and confirm no desktop or
-  Xbox FSE frame flashes before MPV becomes visible.
-- With **Play the entire video** enabled, confirm the curtain closes when MPV
-  exits. Set a short safety timeout and confirm it still closes if MPV hangs.
-- Disable full-duration playback and confirm `DurationMs` closes the video.
-- Temporarily configure a missing video and then a missing MPV executable;
-  confirm each falls back to Black and records the reason in the log.
-- Exit or choose **Disable** from the tray while the curtain is active; confirm
-  XFE closes only the MPV process it launched and removes the black cover.
-- On an HDR television, leave **Force MPV to SDR** enabled and confirm the TV
-  does not switch HDR modes for the startup clip.
+### One logon task, one name
+
+Two programs used to register this task under different names, so a machine could
+carry both and start two companions. These steps prove they converge.
+
+- Fresh machine: install XFE with Setup Assistant. In Task Scheduler confirm
+  exactly one task named **SteamShell XFE Companion**, and that its trigger shows
+  a **10 second delay** — Setup's old task had none.
+- Open **Settings → Advanced → Check Logon Task**. Confirm it now FINDS the task
+  and writes its definition to the log. It used to report none after a Setup
+  install.
+- Press **Create Logon Task**. Confirm it replaces the same task rather than
+  adding a second, and that no task named `SteamShell-XFE` exists afterwards.
+- **Migration.** On a machine that already has the old `SteamShell-XFE` task,
+  run either route and confirm the old name is deleted and only
+  `SteamShell XFE Companion` remains.
+- **Remove Logon Task** must clear both names. Confirm no SteamShell XFE task of
+  either name survives, then reboot and confirm the companion does not start.
+- Uninstall from Setup Assistant and confirm the same.
+- Reboot with the task registered and confirm exactly **one** companion process,
+  starting about ten seconds after sign-in rather than immediately.
+- Confirm the registered account shows as the interactive user. Renaming a
+  Windows account must not break the task — the definition stores a SID.
+
+## Upgrading while the companion is running
+
+This is the normal case, not the awkward one: the logon task starts the
+companion at sign-in, so it is running every time Setup Assistant is opened on a
+configured machine. Setup used to try to replace a locked image and fail, which
+meant it could essentially never apply here.
+
+- **The reported case.** With the companion running, launch a newer
+  `SteamShell.exe`, let it open Setup Assistant, and apply. Confirm it succeeds
+  rather than reporting that the companion could not be deployed, and that
+  `SteamShell-XFE.exe` carries the new file version.
+- Confirm the log records `Setup closed PID … before replacing it` followed by
+  the restart line.
+- Confirm the companion is running again when the result dialog closes, and that
+  the dialog mentions it was closed and restarted. On a first install — nothing
+  running beforehand — confirm it says nothing about a restart.
+- **Integrity check, and this is the important one.** With the companion
+  restarted by Setup, add the *Integrity Level* column in Task Manager and
+  confirm `SteamShell-XFE.exe` is **Medium**. Setup runs elevated, so a restart
+  through `Run` would silently hand the companion an administrator token —
+  exactly what choosing XFE is meant to avoid.
+- Repeat with the **opt-in elevated RTSS helper enabled** so a helper is also
+  resident. Confirm both are closed, both are replaced, and the helper reports
+  file version 1.9.9.4.
+- Confirm the settings INI, `SteamShell-XFE-Controllers.ini`, and the log
+  survive the upgrade intact. The companion is closed with WM_CLOSE so its exit
+  handler runs; a truncated or missing learned profile means it was terminated
+  instead.
+- **Uninstall while running.** Confirm the companion is stopped before removal
+  and that the directory is fully removed rather than partially.
+
+## Retired XFE startup curtain
+
+- Start 0.1.19 with a copy of an older schema-5 INI whose `[StartupSplash]`
+  section is enabled. Confirm no curtain or video appears over Steam.
+- Confirm the section is removed, `SettingsSchemaVersion=6` is written, and the
+  original values remain recoverable in `SteamShell-XFE.ini.pre-schema-6.bak`.
+- Confirm neither the full Settings window nor Quick Menu Settings exposes a
+  startup-curtain control. Standalone SteamShell still owns its startup
+  curtain/video; this retirement is XFE-only.
 
 ## Controller input backend
 
@@ -382,7 +604,7 @@ window is really on screen.
 - Close the menu, launch and leave a fullscreen game, then wait on Xbox FSE
   without reopening the menu. No title, rows, footer, or noninteractive menu
   fragments may reappear. Reopen it afterwards and confirm it is responsive.
-- Open Settings; confirm centred, all eight categories, no overlapping controls.
+- Open Settings; confirm centred, all seven categories, no overlapping controls.
 - On multi-monitor, move the foreground app to the second monitor and confirm
   both windows open there.
 
@@ -472,7 +694,8 @@ the GDI+ painter.
 
 ## Quick Menu Settings page
 
-- Open Quick Menu → Settings; confirm seven toggle rows and **All Settings…**.
+- Open Quick Menu → Settings; confirm seven toggle rows, **Windows Settings**,
+  and **All Settings…**.
 - Flip a row with **A**, and another with **Left/Right**: both must work.
 - **Confirm the row's value updates immediately** and the status line names it.
 - **Open the INI and confirm the value was written**, without pressing Save
@@ -484,6 +707,7 @@ the GDI+ painter.
 - Open the full Settings window afterwards and confirm the checkboxes match what
   the Quick Menu shows.
 - **All Settings…** opens the Settings window.
+- **Windows Settings** dismisses the Quick Menu and opens the Windows Settings app.
 
 ## Settings window layout and focus
 
@@ -495,7 +719,7 @@ the GDI+ painter.
   the "Park after returning to Steam" checkbox.
 - On **Steam** and **Advanced**, confirm no explanatory paragraph is cut off at
   the bottom.
-- Visit all eight categories and confirm nothing is clipped or overlapping. The
+- Visit all seven categories and confirm nothing is clipped or overlapping. The
   requested window is 920x660; page content stops above the button bar at y610.
 - At each display scale, confirm the visible outer window is vertically centred
   in the monitor work area. Its title bar and bottom edge should have equal
@@ -503,8 +727,8 @@ the GDI+ painter.
 
 ## Settings categories
 
-- Confirm the sidebar lists eight categories, including **Steam** and
-  **Startup Splash**.
+- Confirm the sidebar lists seven categories, including **Steam**, **Startup
+  Programs**, and **Assist**, with no **Startup Splash** category.
 - **Cycle with LT/RT all the way round in both directions and confirm every
   category is reachable**, including Assist and Advanced. The wrap point was
   previously hard-coded to 4 and those two could not be reached at all.
@@ -536,8 +760,22 @@ the GDI+ painter.
   automatically revert.
 - After the automatic revert, confirm the open Quick Menu re-centres again
   without manual navigation.
-- Confirm the Apply row counts down (`Select to KEEP (12s)`) during the window.
+- Confirm the Apply row counts down (`Select To KEEP (12s)`) during the window.
 - Repeat and select Apply again to keep all three settings.
+- **KEEP must never be refused.** Whenever the row reads `Select To KEEP`, one
+  press must confirm — the toast reads *Display settings kept* and the countdown
+  stops. Work through every case that used to eat the press:
+  - a **59.94 Hz** mode, where the enumerated list says 60 and Windows reports
+    59 as current. This is the one that produced "sometimes it keeps, sometimes
+    it ignores you", so test it explicitly if the display offers such a mode.
+  - a change that includes **Scale**, pressed KEEP as soon as the row appears
+    rather than after waiting for the desktop to settle.
+  - a resolution the driver stops offering after the change (hot-plug or switch
+    inputs mid-window if the panel allows it).
+  In every case confirm the change **survives past 15 seconds**. A refused press
+  used to look like nothing happening, then a revert.
+- Confirm the toast after Apply reads *Select KEEP within 15 seconds or it
+  reverts* and no longer says "Select CURRENT again".
 - On a multi-monitor system, confirm only the Windows primary display changes,
   even when the Quick Menu was opened over an application on another monitor.
 - If Scale reads `Unavailable`, confirm resolution, refresh, and HDR still work
@@ -633,6 +871,13 @@ Enable one at a time, in this order.
 - With a launcher open and no game running, confirm it closes after the settle
   time, and the log records it.
 - Start a game and confirm cleanup does **not** run while it is detected.
+- Minimize the game and confirm CPU activity continues to block cleanup. Then
+  set `CpuThresholdPercent=0` and confirm only fullscreen/borderless window shape
+  is used.
+- With `HardKill=true`, use a test launcher that ignores `WM_CLOSE`. Confirm the
+  delayed pass closes only the original PID. Disable Launcher Cleanup during the
+  grace period and confirm the pending force-close is cancelled. Repeat while a
+  game starts during the grace period and confirm the process is left running.
 
 **Game Focus Lite:**
 
@@ -642,6 +887,10 @@ Enable one at a time, in this order.
 **Steam Assist Lite** (enable last, alone):
 
 - Watch for it duplicating or fighting AnyFSE's own return-to-Home behaviour.
+- Confirm Steam remains a valid target when its visible Big Picture window has
+  `WS_EX_TOOLWINDOW` without `WS_EX_APPWINDOW`.
+- Bring File Explorer, the desktop, and the taskbar to the foreground and confirm
+  the assist never takes focus away from those `explorer.exe` surfaces.
 
 **The Xbox FSE task switcher, with Steam Assist Lite on.** This is the case the
 overlay check exists for, and the shipped process list is a guess that may not
@@ -688,6 +937,8 @@ For all three:
   Select it and verify RTSS launches minimized and the page changes to the live
   Overlay and Frame Limiter rows. Test a missing executable path and confirm the
   menu reports it without attempting a blind shortcut.
+- Repeat with the configured path missing but a stock RTSS installation present;
+  confirm **Start RTSS** appears and launches the discovered default executable.
 - With RTSS running, confirm the **RTSS Settings** row says only **Running**,
   without repeating Overlay/Limiter state. Select it and confirm SteamShell XFE
   Settings opens directly on **RTSS & Performance**.
@@ -799,3 +1050,393 @@ Diagnosing a failure, in order:
   window it does not own.
 - Exercise Steam exit/restart and non-Steam apps for at least one longer play
   session as the final release smoke test.
+
+## Frame Limit row reaches every entry
+
+The bug this replaces: pressing **A** repeatedly reached OFF, PRESET and CUSTOM
+and stopped there, with 30/40/60/90/120 unreachable in that direction.
+
+- Open Quick Menu → RTSS with RTSS running and the limiter **off**.
+- Press **A** repeatedly and confirm the row walks the full list in order —
+  OFF, 30, 40, 60, 90, 120, PRESET, CUSTOM — and then wraps back to OFF.
+- Confirm each stop actually applies: check the value in RTSS itself, not only
+  the row text.
+- Press **Left/Right** on the same row and confirm it still *clamps* rather than
+  wrapping, and that Right from OFF still restores the FPS RTSS was holding
+  rather than stepping to 30.
+
+## Quick Menu does not clip when a page grows
+
+- With RTSS **not** running, open Quick Menu → RTSS. The page shows two rows.
+- Leave the page open and start RTSS from elsewhere.
+- Confirm the page grows to four rows, the window resizes and re-centres, and
+  the bottom row and the button hint are fully visible.
+- Navigate to another page and back; confirm no leftover empty space.
+
+
+## Hold to drag
+
+New. `Builtin:LeftClick` is press-and-hold; everything else is unchanged.
+
+**The failure this must never produce is a mouse button stuck down.** Less severe here than in the shell -- Explorer still owns the
+desktop -- but keep a keyboard connected anyway.
+
+- With RB bound to Left click (the default), hold View/Back, hold RB, move the
+  right stick. Confirm a drag: select text, move a file, drag a window title bar.
+- Tap RB. Confirm it still produces an ordinary single click.
+- Confirm RB double-click still works by tapping twice.
+- **Release checks.** Start a drag, then in turn: release View/Back mid-drag;
+  let automatic mouse mode end by switching to an application not on the list;
+  press the Quick Menu chord; press the Settings chord; unplug the controller.
+  After each, confirm the button is NOT still down — click somewhere harmless and
+  confirm nothing is selected or dragged.
+- **Inside Xbox FSE.** Confirm the controller still navigates FSE normally and
+  no drag occurs there, since FSE is not on the automatic mouse list.
+- **Watchdog.** With a drag held, suspend the poll (open Settings, or reload).
+  Within ~35 seconds confirm the log records *Released a synthetic mouse button
+  held past the safety limit* and the button is up.
+- **Exit and error.** Exit the companion mid-drag and confirm the button is released.
+- **Mapping editor.** Confirm the `RB.Long` row reads *Reserved for mouse (hold
+  to drag)*, and that **Set Built-in** and **Record Shortcut** both refuse it with
+  a status message rather than accepting a binding that can never fire.
+- Change `RB.Short` to something else and confirm `RB.Long` becomes settable
+  again and shows its real action.
+- Bind Left click to **A** instead and confirm drag moves to A and RB returns to
+  a normal Short/Long button.
+- Confirm **Right click is unchanged** — RT taps produce a context menu and
+  holding RT does not drag.
+
+
+### Steam in the task switcher
+
+- With Xbox FSE running and Steam Big Picture behind it, open the Task Switcher.
+  **Steam must be listed.** It was being dropped as a cloaked window before the
+  tool-window exception was ever reached.
+- Select it and confirm it comes to the front.
+- Confirm no other cloaked or tool windows have appeared alongside it — the
+  exemption is meant to be Steam-specific, not a relaxation of the rules.
+- If Steam's row has no title, confirm it reads something usable rather than
+  being blank.
+
+### Elevated RTSS helper without a prompt
+
+- Enable elevated frame-cap writes and set a cap. On first use, confirm the
+  protected task is registered and no UAC prompt appears afterwards.
+- Confirm no `HighestAvailable` task exists **before** the opt-in is used.
+- Confirm the task and the helper directory are both removed by Setup
+  Assistant's uninstall.
+
+## Automatic mouse mode
+
+Schema 11 removed `EnableDesktopAutoMouseMode` and
+`DesktopAutoMouseExcludeExeList`. Two settings remain.
+
+- Defaults: `EnableAutoMouseMode=true`, `AutoMouseExeList=explorer.exe`.
+- On the Windows desktop, move the right stick without holding View/Back and
+  confirm the pointer moves, and that a hidden cursor is revealed rather than
+  moved invisibly. Include Start and the search surface.
+- Switch to Xbox FSE and confirm the pointer does **not** activate there, and
+  that FSE navigation is unaffected. This now follows from FSE not being on the
+  list rather than from an exclusion, so it is worth confirming rather than
+  assuming.
+- Add a second application to `AutoMouseExeList`, save, and confirm the pointer
+  starts activating inside it without a restart.
+- Clear `AutoMouseExeList` entirely and confirm the pointer stops activating
+  anywhere, and that holding View/Back still works.
+- With the pointer wrongly active somewhere, confirm the Quick Menu and Settings
+  chords still work, so the list can be corrected without a keyboard.
+- Set `EnableAutoMouseMode=false` and confirm holding View/Back still works.
+- Confirm **Settings → Controller & Cursor** shows exactly two automatic-mouse
+  rows — the master switch and the application list — with no exclusions field.
+
+### Schema 11 migration
+
+- Start with an INI containing `EnableDesktopAutoMouseMode=true` and a populated
+  `DesktopAutoMouseExcludeExeList`. Launch the companion.
+- Confirm **both keys are deleted** from `[Controller]`, `AutoMouseExeList` is
+  unchanged, and `SettingsSchemaVersion=11`.
+- Confirm the log records the retirement and states that automatic mouse mode
+  now applies only to `AutoMouseExeList`. This narrows behaviour, so a silent
+  migration is the failure — the line is the deliverable.
+- Repeat with a **read-only** INI: confirm the companion still starts, both keys
+  are ignored by the poll loop regardless, and the warning names the reason.
+
+## Opt-in elevated RTSS helper
+
+### RTSS shortcut messages
+
+- Clear each of the six RTSS shortcut settings in turn, disable DLL integration,
+  and confirm the companion names **the specific setting** that is blank rather
+  than saying "the RTSS shortcut".
+
+
+**None of this has executed.** The helper, its deployment in XFE mode, and every
+refusal path below are new and unrun. Test on a machine you can recover.
+
+Run these as a **standard user** with RTSS installed in its default
+`C:\Program Files (x86)\RivaTuner Statistics Server` location. Anywhere the
+account can already write RTSS's own directory, none of this applies and the
+in-process write works on its own — which is itself worth confirming once.
+
+### The default: nothing is elevated
+
+- Install XFE through `SteamShell.exe` Setup in XFE mode, as an administrator.
+- Confirm the completion dialog says the elevated helper was installed and is
+  **turned off**.
+- Confirm `%ProgramFiles%\SteamShell-XFE\bin\SteamShell-Helper.exe` exists,
+  reports file version **1.9.9.4**, and that `icacls` on **both** the directory
+  and the file lists SYSTEM and Administrators as Full and Users as read/execute
+  — the file must list ACEs, not an empty DACL. This is the failure that shipped
+  once in the standalone path and certified itself as protected.
+- Confirm `dir /q` shows the helper **owned by Administrators**, not by the
+  account that ran Setup. This is the ordering bug that would fail every install.
+- Sign in normally. Confirm **no UAC prompt**, no `SteamShell-Helper.exe` in Task
+  Manager, and that Health Check reports `elevated RTSS helper disabled
+  (default)`.
+- Open Quick Menu → RTSS. Confirm the Frame Limit row reports **read-only** and
+  *Save Limit to Profile* reports **Unavailable**.
+
+### Turning it on
+
+- Settings ▸ RTSS & Performance ▸ **Write the cap through an elevated helper**,
+  then Save & Apply.
+- Confirm a UAC prompt appears **at that moment**, without a restart. Accept it.
+- Confirm `SteamShell-Helper.exe` is running, Health Check reports it as PASS
+  with its PID, and the elevated-helper-protection line reports PASS.
+- Confirm the Frame Limit row is no longer read-only.
+- **Decline** the UAC prompt on a second attempt and confirm the companion keeps
+  running, Health Check says WARN with the cancellation reason, and the row goes
+  back to read-only rather than silently accepting presses.
+
+### The write actually reaches RTSS
+
+- Note the modified time and contents of RTSS's `Global` profile file.
+- Change the cap from the Quick Menu. Confirm **the file on disk changes** —
+  not only the row text — and that RTSS's own window updates live.
+- Confirm the cap takes **one** press, not several. Two processes touching RTSS
+  at once is what made it take several in standalone.
+- Launch a game, open Quick Menu → RTSS → **Save Limit to Profile**, confirm
+  twice. Confirm a profile for that executable appears in RTSS's `Profiles`
+  directory holding the right `FramerateLimit`, and that the Frame Limit row
+  still reads the **global** value afterwards.
+- Check `%ProgramFiles%\SteamShell-XFE\bin\SteamShell-Helper.log` for the
+  matching request lines.
+
+### The refusals
+
+- With the helper running, put a name that is not a running process into the
+  per-game request path and confirm the helper logs a refusal rather than
+  writing it.
+- Point `[RTSS] Path` at an `RTSS.exe` **outside** Program Files and confirm the
+  helper logs that it will not write there. The companion's own write already
+  works in that case.
+- Grant your own account Modify on `%ProgramFiles%\SteamShell-XFE\bin`.
+  Restart the companion and confirm it **refuses to elevate**, logs the reason,
+  and Health Check reports the protection line as WARN naming your SID.
+- Separately, take ownership of that directory without adding a writable ACE and
+  confirm the same refusal — the owner has implicit `WRITE_DAC`, so ownership
+  alone must be enough to refuse.
+- Re-run Setup as administrator and confirm owner, DACL and helper all recover.
+
+### Turning it off, and lifecycle
+
+- Clear the checkbox and Save & Apply. Confirm the helper process **exits
+  immediately**, without a restart, and Health Check returns to the disabled
+  line.
+- With it enabled, end `SteamShell-Helper.exe` from Task Manager. Confirm the
+  next frame-cap press fails **promptly** rather than pausing for three seconds,
+  and logs that the helper process exited.
+- Exit the companion with the helper running. Confirm the helper exits on its
+  own within a few seconds.
+- Confirm the helper **never** shows a window, message box, or error dialog in
+  any of the above.
+
+### What the helper must NOT do
+
+- With the helper running and Task Manager focused, press a mapped controller
+  button. Confirm **nothing happens** — XFE's helper carries no elevated input,
+  and the accepted cost in the README still applies in full.
+- Confirm no elevated window is centred or maximised while the helper runs.
+
+### Uninstall
+
+- Uninstall XFE from Setup Assistant. Confirm it says the helper directory was
+  left in place, and that nothing starts it afterwards.
+
+## Settings fields round-trip
+
+`RTSS.RestoreFrameLimitOnStartup` was registered as a Settings field and neither
+populated nor saved: the checkbox always drew unchecked and clearing it did
+nothing. A validator assertion now covers every field structurally, but confirm
+the two in this area by hand.
+
+- Set `RestoreFrameLimitOnStartup=false` in the INI, open Settings, and confirm
+  the checkbox is **unchecked**.
+- Tick it, Save & Apply, and confirm the INI now reads `true`.
+- Repeat for **Write the cap through an elevated helper**.
+
+## Settings window: flowing rows and a scrolling viewport
+
+**Unrun.** Every page was rebuilt and the window gained a scrolling content area
+it never had. A page that draws over the title, a page that cannot be scrolled to
+the bottom, or a control left behind by the scroll are all new failure modes.
+
+### It still opens and looks right
+
+- Open Settings with `Ctrl+Alt+Shift+S` and from Quick Menu → All Settings.
+- Confirm the log says `Settings layout audit passed for all categories`. If it
+  reports issues, they name the page and the coordinates — treat that as a
+  failure, not a warning.
+- Visit all seven categories with the sidebar and with LT/RT. Confirm each shows
+  its own title and description, and no control from another page.
+- Confirm nothing draws over the page title, the sidebar, or the footer.
+
+### Scrolling
+
+- **General**, **Steam**, **Startup Programs**, **Assist** and **Advanced** must
+  show **no scrollbar** — they fit.
+- **Controller & Cursor** and **RTSS & Performance** must show one.
+- On both, drag the thumb to the bottom and confirm the last row is fully
+  visible and not clipped by the footer.
+- Click above and below the thumb (page up/down) and the arrows (line up/down).
+- Scroll with the mouse wheel over the page background.
+- Scroll with the **left stick** on a controller, and confirm the right stick
+  still moves the pointer at the same time.
+- Put the pointer over the Startup Programs list box and use the wheel. The
+  **list** must scroll, not the page.
+- Scroll one page down, switch to another category and back, and confirm it
+  returns to where you left it.
+- Watch for trails or half-drawn controls while dragging the thumb quickly. That
+  is what the redraw batching prevents.
+
+### Rows are where they should be
+
+- **Controller & Cursor**: confirm the four automatic-mouse controls (Enable,
+  Everywhere-except, Exclusions, Allowlist) are in the **left column, below the
+  parking rows** — not in a right-hand column.
+- **RTSS & Performance**: confirm it is one list with **Overlay** and **Frame
+  Limiter** section headings, and no group boxes.
+- **General**: confirm the order is Quick Menu, Audio, Display, accent colour,
+  custom accent, chord hold, heartbeat.
+
+### The settings still round-trip
+
+This is the important one: the pages were rebuilt, so every field's wiring is new
+even though the keys did not change.
+
+- Change **one setting on every page**, Save & Apply, close Settings, reopen, and
+  confirm each change is still shown.
+- Check the INI directly for the four whose stored value comes from a dropdown
+  **index**, because reordering a list would invert them silently:
+  `RTSS.OverlayControlMode`, `RTSS.FrameLimiterControlMode`,
+  `StartupPrograms.WindowMode`, `Cursor.ParkEdge`. Set each to its **second**
+  option, save, and confirm the INI holds the expected string.
+- Confirm the Record… buttons on every shortcut row record into the right field.
+- Confirm Browse… on the RTSS path row fills the RTSS executable field.
+- Confirm all twelve Advanced buttons still do what their labels say.
+
+## Which window is the game
+
+The per-game RTSS cap is keyed on an executable name, so the failure this fixes
+is a cap written to the wrong program's profile and reported as saved.
+
+- **Upgrade with a customised INI.** Schema 13 to 14 adds twelve `[Assist]` keys.
+  Change several unrelated Assist values first, upgrade, and confirm they survive
+  and the new keys appear with the documented defaults.
+- **A launcher that is fullscreen.** Leave a store launcher maximised with a game
+  running behind it, then save a per-game cap. It must go to the game, not the
+  launcher. Check the log names the exe it chose.
+- **A fullscreen video or browser** with no game running: saving a per-game cap
+  must not target it.
+- **A game with the sound muted** must still be detected — audio adds to the
+  score, it is not required.
+- **A windowed game** below the fullscreen tolerance: the scorer returns nothing
+  and the last-observed-foreground fallback should still let the save proceed.
+- Set `[Assist] EnableAudioAssist=false` and confirm detection still works on
+  shape and CPU alone.
+- Confirm Game Focus, Steam Assist and Launcher Cleanup behave exactly as before
+  — they use the old shape test and must be unaffected.
+
+## Game-score diagnostics and the shared Health Check
+
+- **Upgrade with a customised INI.** Schema 14 to 15 adds a `[Logging]` section.
+  Change several unrelated values first, upgrade, and confirm they survive and
+  `[Logging]` appears with everything off.
+- Set `[Logging] EnableGameScoreLogging=true` and `GameLogMode=TOPN`, open the
+  Quick Menu over a game, and confirm a candidate table appears in the log with
+  score, CPU, audio and fullscreen columns. It must match the shell's format.
+- Set `GameLogMode=DIAGNOSTIC` and confirm rejected near-misses appear too.
+- Confirm a table is written whenever candidates exist, and that the best one is
+  used regardless of its score. A low-scoring but scored candidate must NOT send
+  the save back to the last-observed foreground window.
+- Confirm `GameLogIntervalMs` rate-limits: no more than one table per interval.
+- Leave it `OFF` and confirm the log is unchanged from before this build.
+- **Health Check** now shows a list with Status/Check/Details, plus Refresh and
+  Copy Report. Confirm every row has all three fields and none reads "PASS —".
+- Confirm Copy Report puts the whole report on the clipboard with the companion's
+  name and version in the header.
+- Confirm Refresh re-runs the checks without reopening the window.
+- Confirm Export Diagnostic ZIP still works and the window centres on the active
+  monitor.
+
+## A minimized game must still be nameable
+
+- Start an exclusive-fullscreen game, alt-tab so it minimizes itself, open the
+  Quick Menu and save a per-game frame cap. It must target the game.
+- With `[Logging] EnableGameScoreLogging=true` and `GameLogMode=TOPN`, confirm the
+  minimized game appears as a candidate with `FS=Y`.
+- **Close** a game, then open the Quick Menu and try to save a per-game cap. It
+  must NOT target the closed game — that is the stale-name case the removed
+  fallback used to produce.
+- Confirm Game Focus, Steam Assist and Launcher Cleanup are unaffected; the
+  inventory gained fields but they read the same keys as before.
+
+## The companion records itself
+
+- **Upgrade with a customised INI.** Schema 15 to 16 adds a `[Setup]` section.
+  Change unrelated values first, upgrade, and confirm they survive and `[Setup]`
+  appears with `Product=XFE`.
+- Confirm `InstallDirectory` and `DataDirectory` are filled in on first run and
+  match where the companion actually is.
+- Restart and confirm they are NOT rewritten — an ordinary start should do no
+  file writes for this.
+- **Move the folder** and restart: exactly one warning naming both paths, and the
+  companion runs normally.
+- Confirm a companion copied by hand, never installed by Setup Assistant, still
+  records itself correctly.
+
+- **Health Check row.** Open Health Check and confirm an "Installation record"
+  row. On a normal install it must read PASS. After editing `[Setup]
+  InstallDirectory` to a wrong path it must read WARN and name both paths.
+- On a machine where Setup has never run, the row must read INFO and say nothing
+  is recorded — not WARN. A new installation is not a faulty one.
+
+## A moved companion says so
+
+- Move the companion folder and start it. The tray tip must end with
+  "— installation moved" and the status line must say so once.
+- It must start and behave normally: assists, Quick Menu and RTSS all unaffected.
+- Re-run Setup Assistant from SteamShell.exe, or correct `[Setup]
+  InstallDirectory` by hand, and confirm the notice clears on next start.
+
+## Tray icon and menu
+
+- **The bug this fixes.** Kill `explorer.exe` from Task Manager and let it
+  restart. Before this change the companion's tray icon was gone for good; it
+  must now come back with its menu intact.
+- Confirm the menu is: Quick Menu, Settings, separator, Disable/Enable, Exit.
+- Use Disable, and confirm the entry renames to Enable AND the Quick Menu entry
+  greys out. Re-enable and confirm both revert.
+- With a moved installation, confirm a new first entry appears — "Installation
+  moved — open Settings" — and that it disappears once the record is corrected.
+  This is the entry the old build-once menu could not show at all.
+- Confirm double-clicking the icon still opens the Quick Menu.
+
+## RTSS after the shared-code move
+
+- Toggle the RTSS overlay and frame limiter; both must report on screen as before.
+- Set a global and a per-game frame cap with the elevated RTSS helper enabled and
+  running, then with it killed. The second must fail promptly, not freeze.
+- Confirm the Quick Menu title still reads "SteamShell XFE  ›  <page>".
+- Hold the d-pad on Volume and Custom FPS; both must still repeat.
+- Scroll the Settings window with the wheel and confirm it behaves as before.

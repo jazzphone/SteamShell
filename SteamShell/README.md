@@ -26,10 +26,11 @@ The validated pre-rewrite 1.4 source baseline is preserved in
 `../releases/1.5.0`, and the XFE-parity baseline is preserved in
 `../releases/1.6.0`. The 1.7.0 source is preserved in `../releases/1.7.0`.
 
-The 1.7.1 source is preserved in `../releases/1.7.1`. This tree is the locked
-SteamShell **1.7.4** source, preserved in `../releases/1.7.4`; 1.7.3 remains the
+The 1.7.1 source is preserved in `../releases/1.7.1`. This tree is the
+SteamShell **1.9.9** source, locked together with XFE in
+`../releases/1.9.9`; 1.7.3 remains the
 pre-rendering-rewrite revert point. The feature-by-feature XFE port decisions are recorded in
-`XFE_PARITY_NOTES.md`.
+`XFE_PARITY_NOTES.md`. The current settings schema is 20.
 
 ## Settings upgrades
 
@@ -53,11 +54,11 @@ in a temporary copy and replace the live INI only after every change succeeds.
 
 ## Controller shortcuts
 
-- Hold L3 + R3 for about 0.7 seconds : Open or close Quick Menu
+- Hold L3 + R3 for about 0.5 seconds : Open or close Quick Menu
 - Hold View/Back and tap Start : Open the Windows Start menu
 - Hold View/Back and hold Start : Open File Explorer
 - The mapped Task Manager action uses Windows' native Ctrl+Shift+Esc shortcut. If Windows elevates Task Manager,
-  a non-elevated SteamShell cannot control its window or inject mapped mouse input into it.
+  the separate elevated helper supplies safe controller mouse actions while the main shell stays normal.
 - LT + RT + LB + RB + L3 + R3, **held** : Emergency/fallback Full Settings chord. The hold matches the Quick Menu's
   L3 + R3 chord so a stray grip during play cannot throw Full Settings over a running game. It is declined while the
   Quick Menu, Full Settings, the controller test, or the Steam recovery screen already has controller input — each of
@@ -69,8 +70,8 @@ Menu and Control Panel remain available as optional built-in actions but are una
 ### Automatic mouse mode
 
 `[Controller] AutoMouseExeList` names executables where those same mappings apply **without holding View/Back**.
-Settings ▸ Controller & Cursor ▸ **Automatic mouse mode for these EXEs** edits the list; it is **empty by default**,
-so naming an executable is the entire opt-in.
+Settings ▸ Controller & Cursor ▸ **Automatic mouse mode for these EXEs** edits the list; it contains
+`explorer.exe` by default so Windows shell surfaces work without holding View/Back.
 
 `[Features] EnableAutoMouseMode` (Settings ▸ Controller & Cursor ▸ **Enable
 automatic mouse mode (master switch)**) is a separate switch, on by default. It
@@ -121,20 +122,168 @@ allowlist or exclusion list. Enabling it also enables the master automatic-mouse
 switch if that prerequisite was off, so a checked tray item always means the
 feature is genuinely active.
 
-## Administrator startup
+## Two products, one installer
 
-By default, SteamShell restores the behavior used by versions 1.2 and 1.3: if it starts without administrator
-rights, it relaunches itself with Windows' `Run as administrator` verb before starting Steam or changing the shell
-UI. This allows controller mouse input and window management to interact with elevated Windows surfaces such as
-Task Manager. Command-line modes such as `/install`, `/restore`, and `/safe` are preserved during the handoff.
+`SteamShell.exe` installs either of two things, and Setup Assistant opens with
+the question everything else depends on:
 
-The **Run SteamShell as administrator on startup** checkbox under **Startup & Splash** can disable this relaunch;
-the change takes effect on the next launch. When it is off, Windows integrity isolation can prevent SteamShell's
-controller mouse and injected input from working in elevated applications. The option defaults to On.
+| | Replace the Windows shell | Work alongside Xbox FSE |
+|---|---|---|
+| What is installed | `SteamShell.exe` | `SteamShell-XFE.exe` |
+| Winlogon `Shell` registration | Yes | **Never** |
+| Elevated input helper | Yes | **Never** — XFE stays normal integrity |
+| Startup | Winlogon | Per-user logon task, `LeastPrivilege` |
+| Recovery shortcut | Yes | Not needed; Explorer still owns the desktop |
+| Auto-Login, UAC guidance | Shared | Shared |
 
-If Windows denies or cancels elevation, SteamShell continues non-elevated instead of leaving the system without a
-shell. Health Check reports the active privilege state. With UAC prompting enabled, Windows can display an elevation
-prompt at SteamShell startup; programs launched directly by SteamShell can inherit its elevated token.
+The XFE companion is embedded in `SteamShell.exe` exactly as the elevated helper
+is, so one download installs either. Choosing XFE on a machine where SteamShell
+is currently the registered shell restores Explorer first, so switching products
+is a supported move rather than something that leaves Winlogon pointing at an
+executable you have stopped using.
+
+XFE keeps its INI, controller profiles, and log beside its own executable, so
+Setup makes that directory writable by you. That is safe for the same reason it
+is not safe for the helper: nothing in the XFE layout is ever handed an elevated
+token.
+
+### Which product this PC has
+
+Recorded in `HKCU\Software\SteamShell\Product` and in `[Setup] Product`,
+because the uninstall for one product is wrong for the other — running the shell
+restore on an XFE machine would rewrite a Winlogon value SteamShell never set.
+
+`SteamShell.exe /uninstall` resolves the recorded product, cross-checks it
+against what is actually on disk, and only asks you when the record is missing or
+contradicts the disk. Running unattended with an ambiguous record does nothing
+rather than guessing.
+
+`/restore` is deliberately product-independent: it is the emergency command for
+when the desktop is gone, which cannot happen on an XFE machine, so it always
+puts Explorer back.
+
+Once a machine is recorded as XFE, `SteamShell.exe` no longer starts the shell
+runtime at all — it opens Setup Assistant, because there it is the installer and
+the uninstaller rather than the product.
+
+## Elevated window helper
+
+SteamShell 1.9.9 uses two privilege levels. `SteamShell.exe`—including Quick
+Menu, Settings, recovery, Steam launch, and every ordinary child—runs at normal
+integrity. This lets Steam observe that a normal SteamShell window took the
+foreground, preventing controller input from continuing into Big Picture behind
+Quick Menu, Explorer, or Settings.
+
+`SteamShell-Helper.exe` is compiled first and embedded inside the main EXE. Setup
+extracts it to the protected managed component directory or the portable
+sidecar's `bin` directory. At normal startup the main process verifies the
+helper version and starts only that helper elevated. Standard installations
+register a hidden, on-demand highest-privilege scheduled task whose action points
+through the protected Program Files chain; this avoids a UAC prompt on every
+shell start. If task registration or launch fails, SteamShell falls back to an
+explicit UAC request. Custom and Portable installs always use explicit UAC. Even
+when their `bin` itself is secured, an arbitrary writable parent can allow the
+whole path to be deleted and recreated; an independently invokable task would
+bypass SteamShell's launch-time protection check. Registering either as the
+Windows shell therefore prompts for administrator approval at every sign-in, and
+Setup warns before applying that combination. The helper has no
+tray icon or visible UI, exits when its parent SteamShell process ends, and
+polls/injects controller input only while a High/System-integrity window owns
+the foreground. It also applies the same center/maximize policy, threshold, and
+exclusion lists to elevated application windows that Windows prevents the
+normal-integrity Window Engine from moving. Geometry uses the same bounded
+settle/retry policy rather than continually forcing an application-controlled
+window. The helper also verifies that its user and session match its
+parent before enabling its input timer; the main independently verifies the
+helper's exact path, user, session, and High-integrity token. Main SteamShell detects the same boundary and stops its own
+mapping path there, preventing duplicate movement, clicks, or release actions.
+The parent exposes only a per-process Windows event for geometry state: Shell
+mode signals it, while Desktop and Safe modes reset it. This preserves elevated
+controller input in Task Manager on the desktop without unexpectedly managing
+desktop-mode window positions.
+The helper accepts only a fixed safe elevated-input vocabulary: pointer motion,
+wheel, clicks, arrows, Enter, Escape, and Alt+F4. It deliberately ignores custom
+`Send:` bindings and launch/system actions so the user-writable INI cannot become
+an arbitrary high-integrity keystroke or process-launch bridge. Task Manager, a
+small fixed set of Windows administration hosts, and executables explicitly put
+on the user's automatic-mouse allowlist receive automatic mouse mode; other
+elevated applications require the physical View/Back modifier unless the user
+has deliberately enabled persistent mouse mode.
+
+The **Enable elevated helper for administrator windows** option under
+**Startup & Splash** defaults to On. If elevation is declined, SteamShell and
+all normal-integrity features continue working; controller input and automatic
+geometry for elevated windows are unavailable. Turning the option off and
+reloading settings stops a helper that is already running, rather than waiting
+for the next SteamShell start.
+
+Helper activity and failures are recorded in `SteamShell-Helper.log` **beside the
+helper executable** — `components\bin` for a managed install, `SteamShell\bin`
+for a portable one — and are reported by Health Check. It is not written to the
+writable data folder: an elevated process appending to a path the interactive
+user controls is an invitation to redirect that write somewhere it does not
+belong. The log rotates on the same `[Logging]` size and backup-count settings
+as `SteamShell.log`.
+
+### The helper binary must be administrator-protected
+
+Setup restricts the `bin` directory holding `SteamShell-Helper.exe` to SYSTEM and
+Administrators (read and execute for everyone else) in **every** installation
+mode, portable included, and changes the owner to Administrators. Ownership is
+part of the protection: Windows gives an object's owner the implicit ability to
+rewrite its DACL, even when no writable allow entry is visible. Only `bin` is
+restricted, so a portable layout keeps its writable INI, logs, and backups beside
+it as before.
+
+Before each launch SteamShell re-checks that neither the helper nor its directory
+is owned by or writable by anyone outside that set, and **refuses to elevate it**
+if either is. Setup secures the directory before unconditionally replacing the
+helper from the embedded payload; it never blesses a pre-existing file merely
+because its version resource matches. A version resource is metadata that anyone
+can stamp onto any file, so without these checks a writable helper directory
+would be a way to have SteamShell hand arbitrary code an administrator token.
+
+If Health Check reports **Elevated helper protection** as failed — most likely
+because the folder was moved by hand or the helper predates 1.9.9.4 — start
+SteamShell with **Run as administrator** and apply Setup again to re-secure it.
+
+### Controller behavior over administrator windows
+
+While a High/System-integrity window such as Task Manager owns the foreground,
+the helper handles cursor movement, scrolling, clicks, `Enter`, `Esc`, `Alt+F4`,
+Task Manager, Start menu, Game Bar, and `Ctrl+Alt+Tab`. The main process keeps
+handling the five mappings that must run at normal integrity — **touch keyboard,
+on-screen keyboard, File Explorer, Quick Menu, and Control Panel** — because they
+start a process or raise a SteamShell window, neither of which should inherit an
+administrator token. Every builtin mapping is therefore handled by exactly one of
+the two processes.
+
+Custom `Send:` mappings are deliberately ignored over elevated windows. The INI is
+user-writable by design, and honoring arbitrary keystrokes from it inside a
+High-integrity process would turn a settings file into a privilege boundary.
+
+`EnableDesktopAutoMouseMode` is also narrowed there: automatic mouse mode applies
+to Task Manager, Microsoft Management Console, Control Panel, and the Settings
+administrator flows, but not to every elevated application. Hold **View/Back** to
+use the controller mouse in any other administrator window.
+
+The signed-in shell account must itself have an administrator split token for
+the helper to run under the same identity. Supplying credentials for a different
+administrator is deliberately rejected rather than creating a cross-account
+elevated input bridge.
+
+Install and upgrade are explicit administrator maintenance sessions. If a
+pending first launch or Setup **Apply** runs normally, SteamShell displays
+**Please Start SteamShell As Administrator for First Install or Upgrade**. OK
+records a one-time request for that exact user/session, restores a usable
+Explorer desktop, and closes the current instance. Right-click the same
+`SteamShell.exe` and select **Run as administrator**. The elevated launch opens
+Setup Mode, closes existing same-user/same-session SteamShell instances, waits
+for their parent-bound helpers, and closes only verified helper leftovers.
+Using credentials for a different administrator is rejected. Completed normal
+shell sessions remain unelevated. Portable installations warn that the user is
+responsible for keeping both the main EXE and extracted helper in a trusted
+directory.
 
 ## Major features
 
@@ -175,8 +324,10 @@ prompt at SteamShell startup; programs launched directly by SteamShell can inher
   and sleep timers can still expire. Physical mouse movement restores the cursor.
 - Logging + live log viewer: Writes a log and provides an in-app live viewer for debugging. Operational notices
   and warnings are always retained; game-candidate scoring remains separately optional.
-- Hidden Startup Programs: Optional list of extra programs to launch hidden/minimized at boot.
-- Controller mouse mode (hold View/Back): Right stick moves mouse, left stick scrolls, D-pad arrows.
+- Hidden Startup Programs: Optional list of extra programs launched as the
+  standard interactive user, hidden/minimized at boot.
+- Controller mouse mode (hold View/Back, or enable persistent Mouse Mode): Right
+  stick moves mouse, left stick scrolls, D-pad arrows.
   Buttons are configurable (Short/Long) via the Controller Mapping window.
 - Launcher Cleanup - Clean up launchers after exiting your game so no unnecessary tasks run in the background.
   Aggressive process termination is disabled by default.
@@ -214,8 +365,10 @@ When it has keyboard focus, arrows navigate, Enter/Space selects, Backspace goes
 back, Home/End jump, and Delete closes the selected Task Switcher window.
 
 - **Compact main page:** Audio, Display & HDR, RTSS & Performance, Steam Menu,
-  Steam Quick Access, Controller Layout, Task Switcher, Game Bar, Settings, and
-  System—the same top-level row set and descriptive value column as XFE.
+  Steam Quick Access, Task Switcher, Game Bar, Open Keyboard, Mouse Mode,
+  Settings, and System—the same applicable top-level row set and descriptive
+  value column as XFE. Hold Y on this page to open the styled Controller
+  Mappings submenu.
 - **Accent color:** Settings ▸ General & Startup ▸ Quick Menu Accent cycles
   Steam Blue, Blue, Purple, Magenta, Red, Orange, Yellow, Green, Teal, and a
   custom `RRGGBB` color. The fill is derived from the accent and changes live;
@@ -225,12 +378,12 @@ back, Home/End jump, and Delete closes the selected Task Switcher window.
   when Steam is not the foreground application). With Steam closed it reads
   **Launch Steam**, starts Big Picture, and returns SteamShell to shell mode.
   Steam Quick Access reports `Steam is not running` and is inert meanwhile.
-- **System:** Diagnostics, Health Check, **Exit Steam to Desktop** (or **Return
-  to SteamShell** while in desktop mode), **Exit SteamShell**, Sleep, Restart,
-  and Shut Down. Every one of those requires a second press to confirm.
+- **System:** **Exit Steam to Desktop** (or **Return to SteamShell** while in
+  desktop mode), **Exit SteamShell**, Sleep, Restart, and Shut Down. The
+  transition, exit, and power actions require a second press to confirm.
 - **Audio:** the XFE-matched submenu contains Back, Output, Volume, and Mute.
   Output and Volume support left/right adjustment.
-- **Display:** the XFE picker stages Resolution, Refresh rate, and Scale
+- **Display:** the XFE picker stages Resolution, Refresh Rate, and Scale
   independently, then applies them together from one Apply row. This avoids the
   former paginated list of flattened resolution/refresh combinations. A changed
   display transaction automatically reverts after 15 seconds unless Apply is
@@ -242,19 +395,29 @@ back, Home/End jump, and Delete closes the selected Task Switcher window.
 - **RTSS:** with `UseDllIntegration=true`, SteamShell reads RTSS's live global
   overlay state through `RTSSHooks64.dll` and toggles it directly. **Frame Limit**
   is one row covering both of RTSS's mechanisms — the global limiter flag and the
-  profile's `FramerateLimit` — cycling **Off · 30 · 40 · 60 · 90 · 120 · Custom**
-  with Left/Right. Choosing Custom reveals a **Custom FPS** row whose step
-  escalates 1 → 5 → 10 on consecutive presses, because Quick Menu navigation is
-  edge-triggered and never auto-repeats. "Off" maps to the flag and never writes
-  `0`, so turning the cap off and back on restores the number instead of
-  forgetting it. **Save Limit to Profile** copies the current cap into the
+  profile's `FramerateLimit` — cycling **Off · 30 · 40 · 60 · 90 · 120 · Preset · Custom**
+  with Left/Right. Preset uses `PresetFrameCap` from Settings. Choosing Custom
+  restores its last retained value and reveals a **Custom FPS** row whose step
+  is always exactly 1. Holding Left/Right accelerates the repeat rate while
+  preserving precise single-step input, and the new cap is committed once after
+  input settles rather than writing the RTSS profile on every repeat. "Off" maps
+  to the flag and never writes `0`, so turning the cap off and back on restores
+  the number instead of forgetting it. The selection is also recorded and
+  reapplied after a reboot — see **Restoring the Frame Limit** below. **Save Limit to Profile** copies the current cap into the
   foreground executable's own RTSS profile behind a two-press confirmation; every
   other write targets the global profile only. If that DLL or its write exports
   are unavailable, the cap shows read-only and the configured HotkeyHandler
   shortcuts remain the automatic fallback. The submenu also distinguishes
   disabled, missing, ready-to-start, and running states and links directly to
   RTSS Settings.
-- **Controller Layout:** shows the currently loaded short/long action for every supported View/Back button mapping.
+- **Controller Mappings:** hold Y on the main page to open the Quick Settings
+  mapping reference. Its final **Set Controller Mappings** row opens the full
+  editor when changes are needed. The former main-page Controller Layout row
+  remains removed.
+- **Open Keyboard:** closes Quick Settings before presenting the Windows touch
+  keyboard.
+- **Mouse Mode:** applies the controller pointer and mappings without holding
+  View/Back, including in shell mode. The choice is saved immediately.
 - **Steam actions:** Steam Menu sends the configured Big Picture shortcut when
   Steam was in front and the configured overlay shortcut when a game was in
   front. The in-game overlay chord uses a paced key-down event so Steam's hook
@@ -268,7 +431,8 @@ back, Home/End jump, and Delete closes the selected Task Switcher window.
   applications can still show their own save or confirmation dialogs. Hold X for the configured
   `TaskForceCloseHoldMs` interval to terminate the owning process; this can discard unsaved work and closes every
   window hosted by that process.
-- **System:** groups Diagnostics Control Panel, Exit Steam to Desktop, sleep, restart, and shutdown.
+- **Settings:** includes Windows Settings and the full SteamShell Settings
+  editor. The former Reload Settings row has been removed.
 - **Exit Steam to Desktop:** gracefully shuts Steam down first, then uses the same Explorer/shell restoration
   path used when Steam exits normally. If Steam does not close, restoration is cancelled rather than leaving a
   partially restored desktop. Automatic restoration remains disarmed until a **Big Picture window covering most of
@@ -288,13 +452,16 @@ that process controller input globally while unfocused may still see navigation 
 The Quick Menu includes a controller-friendly **Settings** area with four focused categories:
 
 - **General + Startup:** startup splash, taskbar behavior, and Quick Menu Audio/Display modules.
-- **Controller + Cursor:** controller mouse mode and speed, cursor hiding, event-based left/right mouse parking, and the
-  controller mapping editor.
+- **Controller + Cursor:** controller mouse capability and speed, cursor hiding,
+  and event-based left/right mouse parking. Hold Y on the main page for the
+  Controller Mappings submenu and select **Set Controller Mappings** to edit.
 - **Focus + Window Engine:** Steam refocus, game foreground assistance, AlwaysFocus support, coordinated window
   management, and the session focus pause.
-- **RTSS + Performance:** integration enable, overlay/limiter control modes, and the configured custom frame cap.
+- **RTSS + Performance:** integration enable, overlay/limiter control modes, the configured custom frame cap, and whether the last Frame Limit selection is restored when RTSS starts.
 
 Quick Menu changes are written to `SteamShellSettings.ini` immediately. Startup-only rows are marked `NEXT BOOT`.
+The Settings landing page also opens Windows Settings or the full SteamShell
+Settings editor.
 
 ## Notification-area control
 
@@ -330,14 +497,17 @@ The freeze is accepted rather than forgotten. Anyone who does reach the menu by
 controller emulation dismisses it the way any menu is dismissed — Escape, or a
 click elsewhere — both available to whatever pointer opened it.
 
-Every action in the tray menu is also reachable from the Quick Menu, so a
-controller user never needs the notification area at all:
+The controller-facing actions needed during a session remain reachable from
+the Quick Menu:
 
 | Action | Where |
 |---|---|
 | Open Settings | Settings ▸ Open Full Settings Editor |
-| Reload Settings | Settings ▸ Reload Settings |
-| Open Diagnostics | System ▸ Diagnostics Control Panel |
+| Open Windows Settings | Settings ▸ Windows Settings |
+| Open Keyboard | main page ▸ Open Keyboard |
+| Toggle persistent controller pointer | main page ▸ Mouse Mode |
+| View Controller Mappings | hold Y on the main page |
+| Set Controller Mappings | mapping submenu ▸ Set Controller Mappings |
 | Launch Steam | main page ▸ Launch Steam (desktop mode) |
 | Return to SteamShell | System ▸ Return to SteamShell (desktop mode) |
 | Exit Steam to Desktop | System ▸ Exit Steam to Desktop (shell mode) |
@@ -422,7 +592,8 @@ then restore and reactivate Settings when browsing is finished.
 The Startup Programs category provides explicit **Add Program**, **Browse Selected**, **Apply Command**, and
 **Remove Selected** actions, along with **Test Launch**, reordering, and Hidden/Minimized/Normal window modes.
 New programs use the selected empty slot or the next available slot, while replacing an executable preserves
-arguments already entered after it. The full editor applies runtime-compatible changes when **Save & Apply** is
+arguments already entered after it. Every entry launches directly from the normal-integrity main shell; the
+verified standard-token route remains available during the temporary elevated Setup session. The full editor applies runtime-compatible changes when **Save & Apply** is
 selected and identifies options that require the next launch.
 The RTSS shortcut rows include **Record** buttons that capture a key combination and convert it to the required
 AutoHotkey send syntax. Advanced & Logging includes the common focus, game-assist, reload, INI, and live-log
@@ -430,22 +601,30 @@ actions; the separate Diagnostics Panel remains available for timed overrides an
 
 Advanced & Logging also provides **Install SteamShell as Shell**, **Repair SteamShell Installation**,
 **Register Current EXE as Shell**, and **Permanently Restore Explorer**.
-These actions use the same compiled EXE—there is no companion service, updater, or recovery executable.
-The managed Install action copies SteamShell to `%LocalAppData%\SteamShell` before registration. Register Current
-EXE instead writes the current compiled EXE's exact path directly to the current-user Winlogon `Shell` value,
-matching a portable `.reg` workflow. That EXE must not be moved or deleted until Explorer is restored.
+These actions use the same compiled main EXE—there is no service, updater, or separate recovery executable. The
+only companion binary is the embedded, narrowly scoped elevated window helper described above.
+The managed Install action places SteamShell under `%ProgramFiles%\SteamShell`, stores writable settings and logs
+under `%ProgramData%\SteamShell`, and applies Modify access only to that data tree for the interactive user.
+Register Current EXE instead writes the current compiled EXE's exact path directly to the current-user Winlogon
+`Shell` value, matching a portable `.reg` workflow. That EXE must not be moved or deleted until Explorer is restored.
 
 The same area provides configuration recovery and diagnostics:
 
 - **Health Check** validates Steam, the INI/schema, shell registration, Explorer/taskbar, startup paths, RTSS,
-  controller detection/mapping conflicts, Launcher Cleanup safety, and desktop recovery.
+  external-launch capability and process integrity, controller detection/mapping conflicts, Launcher Cleanup
+  safety, and desktop recovery. It also reports the **installation record** — see below. The window, the report
+  format, **Refresh** and **Copy Report** are shared with SteamShell-XFE, so a report from either product reads
+  the same; only the checks themselves differ.
 - **Export Diagnostic ZIP** creates a sanitized bundle on the desktop containing the health report, system
   information, settings, and recent log lines.
 - **Create Settings Backup**, **Export Settings**, and **Import / Restore** preserve portable configurations.
 - **Restore Category Defaults** and **Reset All Settings** create backups before changing anything.
 - **Restart in Safe Mode** keeps Explorer available and disables shell automation for the current session.
-- **Setup Assistant** connects Steam/RTSS selection, controller testing, Health Check, portable use, installation,
-  and recovery without a separate installer.
+- **Setup Assistant** connects detected and visibly displayed Steam/RTSS paths,
+  controller testing, Health Check, UAC controls, integrated Windows Auto-Login,
+  standard/custom/portable deployment, optional shell registration, and recovery
+  without a separate installer. Its monitor-bounded content has a vertical
+  scrollbar for television DPI scaling.
 
 The Focus and Launcher Cleanup categories use executable-list editors rather than raw pipe-separated text.
 Launcher Cleanup includes its background-helper list and a read-only preview of currently running cleanup targets.
@@ -471,21 +650,73 @@ retained as recovery paths even if the stored order is malformed.
 
 ## Single-EXE setup and recovery
 
-SteamShell can install itself for the current Windows user. Compile the EXE, run it once from the normal desktop,
-open Full Settings, and select **Install SteamShell as Shell**. The setup action:
+SteamShell can install itself for the current Windows user. A new settings file has
+`[Setup] SetupState=Pending`, so the first launch starts an Explorer-backed Setup Mode: Steam, the splash, desktop
+blackout, taskbar hiding, startup programs, and focus/window automation remain off until setup is completed. An
+existing schema-16-or-earlier settings file migrates directly to `Complete` so an upgrade does not unexpectedly
+replace a working sign-in with the wizard.
 
-- Copies the EXE to `%LocalAppData%\SteamShell\SteamShell.exe`
-- Copies the current INI when the installed location does not already have one
-- Saves the previous per-user Windows shell value
-- Verifies the new shell registration
-- Adds an emergency Restore Windows Desktop shortcut to the current user's Start menu
+The assistant offers three layouts:
 
-For a portable deployment such as `C:\Utilities\SteamShell.exe`, use **Register Current EXE as Shell** instead.
-It verifies the direct current-user Winlogon registration, preserves the previous shell value, and creates the
-same emergency restore shortcut without copying the EXE.
+- **Standard (recommended):** `%ProgramFiles%\SteamShell\SteamShell.exe`, protected component space under the
+  same program directory, and writable settings/logs/backups under `%ProgramData%\SteamShell`.
+- **Use current location:** leaves `SteamShell.exe` where it is and creates a portable `SteamShell` sidecar with
+  `SteamShellSettings.ini`, `logs`, `backups`, and the component `bin` directory.
+- **Choose another location:** copies the EXE to a selected directory. With Portable selected it uses the sidecar;
+  otherwise it uses ProgramData for writable data.
 
-The main application follows the administrator-startup setting. Optional operations that require more permission
-can fail cleanly when SteamShell is running unelevated.
+Setup stages and verifies the EXE, preserves an existing target configuration during repair, migrates the current
+configuration into a new target, records `InProgress`, and writes `Complete` only after the selected deployment and
+optional shell registration finish. Shell registration remains an explicit checkbox, saves the previous per-user
+shell value, and creates an emergency Restore Windows Desktop shortcut. Portable shell registration warns when the
+chosen executable is on removable, network, or temporary storage and reminds the user that its directory must be
+trusted and permanent.
+
+The Applications section first honors an existing valid selection, then checks
+Steam and RTSS beneath both Program Files directories; Steam's registered Valve
+install location is also considered. Both resulting paths remain visible in
+read-only fields, and Apply refuses to continue without a valid `Steam.exe`.
+
+To upgrade an existing sidecar-based portable installation, first use its tray
+menu to **Exit SteamShell**, then launch the new verified EXE from another
+directory. In Setup Assistant choose **Choose another location**, browse to the
+directory containing the installed `SteamShell.exe`, and select **Portable**.
+The summary identifies the existing portable installation. Apply stages and
+replaces the main EXE, preserves `SteamShell\SteamShellSettings.ini`, extracts
+and version-verifies the embedded helper through a temporary file, and replaces
+`SteamShell\bin\SteamShell-Helper.exe`. The old process must be stopped because
+Windows does not permit an executing helper binary to be replaced. Once every
+target verification succeeds, SteamShell permanently deletes only the
+pending/in-progress `SteamShell` sidecar beside the separate updater EXE and
+then exits the updater. It will not delete the target installation sidecar, a
+completed source configuration, a link/junction, or a source folder containing
+the selected target.
+
+The final owned dialog offers **Restart Now** and **Restart Later**. Restart Now
+requests an immediate Windows reboot; Restart Later leaves reboot timing to the
+user. The dialog identifies the reboot as optional when shell registration was
+not changed. A successful upgrade closes the updater after either selection
+because the installed copy is now authoritative.
+
+The assistant calculates its initial client height from the selected monitor's
+physical work area and effective DPI. It uses no more than 80% of that work area,
+caps the logical client height at 620 pixels, measures the hidden outer window,
+and reduces it again if non-client scaling would cross an 88% safety ceiling.
+The vertical scrollbar keeps every action reachable at the smaller size.
+
+**Configure Auto-Login** opens an owned credential dialog during an elevated
+Setup session. SteamShell asks Windows to validate the user/domain/password,
+stores the password as Windows' protected `DefaultPassword` LSA secret, and only
+then enables `AutoAdminLogon`. The password is never written to
+`SteamShellSettings.ini`, a log, or a child-process command line. Disabling the
+feature turns off `AutoAdminLogon`, removes any plaintext fallback value, and
+deletes the LSA secret. Automatic login still gives anyone with physical access
+the configured account, and another administrator can retrieve LSA secrets, so
+it is intended only for a physically secured gaming PC.
+
+The main application stays at normal integrity after Setup. The independently configurable elevated helper owns
+controller input and coordinated geometry for administrator windows; optional privileged maintenance operations
+fail cleanly or ask for approval when required.
 
 The same EXE supports these command modes:
 
@@ -502,12 +733,21 @@ Use `/install` and `/repair` from the normal Explorer desktop when another Steam
 While SteamShell is running, use the equivalent buttons in Full Settings. `/restore` and `/uninstall` intentionally
 replace the active instance so they can recover the desktop.
 
-`/restore` and `/uninstall` both permanently register Explorer as the Windows shell and start a verified desktop.
-They deliberately leave the SteamShell folder and INI in place so recovery never deletes user data. If SteamShell
-is forcibly ended, open Task Manager with Ctrl+Shift+Esc, choose **Run new task**, and run:
+`/restore` and `/uninstall` both start a verified Explorer desktop and deliberately leave the SteamShell folder
+and INI in place, so recovery never deletes user data. They differ in what they register as the next sign-in shell:
+
+- `/restore` is the emergency path. It always registers `explorer.exe`. When a session is already broken, a
+  known-good shell beats a faithful one, so this mode never reinstates anything else.
+- `/uninstall` is the deliberate path. It puts back the shell that was registered before SteamShell took over,
+  recorded at install time in `HKCU\Software\SteamShell\PreviousShell`. That value is only used when it is
+  verifiable: it must exist on disk and must not itself point at SteamShell, otherwise `explorer.exe` is kept.
+  On a normal machine the recorded value *is* `explorer.exe`, so the two modes behave identically; the difference
+  only shows up if you were running some other custom shell before installing SteamShell.
+
+If SteamShell is forcibly ended, open Task Manager with Ctrl+Shift+Esc, choose **Run new task**, and run:
 
 ```text
-%LocalAppData%\SteamShell\SteamShell.exe /restore
+%ProgramFiles%\SteamShell\SteamShell.exe /restore
 ```
 
 If Steam itself cannot start, SteamShell displays a recovery window with Retry Steam, Open Settings, and Restore
@@ -522,17 +762,39 @@ calculation invariants without starting the normal shell session.
 
 ## Build validation
 
-`Build-SteamShell.ps1` runs `Validate-SteamShell.ps1` before asking AutoHotkey to validate and compile the script.
+`Build-SteamShell.ps1` is the only build script and produces all three
+binaries. It runs **both** validators — `Validate-SteamShell.ps1` and
+`Validate-SteamShell-XFE.ps1` — then validates and compiles
+`SteamShell-Helper.ahk` and verifies helper version 1.9.9.4, validates and
+compiles `SteamShell-XFE.ahk` and verifies version 1.9.9.0, and finally
+validates and compiles `SteamShell.ahk` with both payloads embedded, verifying
+the published executable reports 1.9.9.0.
+
+Everything it needs is in this folder, which is what makes locking a release a
+copy of one directory.
 The static validator checks duplicate function declarations, embedded/sample INI schema parity, required recovery
 and window-engine functions, Settings-editor and Quick Menu schema bindings, named UI/timer callbacks, Quick Menu
 row dispatch, ampersand-safe Settings headings, the controller-deadzone migration, desktop-restore linkage,
 whitespace hygiene, one full-window scanner, and one scheduled focus-policy call. It also rejects the retired WMI
 process query and legacy focus entry points.
 
-## Optional RTSS setup
+From the workspace root, double-click `Run-SteamShellValidation.cmd`. It runs
+the whole gate: AutoHotkey syntax, both validators, the shared-parity check, the
+full build, then negative tests that break each of the three sources in turn and
+lock each freshness-checked output to prove a stale artefact is refused. Only
+after every check passes does it publish `SteamShell.exe` to the root
+`current\`. Failures return a non-zero exit code and leave the previous
+`current\` untouched.
 
-SteamShell pre-fills RTSS's standard executable path and leaves integration
-disabled until setup is complete. Set `[RTSS] EnableIntegration=true`.
+Only the installer is published. It carries both payloads and installs either
+product through Setup Assistant, so a loose `SteamShell-XFE.exe` beside it would
+only invite a hand-copied install with no logon task, no writable companion
+directory, and no dormant helper.
+
+## RTSS setup
+
+SteamShell pre-fills RTSS's standard executable path and enables integration by
+default. If RTSS is not installed, the Quick Menu reports that setup is required.
 `UseDllIntegration=true` (the default) derives `RTSSHooks64.dll` from the
 configured executable directory and uses its `GetFlags`/`SetFlags` exports for
 live global state and direct control, plus `LoadProfile`/`GetProfileProperty` to
@@ -572,23 +834,97 @@ none of these shortcuts are needed:
 EnableIntegration=true
 Path=C:\Program Files (x86)\RivaTuner Statistics Server\RTSS.exe
 UseDllIntegration=true
+OverlayControlMode=Separate
 OverlayToggleShortcut=^+o       ; Ctrl+Shift+O
-FrameLimiterControlMode=Toggle
-CustomFrameCap=117
+FrameLimiterControlMode=Separate
+PresetFrameCap=158             ; Named Preset entry in the live cycle
+CustomFrameCap=158
+RestoreFrameLimitOnStartup=true ; Reapply the last selection once RTSS is running
 CustomFrameCapShortcut=^+f      ; Ctrl+Shift+F
 ```
 
-In shortcut-fallback Toggle mode, the Quick Menu displays `TOGGLE • 117 FPS`
-but does not claim the limiter is on or off. `CustomFrameCap` is only the
-fallback label, so configure RTSS to use the same value. With DLL integration,
-the Frame Limit row instead sets RTSS's global limiter flag and the global
-profile's numeric limit directly, and `CustomFrameCap` is unused.
+In shortcut-fallback Toggle mode, the Quick Menu uses `PresetFrameCap` as its
+configured FPS label but does not claim the limiter is on or off. With DLL
+integration, Preset applies that value directly; `CustomFrameCap` records the
+last value adjusted on the Custom FPS row and restores it whenever Custom is
+selected again.
+
+### Setting the Frame Limit without running as administrator
+
+`RTSSHooks64.dll` is loaded into whichever process calls it, so the write that
+saves a frame cap happens with *that* process's token — and RTSS installs under
+Program Files by default. An unelevated SteamShell therefore could not save a
+cap, and was not told: the value changed in RTSS's memory, the save failed
+silently, and the next read returned the old number. The row reported itself
+read-only, which was accurate and left the feature unusable for anyone not
+running SteamShell as administrator.
+
+The elevated helper now performs that write, running the same sequence an
+elevated SteamShell always did — load the profile, set the frame limit, save,
+apply — in the process that holds the right token. SteamShell itself then reads
+the value back from RTSS, so the check that decides success still runs in the
+ordinary, unelevated process where you can see it fail. **Use the elevated
+helper to set the Frame Limit** in Settings → RTSS
+(`EnableElevatedFrameCapWrites`, default on) turns it off, and takes effect
+immediately rather than at the next sign-in.
+
+This covers **Save Limit to Profile** as well. Per-game profiles live in the
+same protected directory, so they had the same silent failure — and worse, they
+reported success anyway. A profile save is now verified before it is reported,
+and says so plainly when it does not stick.
+
+RTSS's own window follows the change live, because the whole write happens in
+one process the way it always did before the split.
+
+This needs the elevated helper, so it applies to Shell installs only. Two things
+it deliberately will not do:
+
+- **It will not write an RTSS outside Program Files.** It checks that the
+  configured `[RTSS] Path` really names `RTSS.exe`, that the real directory sits
+  under a Program Files location read from the registry, and that `Profiles\`
+  resolves to somewhere still inside that install. Anything else is refused —
+  which costs nothing, because an RTSS you can write to is one SteamShell can
+  already write to without the helper.
+- **It will not accept a profile name it cannot corroborate.** A per-game name
+  has to look like a plain executable name *and* match a process that is running
+  at that moment, or the helper refuses it. SteamShell knows which game the
+  Quick Menu was opened over and the helper does not, so the name is sent — and
+  then checked against reality rather than trusted.
+
+### Restoring the Frame Limit
+
+RTSS keeps only part of the selection across a restart. The FPS number lives in
+its global profile and is persisted, but the limiter on/off state is a runtime
+flag in RTSS's shared memory, and "Custom" is a SteamShell concept RTSS never
+sees. On its own, that means every reboot came back reading **OFF**, with the
+first Right press landing on 30 FPS rather than your own cap.
+
+SteamShell now records what it applied in `[RTSS] LastFrameCapMode` and
+`LastFrameCapFps` — including while Off, where the number is kept for the same
+reason the Off entry never writes `0` — and reapplies it once RTSS is running.
+**Restore the last Frame Limit selection when RTSS starts** in Settings → RTSS
+(`RestoreFrameLimitOnStartup`, default on) controls this.
+
+Two deliberate limits:
+
+- **It never starts RTSS.** Reapplying a cap is not a reason to launch a program
+  you did not ask for. SteamShell polls for up to two minutes after startup
+  instead, which is also what makes it work when RTSS arrives later through Steam
+  or a startup entry.
+- **It only writes RTSS's profile when RTSS does not already agree.** That write
+  is a real edit to RTSS's own configuration, so it does not happen on every boot
+  when RTSS kept the value by itself.
+
+This needs `UseDllIntegration=true`. The shortcut fallback can only toggle the
+limiter, not select a specific FPS; with DLL integration off, SteamShell logs
+that and skips the restore rather than waiting. The outcome is always recorded in
+`SteamShell.log` as `Restored the last Frame Limit selection: …`.
 
 For explicit limiter controls, configure matching enable and disable actions:
 
 ```ini
 FrameLimiterControlMode=Separate
-CustomFrameCap=117
+PresetFrameCap=117
 FrameLimiterOnShortcut=^+5
 FrameLimiterOffShortcut=^+6
 ```
@@ -610,8 +946,11 @@ powershell -ExecutionPolicy Bypass -File .\Build-SteamShell.ps1
 For a double-clickable build with a persistent result window, run
 `Build-SteamShell.cmd`.
 
-The build script creates `dist\SteamShell.exe` and embeds
-`assets\SteamShell.ico` by default (`-IconPath` still accepts an override).
+The build script creates `dist\SteamShell.exe` and embeds both the verified
+helper payload and `assets\SteamShell.ico` (`-IconPath` still accepts an
+override). The intermediate `build\SteamShell-Helper.exe` is not a separate
+distribution requirement; the main EXE extracts it during Setup or first normal
+startup.
 Windows-specific features must be tested on the intended HTPC;
 they cannot be executed or validated from a macOS development machine.
 
@@ -684,3 +1023,23 @@ When Steam exits:
 Because the restore restarts Explorer, every notification-area icon in the session is destroyed and re-added via
 the `TaskbarCreated` broadcast. SteamShell re-asserts its own icon on that broadcast rather than relying on
 timing, since it is the process that killed Explorer.
+
+That re-assertion is now shared with SteamShell-XFE, which had no `TaskbarCreated` handling of its own and lost
+its icon permanently whenever Explorer restarted for any reason.
+
+### The installation record
+
+`[Setup]` records what this installation is and where it lives: `Product`, `InstallationMode`, `InstallDirectory`
+and `DataDirectory`, alongside `SetupState` and `SetupVersion`. The registry key under `HKCU\Software\SteamShell`
+carries the same facts for a managed install and is the better source while it exists — but it is exactly what
+does not survive a move. Copy an installation to another PC and the registry is empty while the settings file
+still describes the old machine, so the file is the only record able to notice.
+
+At every start the record is compared against where SteamShell is actually running. A mismatch is logged, shown
+on the tray tooltip, offered as a tray entry that opens Setup Assistant, and reported in Health Check.
+
+**It never decides anything.** `SetupAssistantRequired()` determines whether the shell runtime starts, and the
+comparison does not reach it. A stale path in a settings file must not be able to leave a machine sitting in
+Setup with no shell — which would be far worse than the wrong path it was reporting. Startup separately trusts
+the registry's `DataPath` only when `InstalledPath` matches the running executable, so a portable or test copy
+cannot adopt an installed shell's settings.

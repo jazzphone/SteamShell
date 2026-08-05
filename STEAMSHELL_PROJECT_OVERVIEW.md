@@ -1,12 +1,16 @@
 # SteamShell Project Overview
 
-**Document status:** July 31, 2026
+**Document status:** August 1, 2026
 
-**Stable SteamShell release:** 1.7.4 (locked at `releases/1.7.4/`)
+**Stable SteamShell release:** 1.9.9 (locked at `releases/1.9.9/`)
 
-**Stable SteamShell-XFE release:** 0.1.17 (locked at `releases/XFE-0.1.17/`)
+**SteamShell working tree:** 1.9.9, settings schema 20 (helper 1.9.9.4)
 
-**Development line:** Patch releases locked; extended Windows regression testing remains recommended
+**Stable SteamShell-XFE release:** 1.9.9 (locked at `releases/1.9.9/`)
+
+**SteamShell-XFE working tree:** 1.9.9, settings schema 11
+
+**Development line:** Coordinated 1.9.9 pre-2.0 checkpoint; earlier releases preserved as immutable checkpoints
 
 ## Executive summary
 
@@ -15,7 +19,11 @@ SteamShell is a living-room Windows gaming project with two related, but intenti
 1. **SteamShell 1.7** is the complete home-theater PC shell. It launches Steam Big Picture, manages Windows Explorer and the taskbar, decides which game or application should be in front, provides controller-driven system controls, and restores the normal Windows desktop when the gaming session ends.
 2. **SteamShell-XFE** is an experimental companion for Microsoft's Xbox Full Screen Experience (Xbox FSE). Xbox FSE remains responsible for the shell, application presentation, and Home app lifecycle. The companion is intended to add SteamShell's useful controller controls without competing with Xbox FSE.
 
-SteamShell 1.7.4 is the locked stable release and the recommended choice for the established Steam-centered console experience. SteamShell-XFE 0.1.17 is the locked release for Xbox FSE systems: its controller input, Quick Menu, Settings, display/HDR controls, RTSS integration, notification-area control, and optional startup curtain function inside Xbox FSE while Xbox FSE retains ownership of the shell and application presentation.
+SteamShell and SteamShell-XFE 1.9.9 are the coordinated locked stable release.
+The bundle is the major pre-2.0 architecture checkpoint. Standalone separates
+its normal-integrity shell UI and application launches from a narrowly scoped
+elevated helper. XFE continues to operate inside Xbox FSE while Xbox FSE retains
+ownership of the shell and application presentation.
 
 Both locked releases paint their Quick Menu rows
 as one opaque GDI+ bitmap at physical pixel size, with rounded selected fill,
@@ -146,8 +154,8 @@ Coverage rather than title is the discriminator on purpose. It survives client u
 
 | Area | SteamShell 1.7 | SteamShell-XFE |
 |---|---|---|
-| Status | Stable, frozen source release | Stable, frozen source release |
-| Current version | 1.7.4 | 0.1.17 |
+| Status | Locked release 1.9.9 | Locked release 1.9.9 |
+| Current working version | 1.9.9 | 1.9.9 |
 | Primary role | Complete Steam-centered Windows shell | Utility companion to Xbox FSE |
 | Owns the Windows shell | Yes, when installed or registered as the shell | No |
 | Launches and monitors Steam | Yes | No |
@@ -190,11 +198,11 @@ It coordinates the entire session:
 
 ## Current release state
 
-- **Stable release:** 1.7.4, frozen in `releases/1.7.4`
-- **Active source:** 1.7.4 in `SteamShell/`
+- **Stable release:** 1.9.9, frozen with XFE in `releases/1.9.9`
+- **Active source:** 1.9.9 in `SteamShell/`
 - **Runtime:** AutoHotkey v2, 64-bit
 - **Validated compiler baseline:** AutoHotkey v2.0.26 64-bit
-- **Settings schema:** 14
+- **Settings schema:** 18
 - **Distribution model:** One portable executable, with optional installation/registration
 
 The `releases/1.7.0` directory is the permanent release snapshot and should not
@@ -344,16 +352,17 @@ Available functions include:
   overlay uses a paced Shift+Tab event so the game hook can observe the chord.
   With Steam closed the row becomes **Launch Steam**, which starts Big Picture
   and returns SteamShell to shell mode.
-- Current controller layout.
+- Controller Mappings submenu via a main-page hold-Y gesture, with a final
+  **Set Controller Mappings** row for the full editor.
 - Task Switcher: **A** switches once, **Y** switches and applies a session focus
   lock, **X** requests close, and holding **X** force-closes the process.
-- Game Bar, Full Settings, diagnostics, sleep, restart, shutdown, and recovery
-  actions.
+- Game Bar, Open Keyboard, persistent Mouse Mode, Full Settings, Windows
+  Settings, sleep, restart, shutdown, and recovery actions.
 - Context-aware System rows: **Exit Steam to Desktop** in shell mode becomes
   **Return to SteamShell** in desktop mode, alongside a distinct **Exit
   SteamShell** that fully terminates. Both require a second press to confirm.
-- Direct access to SteamShell Settings, plus **Reload Settings** and an
-  immediate-effect **Black Desktop Background** toggle.
+- Direct access to SteamShell and Windows Settings, plus an immediate-effect
+  **Black Desktop Background** toggle.
 
 The notification-area icon's right-click opens the Quick Menu rather than a
 native Windows menu. AutoHotkey will not run a timer while a menu is displayed,
@@ -401,8 +410,8 @@ Settings features include:
 - Diagnostic ZIP creation.
 - Settings backup, import, export, category reset, and full reset.
 - Safe Mode and setup assistance.
-- Default-on administrator startup toggle with an explicit warning about
-  controller mouse/input limitations in elevated applications when disabled.
+- Default-on elevated input-helper toggle with an explicit warning about
+  controller mouse/input limitations in administrator applications when disabled.
 - Clear status for unsaved changes.
 
 The INI maintenance layer adds new settings and removes obsolete managed settings without replacing unrelated user values. Migration creates backups and uses transactional file replacement.
@@ -449,9 +458,50 @@ SteamShell does not require an installer to run.
 
 ### Optional installed shell use
 
-SteamShell can copy/register itself under:
+The recommended managed layout installs the main executable under:
 
-`%LocalAppData%\SteamShell\SteamShell.exe`
+`%ProgramFiles%\SteamShell\SteamShell.exe`
+
+Settings, logs, and backups live under `%ProgramData%\SteamShell`; current-location
+and browsed portable layouts remain available through Setup Assistant.
+
+`rtss-request.ini` appears in that directory once the elevated helper has been
+asked to write an RTSS frame cap. It is a request rather than configuration —
+an FPS value, an optional profile name, and a sequence number — kept out of
+`SteamShellSettings.ini` so a transient message never stages through the
+settings transaction, and so the whole of what crosses into the elevated process
+is one small file. It is not cleaned up on exit and is safe to delete.
+
+The assistant is monitor-height bounded and vertically scrollable for television
+DPI scaling. Its height is calculated from the target monitor's physical work
+area and effective DPI, capped at 80% initially and re-measured before display.
+It displays the resolved Steam and optional RTSS executable paths,
+checks their usual Program Files locations automatically, and keeps owned
+confirmations above the wizard. UAC Settings and external documentation
+temporarily lower/minimize the assistant so their windows remain visible.
+
+Install and upgrade require an explicit **Run as administrator** maintenance
+launch. A normal attempt records a one-time user/session-bound request, restores
+Explorer, and exits after explaining the relaunch. Elevated Setup consumes that
+request, rejects cross-account elevation, closes existing same-identity main and
+helper processes, and then opens the Explorer-backed assistant. It never silently
+promotes the ordinary shell process.
+
+During an elevated Setup session, the assistant can also configure Windows
+Auto-Login. Credentials are validated by Windows before the documented
+`DefaultPassword` LSA secret is stored; no plaintext password is written to the
+SteamShell INI, log, registry value, or a process command line. Disable removes
+both the protected secret and any plaintext fallback value.
+
+Selecting an existing sidecar portable directory with Portable enabled is an
+upgrade operation: the existing INI is preserved, both the main EXE and embedded
+helper are staged and replaced, and the helper's expected file version is
+verified before success is reported. After target verification, only a
+pending/in-progress `SteamShell` sidecar beside the separate updater is removed;
+the installed target, completed configurations, links/junctions, and any source
+containing the target are protected. The updater then exits. The owned completion
+dialog offers Restart Now, which requests a normal immediate Windows reboot, and
+Restart Later.
 
 Supported maintenance commands include:
 
@@ -462,11 +512,15 @@ Supported maintenance commands include:
 - `/safe`
 - `/selftest`
 
-SteamShell requests administrator privileges by default so controller input and
-window management can interact with elevated Windows surfaces. The Startup &
-Splash setting can disable that relaunch on the next start; Health Check reports
-the active privilege state and warns about reduced access to higher-integrity
-windows such as Task Manager.
+Starting in the 1.7.8 development line, locked as 1.9.9, `SteamShell.exe` stays at normal integrity so
+its Quick Menu and Settings correctly take controller focus away from Steam. An
+embedded `SteamShell-Helper.exe` is extracted separately and runs High only for
+safe controller input and coordinated window geometry for High-integrity
+applications. The main process
+accepts it only after path, user, session, and token-integrity verification.
+Steam, startup applications, RTSS, MPV, Explorer, and ordinary Windows utilities
+therefore remain Medium integrity. Health Check reports both privilege states and
+the observed integrity of core external processes.
 
 ---
 
@@ -488,10 +542,11 @@ The companion should remain alive if Steam closes or restarts. Its useful functi
 
 ## Current state
 
-- **Version:** 0.1.17
-- **Status:** Stable source release, frozen in `releases/XFE-0.1.17`
+- **Working version:** 1.9.9
+- **Last locked release:** 1.9.9, frozen with standalone in `releases/1.9.9`
+- **Status:** Windows-validated locked release source
 - **Runtime:** AutoHotkey v2, 64-bit
-- **Settings schema:** 4
+- **Settings schema:** 8
 - **Privilege target:** Standard user
 - **Distribution model:** Portable companion executable
 
@@ -517,8 +572,12 @@ The application works when launched and tested from the normal Windows desktop. 
 - Task switcher listing switchable windows, with close and force-close.
 - Context-aware Steam Menu and Steam Quick Access actions, from the Quick Menu or the View button.
 - Optional assist features: Game Focus Lite, Steam Assist Lite, Launcher Cleanup Lite.
+- Assist game detection combines fullscreen/borderless shape with conservative
+  CPU sampling for minimized games; delayed hard-kill is restricted to the
+  original PID and process creation identity and rechecks safety gates.
 - Assist suspension while a shell overlay such as the Xbox FSE task switcher is on screen, matched by process name or window class.
-- Quick Menu Settings page: live toggles for the assist features, the overlay suspension, and the View button actions, each written to the INI on the spot.
+- Quick Menu Settings page: live toggles for the assist features, the overlay suspension, and the View button actions, each written to the INI on the spot, plus Windows Settings.
+- Main-page Open Keyboard, persistent Mouse Mode, and hold-Y access to Controller Mappings.
 - Independently switchable View button tap and hold actions.
 - Probe Screen: a delayed, read-only capture of every visible window with process, class, geometry, and topmost/foreground state.
 - Startup programs, launched de-elevated when the companion is elevated, with a Normal/Minimized/Hidden launch window mode ported from SteamShell 1.5 and enforced for a few seconds after launch.
@@ -726,7 +785,11 @@ With Steam Assist Lite enabled, opening the FSE task/application switcher caused
 
 **Two wrong assumptions, corrected in order.**
 
-1. *That the switcher never takes the foreground.* It does. The original `IgnoreForegroundProcesses` check missed it only because that list matches on process name, and the process is `explorer.exe` — which cannot be added wholesale, since it also owns the desktop, the taskbar and every File Explorer window.
+1. *That the switcher never takes the foreground.* It does. The original
+   `IgnoreForegroundProcesses` check missed it because the default omitted
+   `explorer.exe`. XFE 0.1.19 protects Explorer when it owns the foreground;
+   class-specific matching is still required for overlay detection when an
+   Explorer-hosted surface is drawn above some other foreground window.
 2. *That scanning the window inventory would find it.* It cannot. XAML island hosts are **tool windows**, and `AssistInventoryBuild` drops tool windows deliberately. With the switcher filling the screen the inventory contained exactly one window: Steam. The first implementation of the overlay check scanned that inventory and was therefore incapable of ever matching, even though the correct class was already in the default list.
 
 **The fix.** Detection inspects the **foreground window directly**, matching process name or `class:`, before falling back to an inventory scan for topmost overlays that do not take the foreground. Class matching is what makes an `explorer.exe`-hosted surface addressable without pausing assistance for the desktop and the taskbar.
@@ -855,6 +918,10 @@ The recurring failure was reasoning from an assumption instead of a measurement,
 | 0.1.15 | Combined **Frame Limit** Quick Menu row — Off · 30 · 40 · 60 · 90 · 120 · Custom — folding RTSS's global limiter flag and the profile's `FramerateLimit` into one control, with a conditional Custom FPS row whose step escalates 1 → 5 → 10 because Quick Menu navigation never auto-repeats. "Off" maps to the flag and never writes `0`, so a cap survives an off/on round trip. Writes go to the global profile only, except the explicit two-press **Save Limit to Profile** row, which copies the current cap into the foreground executable's own profile. Adds the `SetProfileProperty`/`SaveProfile`/`UpdateProfiles` exports, all optional — a build without them shows the cap read-only. Plus: motion-sensor exclusion in the learner's axis search; a bounds guard on the wizard's Skip button; removal of the handler cases and functions left dead by the row merge; and matching validator assertions. |
 | 0.1.16 | RTSS frame-cap input: the write is debounced and committed once after input stops rather than on every press, and the Custom FPS row uses hold-to-repeat with an accelerating rate instead of an escalating step, so a press is always exactly one change. Save Limit to Profile falls back to the last game-like foreground when the captured one is Steam. |
 | 0.1.17 | Shared Quick Menu rendering release: opaque high-DPI GDI+ rows, configurable accent and derived fill, neutral charcoal palette, glow and border suppression, atomic open-session repaint, destroy-on-close compositor lifecycle, recovery-title sizing, and complete driver-reported resolution/refresh enumeration beyond the former 512-mode ceiling. Settings schema 4 adds the accent options. |
+| 0.1.18 | Cross-tree audit hardening: bounded log rotation and diagnostic-only controller-edge logging, restored left-stick Quick Menu navigation, centralized RTSS discovery, shared clamp helpers, validator negative tests, and transactional root validation publishing. Settings schema 5. |
+| 0.1.19 | Retired XFE's late presentation-only startup curtain/video because AnyFSE starts Steam first; schema 6 backs up and removes the obsolete section. Assist now retains Steam Big Picture tool windows, protects Explorer foreground surfaces, uses effective CPU game detection for minimized/non-fullscreen games, and restricts delayed hard-kill to revalidated original process identities. |
+| 0.1.20 | Quick Settings refresh: Open Keyboard and persistent Mouse Mode on the main page, hold Y for the styled Controller Mappings submenu with a final editor action, Windows Settings in the Settings submenu, retired main-page Controller Layout row, and consistent title casing. Settings schema 7. |
+| 0.1.21 | Automatic controller mouse input on every companion settings/editor surface, plus distinct RTSS Preset and retained Custom frame-cap values. Settings schema 8. |
 
 The older ZIP files in the XFE directory are retained source checkpoints from
 the diagnostic phase.
@@ -866,7 +933,7 @@ The unpacked directory is the one to use for comparison or restoration; the ZIP 
 **0.1.14 is locked as the first XFE release** at `releases/XFE-0.1.14/`.
 Its `RELEASE.md` records scope, verification status, known limits, and SHA-256
 checksums. The release directory should not be edited; later development belongs
-in `SteamShell-XFE/` and must use a later version.
+in `SteamShell/` and must use a later version.
 
 **0.1.15 is locked** at `releases/XFE-0.1.15/` — the Frame Limit row, the
 motion-sensor fix, and the Skip bounds guard.
@@ -874,6 +941,12 @@ motion-sensor fix, and the Skip bounds guard.
 **0.1.17 is locked** at `releases/XFE-0.1.17/` — the shared Quick Menu renderer,
 closed-window lifecycle fix, recovery layout, accent schema, and complete
 display-mode enumeration. `releases/XFE-0.1.16/` remains unchanged.
+
+**1.9.9 is the current locked XFE release** at `releases/1.9.9/SteamShell-XFE/`.
+It consolidates the 0.1.21 line—the
+cross-tree audit hardening, retired late startup presentation, Assist fixes,
+Quick Settings refresh, automatic settings mouse, and independent RTSS Preset
+and retained Custom values.
 
 The matching shareable archive is
 `releases/SteamShell-XFE-0.1.14-source.zip` (SHA-256
@@ -906,78 +979,89 @@ Do not run both as competing shell managers. It is reasonable to keep both execu
 ```text
 workspace-root/
 ├── STEAMSHELL_PROJECT_OVERVIEW.md
-├── SteamShell/
-│   ├── assets/
-│   │   ├── SteamShell.ico
-│   │   └── SteamShell-icon.png
-│   ├── SteamShell.ahk
-│   ├── SteamShellSettings_SAMPLE.ini
-│   ├── SteamShell.reg
+├── Run-SteamShellValidation.cmd
+├── Run-SteamShellValidation.ps1
+├── SteamShell/                       <- everything the build and validators need
+│   ├── SteamShell.ahk                   the Windows shell replacement
+│   ├── SteamShell-XFE.ahk               the Xbox FSE companion
+│   ├── SteamShell-Helper.ahk            the elevated helper, one payload, two products
+│   ├── SteamShell-Common.ahk            self-contained; #Included by ALL THREE
+│   ├── COMMON_FUNCTIONS.txt             the manifest for the common half
+│   ├── SteamShell-Shared.ahk            tree-coupled; #Included by both trees
+│   ├── SHARED_FUNCTIONS.txt             the manifest of what is shared, and why
 │   ├── Build-SteamShell.cmd
-│   ├── Build-SteamShell.ps1
+│   ├── Build-SteamShell.ps1             builds all three binaries in order
+│   ├── Validate-Common.ps1              scaffolding only; no product rules
 │   ├── Validate-SteamShell.ps1
-│   ├── README.md
+│   ├── Validate-SteamShell-XFE.ps1
+│   ├── Test-ControllerProfiles.py       learned-controller and Settings-layout simulation
+│   ├── SteamShellSettings_SAMPLE.ini
+│   ├── SteamShell-XFE_SAMPLE.ini
+│   ├── SteamShell.reg
+│   ├── README.md                        standalone
+│   ├── README-XFE.md                    companion
 │   ├── CHANGELOG.md
 │   ├── XFE_PARITY_NOTES.md
+│   ├── INI_READER_MIGRATION.md
 │   ├── WINDOWS_TEST_CHECKLIST.md
+│   ├── WINDOWS_TEST_CHECKLIST-XFE.md
+│   ├── assets/
+│   │   ├── SteamShell.ico
+│   │   ├── SteamShell-icon.png
+│   │   ├── SteamShell-XFE.ico
+│   │   └── SteamShell-XFE-icon.png
 │   ├── extras/
 │   │   ├── bigpicture_startup.webm
 │   │   └── black.png
 │   └── images/
 │       └── control-panel.png
-├── releases/
-│   ├── 1.4.0/
-│   │   └── frozen 1.4 source, documentation, build, and test files
-│   ├── 1.5.0/
-│   │   └── frozen SteamShell 1.5 source, documentation, and build files
-│   ├── 1.6.0/
-│   │   └── frozen SteamShell 1.6 source, assets, documentation, and build files
-│   ├── 1.7.0/
-│   │   └── frozen SteamShell 1.7 source, assets, documentation, and build files
-│   ├── 1.7.4/
-│   │   └── current locked SteamShell source release and checksum manifest
-│   ├── XFE-0.1.9/
-│   │   └── locked XFE learned-controller diagnostic checkpoint
-│   ├── XFE-0.1.14/
-│   │   └── frozen XFE 0.1.14 source release, assets, checksums, and tests
-│   └── XFE-0.1.17/
-│       └── current locked XFE source release and checksum manifest
-└── SteamShell-XFE/
-    ├── assets/
-    │   ├── SteamShell-XFE.ico
-    │   └── SteamShell-XFE-icon.png
-    ├── SteamShell-XFE.ahk
-    ├── SteamShell-XFE_SAMPLE.ini
-    ├── Build-SteamShell-XFE.cmd
-    ├── Build-SteamShell-XFE.ps1
-    ├── Validate-SteamShell-XFE.ps1
-    ├── Test-ControllerProfiles.py
-    ├── README.md
-    ├── WINDOWS_TEST_CHECKLIST.md
-    ├── SteamShell-XFE-0.1.0-test-source.zip
-    ├── SteamShell-XFE-0.1.1-test-source.zip
-    ├── SteamShell-XFE-0.1.2-test-source.zip
-    ├── SteamShell-XFE-0.1.3-diagnostic-source.zip
-    └── SteamShell-XFE-0.1.9-test-source.zip
+├── archive/
+│   └── xfe-test-sources/             historical XFE 0.1.x source zips
+├── current/                          the published, verified SteamShell.exe
+└── releases/
+    ├── 1.4.0/ … 1.7.7/               frozen standalone snapshots
+    ├── 1.9.9/                        coordinated standalone/XFE bundle and checksums
+    └── XFE-0.1.9/ … XFE-0.1.21/      frozen companion snapshots
 ```
+
+**One folder is the unit of a release.** `SteamShell/` reaches outside itself for
+nothing: both AutoHotkey trees, the shared file and its manifest, both
+validators, the shared scaffolding, and the one build script are all in it. Copy
+the directory and it builds. That is why `SteamShell-Shared.ahk`,
+`SHARED_FUNCTIONS.txt` and the parity check are no longer at the workspace root,
+and why `#Include SteamShell-Shared.ahk` no longer climbs a level.
+
+Frozen snapshots under `releases/` predate this and keep the two-folder layout
+they were locked with. They are self-contained on their own terms and are not
+rewritten.
+
 
 ## SteamShell files
 
 | File | Purpose |
 |---|---|
-| `SteamShell/SteamShell.ahk` | Current SteamShell source, matching the locked 1.7.4 release. |
+| `SteamShell/SteamShell.ahk` | Active and locked SteamShell 1.9.9 source. |
+| `SteamShell/SteamShell-Helper.ahk` | Narrow elevated-window controller helper, compiled and embedded by the main build. |
 | `SteamShell/assets/` | Standalone notification-area and compiled executable icon assets. |
 | `SteamShell/SteamShellSettings_SAMPLE.ini` | Documented configuration template. Runtime settings are written to `SteamShellSettings.ini`. |
 | `SteamShell/SteamShell.reg` | Optional registry setup/reference for configuring SteamShell as the per-user shell. |
 | `SteamShell/Build-SteamShell.cmd` | Double-clickable Windows build launcher with visible result and preserved exit code. |
-| `SteamShell/Build-SteamShell.ps1` | Windows build script that validates and compiles the 64-bit executable. |
+| `SteamShell/Build-SteamShell.ps1` | The only build script. Runs both validators, then compiles the helper, the XFE companion and `SteamShell.exe` with both embedded, version-verifying each. |
 | `SteamShell/Validate-SteamShell.ps1` | Static and runtime-oriented validation checks used before compiling or releasing. |
 | `SteamShell/README.md` | Main setup, operation, configuration, and troubleshooting documentation. |
 | `SteamShell/CHANGELOG.md` | Version history and notable behavioral changes. |
 | `SteamShell/XFE_PARITY_NOTES.md` | Ported, already-covered, and deliberately excluded XFE parity decisions. |
 | `SteamShell/WINDOWS_TEST_CHECKLIST.md` | Manual Windows acceptance and regression checklist. |
+| `SteamShell/INI_READER_MIGRATION.md` | Scoped, not-yet-started plan to adopt XFE's typed INI readers. A proposal, not a record of work done. |
 | `SteamShell/extras/` | Optional splash/video and background assets. |
 | `SteamShell/images/` | Documentation screenshots and images. |
+
+## Root files
+
+| File | Purpose |
+|---|---|
+| `Run-SteamShellValidation.cmd` | Double-clickable launcher for the combined validation and build run. |
+| `Run-SteamShellValidation.ps1` | Validates and builds the project in one pass: AutoHotkey syntax, both static validators, the shared-parity check, version-verified compilation of all three binaries, the negative gate tests, and the transactional publish. |
 
 ## Release directories
 
@@ -985,33 +1069,47 @@ The `releases` directory contains frozen source snapshots:
 
 - `releases/1.4.0` preserves the previous stable architecture.
 - `releases/1.5.0` is the source of truth for the locked SteamShell 1.5 release.
+- `releases/1.6.0` preserves the release between 1.5 and 1.7.
 - `releases/1.7.0` is the source of truth for the locked SteamShell 1.7 release.
-- `releases/1.7.4` is the current locked SteamShell patch release.
+- `releases/1.7.1`, `releases/1.7.2` are the intermediate locked 1.7 patch releases.
+- `releases/1.7.3` is the deliberate revert point immediately before the Quick Menu rendering rewrite.
+- `releases/1.7.4` preserves the earlier Quick Menu rendering checkpoint.
+- `releases/1.7.7` is the prior locked SteamShell patch release.
+- `releases/1.9.9` is the current coordinated, self-contained SteamShell and XFE release bundle.
 - `releases/XFE-0.1.9` is the SteamShell-XFE companion at the point the controller-learning wizard was confirmed working on hardware. A test-candidate checkpoint, not a finished release; its `RELEASE.md` is explicit about which parts have never run.
 - `releases/XFE-0.1.14` is the first locked SteamShell-XFE release, preserving
   the complete source, build launchers, icon assets, configuration sample,
   documentation, validation, simulation, and checksums.
-- `releases/XFE-0.1.17` is the current locked SteamShell-XFE patch release.
+- `releases/XFE-0.1.15`, `releases/XFE-0.1.16` are the intermediate locked
+  SteamShell-XFE patch releases.
+- `releases/XFE-0.1.17` preserves the earlier Quick Menu rendering checkpoint.
+- `releases/XFE-0.1.21` is the prior locked SteamShell-XFE patch release.
 
 Each release directory is self-contained enough to inspect, validate, and rebuild that version. Release snapshots should only change to correct packaging mistakes; feature development should create a later version instead.
 `releases/1.7.0/RELEASE.md` records the 1.7 scope, verification boundary, and
 SHA-256 manifest.
 
-## SteamShell-XFE files
+## SteamShell-XFE and cross-tree files
+
+These live in `SteamShell/` alongside the standalone sources — the single-folder
+reorganisation put both products and everything the build needs in one place.
 
 | File | Purpose |
 |---|---|
-| `SteamShell-XFE.ahk` | Current XFE companion source, matching the locked 0.1.17 release. |
-| `assets/SteamShell-XFE.ico` | Multi-resolution Windows executable and notification-area icon. |
-| `assets/SteamShell-XFE-icon.png` | Transparent high-resolution preview/source for the XFE icon. |
-| `SteamShell-XFE_SAMPLE.ini` | Documented XFE configuration template. Runtime settings are written to `SteamShell-XFE.ini`. |
-| `Build-SteamShell-XFE.cmd` | Double-clickable Windows build launcher that bypasses execution policy for this process and keeps the result visible. |
-| `Build-SteamShell-XFE.ps1` | Windows build script for the XFE companion executable. |
-| `Validate-SteamShell-XFE.ps1` | Validation checks specific to the stripped-down companion architecture. |
-| `Test-ControllerProfiles.py` | Deterministic simulation for learned widths, endianness, directions, ranges, button polarity, and trigger layouts. |
-| `README.md` | XFE setup, boundaries, hotkeys, and AnyFSE guidance. |
-| `WINDOWS_TEST_CHECKLIST.md` | Desktop and Xbox FSE test procedure. |
-| `SteamShell-XFE-*.zip` | Historical source packages for individual test candidates. |
+| `SteamShell/SteamShell-XFE.ahk` | Active and locked XFE 1.9.9 source. |
+| `SteamShell/assets/SteamShell-XFE.ico` | Multi-resolution Windows executable and notification-area icon. |
+| `SteamShell/assets/SteamShell-XFE-icon.png` | Transparent high-resolution preview/source for the XFE icon. |
+| `SteamShell/SteamShell-XFE_SAMPLE.ini` | Documented XFE configuration template. Runtime settings are written to `SteamShell-XFE.ini`. |
+| `SteamShell/Validate-SteamShell-XFE.ps1` | Validation checks specific to the stripped-down companion architecture. Deliberately a separate script from `Validate-SteamShell.ps1`: several of its architecture rules are the exact inverse of the shell's, and a merged script would need every one of them to name its own scope, where a mis-scoped rule stops applying instead of failing. |
+| `SteamShell/Test-ControllerProfiles.py` | Deterministic simulation for learned widths, endianness, directions, ranges, button polarity, and trigger layouts. |
+| `SteamShell/README-XFE.md` | XFE setup, boundaries, hotkeys, and AnyFSE guidance. |
+| `SteamShell/WINDOWS_TEST_CHECKLIST-XFE.md` | Desktop and Xbox FSE test procedure. |
+| `SteamShell/SteamShell-Common.ahk` | The self-contained half of the shared code, `#Include`d by **all three** programs including the elevated helper. May not declare a global or reference anything outside itself — that invariant is what lets it compile into a High-integrity binary, and it is enforced rather than trusted. |
+| `SteamShell/COMMON_FUNCTIONS.txt` | The manifest for the common half. A decision record, like `SHARED_FUNCTIONS.txt`. |
+| `SteamShell/SteamShell-Shared.ahk` | The **tree-coupled** half: RTSS orchestration, Quick Menu painting, elevated-helper lifecycle. `#Include`d by both trees only, because it reaches into per-tree functions and would not compile in the helper. Functions only — no top-level code, because it is inserted into two different auto-execute sections. Calls back into **29 per-tree functions** — the seam — of which the `Product*` group (`ProductIdentity`, `ProductHealthResults`, `ProductTrayItems`, `ProductBestGameExe`, `ProductVersionText`, `ProductCenterGui`, `ProductTrayBaseTip`) exists purely so shared logic can ask a question each product answers differently. `LogLine` and `SharedPersistSettings` are the two oldest. Every name is verified present in **both** trees by `Assert-SharedParity`, so a shared body cannot quietly depend on something only one product defines. |
+| `SteamShell/SHARED_FUNCTIONS.txt` | The manifest of what lives in the shared file. A decision record: removing a name, and moving the function back into both trees, records a divergence as deliberate. |
+| `SteamShell/Validate-Common.ps1` | Scaffolding shared by both validators — `Assert-True`, include resolution, the structural scans, and the shared-parity check. Mechanism only; no product rules. |
+| `archive/xfe-test-sources/*.zip` | Historical source packages for individual XFE test candidates, kept out of the release folder. |
 
 ## Generated files at runtime
 
@@ -1026,10 +1124,25 @@ Backup, migration, diagnostic ZIP, and temporary transaction files may also be c
 
 ## Build output
 
-On a Windows development system, the build scripts produce:
+On a Windows development system, the one build script produces:
 
-- `SteamShell\dist\SteamShell.exe`
-- `SteamShell-XFE\dist\SteamShell-XFE.exe`
+- `SteamShell\build\SteamShell-Helper.exe` — embedded payload
+- `SteamShell\build\SteamShell-XFE.exe` — embedded payload
+- `SteamShell\dist\SteamShell.exe` — the installer, carrying both
+- `SteamShell\dist\SteamShell-XFE.exe` — development copy only
+
+Only `SteamShell.exe` is published. It is the installer and the uninstaller for
+both products, so a second `SteamShell-XFE.exe` beside it is not a distributable
+— it is an invitation to a hand-copied install with no logon task, no writable
+companion directory, and no dormant elevated helper. The companion is installed
+by choosing XFE in Setup Assistant.
+
+The root `Run-SteamShellValidation.cmd` validates and builds everything in one
+pass, breaks each of the three sources in turn to prove the gate rejects them,
+locks each freshness-checked output to prove a stale artefact is refused, and
+only on a completely passing run publishes the verified installer to root
+`current\`. A failed run leaves the prior `current\` directory unchanged and
+returns a non-zero exit code.
 
 Compiled executables are build artifacts. The authoritative project history is the source, sample configuration, validation script, documentation, and frozen release snapshot.
 
@@ -1039,8 +1152,9 @@ Compiled executables are build artifacts. The authoritative project history is t
 
 ## SteamShell 1.7
 
-Treat 1.7.4 as the current checkpoint. Keep 1.7.3 as the pre-rendering-rewrite
-revert point. Its predecessors 1.7.3, 1.7.2, 1.7.1 and 1.7.0 remain frozen:
+Treat 1.9.9 as the current locked checkpoint. Keep 1.7.3 as the
+pre-rendering-rewrite revert point. Its predecessors
+1.7.3, 1.7.2, 1.7.1 and 1.7.0 remain frozen:
 
 - Work through the Desktop mode and Desktop blackout sections of
   `WINDOWS_TEST_CHECKLIST.md` before treating either as settled.
@@ -1060,8 +1174,8 @@ The two questions that gated the whole project are now answered:
 1. ~~Prove background controller input inside Xbox FSE.~~ **Solved in 0.1.5 via RawInput.** XInput and GameInput are both gated; RawInput reads underneath and receives everything.
 2. ~~Prove the Quick Menu presentation model inside Xbox FSE.~~ **Confirmed working.** FSE displays the Quick Menu, and keyboard hotkeys reach the background companion.
 
-Treat 0.1.17 as the current completed checkpoint. Its predecessors 0.1.14,
-0.1.15, and 0.1.16 remain frozen:
+Treat 1.9.9 as the current completed checkpoint. Its predecessors 0.1.14,
+0.1.15, 0.1.16, and 0.1.17 remain frozen:
 
 3. Prefer extended play and sleep/resume testing over broad feature work.
 4. Record reproducible regressions before changing RawInput, display safety,

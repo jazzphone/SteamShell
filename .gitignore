@@ -11,15 +11,30 @@ __pycache__/
 # releases/ do contain a compiled EXE, and those are part of the historical
 # record. A bare pattern would silently drop them.
 /SteamShell/dist/
-/SteamShell-XFE/dist/
+/SteamShell/build/
+/current/
+/current.staging-*/
+/current.backup-*/
+
+# Generated only when the self-contained 1.9.9 release bundle is rebuilt. That
+# bundle predates the single-folder layout and still has a SteamShell-XFE tree
+# of its own, so its paths are listed as they actually are.
+/releases/1.9.9/SteamShell/dist/
+/releases/1.9.9/SteamShell/build/
+/releases/1.9.9/SteamShell-XFE/dist/
+/releases/1.9.9/current/
+/releases/1.9.9/current.staging-*/
+/releases/1.9.9/current.backup-*/
 
 # Runtime state. These are created beside the executable at run time and are
 # machine-specific; the tracked files are the *_SAMPLE.ini templates.
 *.log
 *.log.[0-9]
+*.log.[0-9][0-9]*
 SteamShellSettings.ini
 SteamShell-XFE.ini
 SteamShell-XFE-Controllers.ini
+setup-admin-requested.tmp
 *.bak
 
 # Local tool settings, not project configuration

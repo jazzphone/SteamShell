@@ -4,20 +4,121 @@ SteamShell XFE is a portable controller-utility companion for Windows Xbox Full
 Screen Experience. It is separate from the standalone SteamShell application
 and does not replace, install, or modify the Windows shell.
 
-The current release is **0.1.17**, locked as a reproducible source snapshot in
-`releases/XFE-0.1.17`. Controller input, the Quick Menu, Settings,
+The working tree is **1.9.9**, locked with standalone SteamShell in the
+self-contained `releases/1.9.9` bundle. Controller input, the Quick Menu, Settings,
 display/HDR controls, RTSS integration, and notification-area control work inside
-Xbox FSE. The companion remains deliberately separate from the stable SteamShell
-1.7.4 Windows-shell application.
+Xbox FSE. The companion remains deliberately separate from the SteamShell
+Windows-shell application, whose working tree is also 1.9.9.
+
+1.9.9 advances to settings schema 9 and consolidates the validated 0.1.21 feature
+line into the coordinated pre-2.0 version. Every companion-owned settings/editor
+surface now gets temporary controller mouse input, including Controller
+Mappings opened from Quick Settings. RTSS adds a configurable Preset entry and
+persists Custom independently, migrating the former `CustomFrameCap` value into
+the new Preset without discarding it.
+
+0.1.20 advances settings schema to 7 and refreshes the Quick Menu in parity
+with standalone SteamShell: Open Keyboard and persistent Mouse Mode are on the
+main page, holding Y opens the styled Controller Mappings submenu, Windows
+Settings is available from Settings, and all row labels/descriptions use
+consistent title casing. Its fresh-install defaults also mirror the applicable
+parts of the shared living-room profile: Purple Quick Menu, 3000 controller
+deadzone, enabled startup scheduling with an empty application list, enabled
+Lite Assist/launcher cleanup, and RTSS with a 158 FPS custom cap.
+
+0.1.19 advances settings schema to 6. It removes XFE's late startup
+curtain/video, keeps Steam Big Picture tool windows in the assist inventory,
+protects Explorer foreground surfaces, makes CPU game detection effective for
+non-fullscreen/minimized games, and binds delayed launcher hard-kill to the
+original validated process identities. Existing `[StartupSplash]` settings are
+backed up and retired automatically.
+
+0.1.18 came out of the August 2026 cross-tree audit at settings schema 5. It
+It adds log rotation (`[Companion] LogRotateMaxKB` / `LogRotateBackups`), moves
+per-button-edge controller logging behind the existing `DiagnosticLogging`
+flag, restores left-stick Quick Menu navigation, and discovers a stock RTSS
+install when `[RTSS] Path` is unset. Missing keys are added to an existing INI
+automatically; no values are replaced.
+Schema 6 deliberately removes only the retired `[StartupSplash]` section after
+preserving the pre-migration INI beside it.
+
+It also gains `ClampInt`/`ClampFloat`, replacing 19 open-coded
+`Max(lo, Min(hi, x))` sites, and picks up standalone's explanatory comments on
+`OpenOSK` and `SetDefaultAudioEndpointId`. Those bring the number of functions
+byte-identical with the standalone tree to 48; see `SHARED_FUNCTIONS.txt` and
+the parity check in `Validate-Common.ps1`, both beside this file.
+
+HDR behaviour is **unchanged here, and standalone now matches it.** This
+companion has reported **Unavailable** rather than sending a blind Win+Alt+B
+toggle since 0.1.14, and `Validate-SteamShell-XFE.ps1` asserts the chord appears
+nowhere in this tree. Standalone kept the chord as a fallback until it was traced
+and found unreachable: both products build a separate, display-only row when HDR
+state cannot be read, so the fallback could only ever have fired if the state
+became unreadable between the menu being built and the button being pressed. The
+chord is now gone from both, `ToggleQuickMenuHdrState` is one shared definition,
+and standalone carries the same rule forbidding it.
 
 Its Quick Menu rows are
 painted as one high-DPI GDI+ surface with rounded selection, accent outline,
 left accent bar, visible glow, dark `#242424` charcoal base, atomic no-erase
 repaints, neutral-gray unselected text, and no system-drawn outer border. The
 controls persist only for the open menu session; closing destroys the HWND so
-DWM cannot revive stale child surfaces after a fullscreen transition. It also
-adds the configurable Quick Menu accent and
-settings schema 4. Use the locked release directory when reproducibility matters.
+DWM cannot revive stale child surfaces after a fullscreen transition. The
+renderer and configurable Quick Menu accent were introduced in 0.1.17 with
+settings schema 4. The 0.1.18 changes advanced to schema 5 for the audit
+hardening described above; 1.9.9 shipped schema 9 and the post-1.9.9 working
+tree is at schema 16. Schema 10 added the opt-in
+`[RTSS] EnableElevatedFrameCapWrites` described under *Elevation*; schema 11
+retired the automatic-mouse exclusion mode, described under *Automatic mouse
+mode*; schema 12 moved the settings XFE shares with standalone SteamShell into
+the sections standalone keeps them in, so the same setting is in the same place
+in both products; schema 13 did the same for cursor auto-hide and pointer
+parking, which both products had under different names.
+
+Schemas 14 to 16 are additions rather than moves, so nothing relocates. Schema 14
+added the `[Assist]` scoring keys that decide which window is the game; schema 15
+added a `[Logging]` section, which this product did not have at all; schema 16
+added `[Setup]`, the record of what this installation is and where it lives.
+Nothing about behaviour changed in any of them, and existing files are migrated
+on first run. Use the locked release
+directory when reproducibility matters.
+
+### Where settings live, and why the INI is now commented
+
+Every setting in `SteamShell-XFE_SAMPLE.ini` now carries an explanation, matching
+standalone's sample. That was not possible before: XFE's settings readers took
+the value as everything after the `=`, so `EnableAutoMouseMode=true  ; note` was
+read as the string `true  ; note` — which is not `true`, and the setting came
+back off. Documenting the file would have silently disabled 45 settings that
+default to on. All four readers now strip a trailing comment first, through the
+same `CleanIniValue` standalone has always used.
+
+Schemas 12 and 13 moved eleven keys so that a setting shared with standalone is
+found in the same place, under the same name, in both products. Schema 12 covered
+the automatic-mouse switch and launcher cleanup; schema 13 covered cursor
+auto-hide and pointer parking, where both products had the feature all along and
+named every part of it differently — this tree's `ParkYPercent` and standalone's
+`MouseParkYPercent` carried word-for-word the same explanation, which is how the
+duplication was noticed:
+
+| Setting | Was | Now |
+|---|---|---|
+| `EnableAutoMouseMode` | `[Controller]` | `[Features]` |
+| `CooldownSec`, `GracefulCloseMs`, `HardKill`, `RequireNoGame`, `LauncherProcesses` | `[Assist]` | `[LauncherCleanup]` |
+| `EnableAutoHide` | `[Cursor]` | `[Features]` as `EnableAutoHideCursor` |
+| `ParkOnStartup` | `[Cursor]` | `[Features]` as `EnableMouseParkOnBoot` |
+| `HideDelayMs` | `[Cursor]` | `[Timing]` as `MouseHideDelay` |
+| `ParkEdge` | `[Cursor]` | `[MousePark]` as `MouseParkEdge` |
+| `ParkYPercent` | `[Cursor]` | `[MousePark]` as `MouseParkYPercent` |
+
+Only settings that exist in both trees **under the same name** moved. XFE's
+assist tuning that standalone names differently — `TickIntervalMs` against
+`CheckIntervalMs`, `CpuThresholdPercent` against `GameCPUThresholdPercent` —
+stayed in `[Assist]`, because moving a differently-named setting into a shared
+section makes it no easier to find while still invalidating every existing file.
+The `Lite` in `EnableGameFocusLite` and its siblings is likewise deliberate:
+those features are reduced versions of standalone's, and renaming them to match
+would claim a parity that does not exist.
 Display discovery also reads the complete driver-reported mode table rather
 than truncating it after 512 resolution/refresh combinations.
 
@@ -289,6 +390,90 @@ mapping ever "stops working" in one specific game, check this first.
 The companion never relaunches itself elevated — that would raise a UAC prompt
 on every boot, since a non-elevated parent starts it.
 
+### The one exception: an optional RTSS helper, off by default
+
+There is exactly one place where normal privileges do not merely cost
+convenience but remove a feature outright, and it has its own opt-in switch.
+
+`RTSSHooks64.dll` is loaded into the **calling** process, so RTSS's
+`SaveProfile` runs with this companion's token — and RTSS installs under
+Program Files. Unelevated, the companion can read the cap and toggle the
+limiter flag, because that goes through RTSS's shared memory and touches no
+file, but it **cannot set the FPS value and cannot save a per-game profile**.
+The Frame Limit row reports itself read-only, which is accurate, and *Save Limit
+to Profile* reports unavailable.
+
+**Write the cap through an elevated helper** in Settings ▸ RTSS & Performance
+(`[RTSS] EnableElevatedFrameCapWrites`, **default off**) hands that one write to
+`SteamShell-Helper.exe`, a separate High-integrity process that performs the
+`LoadProfile` / `SetProfileProperty` / `SaveProfile` / `UpdateProfiles` sequence
+and nothing else.
+
+What turning it on costs, stated plainly:
+
+- **A UAC prompt when the companion starts.** Once per session. XFE does not get
+  the protected on-demand scheduled task standalone SteamShell uses to avoid
+  that prompt, and that is deliberate — such a task can be invoked directly with
+  `schtasks /run` without asking the companion to re-check anything, so it is
+  only safe below a protected ancestor chain covering the *whole* path. XFE's
+  own directory is user-writable by design, because it keeps its INI, learned
+  controller profiles and log beside its executable.
+- **A second process for the session**, at High integrity, which exits when the
+  companion does.
+
+What it deliberately does **not** do:
+
+- **No elevated controller input.** UIPI blocks this companion's synthetic input
+  from elevated foreground windows, and the helper *could* have carried input as
+  it does for standalone SteamShell — but that implementation is XInput, and XFE
+  exists precisely because XInput is not enough for its users. A controller in
+  DirectInput mode is not an XInput device at all. Elevated input would have
+  worked only for people who did not need XFE, so it was left out. The accepted
+  cost above still applies in full.
+- **No window management.** Xbox FSE owns presentation.
+- **No UI.** The helper cannot show a message box; an uncaught error is logged
+  and the process exits.
+
+Before it is ever elevated, the companion checks that `SteamShell-Helper.exe`
+carries the exact expected version *and* that both the binary and its directory
+are owned by Administrators and writable by nobody else — and that the binary is
+still readable, because an over-restrictive ACL is not protection either.
+Anything less and it is not launched, and Health Check says why.
+
+**The helper is installed by `SteamShell.exe` Setup in XFE mode**, into
+`%ProgramFiles%\SteamShell-XFE\bin`, and lies dormant there. XFE has no embedded
+payload and no administrator rights, so it can never install or repair the
+helper itself; if it is missing or the wrong version, re-run Setup as an
+administrator. It is installed regardless of this setting so that turning the
+setting on later does not mean re-running an installer — a binary on disk is not
+an elevated process, and nothing starts it until you ask.
+
+It buys nothing where RTSS is installed somewhere this account can already
+write, or where you run the companion elevated yourself. In both cases the
+in-process write already works, and Health Check says so rather than starting a
+process for no reason.
+
+## The Settings window
+
+Seven categories in a sidebar, with a page for each. Rows place themselves from
+a flowing cursor, and the content area **scrolls** when a page is taller than the
+window — Controller & Cursor and RTSS & Performance both are. The scrollbar
+appears only when a page needs it.
+
+Scroll with the mouse wheel, the scrollbar, or the **left stick**, which already
+drives the wheel over any Settings surface. The right stick moves the pointer and
+RB clicks, LT/RT change category, and Y saves.
+
+Four category names are shared with standalone SteamShell — General,
+Controller & Cursor, RTSS & Performance, Startup Programs — and present the
+settings that exist in *both* in the same order and wording. Steam, Assist and
+Advanced have no standalone counterpart; standalone's Startup & Splash, Focus &
+Windows and Launcher Cleanup do jobs this companion deliberately leaves to
+Xbox FSE, so those pages are not mirrored in either direction.
+
+One limitation worth knowing: a row scrolled out of view is hidden, and a hidden
+control cannot be reached by Tab. Scroll to it first. This matches standalone.
+
 ## Windows are always-on-top, and what that costs
 
 Every window here is `+AlwaysOnTop`. Not for prominence — it is the only thing
@@ -401,17 +586,57 @@ value. Windows 11 supplies antialiased outer corners, with the shaped-window pat
 retained for Windows 10. The bottom line shows the button hint, replaced by
 transient status messages when something happens.
 
-Pages: **Audio**, **Display & HDR**, **RTSS & Performance**, **Steam Menu**,
-**Steam Quick Access**, **Controller Layout**, **Task Switcher**, **Game Bar**,
-**Settings**, **System**.
+Main rows: **Audio**, **Display & HDR**, **RTSS & Performance**, **Steam Menu**,
+**Steam Quick Access**, **Task Switcher**, **Game Bar**, **Open Keyboard**,
+**Mouse Mode**, **Settings**, and **System**. Open Keyboard dismisses Quick
+Settings before presenting the touch keyboard. Mouse Mode persists the normal
+controller pointer/mappings without requiring View/Back. Hold Y on the main
+page to open the styled Controller Mappings submenu; its final **Set Controller
+Mappings** row opens the full editor.
+
+### Automatic mouse mode
+
+The controller can act as a pointer without holding View/Back, decided by what
+is in the foreground. `EnableAutoMouseMode` is the master switch and
+`AutoMouseExeList` names the applications it applies to. That is the whole
+feature; an empty list turns it off as surely as the switch does. Both settings
+are on **Settings → Controller & Cursor**.
+
+Xbox FSE needs no special handling here — leave it off the list. It is
+controller-driven, and a pointer inside it gets in the way rather than helping.
+
+Automatic mouse mode is evaluated *after* the Quick Menu and Settings chords,
+which test the real buttons. A list that turns the pointer on somewhere unwanted
+is therefore always correctable from the couch, without a keyboard.
+
+#### What schema 11 removed, and why
+
+Until schema 11 there was a second gate: `EnableDesktopAutoMouseMode`, which
+switched the feature into an "everywhere *except* these" mode governed by
+`DesktopAutoMouseExcludeExeList`, defaulting to `XboxPcApp.exe`, `GameBar.exe`,
+`XboxGameBarWidgets.exe` and `ShellHost.exe`.
+
+It existed because standalone SteamShell makes that same choice using
+`DesktopMode`, and the companion has no `DesktopMode` — it never owns the shell.
+The exclusion list was the stand-in, and it was standing in for a question
+Windows gives no way to ask: *am I inside Xbox FSE right now?* A hand-maintained
+list of someone else's shell process names is not an answer to that question; it
+is a bug that goes stale quietly, wearing a configuration field.
+
+So the mode was removed rather than kept working badly. Both keys are deleted
+from an existing INI during migration, and the change is logged, because it
+narrows behaviour: anyone running the old default had a pointer in *every*
+foreground application and now has one only where they say so.
+
+If you want the old reach back, name the applications explicitly. That is more
+typing once, and it never silently stops being true.
 
 **Settings** is a page of switches rather than a shortcut to the Settings
 window, so the things worth changing mid-session can be changed from the couch:
 the three assist features, the FSE-switcher pause, and the three View button
-actions, plus the next-launch startup splash switch. **A** or **Left/Right**
-flips a row. Each toggle writes the INI immediately with no save step. The live
-feature toggles apply at once; the explicitly labelled splash switch applies on
-the next launch. The Settings window is still one row away at the bottom.
+actions. **A** or **Left/Right** flips a row. Each toggle writes the INI
+immediately with no save step and applies at once. The Settings window is still
+one row away at the bottom, alongside a direct Windows Settings row.
 
 **System** is intentionally limited to Sleep, Restart, Shut Down, and Exit.
 Health Check, Probe Screen, and controller re-arm remain in **Settings →
@@ -424,7 +649,7 @@ The Settings page includes **Accent Color**. Left/Right cycles Steam Blue, Blue,
 Purple, Magenta, Red, Orange, Yellow, Green, Teal, and Custom, wrapping at both
 ends and repainting immediately. Full Settings ▸ General exposes the same preset
 plus the custom `RRGGBB` value. Unknown presets or malformed custom values fall
-back visibly to Steam Blue rather than producing an unreadable menu.
+back visibly to Purple rather than producing an unreadable menu.
 
 **Display & HDR** picks resolution, refresh rate, and Windows display scale as
 three independent Left/Right rows rather than a paged list of combinations.
@@ -459,11 +684,12 @@ rows that can each mean "no limiting" only fight each other:
 | Limiter flag (bit `0x4` = disabled) | Global | The master on/off |
 | `FramerateLimit` | Per profile | The target, `0` = uncapped |
 
-Left/Right cycles **Off · 30 · 40 · 60 · 90 · 120 · Custom**. Choosing `Custom`
-reveals a **Custom FPS** row beneath it; Left/Right there steps the value, and
-consecutive presses escalate the step 1 → 5 → 10 so 60 → 120 is about ten
-presses rather than sixty. Quick Menu navigation is edge-triggered with no
-auto-repeat, which is why the escalation exists.
+Left/Right cycles **Off · 30 · 40 · 60 · 90 · 120 · Preset · Custom**. Preset
+uses `PresetFrameCap` from Settings. Choosing `Custom` restores its separately
+retained value and reveals a **Custom FPS** row beneath it; Left/Right there steps the value, and
+each press changes it by exactly 1. Holding Left/Right accelerates the repeat
+rate while keeping that precise step, and the pending value is committed to RTSS
+once input settles instead of rewriting the profile on every repeat.
 
 **"Off" maps to the flag, never to the value.** Writing `0` would discard the
 number, so an off/on round trip would silently forget 72 and come back uncapped.
@@ -473,6 +699,30 @@ rather than jumping to the first preset.
 Every write targets the **global** profile. Per-game profiles are the user's own
 tuning, and a menu that writes whichever profile happens to be in the foreground
 is a menu that can silently change a game's configuration.
+
+### Restoring the Frame Limit
+
+RTSS keeps only part of the selection across a restart. The FPS number lives in
+its global profile and is persisted, but the limiter flag is runtime state in
+RTSS's shared memory, and `Custom` is a concept RTSS never sees. On its own that
+means every reboot came back reading **Off**, with the first Right press landing
+on 30 FPS rather than your own cap.
+
+XFE records what it applied in `[RTSS] LastFrameCapMode` and `LastFrameCapFps` —
+including while Off, where the number is kept for the same reason the Off entry
+never writes `0` — and reapplies it once RTSS is running. **Restore last
+selection when RTSS starts** in Settings ▸ RTSS & Performance
+(`RestoreFrameLimitOnStartup`, default on) controls it.
+
+Two deliberate limits: it **never starts RTSS**, polling for up to two minutes
+after startup instead, which is also what makes it work when RTSS arrives later;
+and it only writes RTSS's profile when RTSS does not already agree, because that
+write is a real edit to RTSS's own configuration. It needs `UseDllIntegration` —
+the shortcut fallback can only toggle, not select an FPS — and logs that it
+skipped rather than waiting if DLL integration is off.
+
+This behaviour is implemented in `SteamShell-Shared.ahk` and is identical in
+standalone SteamShell.
 
 **Save Limit to Profile** is the one exception, and it is explicit. It copies the
 current global cap into the foreground executable's own RTSS profile, showing
@@ -487,6 +737,21 @@ profile automatically every time the game runs.
 Writing needs the `SetProfileProperty`, `SaveProfile` and `UpdateProfiles`
 exports. They are treated as optional: an RTSS build without them keeps Overlay
 and limiter control and shows the cap **read-only** rather than failing outright.
+
+Writing also needs a token that can write where RTSS is installed, which is a
+different problem with a different answer — see *The one exception: an optional
+RTSS helper* under **Elevation**. On a stock Program Files install an unelevated
+companion shows the same **read-only** cap for that reason rather than because
+of the RTSS build.
+
+Both the global cap and *Save Limit to Profile* now **prove** the write instead
+of assuming it. The per-game save previously reported success unconditionally,
+so an unelevated companion told every standard user their profile had been
+saved while `SaveProfile` had silently done nothing. Both paths read the value
+back, and when a helper is available they go straight to it rather than
+attempting a local write first — verifying a named profile re-reads the copy
+`SetProfileProperty` just wrote, so trying locally first passes the check while
+nothing has been saved.
 
 “Limiter On” means RTSS's global limiter-disable switch is clear. The displayed
 profile cap must also be non-zero before that application is actually limited.
@@ -537,6 +802,16 @@ from Windows if it should always remain beside the clock. Right-clicking offers:
 - **Disable** / **Enable**
 - **Exit**
 
+A fifth entry, **Installation moved — open Settings**, appears above the others
+only when the recorded install location does not match where the companion is
+actually running. It is an offer and nothing more: the companion starts and
+behaves normally either way. See *The installation record* below.
+
+The icon re-adds itself when Explorer restarts. Explorer rebuilds the
+notification area and broadcasts `TaskbarCreated`; before this the icon was lost
+until the companion was restarted, taking with it the only route to Settings,
+Disable and Exit that does not need a controller.
+
 Disable is session-only and leaves the tray menu available for recovery. It
 pauses controller polling, assist and cursor timers, diagnostics, startup
 launches that have not fired yet, RawInput processing, and the companion's
@@ -548,7 +823,30 @@ again and re-arms RawInput without firing stale controller-release actions.
 The source-mode tray loads `assets\SteamShell-XFE.ico`. The build script embeds
 the same multi-resolution icon in the compiled executable automatically.
 
-## Assist features (optional, all off by default)
+## The installation record
+
+`[Setup]` records what this installation is and where it lives: `Product`,
+`InstallationMode`, `InstallDirectory` and `DataDirectory`, alongside `SetupState`
+and `SetupVersion`. The companion fills in the two directories itself on first
+run, and only when they are absent, so an ordinary start does no file writes.
+
+It writes its own record because the Setup Assistant that deploys the companion
+records the install in SteamShell's registry key and SteamShell's INI, not this
+one — and because a companion copied into place by hand never met that installer
+at all.
+
+At every start the record is compared against where the companion is actually
+running. A mismatch is logged, marked on the tray tooltip, offered as a tray
+entry, and reported in Health Check. **Nothing else happens.** The companion runs
+normally either way; the record is information, not permission.
+
+The point is migration. SteamShell's registry record is the better source while
+it exists, and is exactly what does not survive a move: copy this folder to
+another PC and the registry is empty while the settings file still describes the
+old machine. The file travels with the installation, which makes it the only
+record able to notice.
+
+## Assist features (enabled by default)
 
 Ported from SteamShell 1.5's window engine **without its geometry layer**.
 Nothing here resizes, centres, maximises or restores a window.
@@ -562,6 +860,20 @@ Nothing here resizes, centres, maximises or restores a window.
 Launcher Cleanup keeps 1.5's safety guards — `RequireNoGame`, a CPU threshold, a
 settle timer and a cooldown. Those guards are why it is safe to run
 automatically; they depend on the game detection this port brings across.
+
+Fullscreen/borderless shape is an immediate game signal. CPU is an additional
+signal across non-protected, non-launcher processes with visible windows, so a
+minimized game can still block cleanup. The first successful process observation
+is treated conservatively until a CPU delta exists.
+
+When hard kill is enabled, the delayed pass retains the exact PIDs and
+process creation times that received the polite close. Before force-closing it
+rechecks that cleanup is still enabled, that no game has appeared, and that each
+PID is still the same process. It never performs a new image-name-wide sweep.
+
+Steam Assist keeps the narrow Steam exception used by the Task Switcher for
+Big Picture windows published as tool windows, then chooses the largest titled
+Steam surface so a small helper popup is not selected instead of Big Picture.
 
 **Assistance suspends entirely while any SteamShell XFE window owns the
 foreground**, so it can never fight the Quick Menu, Settings, the mapping
@@ -581,10 +893,13 @@ instant it appears.
 window of class `XamlExplorerHostIslandWindow`**, and it *does* own the
 foreground while open.
 
-It is matched by **class**, not by process. An `explorer.exe` entry would also
-match the desktop, the taskbar and every File Explorer window, and would pause
-assistance far more often than intended. Prefer `class:` entries; use a bare exe
-name only when you mean every window that process owns.
+It is matched by **class** in the overlay list. An `explorer.exe` overlay entry
+would also match the desktop, the taskbar and every File Explorer window, and
+would pause assistance far more often than intended. Explorer is separately in
+the foreground-protection list, which prevents focus being taken from an
+Explorer surface only while that surface actually owns the foreground. Prefer
+`class:` overlay entries; use a bare exe name only when every window from that
+process should suspend assistance.
 
 Detection runs in two passes:
 
@@ -639,39 +954,13 @@ drop their hover state.
 
 Both are on the **Controller & Cursor** page.
 
-## Startup splash
-
-The optional startup curtain, managed in **Settings → Startup Splash**, covers
-the primary display while SteamShell XFE starts. It has two modes:
-
-- **Black** shows an opaque black curtain for `DurationMs`.
-- **Video** launches the selected clip fullscreen through `mpv.exe`. It can play
-  to completion or use the same fixed duration as the black curtain.
-
-The black curtain is created before MPV starts and remains until MPV has a
-visible fullscreen window, preventing the desktop or Xbox FSE from flashing
-through. When the video ends, XFE puts the black curtain back before closing MPV,
-then fades it away. `SafetyMaxMs` prevents a stuck MPV process or damaged video
-from covering the display indefinitely.
-
-Video mode requires both `VideoPath` and `MpvPath`. If either is missing or
-cannot be launched, XFE logs the reason and safely falls back to the black
-curtain. **Force MPV to SDR** is enabled by default so a startup clip does not
-make a television switch HDR modes. The splash is off by default and changes
-take effect on the next companion launch.
-
-Its master switch is also available from **Quick Menu → Settings** as
-**Startup splash (next launch)**, so it can be changed from the couch after the
-paths and mode have been configured once.
-
-This is presentation only: unlike SteamShell 1.5, XFE does not use the curtain
-to gate Steam, launch the shell, or control Xbox FSE.
-
 ## Startup programs
 
 Launches a list of applications shortly after the companion starts, with a
-configurable initial delay and a stagger between launches. Programs already
-running are skipped. Managed in **Settings → Startup Programs**.
+configurable initial delay and a stagger between launches. Scheduling defaults
+on with a 2-second delay and Hidden window mode, but the application list is
+empty until configured. Programs already running are skipped. Managed in
+**Settings → Startup Programs**.
 
 `LaunchDeElevated` (on by default) starts each program through the shell when
 the companion is elevated, so it receives the ordinary user token — an elevated
@@ -697,14 +986,19 @@ re-hide the program the moment you deliberately opened it later.
 ## Recommended AnyFSE configuration
 
 1. Select AnyFSE's built-in **Steam Big Picture** launcher.
-2. Add `SteamShell-XFE.exe` as an AnyFSE startup application.
-3. Turn **Exit FSE when Home app exits** off.
-4. Do not select SteamShell XFE itself as the custom Home app.
+2. Turn **Exit FSE when Home app exits** off.
+3. Do not select SteamShell XFE itself as the custom Home app.
+4. Leave `SteamShell-XFE.exe` **out** of AnyFSE's startup applications.
 
-Alternatively, use **Settings → Advanced → Create Logon Task** to register a
-Scheduled Task that starts the companion at logon, and remove it from AnyFSE's
-startup applications so it is not started twice. The task runs at normal
-privileges; see the elevation section above.
+Step 4 is the one that changed. Setup Assistant registers a per-user logon task
+when it installs XFE, so the companion already starts at sign-in; adding it to
+AnyFSE's startup list as well starts it twice. If you configured XFE before the
+unified installer and it is still in that list, remove it from there rather than
+removing the task.
+
+The task runs at normal privileges; see the elevation section above. **Settings
+→ Advanced → Create Logon Task** registers the same task by hand, for an
+installation that did not come from Setup Assistant.
 
 The task is registered from an XML definition rather than the shorter
 `schtasks /sc onlogon` form, because that form inherits Task Scheduler's
@@ -735,7 +1029,9 @@ visible from inside the companion.
   presentation, and the geometry layer of 1.5's window engine is never ported
 - Focus pinning and continuous focus enforcement
 - Steam launch, recovery, or exit monitoring
-- Splash video and installer
+- Startup curtain/video and installer. AnyFSE launches Steam before this
+  companion, so an XFE curtain would cover an already-visible Steam client.
+  Standalone SteamShell retains its lifecycle-integrated startup presentation.
 
 The window **inventory** and **game detection** from 1.5's engine *are* used, to
 drive the assist features. The boundary is inventory and detection yes,
@@ -798,6 +1094,22 @@ has no effect and looks exactly like a broken feature.
   visible window after a six-second countdown, with process, class, geometry and
   topmost/foreground state. Built for identifying transient surfaces such as the
   FSE task switcher, which cannot be inspected while a settings window is open.
+- **Game-score logging** (`[Logging]`, off by default) writes a table showing
+  which windows were considered as the game and what each scored — shape, CPU,
+  audio, and whether it was full-screen. `TOPN` lists the highest scorers;
+  `DIAGNOSTIC` also lists the near-misses that were rejected and why. It is the
+  same table SteamShell writes, in the same format.
+
+  This matters most for the per-game RTSS frame cap, which is keyed on an
+  executable **name**: if the wrong window is chosen the cap is written to
+  another program's RTSS profile and reported as saved. A table is written
+  whenever candidates exist, including when none was chosen — that is the case
+  that most needs explaining.
+- **Health Check** (Settings → Advanced) lists each check as Status, Check and
+  Details, with **Refresh** and **Copy Report**. It shares its window and report
+  format with standalone SteamShell, so a report from either product reads the
+  same; only the checks themselves are product-specific. It also carries an
+  **Installation record** row — see below.
 - **Export Diagnostic ZIP** (health check or Settings → Advanced) bundles the log
   tail, settings and environment — backend, slot capabilities, RawInput state,
   DPI and scaling — with paths sanitised.
@@ -807,24 +1119,39 @@ question is answered.
 
 ## Build
 
-For the easiest Windows build, double-click:
+The companion no longer has a build script of its own. One script in this
+folder builds all three binaries, because `SteamShell.exe` embeds the companion
+so Setup Assistant can install either product. Double-click:
 
 ```text
-Build-SteamShell-XFE.cmd
+Build-SteamShell.cmd
 ```
 
-The launcher applies a process-only PowerShell execution-policy bypass and
-keeps the window open so the final result or error remains visible. To invoke
-the underlying script directly instead:
+The launcher applies a process-only PowerShell execution-policy bypass and keeps
+the window open so the final result or error remains visible. To invoke the
+underlying script directly instead:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Build-SteamShell-XFE.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Build-SteamShell.ps1
 ```
 
-Validates with the installed 64-bit AutoHotkey v2 interpreter before compiling
-`dist\SteamShell-XFE.exe`. The build automatically embeds
-`assets\SteamShell-XFE.ico`; `-IconPath` can still override it for a custom
-build.
+It runs both validators, then validates each source with the installed 64-bit
+AutoHotkey v2 interpreter before compiling it. The companion is compiled to
+`build\SteamShell-XFE.exe` for embedding and verified at file version 1.9.9.0,
+and `assets\SteamShell-XFE.ico` is applied automatically. A copy is left in
+`dist\SteamShell-XFE.exe` for developing the companion — pass `-NoXfeDist` to
+skip it.
+
+**That copy is not how you install XFE.** Setup Assistant inside
+`SteamShell.exe` registers the logon task, grants the companion's own directory
+to the signed-in user, and deploys the dormant elevated helper; a hand-copied
+executable gets none of that. Only `SteamShell.exe` is published to `current\`.
+
+From the workspace root, `Run-SteamShellValidation.cmd` runs the whole gate:
+syntax, both validators, the shared-parity check, the full build, then negative
+tests that break each of the three sources in turn and lock each
+freshness-checked output. A failed run returns non-zero and preserves the
+previous `current\` directory.
 
 The learned-profile heuristic can also be exercised without Windows or hardware:
 
