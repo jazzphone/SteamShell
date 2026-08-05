@@ -398,6 +398,35 @@ def main():
                     fail(f"{program} calls '{name}', defined only in {f} and not compiled "
                          "into it. AutoHotkey resolves that at LOAD time.")
 
+    # ---- the Shared seam, kept in step with the PowerShell allowlist ------
+    #
+    # $sharedSeamAllowed in Validate-Common.ps1 is a hand-maintained list, and
+    # consolidating a seam function INTO the shared file makes its entry wrong in
+    # a way only Windows would notice: the entry asserts the name is defined in
+    # both trees, and it no longer is. Five entries went stale exactly that way in
+    # one afternoon. Deriving the real seam here and comparing keeps the list
+    # honest on the machine where the edit happens.
+    shared_defs = set(maps["SteamShell-Shared.ahk"])
+    tree_defs = (set(maps["SteamShell.ahk"]) | set(maps["SteamShell-XFE.ahk"])
+                 | set(maps["SteamShell-Helper.ahk"]))
+    shared_calls = set()
+    for line in strip_code_noise(sources["SteamShell-Shared.ahk"]).split("\n"):
+        for m in re.finditer(r"(?<![.\w])([A-Za-z_]\w*)\s*\(", line):
+            shared_calls.add(m.group(1).lower())
+    actual_seam = (shared_calls & tree_defs) - shared_defs - set(maps["SteamShell-Common.ahk"])
+    ps = (ROOT / "Validate-Common.ps1").read_text(encoding="utf-8", errors="replace")
+    block = re.search(r"\$sharedSeamAllowed = @\((.*?)\)", ps, re.S)
+    if block:
+        listed = {n.lower() for n in re.findall(r'"([A-Za-z_]\w*)"', block.group(1))}
+        for extra in sorted(listed - actual_seam):
+            fail(f"$sharedSeamAllowed in Validate-Common.ps1 lists '{extra}', which "
+                 "SteamShell-Shared.ahk no longer calls out to. The entry asserts it is "
+                 "defined in both trees; remove it.")
+        for missing in sorted(actual_seam - listed):
+            fail(f"SteamShell-Shared.ahk calls '{missing}' in a tree, and "
+                 "$sharedSeamAllowed does not list it. Widening the seam is meant to be "
+                 "a decision somebody makes.")
+
     # ---- globals Shared uses must exist in both trees ---------------------
     shared_globals = in_function_globals(sources["SteamShell-Shared.ahk"])
     for tree in ("SteamShell.ahk", "SteamShell-XFE.ahk"):

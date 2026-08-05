@@ -801,18 +801,16 @@ function Assert-SharedParity {
     # growing back.
     $sharedSeamAllowed = @(
         "LogLine", "SharedPersistSettings",
-        "ElevatedRtssRequestPath", "EnsureRtssRunning",
-        "GetActiveAudioOutputDevices", "IsSteamProcess",
+        "ElevatedRtssRequestPath", "EnsureRtssRunning", "HideQuickMenu",
         "PersistRtssCustomFrameCap", "ProductBestGameExe",
         "ProductCenterGui", "ProductElevatedHelperAlive",
         "ProductHealthResults", "ProductIdentity",
         "ProductSettingsScrollBar", "ProductSettingsViewportHeight",
         "ProductTrayBaseTip", "ProductTrayItems", "ProductVersionText",
         "QuickMenuActivateSelected", "QuickMenuAdjustSelected",
-        "QuickMenuBuildGui", "QuickMenuCloseSelected", "QuickMenuGoBack",
+        "QuickMenuBuildGui", "QuickMenuCloseSelected",
         "QuickMenuMouseChoose", "QuickMenuNormalizeSelection",
-        "QuickMenuRefresh", "QuickMenuRowIsInert", "QuickMenuRowValueText",
-        "SendChordSafe")
+        "QuickMenuRefresh", "QuickMenuRowValueText")
     foreach ($name in $sharedSeamAllowed) {
         foreach ($pair in @(
             @{ Name = "SteamShell.ahk"; Table = $standalone },

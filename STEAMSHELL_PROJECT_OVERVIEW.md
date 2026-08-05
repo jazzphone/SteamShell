@@ -8,7 +8,7 @@
 
 **Stable SteamShell-XFE release:** 1.9.9 (locked at `releases/1.9.9/`)
 
-**SteamShell-XFE working tree:** 1.9.9, settings schema 11
+**SteamShell-XFE working tree:** 1.9.9, settings schema 16
 
 **Development line:** Coordinated 1.9.9 pre-2.0 checkpoint; earlier releases preserved as immutable checkpoints
 
@@ -41,6 +41,67 @@ Desktop restoration also destroys and flushes the menu's DWM surface, then
 latches recreation off before Steam begins shutting down. This prevents a stale,
 non-interactive image of its title, rows, or footer surviving the handoff to
 Explorer.
+
+## What the comments were worth, and what replaced them
+
+**August 5, 2026.** A cross-tree audit found that this project's prose — these
+notes, the file headers, the explanations beside individual functions — had been
+describing intent at the time of writing rather than behaviour, and that several
+load-bearing claims were simply false:
+
+- `SteamShell-Shared.ahk` documented a **three-function** seam. The real count
+  was **28**.
+- `SteamShell-Common.ahk` said the shared file "reaches into **eight** tree
+  functions." Also 28.
+- Both files named `SharedNotify` as something each tree must define. It is
+  defined in the shared file, and neither tree defines it.
+- This document said the companion's settings schema was **11**. It was **16**.
+
+The pattern matters more than any single error. `SteamShell-Common.ahk`'s header
+already contained the diagnosis, written about the shared file: it *"documented
+two permitted callbacks and had grown to eight before anyone noticed, because
+nothing enumerated what actually left the file."* The remedy — an enforced
+allowlist — was then applied only to `SteamShell-Common.ahk`. The shared file
+kept its prose, and the growth resumed, from eight to 28.
+
+**Prose cannot hold a list that changes.** Every list of that kind now lives
+where it is executed rather than where it is read: `$sharedSeamAllowed` and the
+declaration-block check in `Validate-Common.ps1`, `SHARED_FUNCTIONS.txt`,
+`COMMON_FUNCTIONS.txt`, and `DIVERGENT_FUNCTIONS.txt`. Where a comment states a
+count, it now says where the real one is kept.
+
+### The measurement that was wrong, and why it read as success
+
+The shared-parity check compared function bodies with `-ceq` and reported
+nothing for months. That was taken as evidence the consolidation was complete.
+
+It could not have reported anything. Two copies of one routine are never
+textually identical once either has been touched, and touching them is exactly
+what happens when a copy is tidied — a renamed parameter, a rewrapped
+`DllCall`, a `switch` rewritten as a `Map`. Measuring *text* scored
+`ControllerBindingPretty` at 0.26 similarity and `GetLastLines` at 0.49. Both
+have an **identical call sequence**; one is a `switch` against a `Map`, the
+other is the same function with a parameter deleted.
+
+Comparing what the code **calls** instead found **34 of the 67** functions
+defined in both trees to be the same routine written twice — about 526 lines.
+Six of the eight strict-subset pairs were XFE-inside-standalone, which is not
+two programs growing apart. It is one program copied and trimmed.
+
+That comparison is now the fingerprint gate. Divergence is declared in
+`DIVERGENT_FUNCTIONS.txt` with a stated reason and fails the build otherwise,
+including when an entry goes stale — so the file cannot quietly become a list
+nobody reads.
+
+### What this means for reading the rest of this document
+
+The narrative sections here — *Solved:*, *Reversed:*, *What hardware testing
+changed* — remain the most valuable material in the repository, because they
+record **why** a decision was made or undone, which no check can capture. Treat
+them as history, which they are and are good at.
+
+Treat any **count, list, or "these are the N functions that…"** in prose as
+unverified. If it matters, the enforced version is in a manifest or a validator.
 
 ## What 1.7.4 / 0.1.17 added
 

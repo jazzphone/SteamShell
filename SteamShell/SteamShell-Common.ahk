@@ -27,10 +27,17 @@
 ;
 ; SteamShell-Shared.ahk remains the tree-coupled half -- RTSS orchestration,
 ; Quick Menu painting, elevated-helper lifecycle -- and is #Included by the two
-; trees only. It reaches into eight tree functions and cannot be shared further
-; without dragging those concerns into the helper. That boundary is the finding,
-; not a compromise: roughly half of what looked shareable orchestrates tree
-; state, and half genuinely does not.
+; trees only. It reaches into the trees through the 24 functions enumerated in
+; $sharedSeamAllowed, and cannot be shared further without dragging those
+; concerns into the helper. That boundary is the finding, not a compromise:
+; roughly half of what looked shareable orchestrates tree state, and half
+; genuinely does not.
+;
+; This sentence said "eight" for as long as the shared file's own header said
+; "three", while the true count was 28. Neither number is written down here any
+; more than it has to be: the list is in Validate-Common.ps1 where it is
+; checked, and the count above will be corrected by the check that fails when
+; it is wrong.
 ;
 ; Functions only. No top-level code: this is inserted into three different
 ; auto-execute sections.

@@ -30,12 +30,29 @@
 ;
 ; The per-tree seam
 ; -----------------
-; Shared code may call these, and each tree MUST define them:
+; Shared code calls back into the trees through 24 functions, and each tree MUST
+; define every one. THE LIST IS NOT HERE. It is $sharedSeamAllowed in
+; Validate-Common.ps1, and it is enforced in both directions: every name on it
+; must exist in both trees, and nothing may leave this file that is not on it.
+;
+; This paragraph used to name three functions. The real number was 28. That is
+; not a documentation slip -- it is the same failure SteamShell-Common.ahk's
+; header describes happening to THIS file once already ("documented two
+; permitted callbacks and had grown to eight before anyone noticed, because
+; nothing enumerated what actually left the file"). It was written about this
+; file, the remedy was applied only to Common, and the growth resumed. Prose
+; cannot hold a list that changes; a check can. So the list lives where it is
+; executed, and this paragraph says where to look instead of guessing.
+;
+; SharedNotify was on that three-name list as something "each tree MUST define".
+; It is defined HERE, and neither tree defines it. The trees each have a
+; one-line alias -- ShowNotification in standalone, SetStatus in the companion --
+; which is why the mistake read as true for as long as it did.
+;
+; The two seam functions worth understanding rather than looking up:
 ;
 ;   LogLine(message, level)                 diagnostic log line
 ;   SharedPersistSettings(changes)          apply Map("section","key","value")
-;   SharedNotify(message, kind := "")       tell the user, on whichever
-;                                           surface this program has
 ;                                           entries as one unit, return bool
 ;
 ; SharedPersistSettings exists because the two trees write settings differently
