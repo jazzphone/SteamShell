@@ -1,17 +1,14 @@
-'\\10.0.0.60\data\SteamShell'
-CMD.EXE was started with the above path as the current directory.
-UNC paths are not supported.  Defaulting to Windows directory.
 
 ==============================================================================
   1. Environment
 ==============================================================================
 PowerShell edition : Desktop
-PowerShell version : 5.1.26100.8875
-Root               : \\10.0.0.60\data\SteamShell
+PowerShell version : 5.1.26100.4202
+Root               : Z:\
 Project folder found (both trees, shared file, both validators, one build).
-Interpreter        : C:\Users\Steam\AppData\Local\Programs\AutoHotkey\v2\AutoHotkey64.exe
+Interpreter        : C:\Users\Jason\AppData\Local\Programs\AutoHotkey\v2\AutoHotkey64.exe
   version          : 2.0.26
-Compiler           : C:\Users\Steam\AppData\Local\Programs\AutoHotkey\Compiler\Ahk2Exe.exe
+Compiler           : C:\Users\Jason\AppData\Local\Programs\AutoHotkey\Compiler\Ahk2Exe.exe
 
 ==============================================================================
   2. AutoHotkey syntax validation  <-- the result that matters most
@@ -34,10 +31,14 @@ FileInstall helper payload exists. This keeps clean release snapshots buildable.
 
 --- Validate-SteamShell.ps1
 Settings schema version: 20
-FAIL: Setting RTSS overlay or limiter to the state it already holds must report it.
+FAIL: The elevated helper must release held mouse buttons on exit and on an uncaught error, and arm the watchdog unconditionally.
 
 --- Validate-SteamShell-XFE.ps1
-FAIL: DIVERGENT_FUNCTIONS.txt lists functions whose two copies no longer diverge, or which are no longer defined in both trees: haslongbinding, initxinput, readbool, readint, sendchordsafe. Remove the entries.
+Shared parity: 128 functions defined once in SteamShell-Shared.ahk (two trees) and 97 in SteamShell-Common.ahk (all three programs); no tree redefines any of them.
+  Fingerprint gate: 16 of the 48 functions defined in both trees are declared divergent in DIVERGENT_FUNCTIONS.txt.
+Structural drift: 1 function(s) at or above 0.9 once naming and formatting are ignored -- ProductIdentity (1)
+SteamShell XFE static validation passed.
+PASS
 
 ==============================================================================
   4. Full builds (produces and verifies dist EXEs; nothing is executed)
@@ -46,7 +47,7 @@ FAIL: DIVERGENT_FUNCTIONS.txt lists functions whose two copies no longer diverge
 --- Build-SteamShell.ps1
 Running SteamShell static validation...
 Settings schema version: 20
-FAIL: Setting RTSS overlay or limiter to the state it already holds must report it.
+FAIL: The elevated helper must release held mouse buttons on exit and on an uncaught error, and arm the watchdog unconditionally.
 
 ==============================================================================
   5. Does the build gate actually reject bad output?
@@ -62,7 +63,7 @@ FAIL: Setting RTSS overlay or limiter to the state it already holds must report 
 5b. End-to-end: the build against a broken copy of each source
 
     INCONCLUSIVE - the unmodified project already fails validation, so breaking it proves nothing.
-    Fix the baseline first: Validator: Validate-SteamShell.ps1, Validator: Validate-SteamShell-XFE.ps1, Build: Build-SteamShell.ps1
+    Fix the baseline first: Validator: Validate-SteamShell.ps1, Build: Build-SteamShell.ps1
 
 5c. Stale-output detection (source valid; output locked)
     INCONCLUSIVE - baseline already failing; a stale output would be rejected for that reason instead.
@@ -78,12 +79,12 @@ SKIPPED - validation failed; the existing current folder was not changed.
 
 Step                                            Status  Detail
 ----                                            ------  ------
-Environment                                     OK      PS 5.1.26100.8875, AHK 2.0.26
+Environment                                     OK      PS 5.1.26100.4202, AHK 2.0.26
 Syntax: SteamShell-Helper.ahk                   PASS
 Syntax: SteamShell-XFE.ahk                      PASS
-Validator: Validate-SteamShell.ps1              FAIL    Setting RTSS overlay or limiter to the state it already hold...
-Validator: Validate-SteamShell-XFE.ps1          FAIL    DIVERGENT_FUNCTIONS.txt lists functions whose two copies no ...
-Build: Build-SteamShell.ps1                     FAIL    Setting RTSS overlay or limiter to the state it already hold...
+Validator: Validate-SteamShell.ps1              FAIL    The elevated helper must release held mouse buttons on exit ...
+Validator: Validate-SteamShell-XFE.ps1          PASS
+Build: Build-SteamShell.ps1                     FAIL    The elevated helper must release held mouse buttons on exit ...
 Exit-code mechanism                             OK      old=2 new=2 (both caught)
 Broken source rejected: SteamShell.ahk          SKIPPED baseline already failing
 Broken source rejected: SteamShell-XFE.ahk      SKIPPED baseline already failing
@@ -96,7 +97,7 @@ Publish current                                 SKIPPED validation failed; exist
 
 
 
-3 CHECK(S) FAILED
+2 CHECK(S) FAILED
 
 The produced EXE was not run. SteamShell.exe replaces the Windows shell;
 do not launch it on a machine you are not prepared to restore.

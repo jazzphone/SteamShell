@@ -58,6 +58,12 @@ $rawSource = Get-Content -LiteralPath $sourcePath -Raw
 # make every function in SteamShell-Common.ahk look like the helper's own, which
 # is precisely the duplication those assertions exist to forbid.
 $helperSource = Get-Content -LiteralPath $helperSourcePath -Raw
+# ...and the same file WITH its #Include resolved, for the handful of assertions
+# that ask whether a BEHAVIOUR exists rather than where it is written. Keeping
+# both is the point: a -notmatch forbidding duplication has to read the raw file,
+# and a -match on a function that has since moved into SteamShell-Common.ahk has
+# to read this one, or consolidating a function reads as deleting it.
+$helperEffective = Get-EffectiveSource -Path $helperSourcePath
 $commonSourcePath = Join-Path $projectRoot "SteamShell-Common.ahk"
 Assert-True (Test-Path $commonSourcePath) "SteamShell-Common.ahk is missing."
 $commonSource = Get-Content -LiteralPath $commonSourcePath -Raw
@@ -1175,7 +1181,14 @@ Assert-True (
     $helperSource -match
         '(?sm)^HandleUncaughtHelperError\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?ReleaseControllerMouseButtons\(\)' -and
     $helperSource -match '(?m)^SetTimer\(ControllerMouseSafetyTick, 5000\)' -and
-    $helperSource -match
+    # $helperEffective, not $helperSource: the watchdog moved into
+    # SteamShell-Common.ahk once it turned out to be byte-identical to the
+    # shared copy, so it is only visible with the #Include resolved. The
+    # assertions either side stay on the raw file deliberately -- ARMING it at
+    # top level, and not arming it from ApplyRuntimeTimers, are properties of
+    # this file and not of the behaviour. Exactly the split already made for the
+    # standalone tree's copy of this rule a few assertions above.
+    $helperEffective -match
         '(?sm)^ControllerMouseSafetyTick\(\)\s*\{(?:(?!\n\})[\s\S])*?' +
         'ExpireControllerMouseButtons\(30000\)' -and
     $helperSource -notmatch

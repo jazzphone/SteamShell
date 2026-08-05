@@ -136,6 +136,29 @@ def _effective_source(name, depth=0):
                 + text[m.end():])
 
 
+def _strip_ps_comment(line):
+    """A PowerShell line comment, but only where '#' is outside a quote.
+
+    Blanket `#.*$` removal corrupts the very assertions being replayed: the
+    helper rules match on '#NoTrayIcon', '#Include' and '#Requires', which are
+    AutoHotkey directives written inside single-quoted regex literals. Cutting
+    at the '#' left a dangling opening quote, the pattern scanner ran on into
+    the following lines, and the result was a reported failure whose pattern
+    printed as blank. Same over-aggressive stripping that made a comment
+    mentioning SettingsLayout() look like a call to it.
+    """
+    quote = None
+    for i, ch in enumerate(line):
+        if quote:
+            if ch == quote:
+                quote = None
+        elif ch in "'\"":
+            quote = ch
+        elif ch == "#" and (i == 0 or line[i - 1] != "`"):
+            return line[:i]
+    return line
+
+
 def strip_comments(line):
     """Comments only. A ';' inside a string literal is not a comment, and neither
     is one escaped as `; -- both appear in these sources."""
@@ -579,7 +602,7 @@ def main():
         # violation that does not exist. The comment being misread here is itself
         # explaining that same trap.
         vtext = "\n".join(
-            re.sub(r"(?<!`)#.*$", "", line)
+            _strip_ps_comment(line)
             for line in decode_like_powershell((ROOT / vpath).read_bytes()).split("\n"))
         # $rawSource as well as $source, EACH AGAINST THE TEXT IT NAMES.
         #
@@ -594,10 +617,30 @@ def main():
         # Replaying only $source was the other error: two -match assertions read
         # $rawSource, so moving the RTSS state-report functions into the shared
         # file broke them invisibly here and Windows found them instead.
-        texts = {"source": source, "rawsource": read_source(spath)}
+        # Every subject the validators assert against, each mapped to the text it
+        # names. Three of these were learned one Windows round-trip at a time --
+        # $source, then $rawSource, then $helperSource -- so the unknown-subject
+        # report below exists to make the fourth one visible here instead.
+        texts = {
+            "source": source,
+            "rawsource": read_source(spath),
+            "helpersource": read_source("SteamShell-Helper.ahk"),
+            "helpereffective": _effective_source("SteamShell-Helper.ahk"),
+            "sharedsource": read_source("SteamShell-Shared.ahk"),
+            "commonsource": read_source("SteamShell-Common.ahk"),
+        }
+        for subject_name in sorted(set(
+                m.group(1).lower() for m in re.finditer(
+                    r"\$(\w*[Ss]ource\w*)\s+-(?:not)?match", vtext))):
+            if subject_name not in texts:
+                fail(f"{vpath} asserts against ${subject_name}, which "
+                     "Replay-Validation.py does not know how to read. Every rule "
+                     "written against it is going unchecked here. Add it to `texts`.")
         for op, want in (("-match", True), ("-notmatch", False)):
-            for m in re.finditer(r"\$(raw[Ss]ource|[Ss]ource)\s+" + re.escape(op)
+            for m in re.finditer(r"\$(\w*[Ss]ource\w*)\s+" + re.escape(op)
                                  + r"\s+((?:\s*(?:\+\s*)?'(?:[^']|'')*'\s*)+)", vtext):
+                if m.group(1).lower() not in texts:
+                    continue
                 subject = texts[m.group(1).lower()]
                 pattern = "".join(f.replace("''", "'")
                                   for f in re.findall(r"'((?:[^']|'')*)'", m.group(2)))
