@@ -3596,3 +3596,145 @@ InitXInput() {
     XInputDll := ResolveXInputDll()
     return XInputDll != ""
 }
+
+; ============================================================================
+; Consolidated once the state each needed existed in both programs
+; ============================================================================
+; CompanionDisabled and the three Desktop* globals below are declared as
+; constants in the program that has no such concept, rather than the function
+; being kept in two copies to avoid naming them. A guard that can never fire is
+; cheaper than a second implementation that can drift.
+;
+; SetRtssFrameLimiterState and SetRtssOverlayState differed by one call:
+; ShowNotification in standalone against SetStatus in the companion. Both were
+; already one-line aliases for SharedNotify, so calling it directly changes
+; nothing at run time and removes the last reason these existed twice.
+; ============================================================================
+
+SendChordSafe(keys) {
+    global CompanionDisabled
+    if CompanionDisabled
+        return false
+    SendChordReleasingModifiers(keys)
+    return true
+}
+
+; Steam's in-game overlay hook can miss SendInput's effectively instantaneous
+; Shift+Tab pulse even though ordinary desktop applications accept it. SendEvent
+; honours SetKeyDelay's press duration, giving Steam a real modifier-down window
+; in which to observe the second key. The configured shortcut is still used, so
+; this is not hard-coded to Shift+Tab.
+SendSteamOverlayChord() {
+    global SteamOverlayShortcut, CompanionDisabled
+    if CompanionDisabled
+        return false
+    foregroundHwnd := 0
+    foregroundExe := ""
+    try foregroundHwnd := WinExist("A")
+    if foregroundHwnd
+        try foregroundExe := WinGetProcessName("ahk_id " foregroundHwnd)
+    LogLine("Steam overlay send: " SendToPretty(SteamOverlayShortcut)
+        . ", foreground=" (foregroundExe != "" ? foregroundExe : "unknown")
+        . ", hwnd=" foregroundHwnd ".")
+    sent := false
+    try {
+        SendEvent("{Ctrl up}{Alt up}{Shift up}{LWin up}{RWin up}")
+        ; Delay between events, then how long each key stays down.
+        SetKeyDelay(35, 80)
+        SendEvent(SteamOverlayShortcut)
+        sent := true
+    } catch as err {
+        LogLine("Steam overlay send failed: " err.Message, "Warning")
+    }
+    ; Also runs after a partial failure so a modifier can never remain stuck.
+    try SendEvent("{Ctrl up}{Alt up}{Shift up}{LWin up}{RWin up}")
+    return sent
+}
+
+; True while the foreground application is eligible for automatic mouse mode:
+; the explicit allowlist in SteamShell presentation, or any non-excluded app in
+; Windows desktop mode.
+;
+; The mechanism is deliberately "pretend View/Back is held" rather than a second
+; input mode. The View mappings are already a complete desktop mouse by default --
+; right stick moves, left stick scrolls, D-pad arrows, RB left-click, RT
+; right-click, Start opens the Start menu -- so reusing them means nothing new to
+; design, nothing new to configure, and no second keymap that can drift from the
+; first. What happens automatically is exactly what holding View/Back does.
+;
+; Cached briefly: this is evaluated on every poll tick at ~16 ms, and the
+; foreground process cannot change faster than a person can alt-tab.
+AutoMouseModeActive() {
+    global EnableAutoMouseMode, EnablePersistentMouseMode, AutoMouseExeSet, ScriptPid, DesktopMode
+    global EnableDesktopAutoMouseMode, DesktopAutoMouseExcludeExeSet
+    static cachedResult := false
+    static cachedTick := 0
+    ; All kill switches are checked ahead of the cache so tray/Settings changes
+    ; take effect on the next poll rather than up to 250 ms later.
+    if EnablePersistentMouseMode
+        return true
+    if !EnableAutoMouseMode
+        return false
+    if (DesktopMode && !EnableDesktopAutoMouseMode)
+        return false
+    if (!DesktopMode && AutoMouseExeSet.Count = 0)
+        return false
+    if (cachedTick && A_TickCount - cachedTick < 250)
+        return cachedResult
+    cachedTick := A_TickCount
+    cachedResult := false
+    try {
+        hwnd := DllCall("User32\GetForegroundWindow", "Ptr")
+        if (hwnd && WinGetPID("ahk_id " hwnd) != ScriptPid) {
+            foregroundExe := StrLower(WinGetProcessName("ahk_id " hwnd))
+            cachedResult := DesktopMode
+                ? !DesktopAutoMouseExcludeExeSet.Has(foregroundExe)
+                : AutoMouseProcessMatches(foregroundExe)
+        }
+    }
+    return cachedResult
+}
+
+SetRtssFrameLimiterState(enableLimiter) {
+    global RtssFrameLimiterOnShortcut, RtssFrameLimiterOffShortcut
+    state := GetRtssGlobalState()
+    if IsObject(state) {
+        ; Returns BEFORE persisting. The old code fell through to
+        ; PersistRtssFrameCapStateNow even when the limiter already matched and
+        ; nothing had been applied, so a button press that did nothing still
+        ; wrote the settings file.
+        if (state["limiter"] = enableLimiter) {
+            SharedNotify(
+                "RTSS frame limiter is already " (enableLimiter ? "on" : "off"))
+            return
+        }
+        ApplyRtssGlobalState("limiter", enableLimiter)
+        PersistRtssFrameCapStateNow()
+        return
+    }
+    SendRtssShortcut(
+        enableLimiter ? RtssFrameLimiterOnShortcut : RtssFrameLimiterOffShortcut,
+        enableLimiter ? "RTSS frame limiter enable requested"
+                      : "RTSS frame limiter disable requested",
+        enableLimiter ? "FrameLimiterOnShortcut" : "FrameLimiterOffShortcut")
+}
+
+SetRtssOverlayState(showOverlay) {
+    global RtssOverlayOnShortcut, RtssOverlayOffShortcut
+    state := GetRtssGlobalState()
+    if IsObject(state) {
+        ; Say so rather than doing nothing. Selecting "Overlay ON" when it is
+        ; already on used to produce no toast at all, and on a couch UI with no
+        ; keyboard "nothing happened" is indistinguishable from "this is broken".
+        if (state["overlay"] = showOverlay) {
+            SharedNotify("RTSS overlay is already " (showOverlay ? "on" : "off"))
+            return
+        }
+        ApplyRtssGlobalState("overlay", showOverlay)
+        return
+    }
+    SendRtssShortcut(
+        showOverlay ? RtssOverlayOnShortcut : RtssOverlayOffShortcut,
+        showOverlay ? "RTSS overlay show requested" : "RTSS overlay hide requested",
+        showOverlay ? "OverlayOnShortcut" : "OverlayOffShortcut")
+}

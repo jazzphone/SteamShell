@@ -1191,13 +1191,6 @@ ElevatedForeground(&exeName) {
     return ProcessIsElevatedIntegrity(pid)
 }
 
-; Same guard the main tree uses for system chords: clear any stuck modifier
-; before sending, so a chord cannot be swallowed or leave one held down.
-SendChordSafe(keys) {
-    try SendInput("{Ctrl up}{Alt up}{Shift up}{LWin up}{RWin up}")
-    try SendInput(keys)
-}
-
 ExecuteBinding(key) {
     global ControllerMap
     if !ControllerMap.Has(key)
@@ -1579,4 +1572,8 @@ InitXInput() {
         return true
     XInputDll := ResolveXInputDll()
     return XInputDll != ""
+}
+
+SendChordSafe(keys) {
+    SendChordReleasingModifiers(keys)
 }

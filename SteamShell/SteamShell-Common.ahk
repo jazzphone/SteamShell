@@ -2218,3 +2218,14 @@ ControllerMouseSafetyTick() {
         LogLine("Released a synthetic mouse button held past the safety limit: "
             . released . ". The controller poll loop may have stopped.", "Warning")
 }
+
+; Sends a chord with every modifier released first.
+; 
+; Existed in all THREE programs, identically, because the helper cannot see
+; SteamShell-Shared.ahk. It holds no state at all, which is what makes it safe
+; here -- the two callers that DO have state (the companion, which declines
+; while disabled) keep that decision in their own wrapper.
+SendChordReleasingModifiers(keys) {
+    try SendInput("{Ctrl up}{Alt up}{Shift up}{LWin up}{RWin up}")
+    try SendInput(keys)
+}

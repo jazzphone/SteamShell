@@ -11,11 +11,6 @@
 ; ==============================================================================
 #Requires AutoHotkey v2.0.19 64-bit
 #SingleInstance Force
-
-; Shared function definitions, compiled into both trees. See the file header
-; for the rules and for the per-tree seam it depends on.
-#Include SteamShell-Common.ahk
-#Include SteamShell-Shared.ahk
 ;@Ahk2Exe-SetName SteamShell
 ;@Ahk2Exe-SetDescription Steam Big Picture living-room Windows shell
 ;@Ahk2Exe-SetVersion 1.9.9.0
@@ -35,6 +30,7 @@ SendMode "Input"
 ; otherwise defaults MouseGetPos to the active window's client area, which can
 ; make an unchanged pointer look as if it moved when the Quick Menu is repositioned.
 CoordMode "Mouse", "Screen"
+
 
 ; ==============================================================================
 ; FILE PATHS
@@ -81,7 +77,7 @@ try DirCreate(SteamShellDataDir "\backups")
 global SettingsPath := SteamShellDataDir "\SteamShellSettings.ini"
 ; Back-compat alias used by some helper functions
 global IniPath := SettingsPath
-global CurrentSettingsSchemaVersion := 20
+global CurrentSettingsSchemaVersion := 18
 global LogPath := SteamShellDataDir "\logs\SteamShell.log"
 global IntentionalExitMode := ""
 global SafeMode := false
@@ -91,19 +87,8 @@ global ElevatedHelperPath := ""
 global ElevatedHelperPid := 0
 global ElevatedHelperAvailable := false
 global ElevatedHelperLastError := "Not started"
-global ElevatedHelperExpectedVersion := "1.9.9.4"
-; SteamShell.exe installs either product, so it embeds the XFE companion the same
-; way it embeds the elevated helper. "Standalone" replaces the Windows shell;
-; "XFE" runs alongside Xbox Full Screen Experience at normal integrity.
-global XfeExpectedVersion := "1.9.9.0"
-global SteamShellProduct := "Standalone"
+global ElevatedHelperExpectedVersion := "1.9.9.1"
 global ElevatedGeometryEventHandle := 0
-; Publishes AutoMouseModeActive() to the elevated helper. See
-; SetElevatedAutoMouseRuntimeEnabled for why the helper cannot work it out.
-global ElevatedAutoMouseEventHandle := 0
-global ElevatedRtssEventHandle := 0
-global ElevatedRtssDoneEventHandle := 0
-global RtssElevatedRequestSeq := 0
 
 ; SteamShell itself remains at the interactive user's normal integrity so its
 ; Quick Menu and settings windows correctly take controller focus away from
@@ -142,6 +127,7 @@ global EnableMouseParkOnFocusChange := true
 global EnableCursorHideOnBoot := true
 global EnableCursorHideOnRefocus := true
 
+
 ; Controller-to-mouse (XInput / Xbox controller)
 global EnableControllerMouseMode := true ; Enable controller mouse/keyboard mapping
 global EnablePersistentMouseMode := false ; Apply mappings without holding View/Back
@@ -172,11 +158,6 @@ global QuickMenuLayoutGui := unset
 global QuickMenuGui := unset
 global QuickMenuRows := []
 global QuickMenuSelected := 1
-; Declared so SendChordSafe and SendSteamOverlayChord can be defined once.
-; Standalone has no companion to disable, so the guard never fires; the
-; alternative was keeping both functions in two copies to avoid the name.
-global CompanionDisabled := false
-
 global QuickMenuVisible := false
 global QuickMenuPreviousHwnd := 0
 global QuickMenuPage := "MAIN"
@@ -189,7 +170,7 @@ global QuickMenuTaskWindows := []
 global QuickMenuTaskPage := 1
 global QuickMenuTitleCtrl := 0
 global QuickMenuSubtitleCtrl := 0
-global QuickMenuStatusCtrl := 0
+global QuickMenuFooterCtrl := 0
 ; Transient status shown in the Quick Menu footer in place of the button hint.
 ;
 ; ShowNotification is log-only by design -- the old bottom-corner overlay was
@@ -285,8 +266,6 @@ global SetupAssistantViewportHeight := 0
 global AutoLogonGui := unset
 global SetupCompletionGui := unset
 global SetupCompletionChoice := "later"
-global ProductRemovalGui := unset
-global ProductRemovalChoice := "cancel"
 global SetupAssistantExternalPid := 0
 global SetupAssistantExternalStartedTick := 0
 
@@ -304,14 +283,6 @@ global RtssFrameLimiterControlMode := "separate"
 global RtssPresetFrameCap := 158
 global RtssCustomFrameCap := 158
 global RtssCustomFrameCapShortcut := "^+f"
-global RtssRestoreFrameLimitOnStartup := true
-global RtssElevatedFrameCapWrites := true
-; The Frame Limit selection SteamShell last applied. RTSS persists only the
-; FPS number in its global profile; the limiter on/off flag is runtime state
-; in its shared memory, and "Custom" is a SteamShell concept RTSS never sees.
-; Without these two keys, none of the selection survives an RTSS restart.
-global RtssLastFrameCapMode := ""
-global RtssLastFrameCapFps := 0
 global RtssFrameLimiterOnShortcut := "^+5"
 global RtssFrameLimiterOffShortcut := "^+6"
 global RtssHooksModule := 0
@@ -331,9 +302,6 @@ global RtssFrameCapPresets := [30, 40, 60, 90, 120]
 ; to equal a preset; without it the next repaint would derive "preset" again and
 ; the Custom row would vanish under the selection. Never persisted.
 global RtssFrameCapCustomMode := false
-; Set the first time RTSS accepts a FramerateLimit write and then reports a
-; different value. See RtssFrameCapBlockedReason in SteamShell-Shared.ahk.
-global RtssFrameCapWriteBlocked := false
 ; Repaint cache for the global FramerateLimit read. GetRtssFrameCapState runs
 ; once per row per repaint and each miss costs a LoadProfile plus a
 ; GetProfileProperty round trip; the Quick Menu repaints on every keypress.
@@ -379,6 +347,7 @@ global LC_FoundText := "-"          ; Launchers/helpers currently detected (by E
 global LC_GateText := "-"           ; Current gating/why cleanup isn't running
 global LC_ConfigText := "-"         ; One-line config summary (enabled/guard/hardkill)
 
+
 global LC_LastGateCat := ""        ; Internal: last gate category recorded for LC Last
 ; Timings (ms)
 global SplashScreenDuration := 10000
@@ -399,6 +368,7 @@ global SplashMpvPid := 0
 global SplashMpvHwnd := 0
 global SplashFailReason := ""
 global SplashClosing := false
+
 
 global SplashOverlayGui := unset
 
@@ -518,8 +488,8 @@ global GameLogIntervalMs := 3000
 global GameLogIncludeTitles := true
 global GameLogRejectNearCandidates := true
 global GameLogRejectMinAreaPercent := 0.85
-global LogRotateMaxKB := 256
-global LogRotateBackups := 2
+global GameLogRotateMaxKB := 256
+global GameLogRotateBackups := 2
 
 ; ==============================================================================
 ; INTERNAL STATE
@@ -615,6 +585,7 @@ global _ShortcutCap := ""
 global PanelLogMaxLines := 200
 global DetachedLogMaxLines := 300
 
+
 ; controller mouse mode state (XInput)
 global XInputDll := ""
 global ControllerDragLock := false
@@ -623,23 +594,141 @@ global ControllerCalibrationUntil := 0
 global ControllerCalibrationMax := 0
 global ControllerSuggestedDeadzone := 0
 
-; QuoteWindowsCommandLineArg, StrRepeat, and the process-token identity helpers
-; (GetTokenInformationBuffer, OpenCurrentProcessToken, GetTokenUserSidString,
-; GetTokenSessionId, GetCurrentProcessUserSid, GetCurrentProcessSessionId,
-; GetProcessTokenSecurity) moved to SteamShell-Shared.ahk when XFE gained its
-; opt-in RTSS helper: verifying that the helper process has a High-integrity
-; token belonging to the same user and session is the same question in both
-; programs, asked of the same payload.
-;
-; InitializeExpectedInteractiveIdentity stayed here. It reads this tree's
-; bootstrap --steamshell-user-sid/--steamshell-session-id arguments, which exist
-; because standalone re-launches itself across the elevation boundary; XFE never
-; does and records its own token directly.
+QuoteWindowsCommandLineArg(value) {
+    ; Follow Windows' command-line quoting rules so relaunch arguments survive
+    ; spaces, embedded quotes, and trailing backslashes.
+    value := value ""
+    if (value = "")
+        return '""'
+    if !RegExMatch(value, '[\s"]')
+        return value
+
+    quoted := '"'
+    backslashes := 0
+    Loop Parse value {
+        ch := A_LoopField
+        if (ch = "\") {
+            backslashes += 1
+            continue
+        }
+        if (ch = '"') {
+            quoted .= StrRepeat("\", (backslashes * 2) + 1) '"'
+            backslashes := 0
+            continue
+        }
+        if (backslashes > 0) {
+            quoted .= StrRepeat("\", backslashes)
+            backslashes := 0
+        }
+        quoted .= ch
+    }
+    if (backslashes > 0)
+        quoted .= StrRepeat("\", backslashes * 2)
+    return quoted '"'
+}
 
 IsSteamShellIdentityArgument(argument) {
     value := StrLower(Trim(argument))
     return InStr(value, "--steamshell-user-sid=") = 1
         || InStr(value, "--steamshell-session-id=") = 1
+}
+
+GetTokenInformationBuffer(token, informationClass, &informationBuffer, &errorCode) {
+    needed := 0
+    DllCall(
+        "Advapi32\GetTokenInformation",
+        "Ptr", token,
+        "Int", informationClass,
+        "Ptr", 0,
+        "UInt", 0,
+        "UInt*", &needed,
+        "Int")
+    if (needed <= 0) {
+        errorCode := A_LastError
+        informationBuffer := Buffer(0)
+        return false
+    }
+    informationBuffer := Buffer(needed, 0)
+    if !DllCall(
+        "Advapi32\GetTokenInformation",
+        "Ptr", token,
+        "Int", informationClass,
+        "Ptr", informationBuffer.Ptr,
+        "UInt", informationBuffer.Size,
+        "UInt*", &needed,
+        "Int") {
+        errorCode := A_LastError
+        return false
+    }
+    errorCode := 0
+    return true
+}
+
+OpenCurrentProcessToken(desiredAccess, &token, &errorCode) {
+    token := 0
+    if !DllCall(
+        "Advapi32\OpenProcessToken",
+        "Ptr", DllCall("Kernel32\GetCurrentProcess", "Ptr"),
+        "UInt", desiredAccess,
+        "Ptr*", &token,
+        "Int") {
+        errorCode := A_LastError
+        return false
+    }
+    errorCode := 0
+    return true
+}
+
+GetTokenUserSidString(token, &sidText, &errorCode) {
+    sidText := ""
+    if !GetTokenInformationBuffer(token, 1, &userInfo, &errorCode)
+        return false
+    sid := NumGet(userInfo, 0, "Ptr")
+    sidStringPtr := 0
+    if !sid || !DllCall(
+        "Advapi32\ConvertSidToStringSidW",
+        "Ptr", sid,
+        "Ptr*", &sidStringPtr,
+        "Int") {
+        errorCode := A_LastError
+        return false
+    }
+    try {
+        sidText := StrGet(sidStringPtr, "UTF-16")
+    } finally {
+        DllCall("Kernel32\LocalFree", "Ptr", sidStringPtr, "Ptr")
+    }
+    errorCode := 0
+    return sidText != ""
+}
+
+GetTokenSessionId(token, &sessionId, &errorCode) {
+    sessionId := -1
+    if !GetTokenInformationBuffer(token, 12, &sessionInfo, &errorCode)
+        return false
+    sessionId := NumGet(sessionInfo, 0, "UInt")
+    return true
+}
+
+GetCurrentProcessUserSid(&sidText, &errorCode) {
+    static TOKEN_QUERY := 0x0008
+    sidText := ""
+    if !OpenCurrentProcessToken(TOKEN_QUERY, &token, &errorCode)
+        return false
+    try {
+        return GetTokenUserSidString(token, &sidText, &errorCode)
+    } finally {
+        DllCall("Kernel32\CloseHandle", "Ptr", token, "Int")
+    }
+}
+
+GetCurrentProcessSessionId(&sessionId) {
+    sessionId := -1
+    return DllCall(
+        "Kernel32\ProcessIdToSessionId",
+        "UInt", DllCall("Kernel32\GetCurrentProcessId", "UInt"),
+        "UInt*", &sessionId,
+        "Int") != 0
 }
 
 InitializeExpectedInteractiveIdentity() {
@@ -970,6 +1059,85 @@ CreateProcessWithStandardToken(
     return pid != 0
 }
 
+GetProcessTokenSecurity(pid, &sidText, &sessionId, &integrityName, &errorText) {
+    static PROCESS_QUERY_LIMITED_INFORMATION := 0x1000
+    static TOKEN_QUERY := 0x0008
+    sidText := ""
+    sessionId := -1
+    integrityName := "Unknown"
+    errorText := ""
+
+    processHandle := DllCall(
+        "Kernel32\OpenProcess",
+        "UInt", PROCESS_QUERY_LIMITED_INFORMATION,
+        "Int", false,
+        "UInt", pid,
+        "Ptr")
+    if !processHandle {
+        errorText := "OpenProcess failed (" A_LastError ")."
+        return false
+    }
+    token := 0
+    try {
+        if !DllCall(
+            "Advapi32\OpenProcessToken",
+            "Ptr", processHandle,
+            "UInt", TOKEN_QUERY,
+            "Ptr*", &token,
+            "Int") {
+            errorText := "OpenProcessToken failed (" A_LastError ")."
+            return false
+        }
+        if !GetTokenUserSidString(token, &sidText, &errorCode) {
+            errorText := "Token user query failed (" errorCode ")."
+            return false
+        }
+        if !GetTokenSessionId(token, &sessionId, &errorCode) {
+            errorText := "Token session query failed (" errorCode ")."
+            return false
+        }
+        if !GetTokenInformationBuffer(token, 25, &integrityInfo, &errorCode) {
+            errorText := "Token integrity query failed (" errorCode ")."
+            return false
+        }
+        integritySid := NumGet(integrityInfo, 0, "Ptr")
+        countPointer := integritySid
+            ? DllCall(
+                "Advapi32\GetSidSubAuthorityCount",
+                "Ptr", integritySid,
+                "Ptr")
+            : 0
+        if !countPointer {
+            errorText := "The integrity SID was invalid."
+            return false
+        }
+        subAuthorityCount := NumGet(countPointer, 0, "UChar")
+        if (subAuthorityCount <= 0) {
+            errorText := "The integrity SID had no sub-authorities."
+            return false
+        }
+        ridPointer := DllCall(
+            "Advapi32\GetSidSubAuthority",
+            "Ptr", integritySid,
+            "UInt", subAuthorityCount - 1,
+            "Ptr")
+        if !ridPointer {
+            errorText := "The integrity RID was unavailable."
+            return false
+        }
+        rid := NumGet(ridPointer, 0, "UInt")
+        integrityName := rid < 0x1000 ? "Untrusted"
+            : (rid < 0x2000 ? "Low"
+            : (rid < 0x3000 ? "Medium"
+            : (rid < 0x4000 ? "High" : "System")))
+        return true
+    } finally {
+        if token
+            DllCall("Kernel32\CloseHandle", "Ptr", token, "Int")
+        DllCall("Kernel32\CloseHandle", "Ptr", processHandle, "Int")
+    }
+}
+
 GetVerifiedDesktopShellPid(&shellPid, &reason) {
     global ExpectedInteractiveUserSid, ExpectedInteractiveSessionId
     shellPid := 0
@@ -1042,105 +1210,48 @@ BootstrapVerifiedDesktopShell(&shellPid, &reason) {
     }
 }
 
-; Windows holds an exclusive write lock on a running image, so a file can be
-; gone from the process list and still be unopenable for a moment afterwards
-; while the last handle is released. Probing the lock directly is what makes the
-; wait honest: a fixed Sleep is a guess, and this asks the actual question the
-; caller is about to ask.
-WaitForReplaceableFile(path, timeoutMs := 5000) {
-    if (path = "" || !FileExist(path))
-        return true
-    deadline := A_TickCount + Max(0, timeoutMs)
-    Loop {
-        handle := 0
-        ; "rw" opens for read/write without truncating. A running image denies
-        ; write sharing, so this succeeds exactly when a replace would.
-        try handle := FileOpen(path, "rw")
-        if IsObject(handle) {
-            try handle.Close()
-            return true
-        }
-        if (A_TickCount >= deadline)
-            return false
-        Sleep(100)
+CaptureExecutablePidSet(executable) {
+    existing := Map()
+    if (executable = "")
+        return existing
+    SplitPath(executable, &exeName)
+    if (exeName = "")
+        return existing
+    pids := []
+    try pids := GetPidsByExeName(exeName)
+    for _, existingPid in pids {
+        processPath := ""
+        try processPath := ProcessGetPath(existingPid)
+        if (processPath != ""
+            && StrLower(processPath) = StrLower(executable))
+            existing[existingPid] := true
     }
+    return existing
 }
 
-; Setup replaces SteamShell-XFE.exe and SteamShell-Helper.exe in place, and
-; nothing stopped either one first. On an XFE machine the logon task starts the
-; companion at sign-in, so the file was always locked and FileMove always failed
-; -- meaning Setup could essentially never apply, not merely that upgrades were
-; awkward. It surfaced as "The XFE companion could not be deployed" carrying a
-; bare [Win32 32], which named neither the cause nor the remedy.
-;
-; Three rules, in this order:
-;
-; 1. IDENTITY BEFORE ANYTHING IS CLOSED. Only a process whose image path is
-;    exactly the target counts, and it must belong to the interactive user in
-;    this session. A process carrying the right path with the wrong owner is a
-;    reason to STOP, not to kill: Setup cannot account for it, and terminating
-;    processes it cannot account for is not Setup's job. It fails closed and
-;    says so.
-; 2. WM_CLOSE FIRST. Both targets are AutoHotkey scripts, so WM_CLOSE on the
-;    script's main window runs OnExit. XFE keeps its INI, learned controller
-;    profiles and log beside its executable; a hard kill mid-write is not the
-;    opening move. TerminateProcess is the fallback, not the plan.
-; 3. WAIT FOR THE LOCK, not for the process. See WaitForReplaceableFile.
-StopRunningSteamShellExecutable(executablePath, &stoppedPids, &failureReason) {
-    stoppedPids := []
-    failureReason := ""
-    if (executablePath = "" || !FileExist(executablePath))
-        return true
-    running := CaptureExecutablePidSet(executablePath)
-    if (running.Count = 0)
-        return true
-
-    foreign := []
-    targets := []
-    for pid, _ in running {
-        if SteamShellSetupProcessMatchesIdentity(pid)
-            targets.Push(pid)
-        else
-            foreign.Push(pid)
-    }
-    if (foreign.Length > 0) {
-        failureReason := "A process at " executablePath " (PID "
-            . foreign[1] ") does not belong to the signed-in user in this "
-            . "session, so Setup did not close it. Close it manually and apply "
-            . "again."
-        LogLine("Setup refused to close an unaccounted process at "
-            . executablePath ": PID " foreign[1] ".", "Warning")
-        return false
-    }
-
-    for _, pid in targets {
-        ; CloseSteamShellProcessForSetup already does WM_CLOSE-then-terminate,
-        ; and does it correctly: it posts to the script's hidden main window
-        ; with DetectHiddenWindows enabled. An open-coded WinClose here would
-        ; find nothing, because another process's AutoHotkey main window is
-        ; hidden and this script does not detect hidden windows by default --
-        ; so it would silently skip the graceful path and always terminate.
-        if !CloseSteamShellProcessForSetup(pid, true) {
-            failureReason := "PID " pid " at " executablePath
-                . " could not be closed. Close it manually and apply again."
-            LogLine("Setup could not close PID " pid " at " executablePath ".",
-                "Warning")
-            return false
+WaitForNewExecutablePid(executable, existingPids, timeoutMs := 2500) {
+    if (executable = "")
+        return 0
+    SplitPath(executable, &exeName)
+    if (exeName = "")
+        return 0
+    deadline := A_TickCount + Max(0, timeoutMs)
+    Loop {
+        pids := []
+        try pids := GetPidsByExeName(exeName)
+        for _, candidatePid in pids {
+            processPath := ""
+            try processPath := ProcessGetPath(candidatePid)
+            if (!existingPids.Has(candidatePid)
+                && processPath != ""
+                && StrLower(processPath) = StrLower(executable))
+                return candidatePid
         }
-        stoppedPids.Push(pid)
-        LogLine("Setup closed PID " pid " at " executablePath
-            . " before replacing it.")
+        if (A_TickCount >= deadline)
+            break
+        Sleep 100
     }
-
-    if !WaitForReplaceableFile(executablePath, 5000) {
-        failureReason := executablePath
-            . " is still locked after the processes using it exited. "
-            . "Sign out and back in, then apply again."
-        LogLine("Setup: " executablePath
-            . " stayed locked after every owning process exited.", "Warning")
-        return false
-    }
-    return true
+    return 0
 }
 
 RecordStandardLaunch(purpose, target, route, pid := 0, errorText := "") {
@@ -1357,8 +1468,10 @@ PromptForAdministratorSetupAndExit() {
         . "Click OK to close this SteamShell instance. Then right-click SteamShell.exe and select Run as administrator."
     if !markerWritten
         message .= "`n`nThe automatic Setup request could not be saved. After relaunching, open Setup Assistant manually."
-    SteamShellMsgBox(
-        message, "OK Icon!", "SteamShell Administrator Setup Required")
+    if IsSet(SetupAssistantGui) && IsGuiVisible(SetupAssistantGui)
+        SetupAssistantMsgBox(message, "OK Icon!")
+    else
+        MsgBox(message, "SteamShell Administrator Setup Required", "OK Icon!")
     IntentionalExitMode := "setup-admin-required"
     try LogLine(
         "SteamShell is exiting because installation or upgrade requires an administrator launch; marker="
@@ -1448,7 +1561,6 @@ CloseExistingSteamShellInstancesForElevatedSetup(&detail) {
         return false
     }
     mainClosed := 0
-    companionClosed := 0
     helperClosed := 0
     failures := []
     for _, pid in GetPidsByExeName("SteamShell.exe") {
@@ -1458,20 +1570,6 @@ CloseExistingSteamShellInstancesForElevatedSetup(&detail) {
             mainClosed += 1
         else
             failures.Push("SteamShell.exe PID " pid)
-    }
-    ; The companion was missing from this list entirely, and it is the one that
-    ; is ALWAYS running: its logon task starts it at sign-in on every XFE
-    ; machine. Setup then tried to replace a locked image and failed, so on an
-    ; XFE machine Setup could essentially never apply -- not merely that
-    ; upgrading was awkward. Graceful, because XFE keeps its INI, learned
-    ; controller profiles and log beside its executable.
-    for _, pid in GetPidsByExeName("SteamShell-XFE.exe") {
-        if !SteamShellSetupProcessMatchesIdentity(pid)
-            continue
-        if CloseSteamShellProcessForSetup(pid, true)
-            companionClosed += 1
-        else
-            failures.Push("SteamShell-XFE.exe PID " pid)
     }
 
     ; Helpers normally observe their parent exit and leave on their own. Give
@@ -1498,8 +1596,7 @@ CloseExistingSteamShellInstancesForElevatedSetup(&detail) {
         else
             failures.Push("SteamShell-Helper.exe PID " pid)
     }
-    detail := "closed main=" mainClosed "; closed companion=" companionClosed
-        . "; closed helper leftovers=" helperClosed
+    detail := "closed main=" mainClosed "; closed helper leftovers=" helperClosed
     if failures.Length {
         detail .= "; still running=" JoinWith(failures, ", ")
         return false
@@ -1509,9 +1606,9 @@ CloseExistingSteamShellInstancesForElevatedSetup(&detail) {
 
 AbortAdministratorSetup(message) {
     global IntentionalExitMode
-    SteamShellMsgBox(
+    MsgBox(
         message "`n`nSteamShell Setup will now close.",
-        "OK Iconx", "SteamShell Administrator Setup")
+        "SteamShell Administrator Setup", "OK Iconx")
     IntentionalExitMode := "setup-admin-aborted"
     try LogLine("Administrator Setup aborted: " message, "Error")
     ; A rejected over-the-shoulder administrator must not create an Explorer
@@ -1533,91 +1630,16 @@ ReadElevatedHelperPreference() {
     return ToBool(CleanIniValue(rawValue, "true"), true)
 }
 
-; The elevated helper lives in Program Files in EVERY installation mode, and it
-; is the one part of SteamShell that is deliberately not portable.
-;
-; It used to sit beside the executable, which for a Portable install meant a
-; directory the interactive user holds Modify on -- and Modify includes
-; FILE_DELETE_CHILD, so the user could delete the hardened bin despite its own
-; ACL, recreate it, and drop in their own binary. That is why Portable and
-; Custom were refused the on-demand scheduled task: without a protected ancestor
-; chain the task is an unprompted elevation to a file anyone can replace.
-;
-; The binary carries no user state -- it is a fixed payload extracted from
-; SteamShell.exe -- so nothing about it needs to travel with a portable install.
-; Only the INI, logs and backups do, and they still sit beside the executable.
-; XFE already did exactly this; this is the shell adopting it.
-;
-; The consequence, stated in Setup: a portable copy is no longer self-contained
-; on disk, and moving the folder to another machine needs Setup run again. That
-; was already true of the scheduled task and the registry record.
-SteamShellElevatedHelperDirectory() {
-    global SteamShellInstallationMode, SettingsPath
-    ; A Portable install may keep the helper beside the executable, but only
-    ; because Setup either PROVED the folder is administrator-only-writable or
-    ; the user chose it knowing the trade. The choice is recorded rather than
-    ; re-derived, so a folder whose permissions change later cannot silently
-    ; move the helper out from under an already-registered task.
-    if (InStr(StrLower(Trim(SteamShellInstallationMode)), "portable")
-        && StrLower(Trim(IniReadS("Setup", "PortableHelperLocation", "ProgramFiles")))
-            = "portable")
-        return A_ScriptDir "\SteamShell\bin"
-    return A_ProgramFiles "\SteamShell\bin"
-}
-
-; Both places a helper can be, so uninstall and cleanup never depend on which
-; was chosen -- or on the record still being readable.
-; Both places a helper can be, so uninstall never depends on which was chosen --
-; or on the [Setup] record still being readable.
-;
-; installDirectory MUST be passed when uninstalling. A_ScriptDir is only the
-; install folder when the running executable is the installed one, and the whole
-; point of the registry record is that an uninstall can be driven by a freshly
-; downloaded SteamShell.exe sitting in Downloads. Defaulting to A_ScriptDir
-; there would look for the portable helper beside the DOWNLOAD and quietly find
-; nothing, leaving an administrator-protected directory and a scheduled task
-; behind for a product the user believes is gone.
-SteamShellElevatedHelperDirectories(installDirectory := "") {
-    directories := [A_ProgramFiles "\SteamShell\bin"]
-    base := RTrim(Trim(installDirectory), "\/")
-    if (base = "")
-        base := A_ScriptDir
-    directories.Push(base "\SteamShell\bin")
-    return directories
-}
-
 GetElevatedHelperPath() {
-    return SteamShellElevatedHelperDirectory() "\SteamShell-Helper.exe"
+    global SteamShellInstallationMode
+    mode := StrLower(Trim(SteamShellInstallationMode))
+    componentDirectory := InStr(mode, "portable")
+        ? A_ScriptDir "\SteamShell"
+        : A_ScriptDir "\components"
+    return componentDirectory "\bin\SteamShell-Helper.exe"
 }
 
-; Turns a thrown file error into something a log reader can act on.
-;
-; AutoHotkey's file commands throw with the bare message "Failed", so the raw
-; err.Message names neither what was being written nor why it was refused.
-; Win32 5 is the one that matters here: it is what an unelevated write into an
-; Administrators-only directory looks like, and it must not read the same as a
-; missing payload.
-; Only Win32 5 was ever named, and 32 is the one an upgrade actually hits: a
-; running image cannot be replaced, and that failure used to render as a bare
-; "[Win32 32]" for the single most likely reason a deployment fails. Setup now
-; closes the owning process first, so reaching this line means that did not
-; work -- which makes naming the cause more important, not less.
-DescribeFileFailure(err, lastError, targetPath) {
-    static WIN32_REASONS := Map(
-        5, ": access denied",
-        32, ": the file is in use by a running process",
-        33, ": the file is locked by another process",
-        1224, ": the file is open as a running image")
-    detail := err.Message
-    if (err.HasProp("Extra") && err.Extra != "")
-        detail .= " (" err.Extra ")"
-    if lastError
-        detail .= " [Win32 " lastError
-            . (WIN32_REASONS.Has(lastError) ? WIN32_REASONS[lastError] : "") "]"
-    return detail " Target: " targetPath "."
-}
-
-ExtractEmbeddedElevatedHelper(targetPath, &failureReason, forceReplace := false) {
+ExtractEmbeddedElevatedHelper(targetPath, &failureReason) {
     global ScriptPid, ElevatedHelperExpectedVersion
     failureReason := ""
     if !A_IsCompiled {
@@ -1632,8 +1654,7 @@ ExtractEmbeddedElevatedHelper(targetPath, &failureReason, forceReplace := false)
         existingVersion := ""
         if FileExist(targetPath)
             try existingVersion := FileGetVersion(targetPath)
-        if (!forceReplace
-            && existingVersion = ElevatedHelperExpectedVersion)
+        if (existingVersion = ElevatedHelperExpectedVersion)
             return true
         if FileExist(stagedPath)
             FileDelete(stagedPath)
@@ -1654,350 +1675,22 @@ ExtractEmbeddedElevatedHelper(targetPath, &failureReason, forceReplace := false)
             throw Error("The installed helper could not be verified.")
         return true
     } catch as err {
-        ; A_LastError is read FIRST: the cleanup below issues its own file calls
-        ; and would overwrite the code that explains the failure.
-        lastError := A_LastError
         try {
             if FileExist(stagedPath)
                 FileDelete(stagedPath)
         }
-        ; err.Message alone is not diagnosable. AutoHotkey's file commands throw
-        ; with the bare message "Failed", so a real install produced the log line
-        ; "Extraction failed: Failed Run SteamShell as administrator ..." --
-        ; naming neither the path nor the reason, and giving advice the user had
-        ; already followed. Access denied writing into an Administrators-only
-        ; directory is the expected failure for an unelevated run, and it has to
-        ; be distinguishable from a missing payload at a glance.
-        failureReason := DescribeFileFailure(err, lastError, targetPath)
-        return false
-    }
-}
-
-; SteamShellPathIsAdminOnlyWritable and ElevatedHelperLocationIsProtected used to
-; be defined here. They now live in SteamShell-Shared.ahk, because XFE's opt-in
-; RTSS helper has to ask the same two questions about the same payload, and
-; neither function knows anything about a shell replacement: they take a path and
-; an expected version and inspect owner, DACL and readability.
-;
-; The deployment half stayed here on purpose. Setup Assistant, the embedded
-; payload, the installation modes and the protected on-demand task are all
-; standalone concepts; only the GATE is shared. See XFE_PARITY_NOTES.md, which
-; previously recorded that these two would never be shared and now records why
-; that was reversed.
-
-; Applied to the component bin directory in every installation mode, including
-; portable, where the surrounding folder is deliberately user-writable for the
-; INI, logs, and backups. Only bin is locked down, so the writable data layout is
-; unchanged and only the elevated payload becomes administrator-owned.
-HardenElevatedHelperDirectory(binDirectory, &failureReason) {
-    failureReason := ""
-    if !A_IsAdmin {
-        failureReason := "Administrator approval is required to secure the helper directory."
-        return false
-    }
-    icaclsPath := A_WinDir "\System32\icacls.exe"
-    ownerCommandLine := QuoteWindowsCommandLineArg(icaclsPath)
-        . " " QuoteWindowsCommandLineArg(binDirectory)
-        . " /setowner " QuoteWindowsCommandLineArg("*S-1-5-32-544")
-        . " /T /C"
-    try ownerExitCode := RunWait(ownerCommandLine, A_WinDir, "Hide")
-    catch as err {
         failureReason := err.Message
         return false
     }
-    if (ownerExitCode != 0) {
-        failureReason := "icacls /setowner returned exit code " ownerExitCode "."
-        return false
-    }
-    ; The grant applies to the DIRECTORY ONLY -- deliberately no /T.
-    ;
-    ; (OI) and (CI) are inheritance flags and mean nothing on a file. Running
-    ; this same string with /T made icacls apply it to SteamShell-Helper.exe as
-    ; well, where the flags are invalid, so the grant was rejected for the file
-    ; -- but /inheritance:r had already stripped the ACEs it would otherwise
-    ; have inherited. The file was left with an EMPTY DACL, which denies
-    ; everyone everything including Administrators, and /C suppressed the error
-    ; while the process still exited 0 so Setup recorded a success.
-    ;
-    ; Observed on hardware 2026-08-02: the directory listed all three ACEs
-    ; correctly while `icacls` on the helper listed none at all. The helper
-    ; could not be launched, and could not even be READ -- which is what made
-    ; the main process believe it was missing and try to re-extract it into a
-    ; directory only administrators can write, producing an "extraction failed"
-    ; log line for a file that was sitting right there.
-    commandLine := QuoteWindowsCommandLineArg(icaclsPath)
-        . " " QuoteWindowsCommandLineArg(binDirectory)
-        . " /inheritance:r"
-        . " /grant:r " QuoteWindowsCommandLineArg("*S-1-5-18:(OI)(CI)F")
-        . " " QuoteWindowsCommandLineArg("*S-1-5-32-544:(OI)(CI)F")
-        . " " QuoteWindowsCommandLineArg("*S-1-5-32-545:(OI)(CI)RX")
-    try exitCode := RunWait(commandLine, A_WinDir, "Hide")
-    catch as err {
-        failureReason := err.Message
-        return false
-    }
-    if (exitCode != 0) {
-        failureReason := "icacls returned exit code " exitCode "."
-        return false
-    }
-    ; Now make the contents inherit what the directory just got. /reset replaces
-    ; a child's ACL with the inherited default, which is the effective,
-    ; non-inheritable form of the three ACEs above -- the thing the flagged
-    ; grant could never produce on a file.
-    ;
-    ; A non-zero exit here is not fatal: the wildcard matches nothing when the
-    ; directory is still empty, which is the normal case on the first pass,
-    ; before the payload is extracted. The verification after deployment is what
-    ; decides whether the result is acceptable.
-    resetCommandLine := QuoteWindowsCommandLineArg(icaclsPath)
-        . " " QuoteWindowsCommandLineArg(binDirectory "\*")
-        . " /reset /T /C /Q"
-    try RunWait(resetCommandLine, A_WinDir, "Hide")
-    return true
 }
 
-; ==============================================================================
-; PRODUCT SELECTION (SteamShell shell replacement vs SteamShell-XFE companion)
-; ==============================================================================
-; SteamShell.exe is the installer for both products. Which one a machine has is a
-; single recorded fact, because every later decision depends on it: whether the
-; Windows shell was registered, whether an elevated helper exists, and what an
-; uninstall has to undo. Asking the user is the fallback for a missing or
-; contradicted record, not the normal path -- a question the installer should be
-; able to answer itself is a question that collects wrong answers.
-SteamShellProductIsXfe(product) {
-    return StrLower(Trim(product)) = "xfe"
-}
-
-NormalizeSteamShellProduct(product) {
-    return SteamShellProductIsXfe(product) ? "XFE" : "Standalone"
-}
-
-; The product this machine actually has, resolved from the recorded value and
-; cross-checked against what is on disk. Returns "" when the two disagree or
-; nothing is recorded, which is the only case that justifies asking.
-ResolveInstalledSteamShellProduct(&product, &detail) {
-    global SteamShellRegKey
-    product := ""
-    detail := ""
-    recorded := ""
-    try recorded := RegRead(SteamShellRegKey, "Product")
-    recorded := NormalizeSteamShellProduct(recorded)
-    recordedIsPresent := false
-    try recordedIsPresent := RegRead(SteamShellRegKey, "Product") != ""
-
-    xfePath := ""
-    try xfePath := RegRead(SteamShellRegKey, "XfeInstalledPath")
-    xfeOnDisk := xfePath != "" && FileExist(xfePath) != ""
-    shellPath := ""
-    try shellPath := RegRead(SteamShellRegKey, "InstalledPath")
-    shellOnDisk := shellPath != "" && FileExist(shellPath) != ""
-
-    if !recordedIsPresent {
-        ; No record. Infer from what is REGISTERED, and only when exactly one
-        ; product is.
-        ;
-        ; This used to infer from executables on disk, which both uninstalls
-        ; deliberately leave behind. After removing either product the file
-        ; stayed, so "exactly one installed" was answered from residue: a
-        ; machine that had run both reported an ambiguity that never resolved,
-        ; and one that had removed XFE still reported XFE.
-        xfeRegistered := SteamShellXfeLogonTaskExists()
-        if !xfeRegistered {
-            try xfeRegistered := ToBool(
-                RegRead(SteamShellRegKey, "XfeLogonTaskRegistered", "false"), false)
-        }
-        shellRegistered := SteamShellIsRegisteredWindowsShell()
-        if !shellRegistered {
-            recordedShellPath := ""
-            try recordedShellPath := RegRead(SteamShellRegKey, "RegisteredPath")
-            shellRegistered := Trim(recordedShellPath) != ""
-        }
-        if (xfeRegistered && !shellRegistered) {
-            product := "XFE"
-            detail := "No product was recorded; only XFE is registered to start."
-            return true
-        }
-        if (shellRegistered && !xfeRegistered) {
-            product := "Standalone"
-            detail := "No product was recorded; only the shell is registered."
-            return true
-        }
-        detail := xfeRegistered && shellRegistered
-            ? "No product was recorded and both a shell and an XFE registration were found."
-            : "No product was recorded and nothing is registered to start."
-        return false
-    }
-
-    if (SteamShellProductIsXfe(recorded) && !xfeOnDisk) {
-        detail := "XFE is recorded, but " (xfePath != "" ? xfePath : "its executable")
-            . " is missing."
-        return false
-    }
-    if (!SteamShellProductIsXfe(recorded) && !shellOnDisk) {
-        detail := "A shell installation is recorded, but "
-            . (shellPath != "" ? shellPath : "its executable") " is missing."
-        return false
-    }
-    product := recorded
-    detail := "Recorded product: " recorded "."
-    return true
-}
-
-GetXfeInstalledPath() {
-    global SteamShellRegKey
-    recorded := ""
-    try recorded := RegRead(SteamShellRegKey, "XfeInstalledPath")
-    return Trim(recorded)
-}
-
-ExtractEmbeddedXfe(targetPath, &failureReason, forceReplace := false) {
-    global ScriptPid, XfeExpectedVersion
-    failureReason := ""
-    if !A_IsCompiled {
-        failureReason := "The XFE companion is embedded only in the compiled SteamShell.exe."
-        return false
-    }
-    targetDirectory := ""
-    SplitPath(targetPath, , &targetDirectory)
-    stagedPath := targetPath ".extract-" ScriptPid ".tmp"
-    try {
-        DirCreate(targetDirectory)
-        existingVersion := ""
-        if FileExist(targetPath)
-            try existingVersion := FileGetVersion(targetPath)
-        if (!forceReplace && existingVersion = XfeExpectedVersion)
-            return true
-        if FileExist(stagedPath)
-            FileDelete(stagedPath)
-        ; Ahk2Exe embeds this build-time companion payload into SteamShell.exe.
-        FileInstall "build\SteamShell-XFE.exe", stagedPath, true
-        if !FileExist(stagedPath) || FileGetSize(stagedPath) <= 0
-            throw Error("The embedded XFE payload could not be extracted.")
-        extractedVersion := ""
-        try extractedVersion := FileGetVersion(stagedPath)
-        if (extractedVersion != XfeExpectedVersion)
-            throw Error(
-                "The extracted XFE version was "
-                . (extractedVersion != "" ? extractedVersion : "unavailable")
-                . "; expected " XfeExpectedVersion ".")
-        FileMove(stagedPath, targetPath, true)
-        if !FileExist(targetPath)
-            || FileGetVersion(targetPath) != XfeExpectedVersion
-            throw Error("The installed XFE companion could not be verified.")
-        return true
-    } catch as err {
-        ; A_LastError is read FIRST: the cleanup below issues its own file calls
-        ; and would overwrite the code that explains the failure.
-        lastError := A_LastError
-        try {
-            if FileExist(stagedPath)
-                FileDelete(stagedPath)
-        }
-        ; err.Message alone is not diagnosable. AutoHotkey's file commands throw
-        ; with the bare message "Failed", so a real install produced the log line
-        ; "Extraction failed: Failed Run SteamShell as administrator ..." --
-        ; naming neither the path nor the reason, and giving advice the user had
-        ; already followed. Access denied writing into an Administrators-only
-        ; directory is the expected failure for an unelevated run, and it has to
-        ; be distinguishable from a missing payload at a glance.
-        failureReason := DescribeFileFailure(err, lastError, targetPath)
-        return false
-    }
-}
-
-; XFE's startup route. Deliberately NOT the helper's HighestAvailable task:
-; XFE is a normal-integrity companion and must stay that way, so the principal
-; runs at LeastPrivilege. Elevating it would hand it the exact privilege the
-; whole two-product split exists to avoid.
-RegisterXfeLogonTask(xfePath, &failureReason) {
-    global ExpectedInteractiveUserSid, ScriptPid
-    failureReason := ""
-    if !A_IsAdmin {
-        failureReason := "Task registration requires administrator approval."
-        return false
-    }
-    sidText := ExpectedInteractiveUserSid
-    if (sidText = "" && !GetCurrentProcessUserSid(&sidText, &sidError)) {
-        failureReason := "The task user SID could not be determined (" sidError ")."
-        return false
-    }
-    SplitPath(xfePath, , &xfeDirectory)
-    ; Built by SteamShell-Common.ahk, which the companion also uses. Setup used
-    ; to emit its own XML with no logon delay, so a Setup-installed companion
-    ; raced Xbox FSE at sign-in while the documentation promised it would not.
-    taskXml := XfeLogonTaskXml(sidText, xfePath, "", xfeDirectory)
-    xmlPath := A_Temp "\SteamShell-xfe-task-" ScriptPid ".xml"
-    try {
-        if FileExist(xmlPath)
-            FileDelete(xmlPath)
-        FileAppend(taskXml, xmlPath, "UTF-16")
-        ; Drop the name the companion used to register under before creating
-        ; ours, so the two routes converge on one task.
-        legacyDelete := QuoteWindowsCommandLineArg(A_WinDir "\System32\schtasks.exe")
-            . " /delete /tn " QuoteWindowsCommandLineArg(XfeLogonTaskLegacyName())
-            . " /f"
-        try RunWait(legacyDelete, A_WinDir, "Hide")
-        taskCommand := QuoteWindowsCommandLineArg(A_WinDir "\System32\schtasks.exe")
-            . " /create /tn " QuoteWindowsCommandLineArg(XfeLogonTaskName())
-            . " /xml " QuoteWindowsCommandLineArg(xmlPath) " /f"
-        exitCode := RunWait(taskCommand, A_WinDir, "Hide")
-        if (exitCode != 0)
-            throw Error("schtasks /create returned exit code " exitCode ".")
-        return true
-    } catch as err {
-        failureReason := err.Message
-        return false
-    } finally {
-        try {
-            if FileExist(xmlPath)
-                FileDelete(xmlPath)
-        }
-    }
-}
-
-; The companion registers this lazily the first time elevated RTSS writes are
-; used, so an uninstall has to clear it even though Setup never created it.
-RemoveXfeElevatedHelperTask() {
-    taskCommand := QuoteWindowsCommandLineArg(A_WinDir "\System32\schtasks.exe")
-        . " /delete /tn "
-        . QuoteWindowsCommandLineArg("SteamShell XFE Elevated RTSS Helper") " /f"
-    try return RunWait(taskCommand, A_WinDir, "Hide") = 0
-    return false
-}
-
-RemoveXfeLogonTask() {
-    ; Both names: a machine may carry the one the companion used to register
-    ; under, and leaving it behind would keep starting XFE after an uninstall.
-    ;
-    ; Success means the task is not there afterwards, not that a deletion ran.
-    ; schtasks /delete exits non-zero when the task does not exist, and this used
-    ; to report that as failure: RemoveSteamShellXfeInstallation returns this
-    ; value, so an uninstall that had nothing to remove told the user "the
-    ; installation could not be fully removed" while every other part of it had
-    ; in fact succeeded.
-    ;
-    ; It is reachable two ways. An install whose logon task was declined has no
-    ; task to delete. And the product prompt is reached precisely because nothing
-    ; is registered, so the hand-picked XFE removal would always have said it
-    ; failed.
-    failed := false
-    for _, name in [XfeLogonTaskName(), XfeLogonTaskLegacyName()] {
-        taskCommand := QuoteWindowsCommandLineArg(A_WinDir "\System32\schtasks.exe")
-            . " /delete /tn " QuoteWindowsCommandLineArg(name) " /f"
-        deleted := false
-        try deleted := RunWait(taskCommand, A_WinDir, "Hide") = 0
-        if (deleted)
-            continue
-        ; Non-zero is ambiguous: absent, or present and undeletable. Only the
-        ; second is a failure worth reporting.
-        if SteamShellXfeLogonTaskExists(name) {
-            LogLine("Uninstall: the XFE logon task " name
-                . " still exists after a delete attempt.", "Warning")
-            failed := true
-        }
-    }
-    return !failed
+XmlEscapeText(value) {
+    value := StrReplace(value, "&", "&amp;")
+    value := StrReplace(value, "<", "&lt;")
+    value := StrReplace(value, ">", "&gt;")
+    value := StrReplace(value, Chr(34), "&quot;")
+    value := StrReplace(value, "'", "&apos;")
+    return value
 }
 
 ElevatedHelperTaskName() {
@@ -2016,20 +1709,30 @@ RegisterElevatedHelperTask(helperPath, mainPath, settingsFile, helperLog, &failu
         failureReason := "The task user SID could not be determined (" sidError ")."
         return false
     }
-    ; --product is explicit even though standalone is the helper's default. The
-    ; helper treats any unrecognised value as standalone precisely so a
-    ; standalone user never silently gets the narrower XFE helper, and naming it
-    ; here means the task XML records which product registered the task.
-    taskArguments := "--product=standalone"
-        . " --main-path=" QuoteWindowsCommandLineArg(mainPath)
+    taskArguments := "--main-path=" QuoteWindowsCommandLineArg(mainPath)
         . " --settings=" QuoteWindowsCommandLineArg(settingsFile)
         . " --log=" QuoteWindowsCommandLineArg(helperLog)
     SplitPath(helperPath, , &helperDirectory)
-    ; Built by SteamShell-Common.ahk; the companion registers the same shape of
-    ; task for its own helper and the two used to be written out separately.
-    SplitPath(helperPath, , &helperDirectory)
-    taskXml := ElevatedHelperTaskXml(
-        sidText, helperPath, taskArguments, helperDirectory)
+    taskXml := '<?xml version="1.0" encoding="UTF-16"?>`r`n'
+        . '<Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">`r`n'
+        . '  <RegistrationInfo><Description>Runs the protected SteamShell elevated-window helper on demand.</Description></RegistrationInfo>`r`n'
+        . '  <Triggers />`r`n'
+        . '  <Principals><Principal id="Author"><UserId>' XmlEscapeText(sidText)
+        . '</UserId><LogonType>InteractiveToken</LogonType><RunLevel>HighestAvailable</RunLevel></Principal></Principals>`r`n'
+        . '  <Settings><MultipleInstancesPolicy>StopExisting</MultipleInstancesPolicy>'
+        . '<DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>'
+        . '<StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>'
+        . '<AllowHardTerminate>true</AllowHardTerminate><StartWhenAvailable>true</StartWhenAvailable>'
+        . '<RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>'
+        . '<IdleSettings><StopOnIdleEnd>false</StopOnIdleEnd><RestartOnIdle>false</RestartOnIdle></IdleSettings>'
+        . '<AllowStartOnDemand>true</AllowStartOnDemand><Enabled>true</Enabled>'
+        . '<Hidden>true</Hidden><RunOnlyIfIdle>false</RunOnlyIfIdle>'
+        . '<WakeToRun>false</WakeToRun><ExecutionTimeLimit>PT0S</ExecutionTimeLimit>'
+        . '<Priority>5</Priority></Settings>`r`n'
+        . '  <Actions Context="Author"><Exec><Command>' XmlEscapeText(helperPath)
+        . '</Command><Arguments>' XmlEscapeText(taskArguments)
+        . '</Arguments><WorkingDirectory>' XmlEscapeText(helperDirectory)
+        . '</WorkingDirectory></Exec></Actions>`r`n</Task>`r`n'
     xmlPath := A_Temp "\SteamShell-helper-task-" ScriptPid ".xml"
     try {
         if FileExist(xmlPath)
@@ -2076,6 +1779,57 @@ StartElevatedHelperTask(helperPath, &helperPid, &failureReason) {
     return true
 }
 
+VerifyElevatedHelperProcess(pid, &failureReason) {
+    global ElevatedHelperPath
+    global ExpectedInteractiveUserSid, ExpectedInteractiveSessionId
+    failureReason := ""
+    if !pid || !ProcessExist(pid) {
+        failureReason := "The helper process is not running."
+        return false
+    }
+    processPath := ""
+    try processPath := ProcessGetPath(pid)
+    catch as err {
+        failureReason := "The helper executable path could not be read: " err.Message
+        return false
+    }
+    if (processPath = ""
+        || StrLower(processPath) != StrLower(ElevatedHelperPath)) {
+        failureReason := "The observed helper path did not match the verified installed helper."
+        return false
+    }
+    if !GetProcessTokenSecurity(
+        pid, &helperSid, &helperSession, &helperIntegrity, &tokenError) {
+        failureReason := "The helper token could not be verified: " tokenError
+        return false
+    }
+    if (helperIntegrity != "High") {
+        failureReason := "The helper has " helperIntegrity
+            . " integrity instead of High integrity."
+        return false
+    }
+    if (ExpectedInteractiveUserSid = ""
+        || StrLower(helperSid) != StrLower(ExpectedInteractiveUserSid)
+        || helperSession != ExpectedInteractiveSessionId) {
+        failureReason :=
+            "The helper user or interactive session does not match SteamShell."
+        return false
+    }
+    return true
+}
+
+WaitForVerifiedElevatedHelper(pid, &failureReason, timeoutMs := 2500) {
+    deadline := A_TickCount + Max(0, timeoutMs)
+    Loop {
+        if VerifyElevatedHelperProcess(pid, &failureReason)
+            return true
+        if !pid || !ProcessExist(pid) || A_TickCount >= deadline
+            break
+        Sleep 100
+    }
+    return false
+}
+
 RemoveElevatedHelperTask() {
     taskCommand := QuoteWindowsCommandLineArg(A_WinDir "\System32\schtasks.exe")
         . " /delete /tn " QuoteWindowsCommandLineArg(ElevatedHelperTaskName())
@@ -2107,25 +1861,6 @@ EnsureElevatedGeometryEvent() {
     return ElevatedGeometryEventHandle != 0
 }
 
-; ------------------------------------------------------------------------------
-; Elevated RTSS frame cap request -- per-tree half
-; ------------------------------------------------------------------------------
-; The request channel itself now lives in SteamShell-Shared.ahk: the event names,
-; the request write, the completion wait, and the two Apply* verifiers are
-; identical in both trees and are compiled from one definition. What stays here
-; is the one part that genuinely differs -- where the request file is written,
-; because the two programs keep their data in different places.
-
-; Deliberately NOT the settings file. This is a request, not a setting: it has
-; no meaning once serviced, it must not be staged through CommitIniChanges
-; beside the user's real configuration, and keeping it separate means the whole
-; of what crosses into the elevated process is two integers in a file that
-; contains nothing else.
-ElevatedRtssRequestPath() {
-    global SteamShellDataDir
-    return SteamShellDataDir "\rtss-request.ini"
-}
-
 SetElevatedGeometryRuntimeEnabled(enabled) {
     global ElevatedGeometryEventHandle
     if !EnsureElevatedGeometryEvent()
@@ -2137,72 +1872,10 @@ SetElevatedGeometryRuntimeEnabled(enabled) {
         "Int") != 0
 }
 
-; ------------------------------------------------------------------------------
-; Automatic mouse mode, published to the elevated helper
-; ------------------------------------------------------------------------------
-; Both processes gate controller input on the same question -- "is the controller
-; a mouse right now?" -- and they used to answer it independently. They could
-; not agree, because the answer depends on DesktopMode, which is shell state the
-; helper has no way to observe.
-;
-; So the helper had a hardcoded four-name allowlist standing in for it. In
-; desktop mode this tree answers "everything except the exclusion list", and the
-; helper answered "taskmgr, mmc, control, systemsettingsadminflows" -- which
-; means that for EVERY elevated window outside those four, one process thought
-; automatic mouse mode was on and the other thought it was off. The user got the
-; five normal-integrity builtins this tree keeps (on-screen keyboard, touch
-; keyboard, Explorer, Quick Menu, Control Panel) and no cursor movement, no
-; scrolling and no click from the helper to use them with. An elevated installer
-; or regedit is the ordinary case.
-;
-; The fix is not a better list. It is that there is only one answer and this
-; process owns it: AutoMouseModeActive() is authoritative, and its result is
-; published on the same tick it is computed. Manual reset, exactly like the
-; geometry event -- the mode persists until this process changes it.
-;
-; Only the automatic half crosses. The helper reads the physical View/Back
-; button from the same controller and ORs it in itself, so a held button still
-; works even if this event never arrives.
-ElevatedAutoMouseEventName() {
-    global ScriptPid
-    return "Local\SteamShellAutoMouse-" ScriptPid
-}
-
-EnsureElevatedAutoMouseEvent() {
-    global ElevatedAutoMouseEventHandle
-    if ElevatedAutoMouseEventHandle
-        return true
-    ElevatedAutoMouseEventHandle := DllCall(
-        "Kernel32\CreateEventW",
-        "Ptr", 0,
-        "Int", true,  ; manual reset: the runtime mode persists until changed
-        "Int", false,
-        "WStr", ElevatedAutoMouseEventName(),
-        "Ptr")
-    if !ElevatedAutoMouseEventHandle
-        LogLine(
-            "The automatic-mouse coordination event could not be created ("
-            . A_LastError "). The elevated helper will fall back to the "
-            . "physical View/Back button.", "Warning")
-    return ElevatedAutoMouseEventHandle != 0
-}
-
-SetElevatedAutoMouseRuntimeEnabled(enabled) {
-    global ElevatedAutoMouseEventHandle
-    if !EnsureElevatedAutoMouseEvent()
-        return false
-    functionName := enabled ? "SetEvent" : "ResetEvent"
-    return DllCall(
-        "Kernel32\" functionName,
-        "Ptr", ElevatedAutoMouseEventHandle,
-        "Int") != 0
-}
-
 StartElevatedInputHelper() {
     global EnableElevatedInputHelper, ElevatedHelperPath, ElevatedHelperPid
     global ElevatedHelperAvailable, ElevatedHelperLastError
-    global SettingsPath, ScriptPid, SteamShellInstallationMode
-    global ElevatedHelperExpectedVersion
+    global SettingsPath, LogPath, ScriptPid, SteamShellInstallationMode
 
     EnableElevatedInputHelper := ReadElevatedHelperPreference()
     ElevatedHelperAvailable := false
@@ -2224,80 +1897,21 @@ StartElevatedInputHelper() {
     SetElevatedGeometryRuntimeEnabled(false)
 
     ElevatedHelperPath := GetElevatedHelperPath()
-    ; Do not even attempt the write when it cannot possibly succeed.
-    ;
-    ; The helper's directory is administrator-only by design, so an unelevated
-    ; session can never extract into it. Trying anyway produced an access-denied
-    ; failure reported as "Extraction failed", which reads like a broken or
-    ; missing payload and sent debugging in the wrong direction -- especially
-    ; when the real cause was that the deployed helper could not be READ, so its
-    ; version came back empty and looked like a mismatch. Name the actual
-    ; remedy instead.
-    if !A_IsAdmin {
-        installedVersion := ""
-        try installedVersion := FileGetVersion(ElevatedHelperPath)
-        if (installedVersion != ElevatedHelperExpectedVersion) {
-            ElevatedHelperLastError := installedVersion = ""
-                ? "The installed helper is missing or cannot be read by this account. "
-                    . "Run Setup from an elevated SteamShell session to repair it."
-                : "The installed helper is version " installedVersion "; this build "
-                    . "expects " ElevatedHelperExpectedVersion ". Run Setup from an "
-                    . "elevated SteamShell session to replace it."
-            LogLine("Elevated helper: " ElevatedHelperLastError, "Warning")
-            return false
-        }
-    }
-    ; Expected on the first normal start after the main EXE is replaced by hand:
-    ; the installed helper is the previous version and the directory holding it is
-    ; administrator-only, which is the point. Setup is the supported way to
-    ; replace it, so say so rather than reporting a bare file error.
     if !ExtractEmbeddedElevatedHelper(ElevatedHelperPath, &extractError) {
         ElevatedHelperLastError := "Extraction failed: " extractError
-            . " Run SteamShell as administrator and apply Setup to install the matching helper."
         LogLine("Elevated helper " ElevatedHelperLastError, "Warning")
         return false
     }
-    ; Fail closed. Setup secures this directory in every installation mode, so a
-    ; failure here means the helper was deployed by an older build or the folder
-    ; was relocated by hand. Elevating it anyway is the one thing this whole
-    ; split-integrity design exists to prevent.
-    if !ElevatedHelperLocationIsProtected(ElevatedHelperPath, &protectionError) {
-        ElevatedHelperLastError :=
-            "The installed helper is not administrator-protected, so it was not elevated. "
-            . protectionError
-            . " Run SteamShell as administrator and apply Setup again to re-secure it."
-        LogLine("Elevated helper: " ElevatedHelperLastError, "Warning")
-        return false
-    }
-    ; Beside the helper rather than in the writable data directory: an elevated
-    ; process appending to a path the interactive user controls invites a
-    ; reparse-point redirection onto a file it should never have touched.
-    SplitPath(ElevatedHelperPath, , &helperDirectory)
-    helperLog := helperDirectory "\SteamShell-Helper.log"
-    helperArguments := "--product=standalone"
-        . " --parent-pid=" ScriptPid
+    helperLog := ""
+    SplitPath(LogPath, , &logDirectory)
+    helperLog := logDirectory "\SteamShell-Helper.log"
+    helperArguments := "--parent-pid=" ScriptPid
         . " --settings=" QuoteWindowsCommandLineArg(SettingsPath)
         . " --log=" QuoteWindowsCommandLineArg(helperLog)
     commandLine := "*RunAs " QuoteWindowsCommandLineArg(ElevatedHelperPath)
         . " " helperArguments
-    ; The gate is the security property, not the installation mode.
-    ;
-    ; It used to be `mode = "standard"`, which was a proxy for "the helper sits
-    ; somewhere a non-administrator cannot replace it". Now that the helper is
-    ; always in Program Files the proxy is unnecessary, and asking the real
-    ; question also covers a Custom install that happens to be protected.
-    ;
-    ; A scheduled task is an UNPROMPTED elevation to whatever binary sits at its
-    ; action path, so it is only ever safe when that path cannot be replaced by
-    ; the interactive user. Fail closed: if the check cannot be completed, use
-    ; explicit UAC.
-    taskEligible := ElevatedHelperLocationIsProtected(
-        ElevatedHelperPath, &taskProtectionError)
-    if !taskEligible
-        LogLine("Elevated helper: no scheduled task will be used because the "
-            . "helper location is not administrator-protected ("
-            . taskProtectionError "); elevation will prompt.", "Warning")
-    if (taskEligible
+    mode := StrLower(Trim(SteamShellInstallationMode))
+    if (mode = "standard"
         && StartElevatedHelperTask(
             ElevatedHelperPath, &taskHelperPid, &taskError)) {
         if WaitForVerifiedElevatedHelper(
@@ -2311,13 +1925,8 @@ StartElevatedInputHelper() {
             return true
         }
         taskError := "Task process verification failed: " taskVerificationError
-        ; A task process that did not verify is usually one Windows started with
-        ; a normal token. Close it rather than leaving it behind while the direct
-        ; route starts a second helper.
-        if (taskHelperPid && ProcessExist(taskHelperPid))
-            try ProcessClose(taskHelperPid)
     }
-    if (taskEligible && taskError != "")
+    if (mode = "standard" && taskError != "")
         LogLine(
             "Elevated helper scheduled task unavailable; requesting UAC directly: "
             . taskError, "Warning")
@@ -2335,28 +1944,6 @@ StartElevatedInputHelper() {
         LogLine("Elevated helper unavailable: " ElevatedHelperLastError, "Warning")
         return false
     }
-}
-
-; EnableElevatedInputHelper is a security control, and a security control that
-; only takes effect at the next boot is not one. Turning it off used to leave the
-; elevated process injecting for the rest of the session while Health Check
-; happily reported it running.
-SyncElevatedInputHelperWithSettings() {
-    global EnableElevatedInputHelper, ElevatedHelperAvailable, ElevatedHelperPid
-    global ElevatedHelperLastError, FirstRunSetupMode, SafeMode
-    EnableElevatedInputHelper := ReadElevatedHelperPreference()
-    if !EnableElevatedInputHelper {
-        if (ElevatedHelperPid || ElevatedHelperAvailable)
-            return StopElevatedHelper("disabled in Settings")
-        ElevatedHelperLastError := "Disabled in Settings."
-        return true
-    }
-    if (FirstRunSetupMode || SafeMode || A_IsAdmin)
-        return false
-    if (ElevatedHelperAvailable && ElevatedHelperPid
-        && ProcessExist(ElevatedHelperPid))
-        return true
-    return StartElevatedInputHelper()
 }
 
 ElevatedHelperIsVerified() {
@@ -2422,20 +2009,21 @@ InitializeExpectedInteractiveIdentity()
 ; Register cleanup before any cursor, splash, process, or shell side effects.
 OnExit(ExitCleanup)
 
-OnError(HandleUncaughtError)
-; Armed once, unconditionally, and never disarmed.
-;
-; NOT inside ApplyRuntimeTimers: that function stops every timer and re-arms the
-; ones the current mode wants, so the watchdog would be cancelled exactly when
-; the poll loop was cancelled -- and a poll loop that has stopped is precisely
-; the case this exists to cover. Safe mode, desktop mode and a disabled
-; controller all reach that path.
-SetTimer(ControllerMouseSafetyTick, 5000)
-
 ; ==============================================================================
 ; HELPERS (v2.0.19 compatibility)
 ; ==============================================================================
+StrRepeat(s, count) {
+    if (count <= 0)
+    return ""
+    out := ""
+    Loop count
+    out .= s
+    return out
+}
 
+NowStamp() {
+    return FormatTime(A_Now, "yyyy-MM-dd HH:mm:ss")
+}
 
 SetSessionState(newState, detail := "") {
     global SessionState
@@ -2448,6 +2036,7 @@ SetSessionState(newState, detail := "") {
         . (detail != "" ? " (" detail ")" : ""))
 }
 
+
 ; Record LC Last based on gate state transitions (prevents constant updates during countdowns).
 LC_RecordGateIfChanged(gateText, cat) {
     global LC_LastGateCat, LC_LastDecisionStamp, LC_LastDecisionText
@@ -2458,6 +2047,34 @@ LC_RecordGateIfChanged(gateText, cat) {
         LC_LastDecisionStamp := NowStamp()
         LC_LastDecisionText := gateText
     }
+}
+
+GetLastLines(text, maxLines, newestFirst := false) {
+    if (maxLines <= 0)
+    return ""
+    t := StrReplace(text, "`r`n", "`n")
+    t := StrReplace(t, "`r", "`n")
+    lines := StrSplit(t, "`n")
+    total := lines.Length
+    start := total - maxLines + 1
+    if (start < 1)
+    start := 1
+
+    out := ""
+    if (newestFirst) {
+    i := total
+    while (i >= start) {
+    out .= lines[i] "`r`n"
+    i--
+    }
+    } else {
+    i := start
+    while (i <= total) {
+    out .= lines[i] "`r`n"
+    i++
+    }
+    }
+    return out
 }
 
 SecondsLeft(tickUntil) {
@@ -2485,12 +2102,11 @@ GetDefaultSettingsIniText() {
 ; ==================================================================================================
 
 [SteamShell]
-SettingsSchemaVersion=20                                   ; Internal schema used for safe settings upgrades
+SettingsSchemaVersion=18                                   ; Internal schema used for safe settings upgrades
 
 [Setup]
 SetupState=Pending                                         ; Pending | InProgress | Complete
 SetupVersion=1                                             ; Setup workflow version completed by this installation
-Product=Standalone                                         ; Standalone (replaces the Windows shell) | XFE (companion beside Xbox FSE)
 InstallationMode=Portable                                  ; Standard | Custom | Portable
 InstallDirectory=                                          ; Directory containing SteamShell.exe after Setup completes
 DataDirectory=                                             ; Writable settings, logs, backups, and support data
@@ -2507,7 +2123,7 @@ QuickAccessShortcut=^2                                     ; Steam Quick Access 
 OverlayShortcut=+{Tab}                                     ; Steam overlay while a game owns the foreground
 
 [Features]
-EnableElevatedInputHelper=true                             ; Launch the separate elevated window helper; applies immediately on reload; SteamShell.exe remains normal integrity
+EnableElevatedInputHelper=true                             ; Launch the separate elevated window helper; SteamShell.exe remains normal integrity
 EnableSplashScreen=true                                     ; Show a black splash overlay during boot
 EnableTaskbarHiding=true                                    ; Hide taskbar & tray windows (kiosk feel)
 EnableDesktopBlackout=true                                  ; Black backdrop instead of the wallpaper and desktop icons
@@ -2541,6 +2157,7 @@ TopmostGuardMs=500                                          ; Re-assert topmost 
 MpvPath=                                                    ; Full path to mpv.exe (required when Mode=Video)
 ForceSDR=true                                               ; Force MPV to output SDR (prevents HDR/Dolby Vision mode switching)
 DebugOverlay=false                                          ; If true, shows the reason video failed on the splash screen
+
 
 [WindowManagement]
 MinWidthPercent=0.30                                        ; Only maximize windows wider than this % of screen width
@@ -2589,7 +2206,6 @@ MouseParkYPercent=0.50                                      ; Park cursor at thi
 [StartupPrograms]
 Enable=true                                                 ; Start additional user-defined programs at boot (hidden)
 DelayMs=2000                                                ; Wait this long after SteamShell starts before launching them
-StaggerMs=1200                                              ; Gap between each program launch
 WindowMode=Hidden                                           ; Hidden | Minimized | Normal
 ; Define programs as Program1..Program20. Format:
 ; ProgramN="C:\Path\App.exe" --arg1 --arg2
@@ -2628,6 +2244,7 @@ CooldownSec=300
 CheckIntervalMs=2000
 GracefulCloseMs=4000
 HardKill=true
+
 
 ; Advanced (only used when RequireNoGame=true and UseCpuAudio=true)
 UseCpuAudio=true
@@ -2683,10 +2300,6 @@ OverlayOffShortcut=^+2                                     ; Separate mode: Ctrl
 FrameLimiterControlMode=Separate                           ; Toggle | Separate
 PresetFrameCap=158                                         ; Named Preset entry in the live Frame Limit cycle
 CustomFrameCap=158                                         ; Last Custom FPS value; updated when Custom is adjusted
-RestoreFrameLimitOnStartup=true                            ; Reapply the last Frame Limit selection once RTSS is running
-EnableElevatedFrameCapWrites=true                          ; Let the elevated helper write the cap when RTSS is under Program Files
-LastFrameCapMode=                                          ; Written by SteamShell: off | preset | configured | custom
-LastFrameCapFps=0                                          ; Written by SteamShell: FPS of the last selection, kept while Off
 CustomFrameCapShortcut=^+f                                 ; Toggle mode: Ctrl+Shift+F
 FrameLimiterOnShortcut=^+5                                ; Separate mode: Ctrl+Shift+5 - enable limiter
 FrameLimiterOffShortcut=^+6                               ; Separate mode: Ctrl+Shift+6 - disable limiter
@@ -3078,9 +2691,20 @@ SyncSettingsIniSchema() {
     }
 }
 
-; CleanIniValue now lives in SteamShell-Common.ahk, because XFE and the elevated
-; helper each had their own partial copy of it and XFE's could not strip a
-; comment at all.
+CleanIniValue(v, default := "", blankUsesDefault := true) {
+    v := Trim(v)
+    if (v = "")
+    return blankUsesDefault ? default : ""
+
+    pos := RegExMatch(v, "(^|\s)[;#]")
+    if (pos)
+    v := pos = 1 ? "" : Trim(SubStr(v, 1, pos - 1))
+
+    if (v = "")
+    return blankUsesDefault ? default : ""
+
+    return v
+}
 
 IniReadS(section, key, default := "") {
     if !TryReadIniRaw(section, key, &v)
@@ -3144,6 +2768,22 @@ FormatSettingsFloat(value, maxDecimals := 6) {
     text := RegExReplace(text, "0+$")
     text := RegExReplace(text, "\.$")
     return text = "-0" ? "0" : text
+}
+
+ClampInt(v, lo, hi) {
+    if (v < lo)
+        return lo
+    if (v > hi)
+        return hi
+    return v
+}
+
+ClampFloat(v, lo, hi) {
+    if (v < lo)
+        return lo
+    if (v > hi)
+        return hi
+    return v
 }
 
 ParseExeListPipe(raw) {
@@ -3212,6 +2852,7 @@ ParseClassListPipe(raw) {
     return list
 }
 
+
 IsExeInList(exeLower, listObj) {
     for _, v in listObj {
     if (exeLower = v)
@@ -3237,99 +2878,11 @@ JoinWith(listObj, delimiter := ", ") {
     return out
 }
 
-; The notification half of the shared seam. Standalone shows a toast; XFE writes
-; to its status line. Shared code calls SharedNotify and neither tree has to know
-; about the other's surface -- this is what let the display selection, safety
-; revert and HDR control become one definition instead of two that drifted.
-
-; Per-tree seam required by SteamShell-Shared.ahk.
-;
-; Takes an array of Map("section", "key", "value") and applies them as one unit.
-; Standalone stages a copy and replaces the live INI only after every write
-; succeeds, because it is the registered Windows shell and a half-written
-; settings file is a machine that signs in to nothing. XFE implements the same
-; name with direct writes, which is right for an ordinary application. Shared
-; code calls this and does not have to know which.
-SharedPersistSettings(changes) {
-    return CommitIniChanges(changes)
-}
-
-; Per-tree seam required by SteamShell-Shared.ahk. See the header above
-; VerifyElevatedHelperProcess there for why this exists.
-; A click on a Quick Menu row SELECTS it here; XFE activates it. Deliberate:
-; the shell's menu is driven from the couch and a stray click should not fire an
-; action, while XFE's is used at a desk with a pointer already in hand.
-QuickMenuMouseChoose(index) {
-    QuickMenuMouseSelect(index)
-}
-
-ProductIdentity() {
-    static identity := Map(
-        "name", "SteamShell",
-        "exe", "steamshell.exe",
-        "dirToken", "STEAMSHELL_DIR",
-        "helperLabel", "Elevated helper",
-        ; Shown at the top of the Quick Menu. Separate from "name", which is
-        ; prose used inside sentences.
-        "title", "SteamShell",
-        ; Tray icon filename under assets\. Read by the shared
-        ; ApplyTrayIconImage so the icon lifecycle has no per-tree copy.
-        "icon", "SteamShell.ico")
-    return identity
-}
-
-; Removes staging files left behind by a process that did not get to finish.
-;
-; CommitIniChanges copies the settings file, edits the copy, and moves it over
-; the original, so an exit between the copy and the move leaves the copy behind.
-; The name carries the PID that wrote it, which is what makes them safe to
-; delete: this process has just started, so any file named after a PID that is
-; not ours and is no longer running belongs to a run that ended.
-;
-; A shell replacement is killed rather than closed often enough -- End Task,
-; power loss, a failed sign-in -- that these accumulate beside the settings file
-; the user is expected to be able to read.
-SweepAbandonedSettingsUpdates() {
-    global SettingsPath, ScriptPid
-    settingsDirectory := ""
-    settingsName := ""
-    SplitPath(SettingsPath, &settingsName, &settingsDirectory)
-    if (settingsDirectory = "" || settingsName = "")
-        return
-    removed := 0
-    try {
-        Loop Files, settingsDirectory "\" settingsName ".update-*.tmp" {
-            if !RegExMatch(A_LoopFileName, "\.update-(\d+)\.tmp$", &match)
-                continue
-            ownerPid := Integer(match[1])
-            ; Never touch a live commit -- ours, or a second instance's.
-            if (ownerPid = ScriptPid || ProcessExist(ownerPid))
-                continue
-            try {
-                FileDelete(A_LoopFilePath)
-                removed += 1
-            }
-        }
-    }
-    if removed
-        LogLine("Removed " removed " abandoned settings staging file(s) left by "
-            . "a previous run.")
-}
-
 CommitIniChanges(changes, deletes := 0) {
     global SettingsPath, ScriptPid
     static busy := false
-    if (busy) {
-        ; A refusal is not a failure, and the two used to be indistinguishable:
-        ; both returned false and only the catch below logged anything. Staging
-        ; is deliberately not reentrant -- a second commit would copy a settings
-        ; file that is mid-replacement -- so the caller still gets false. What is
-        ; new is that the dropped write is on the record instead of vanishing.
-        LogLine("A settings write was refused because another commit was already "
-            . "in progress; " changes.Length " change(s) were not applied.",
-            "Warning")
+    if (busy)
         return false
-    }
     busy := true
     workPath := SettingsPath ".update-" ScriptPid ".tmp"
     try {
@@ -3358,7 +2911,7 @@ CommitIniChanges(changes, deletes := 0) {
 
 LoadSettings() {
     global AudioPeakThreshold, DEFAULT_AUDIO_PEAK_THRESHOLD
-    AudioPeakThreshold := ReadNumber("GameForegroundAssist", "AudioPeakThreshold", DEFAULT_AUDIO_PEAK_THRESHOLD, 0.0, 1.0)
+    AudioPeakThreshold := ClampFloat(ToFloat(IniReadS("GameForegroundAssist","AudioPeakThreshold","0.02"), DEFAULT_AUDIO_PEAK_THRESHOLD), 0.0, 1.0)
     global SteamPath, BpmTitle
     global EnableElevatedInputHelper
     global EnableSplashScreen, EnableTaskbarHiding, EnableDesktopBlackout
@@ -3386,7 +2939,7 @@ LoadSettings() {
     global ScoreCpuAboveThreshold, ScoreCpuNonZeroBonus, GameMinScoreToActivate
     global EnableAudioAssist, ScoreAudioActive
     global EnableGameScoreLogging, GameLogMode, GameLogTopN, GameLogIntervalMs, GameLogIncludeTitles
-    global GameLogRejectNearCandidates, GameLogRejectMinAreaPercent, LogRotateMaxKB, LogRotateBackups
+    global GameLogRejectNearCandidates, GameLogRejectMinAreaPercent, GameLogRotateMaxKB, GameLogRotateBackups
     global MouseParkRightOffsetPx, MouseParkYPercent, MouseParkEdge
     global EnableLauncherCleanup, LauncherCleanupSteamForegroundSec, LauncherCleanupRequireNoGame, LauncherCleanupUseCpuAudio, LauncherCleanupCpuThreshold, LauncherCleanupAudioPeakThreshold, LauncherCleanupDownloadGuard, LauncherCleanupDownloadGuardMode
     global LauncherCleanupCooldownSec, LauncherCleanupCheckIntervalMs, LauncherCleanupGracefulCloseMs, LauncherCleanupHardKill
@@ -3401,9 +2954,7 @@ LoadSettings() {
     global EnableRTSSIntegration, RtssPath, RtssUseDllIntegration, RtssOverlayControlMode
     global RtssOverlayToggleShortcut, RtssOverlayOnShortcut, RtssOverlayOffShortcut
     global RtssFrameLimiterControlMode, RtssPresetFrameCap, RtssCustomFrameCap
-    global RtssCustomFrameCapShortcut, RtssRestoreFrameLimitOnStartup
-    global RtssElevatedFrameCapWrites, RtssFrameCapWriteBlocked
-    global RtssLastFrameCapMode, RtssLastFrameCapFps
+    global RtssCustomFrameCapShortcut
     global RtssFrameLimiterOnShortcut, RtssFrameLimiterOffShortcut
 
     SteamPath := IniReadS("Paths", "SteamPath", SteamPath)
@@ -3412,17 +2963,18 @@ LoadSettings() {
     SteamQuickAccessShortcut := IniReadS("Steam", "QuickAccessShortcut", "^2")
     SteamOverlayShortcut := IniReadS("Steam", "OverlayShortcut", "+{Tab}")
 
-    EnableElevatedInputHelper := ReadBool("Features", "EnableElevatedInputHelper", true)
-    EnableSplashScreen := ReadBool("Features", "EnableSplashScreen", true)
-    EnableTaskbarHiding := ReadBool("Features", "EnableTaskbarHiding", true)
-    EnableDesktopBlackout := ReadBool("Features", "EnableDesktopBlackout", true)
-    EnableWindowManagement := ReadBool("Features", "EnableWindowManagement", true)
-    EnableAutoHideCursor := ReadBool("Features", "EnableAutoHideCursor", true)
-    EnableSteamRefocusMode := ReadBool("Features", "EnableSteamRefocusMode", true)
-    EnableGameForegroundAssist := ReadBool("Features", "EnableGameForegroundAssist", true)
-    EnableAlwaysFocus := ReadBool("Features", "EnableAlwaysFocus", true)
+    EnableElevatedInputHelper := ToBool(
+        IniReadS("Features", "EnableElevatedInputHelper", "true"), true)
+    EnableSplashScreen := ToBool(IniReadS("Features","EnableSplashScreen","true"), true)
+    EnableTaskbarHiding := ToBool(IniReadS("Features","EnableTaskbarHiding","true"), true)
+    EnableDesktopBlackout := ToBool(IniReadS("Features","EnableDesktopBlackout","true"), true)
+    EnableWindowManagement := ToBool(IniReadS("Features","EnableWindowManagement","true"), true)
+    EnableAutoHideCursor := ToBool(IniReadS("Features","EnableAutoHideCursor","true"), true)
+    EnableSteamRefocusMode := ToBool(IniReadS("Features","EnableSteamRefocusMode","true"), true)
+    EnableGameForegroundAssist := ToBool(IniReadS("Features","EnableGameForegroundAssist","true"), true)
+    EnableAlwaysFocus := ToBool(IniReadS("Features","EnableAlwaysFocus","true"), true)
     legacyParkOnRefocus := IniReadS("Features","EnableMouseParkEveryRefocus","")
-    EnableMouseParkOnBoot := ReadBool("Features", "EnableMouseParkOnBoot", true)
+    EnableMouseParkOnBoot := ToBool(IniReadS("Features","EnableMouseParkOnBoot","true"), true)
     EnableMouseParkOnFocusChange := ToBool(
         IniReadS("Features","EnableMouseParkOnFocusChange", legacyParkOnRefocus != "" ? legacyParkOnRefocus : "true"), true)
     ; Cursor hiding does not generate input or reset Windows idle timers, so the
@@ -3430,7 +2982,7 @@ LoadSettings() {
     EnableCursorHideOnBoot := true
     EnableCursorHideOnRefocus := true
 
-    SplashScreenDuration := ReadInt("Timing", "SplashScreenDuration", 10000, 0, 60000)
+    SplashScreenDuration := ClampInt(ToInt(IniReadS("Timing","SplashScreenDuration","10000"), 10000), 0, 60000)
 
     ; Splash (Black or Video)
     SplashMode := IniReadS("Splash","Mode","Black")
@@ -3438,14 +2990,14 @@ LoadSettings() {
     ; The INI default and the parse-failure fallback are deliberately the same
     ; value in each pair. When they disagreed, a malformed entry produced the
     ; opposite of the documented default rather than falling back to it.
-    SplashVideoMute := ReadBool("Splash", "Mute", false)
-    SplashVideoPlayFull := ReadBool("Splash", "PlayFullDuration", true)
-    SplashVideoSafetyMaxMs := ReadInt("Splash", "SafetyMaxMs", 15000, 1000, 600000)
-    SplashFadeOutMs := ReadInt("Splash", "FadeOutMs", 300, 0, 5000)
-    SplashTopmostGuardMs := ReadInt("Splash", "TopmostGuardMs", 500, 0, 5000)
+    SplashVideoMute := ToBool(IniReadS("Splash","Mute","false"), false)
+    SplashVideoPlayFull := ToBool(IniReadS("Splash","PlayFullDuration","true"), true)
+    SplashVideoSafetyMaxMs := ClampInt(ToInt(IniReadS("Splash","SafetyMaxMs","15000"), 15000), 1000, 600000)
+    SplashFadeOutMs := ClampInt(ToInt(IniReadS("Splash","FadeOutMs","300"), 300), 0, 5000)
+    SplashTopmostGuardMs := ClampInt(ToInt(IniReadS("Splash","TopmostGuardMs","500"), 500), 0, 5000)
     SplashMpvPath := IniReadS("Splash","MpvPath","")
-    SplashDebugOverlay := ReadBool("Splash", "DebugOverlay", false)
-    SplashForceSDR := ReadBool("Splash", "ForceSDR", true)
+    SplashDebugOverlay := ToBool(IniReadS("Splash","DebugOverlay","false"), false)
+    SplashForceSDR := ToBool(IniReadS("Splash","ForceSDR","true"), true)
 
     ; Coordinated-engine cadence and retry limits are intentionally fixed. The
     ; previous editable values allowed combinations that could not take effect
@@ -3455,13 +3007,13 @@ LoadSettings() {
     WindowEngineGeometryRetryMs := 1000
     WindowEngineGeometryMaxAttempts := 3
     WindowEngineCpuSampleIntervalMs := 1000
-    MouseMonitorInterval := ReadInt("Timing", "MouseMonitorInterval", 250, 50, 5000)
-    MouseHideDelay := ReadInt("Timing", "MouseHideDelay", 1000, 0, 60000)
-    SteamRefocusDelay := ReadInt("Timing", "SteamRefocusDelay", 1000, 0, 60000)
-    SteamStartupGraceMs := ReadInt("Timing", "SteamStartupGraceMs", 120000, 10000, 600000)
-    SteamExitConfirmMs := ReadInt("Timing", "SteamExitConfirmMs", 4000, 1000, 60000)
+    MouseMonitorInterval := ClampInt(ToInt(IniReadS("Timing","MouseMonitorInterval","250"), 250), 50, 5000)
+    MouseHideDelay := ClampInt(ToInt(IniReadS("Timing","MouseHideDelay","1000"), 1000), 0, 60000)
+    SteamRefocusDelay := ClampInt(ToInt(IniReadS("Timing","SteamRefocusDelay","1000"), 1000), 0, 60000)
+    SteamStartupGraceMs := ClampInt(ToInt(IniReadS("Timing","SteamStartupGraceMs","120000"), 120000), 10000, 600000)
+    SteamExitConfirmMs := ClampInt(ToInt(IniReadS("Timing","SteamExitConfirmMs","4000"), 4000), 1000, 60000)
 
-    MinWidthPercent := ReadNumber("WindowManagement", "MinWidthPercent", 0.30, 0.05, 1.00)
+    MinWidthPercent := ClampFloat(ToFloat(IniReadS("WindowManagement","MinWidthPercent","0.30"), 0.30), 0.05, 1.00)
 
     ; Window-management exclusion lists (optional)
     WmExcludeExeListRaw := IniReadS("WindowManagement", "ExcludeExeList", "")
@@ -3477,8 +3029,9 @@ LoadSettings() {
 
     ; Automatic mouse mode (optional). Both gates must pass: the toggle allows the
     ; feature, the list decides where it applies.
-    EnableAutoMouseMode := ReadBool("Features", "EnableAutoMouseMode", true)
-    EnableDesktopAutoMouseMode := ReadBool("Features", "EnableDesktopAutoMouseMode", true)
+    EnableAutoMouseMode := ToBool(IniReadS("Features","EnableAutoMouseMode","true"), true)
+    EnableDesktopAutoMouseMode := ToBool(
+        IniReadS("Features", "EnableDesktopAutoMouseMode", "true"), true)
     AutoMouseExeListRaw := IniReadS("Controller", "AutoMouseExeList", "explorer.exe")
     AutoMouseExeSet := Map()
     for _, exe in ParseExeListPipe(AutoMouseExeListRaw)
@@ -3490,7 +3043,7 @@ LoadSettings() {
         DesktopAutoMouseExcludeExeSet[exe] := true
 
     AlwaysFocusExeListRaw := IniReadS("AlwaysFocus","ExeList","")
-    AlwaysFocusCooldownMs := ReadInt("AlwaysFocus", "AlwaysFocusCooldownMs", 1000, 0, 60000)
+    AlwaysFocusCooldownMs := ClampInt(ToInt(IniReadS("AlwaysFocus","AlwaysFocusCooldownMs","1000"), 1000), 0, 60000)
     AlwaysFocusList := []
     if EnableAlwaysFocus {
         for _, alwaysExe in ParseExeListPipe(AlwaysFocusExeListRaw) {
@@ -3500,57 +3053,57 @@ LoadSettings() {
     }
     AlwaysFocusExeListRaw := JoinPipe(AlwaysFocusList)
 
-    GameCPUThresholdPercent := ReadNumber("GameForegroundAssist", "GameCPUThresholdPercent", 5.0, 0.0, 100.0)
-    FullscreenTolerance := ReadNumber("GameForegroundAssist", "FullscreenTolerance", 0.98, 0.50, 1.00)
-    FullscreenPosTolerancePx := ReadInt("GameForegroundAssist", "FullscreenPosTolerancePx", 2, 0, 200)
-    GameForegroundCooldownMs := ReadInt("GameForegroundAssist", "GameForegroundCooldownMs", 1500, 0, 60000)
-    GameAllowZeroCpuAsCandidate := ReadBool("GameForegroundAssist", "GameAllowZeroCpuAsCandidate", true)
-    GameRequireSteamForeground := ReadBool("GameForegroundAssist", "GameRequireSteamForeground", true)
-    GameAssistLogEvenWhenSkipped := ReadBool("GameForegroundAssist", "GameAssistLogEvenWhenSkipped", true)
+    GameCPUThresholdPercent := ClampFloat(ToFloat(IniReadS("GameForegroundAssist","GameCPUThresholdPercent","5.0"), 5.0), 0.0, 100.0)
+    FullscreenTolerance := ClampFloat(ToFloat(IniReadS("GameForegroundAssist","FullscreenTolerance","0.98"), 0.98), 0.50, 1.00)
+    FullscreenPosTolerancePx := ClampInt(ToInt(IniReadS("GameForegroundAssist","FullscreenPosTolerancePx","2"), 2), 0, 200)
+    GameForegroundCooldownMs := ClampInt(ToInt(IniReadS("GameForegroundAssist","GameForegroundCooldownMs","1500"), 1500), 0, 60000)
+    GameAllowZeroCpuAsCandidate := ToBool(IniReadS("GameForegroundAssist","GameAllowZeroCpuAsCandidate","true"), true)
+    GameRequireSteamForeground := ToBool(IniReadS("GameForegroundAssist","GameRequireSteamForeground","true"), true)
+    GameAssistLogEvenWhenSkipped := ToBool(IniReadS("GameForegroundAssist","GameAssistLogEvenWhenSkipped","true"), true)
 
-    EnableAudioAssist := ReadBool("GameForegroundAssist", "EnableAudioAssist", true)
-    ScoreAudioActive := ReadInt("GameForegroundAssist", "ScoreAudioActive", 30, 0, 200)
+    EnableAudioAssist := ToBool(IniReadS("GameForegroundAssist","EnableAudioAssist","true"), true)
+    ScoreAudioActive := ClampInt(ToInt(IniReadS("GameForegroundAssist","ScoreAudioActive","30"), 30), 0, 200)
 
-    ScoreFullscreen := ReadInt("GameForegroundAssist", "ScoreFullscreen", 70, 0, 200)
-    ScoreBorderlessLarge := ReadInt("GameForegroundAssist", "ScoreBorderlessLarge", 45, 0, 200)
-    ScoreTitleBonus := ReadInt("GameForegroundAssist", "ScoreTitleBonus", 10, 0, 100)
-    ScoreCpuAboveThreshold := ReadInt("GameForegroundAssist", "ScoreCpuAboveThreshold", 20, 0, 200)
-    ScoreCpuNonZeroBonus := ReadInt("GameForegroundAssist", "ScoreCpuNonZeroBonus", 15, 0, 200)
-    GameMinScoreToActivate := ReadInt("GameForegroundAssist", "GameMinScoreToActivate", 55, 0, 300)
+    ScoreFullscreen := ClampInt(ToInt(IniReadS("GameForegroundAssist","ScoreFullscreen","70"), 70), 0, 200)
+    ScoreBorderlessLarge := ClampInt(ToInt(IniReadS("GameForegroundAssist","ScoreBorderlessLarge","45"), 45), 0, 200)
+    ScoreTitleBonus := ClampInt(ToInt(IniReadS("GameForegroundAssist","ScoreTitleBonus","10"), 10), 0, 100)
+    ScoreCpuAboveThreshold := ClampInt(ToInt(IniReadS("GameForegroundAssist","ScoreCpuAboveThreshold","20"), 20), 0, 200)
+    ScoreCpuNonZeroBonus := ClampInt(ToInt(IniReadS("GameForegroundAssist","ScoreCpuNonZeroBonus","15"), 15), 0, 200)
+    GameMinScoreToActivate := ClampInt(ToInt(IniReadS("GameForegroundAssist","GameMinScoreToActivate","55"), 55), 0, 300)
 
     GameLogMode := StrUpper(IniReadS("Logging","GameLogMode","OFF"))
     if (GameLogMode != "OFF" && GameLogMode != "ACTIVATIONS"
         && GameLogMode != "TOPN" && GameLogMode != "DIAGNOSTIC")
         GameLogMode := "OFF"
     EnableGameScoreLogging := GameLogMode != "OFF"
-    GameLogTopN := ReadInt("Logging", "GameLogTopN", 3, 1, 10)
-    GameLogIntervalMs := ReadInt("Logging", "GameLogIntervalMs", 3000, 250, 60000)
-    GameLogIncludeTitles := ReadBool("Logging", "GameLogIncludeTitles", true)
-    GameLogRejectNearCandidates := ReadBool("Logging", "GameLogRejectNearCandidates", true)
-    GameLogRejectMinAreaPercent := ReadNumber("Logging", "GameLogRejectMinAreaPercent", 0.85, 0.10, 1.00)
-    LogRotateMaxKB := ReadInt("Logging", "GameLogRotateMaxKB", 256, 32, 8192)
-    LogRotateBackups := ReadInt("Logging", "GameLogRotateBackups", 2, 0, 10)
+    GameLogTopN := ClampInt(ToInt(IniReadS("Logging","GameLogTopN","3"), 3), 1, 10)
+    GameLogIntervalMs := ClampInt(ToInt(IniReadS("Logging","GameLogIntervalMs","3000"), 3000), 250, 60000)
+    GameLogIncludeTitles := ToBool(IniReadS("Logging","GameLogIncludeTitles","true"), true)
+    GameLogRejectNearCandidates := ToBool(IniReadS("Logging","GameLogRejectNearCandidates","true"), true)
+    GameLogRejectMinAreaPercent := ClampFloat(ToFloat(IniReadS("Logging","GameLogRejectMinAreaPercent","0.85"), 0.85), 0.10, 1.00)
+    GameLogRotateMaxKB := ClampInt(ToInt(IniReadS("Logging","GameLogRotateMaxKB","256"), 256), 32, 8192)
+    GameLogRotateBackups := ClampInt(ToInt(IniReadS("Logging","GameLogRotateBackups","2"), 2), 0, 10)
 
-    MouseParkRightOffsetPx := ReadInt("MousePark", "MouseParkRightOffsetPx", 50, 0, 5000)
-    MouseParkYPercent := ReadNumber("MousePark", "MouseParkYPercent", 0.50, 0.0, 1.0)
+    MouseParkRightOffsetPx := ClampInt(ToInt(IniReadS("MousePark","MouseParkRightOffsetPx","50"), 50), 0, 5000)
+    MouseParkYPercent := ClampFloat(ToFloat(IniReadS("MousePark","MouseParkYPercent","0.50"), 0.50), 0.0, 1.0)
     MouseParkEdge := StrLower(IniReadS("MousePark", "MouseParkEdge", "Right"))
     if (MouseParkEdge != "left" && MouseParkEdge != "right")
         MouseParkEdge := "right"
 
     ; Launcher cleanup (optional)
-    EnableLauncherCleanup := ReadBool("LauncherCleanup", "Enable", true)
-    LauncherCleanupSteamForegroundSec := ReadInt("LauncherCleanup", "SteamForegroundSec", 30, 1, 600)
-    LauncherCleanupRequireNoGame := ReadBool("LauncherCleanup", "RequireNoGame", true)
-    LauncherCleanupCooldownSec := ReadInt("LauncherCleanup", "CooldownSec", 300, 0, 86400)
-    LauncherCleanupCheckIntervalMs := ReadInt("LauncherCleanup", "CheckIntervalMs", 2000, 200, 60000)
-    LauncherCleanupGracefulCloseMs := ReadInt("LauncherCleanup", "GracefulCloseMs", 4000, 0, 60000)
-    LauncherCleanupHardKill := ReadBool("LauncherCleanup", "HardKill", true)
+    EnableLauncherCleanup := ToBool(IniReadS("LauncherCleanup","Enable","true"), true)
+    LauncherCleanupSteamForegroundSec := ClampInt(ToInt(IniReadS("LauncherCleanup","SteamForegroundSec","30"), 30), 1, 600)
+    LauncherCleanupRequireNoGame := ToBool(IniReadS("LauncherCleanup","RequireNoGame","true"), true)
+    LauncherCleanupCooldownSec := ClampInt(ToInt(IniReadS("LauncherCleanup","CooldownSec","300"), 300), 0, 86400)
+    LauncherCleanupCheckIntervalMs := ClampInt(ToInt(IniReadS("LauncherCleanup","CheckIntervalMs","2000"), 2000), 200, 60000)
+    LauncherCleanupGracefulCloseMs := ClampInt(ToInt(IniReadS("LauncherCleanup","GracefulCloseMs","4000"), 4000), 0, 60000)
+    LauncherCleanupHardKill := ToBool(IniReadS("LauncherCleanup","HardKill","true"), true)
 
-LauncherCleanupUseCpuAudio := ReadBool("LauncherCleanup", "UseCpuAudio", true)
-LauncherCleanupCpuThreshold := ReadInt("LauncherCleanup", "CpuThreshold", 12, 0, 500)
+LauncherCleanupUseCpuAudio := ToBool(IniReadS("LauncherCleanup","UseCpuAudio","true"), true)
+LauncherCleanupCpuThreshold := ClampInt(ToInt(IniReadS("LauncherCleanup","CpuThreshold","12"), 12), 0, 500)
 
-LauncherCleanupAudioPeakThreshold := ReadNumber("LauncherCleanup", "AudioPeakThreshold", 0.02, 0.0, 1.0)
-    LauncherCleanupDownloadGuard := ReadBool("LauncherCleanup", "DownloadGuard", true)
+LauncherCleanupAudioPeakThreshold := ClampFloat(ToFloat(IniReadS("LauncherCleanup","AudioPeakThreshold","0.02"), 0.02), 0.0, 1.0)
+    LauncherCleanupDownloadGuard := ToBool(IniReadS("LauncherCleanup","DownloadGuard","true"), true)
     LauncherCleanupDownloadGuardMode := StrUpper(IniReadS("LauncherCleanup","DownloadGuardMode","Balanced"))
     if (LauncherCleanupDownloadGuardMode != "OFF" && LauncherCleanupDownloadGuardMode != "BALANCED" && LauncherCleanupDownloadGuardMode != "STRICT")
         LauncherCleanupDownloadGuardMode := "BALANCED"
@@ -3570,20 +3123,21 @@ LauncherCleanupAudioPeakThreshold := ReadNumber("LauncherCleanup", "AudioPeakThr
     LauncherCleanupExcludeSet["steamshell.exe"] := true
 
     ; Controller mouse mode (XInput / Xbox)
-    EnableControllerMouseMode := ReadBool("Controller", "EnableControllerMouseMode", true)
-    EnablePersistentMouseMode := ReadBool("Controller", "EnablePersistentMouseMode", false)
-    ControllerIndex := ReadInt("Controller", "ControllerIndex", 0, 0, 3)
-    ControllerPollIntervalMs := ReadInt("Controller", "ControllerPollIntervalMs", 16, 5, 200)
-    ControllerDeadzone := ReadInt("Controller", "ControllerDeadzone", 3000, 0, 32000)
-    ControllerMouseSpeed := ReadInt("Controller", "ControllerMouseSpeed", 100, 1, 200)
-    ControllerMouseFastMultiplier := ReadNumber("Controller", "ControllerMouseFastMultiplier", 2.5, 1.0, 10.0)
-    ControllerScrollIntervalMs := ReadInt("Controller", "ControllerScrollIntervalMs", 80, 10, 1000)
-    ControllerScrollStep := ReadInt("Controller", "ControllerScrollStep", 1, 1, 10)
-    ControllerChordHoldMs := ReadInt("Controller", "ControllerChordHoldMs", 500, 100, 2000)
+    EnableControllerMouseMode := ToBool(IniReadS("Controller","EnableControllerMouseMode","true"), true)
+    EnablePersistentMouseMode := ToBool(
+        IniReadS("Controller", "EnablePersistentMouseMode", "false"), false)
+    ControllerIndex := ClampInt(ToInt(IniReadS("Controller","ControllerIndex","0"), 0), 0, 3)
+    ControllerPollIntervalMs := ClampInt(ToInt(IniReadS("Controller","ControllerPollIntervalMs","16"), 16), 5, 200)
+    ControllerDeadzone := ClampInt(ToInt(IniReadS("Controller","ControllerDeadzone","3000"), 3000), 0, 32000)
+    ControllerMouseSpeed := ClampInt(ToInt(IniReadS("Controller","ControllerMouseSpeed","100"), 100), 1, 200)
+    ControllerMouseFastMultiplier := ClampFloat(ToFloat(IniReadS("Controller","ControllerMouseFastMultiplier","2.5"), 2.5), 1.0, 10.0)
+    ControllerScrollIntervalMs := ClampInt(ToInt(IniReadS("Controller","ControllerScrollIntervalMs","80"), 80), 10, 1000)
+    ControllerScrollStep := ClampInt(ToInt(IniReadS("Controller","ControllerScrollStep","1"), 1), 1, 10)
+    ControllerChordHoldMs := ClampInt(ToInt(IniReadS("Controller","ControllerChordHoldMs","500"), 500), 100, 2000)
 
-    EnableQuickMenu := ReadBool("QuickMenu", "Enable", true)
-    QuickMenuChordHoldMs := ReadInt("QuickMenu", "ChordHoldMs", 500, 300, 3000)
-    TaskForceCloseHoldMs := ReadInt("QuickMenu", "TaskForceCloseHoldMs", 1200, 600, 3000)
+    EnableQuickMenu := ToBool(IniReadS("QuickMenu","Enable","true"), true)
+    QuickMenuChordHoldMs := ClampInt(ToInt(IniReadS("QuickMenu","ChordHoldMs","500"), 500), 300, 3000)
+    TaskForceCloseHoldMs := ClampInt(ToInt(IniReadS("QuickMenu","TaskForceCloseHoldMs","1200"), 1200), 600, 3000)
     QuickMenuMainOrderRaw := IniReadS(
         "QuickMenu", "MainOrder",
         "Audio|Display|RTSS|SteamMenu|SteamQuickAccess|Tasks|GameBar|Keyboard|MouseMode|Settings|System")
@@ -3600,12 +3154,12 @@ LauncherCleanupAudioPeakThreshold := ReadNumber("LauncherCleanup", "AudioPeakThr
         if (itemName != "")
             QuickMenuHiddenItems[itemName] := true
     }
-    EnableAudioQuickControls := ReadBool("AudioQuickControls", "Enable", true)
-    EnableDisplayQuickControls := ReadBool("DisplayQuickControls", "Enable", true)
+    EnableAudioQuickControls := ToBool(IniReadS("AudioQuickControls","Enable","true"), true)
+    EnableDisplayQuickControls := ToBool(IniReadS("DisplayQuickControls","Enable","true"), true)
 
-    EnableRTSSIntegration := ReadBool("RTSS", "EnableIntegration", true)
+    EnableRTSSIntegration := ToBool(IniReadS("RTSS","EnableIntegration","true"), true)
     RtssPath := IniReadS("RTSS","Path","C:\Program Files (x86)\RivaTuner Statistics Server\RTSS.exe")
-    RtssUseDllIntegration := ReadBool("RTSS", "UseDllIntegration", true)
+    RtssUseDllIntegration := ToBool(IniReadS("RTSS", "UseDllIntegration", "true"), true)
     if !RtssUseDllIntegration
         ShutdownRtssHooksApi()
     RtssOverlayControlMode := StrLower(IniReadS("RTSS","OverlayControlMode","Separate"))
@@ -3617,24 +3171,8 @@ LauncherCleanupAudioPeakThreshold := ReadNumber("LauncherCleanup", "AudioPeakThr
     RtssFrameLimiterControlMode := StrLower(IniReadS("RTSS","FrameLimiterControlMode","Separate"))
     if (RtssFrameLimiterControlMode != "toggle" && RtssFrameLimiterControlMode != "separate")
         RtssFrameLimiterControlMode := "separate"
-    RtssPresetFrameCap := ReadInt("RTSS", "PresetFrameCap", 158, 0, 1000)
-    RtssCustomFrameCap := ReadInt("RTSS", "CustomFrameCap", 158, 10, 1000)
-    RtssRestoreFrameLimitOnStartup := ReadBool("RTSS", "RestoreFrameLimitOnStartup", true)
-    RtssElevatedFrameCapWrites := ReadBool("RTSS", "EnableElevatedFrameCapWrites", true)
-    ; Reloading settings re-arms the frame cap.
-    ;
-    ; RtssFrameCapWriteBlocked latches on the first failed write so the row
-    ; stops accepting presses it cannot honour. That is right during a session
-    ; and wrong across a settings change: turning the elevated write back on, or
-    ; correcting [RTSS] Path, would otherwise leave the row read-only until the
-    ; next sign-in with no way to tell why. The latch costs one failed write to
-    ; re-establish, so clearing it here is cheap and reloading settings is
-    ; exactly the moment the answer may have changed.
-    RtssFrameCapWriteBlocked := false
-    RtssLastFrameCapMode := StrLower(Trim(IniReadS("RTSS","LastFrameCapMode","")))
-    if !RtssFrameCapModeIsKnown(RtssLastFrameCapMode)
-        RtssLastFrameCapMode := ""
-    RtssLastFrameCapFps := ReadInt("RTSS", "LastFrameCapFps", 0, 0, 1000)
+    RtssPresetFrameCap := ClampInt(ToInt(IniReadS("RTSS","PresetFrameCap","158"), 158), 0, 1000)
+    RtssCustomFrameCap := ClampInt(ToInt(IniReadS("RTSS","CustomFrameCap","158"), 158), 10, 1000)
     RtssCustomFrameCapShortcut := IniReadS("RTSS","CustomFrameCapShortcut","^+f")
     RtssFrameLimiterOnShortcut := IniReadS("RTSS","FrameLimiterOnShortcut","^+5")
     RtssFrameLimiterOffShortcut := IniReadS("RTSS","FrameLimiterOffShortcut","^+6")
@@ -3689,7 +3227,6 @@ ReloadSettings() {
     LoadSettings()
     if SafeMode
         ApplySafeModeOverrides()
-    SyncElevatedInputHelperWithSettings()
     ApplyRuntimeTimers()
     if (!EnableAutoHideCursor && MouseHidden) {
         SystemCursor("Show")
@@ -3697,7 +3234,7 @@ ReloadSettings() {
     }
     SyncControlPanel()
     RefreshAlwaysFocusManagerLists()
-    BuildProductTrayMenu()
+    RefreshTrayMenu()
     if (QuickMenuVisible)
         QuickMenuBuildGui()
     ShowNotification("SteamShell settings reloaded", "Success")
@@ -3729,11 +3266,24 @@ InitDpiAwareness() {
 ; LOG-ONLY ACTION MESSAGES + TRAY ACTIONS
 ; ==============================================================================
 
-; Alias for SharedNotify, which holds the implementation. Kept so this tree's
-; call sites read naturally; SteamShell-Shared.ahk explains why the name outlived
-; the toast it was named after.
 ShowNotification(message, kind := "Info") {
-    SharedNotify(message, kind)
+    global LastStatusText, LastStatusLevel, LastStatusTick, StatusVisibleMs
+    global QuickMenuVisible
+    ; The former bottom-corner notification GUI was distracting over the Quick
+    ; Menu and is not coming back. The log remains the record; the Quick Menu
+    ; footer is the transient surface, used only when the menu is already open.
+    if (Trim(message) = "")
+        return
+    try LogLine(message, kind)
+    LastStatusText := message
+    LastStatusLevel := kind
+    LastStatusTick := A_TickCount
+    if QuickMenuVisible {
+        try QuickMenuRefresh()
+        ; Repaint once the message expires so the hint returns on its own rather
+        ; than whenever the menu next happens to redraw.
+        SetTimer(QuickMenuRefresh, -(StatusVisibleMs + 100))
+    }
 }
 
 TrayOpenQuickMenu(*) {
@@ -3776,7 +3326,7 @@ TrayToggleDesktopAutoMouse(*) {
     if nextValue
         EnableAutoMouseMode := true
     EnableDesktopAutoMouseMode := nextValue
-    BuildProductTrayMenu()
+    RefreshTrayMenu()
     ShowNotification(
         "Automatic mouse throughout the Windows desktop "
             . (nextValue ? "enabled" : "disabled"),
@@ -3787,7 +3337,29 @@ TrayExitSteamShell(*) {
     ExitSteamShell()
 }
 
+ApplyTrayIconImage() {
+    iconPath := A_ScriptDir "\assets\SteamShell.ico"
+    if FileExist(iconPath)
+        try TraySetIcon(iconPath)
+}
 
+; The notification area is owned by Explorer, and the desktop-restore path
+; deliberately restarts Explorer. Every surviving process has to re-add its
+; icon when Explorer broadcasts TaskbarCreated. AutoHotkey does this for its own
+; icon, but SteamShell is the process that killed Explorer, so re-assert the
+; icon explicitly rather than depending on that timing.
+RegisterTaskbarCreatedListener() {
+    global TaskbarCreatedMessage
+    try TaskbarCreatedMessage := DllCall(
+        "User32\RegisterWindowMessageW", "WStr", "TaskbarCreated", "UInt")
+    ; Braces are required here: a bare `try` cannot be an if-body that an `else`
+    ; attaches to.
+    if (TaskbarCreatedMessage) {
+        try OnMessage(TaskbarCreatedMessage, TaskbarCreatedHandler)
+    } else {
+        try LogLine("TaskbarCreated could not be registered; the tray icon may not survive an Explorer restart.")
+    }
+}
 
 ; The tray right-click shows the ordinary Windows menu, matching XFE.
 ;
@@ -3811,56 +3383,109 @@ TrayExitSteamShell(*) {
 ; opened it. Double-click still opens the Quick Menu, via the menu's default
 ; item, so the controller-friendly surface is one gesture away.
 
+TaskbarCreatedHandler(*) {
+    ; Explorer is still building the tray when it sends this. Re-assert shortly
+    ; after rather than inside the broadcast handler.
+    SetTimer(ReassertTrayIcon, -750)
+}
 
+ReassertTrayIcon() {
+    try {
+        A_IconHidden := true
+        A_IconHidden := false
+    }
+    ApplyTrayIconImage()
+    RefreshTrayMenu()
+    try LogLine("Notification-area icon re-asserted after an Explorer taskbar rebuild.")
+}
 
-; Seam for SteamShell-Shared.ahk. The entries this product offers, in order;
-; anything that is not a Map is a separator.
-ProductTrayItems() {
+RefreshTrayMenu() {
     global DesktopMode, EnableAutoMouseMode, EnableDesktopAutoMouseMode
-    global SteamShellDataDir, SteamShellInstallationMode
-    items := []
-    ; Offered, never forced. A record that disagrees with reality must not reach
-    ; SetupAssistantRequired(), which decides whether the shell starts at all --
-    ; a stale path in a settings file leaving a machine with nothing to log in to
-    ; would be far worse than the wrong path it was reporting.
-    if (InstallationRecordAlert(
-        A_ScriptDir, SteamShellDataDir, SteamShellInstallationMode) != "") {
-        items.Push(Map(
-            "label", "Installation moved — open Setup Assistant",
-            "handler", ShowSetupAssistant))
-        items.Push("")
-    }
-    items.Push(Map("label", "Open Quick Menu", "handler", TrayOpenQuickMenu))
-    items.Push(Map("label", "Open Settings", "handler", TrayOpenSettings))
-    items.Push(Map("label", "Open Diagnostics", "handler", ShowControlPanel))
-    items.Push("")
+    try A_TrayMenu.Delete()
+    A_TrayMenu.Add("Open Quick Menu", TrayOpenQuickMenu)
+    A_TrayMenu.Add("Open Settings", TrayOpenSettings)
+    A_TrayMenu.Add("Open Diagnostics", ShowControlPanel)
+    A_TrayMenu.Add()
     if (DesktopMode) {
-        items.Push(Map(
-            "label", "Automatic Mouse Throughout Desktop",
-            "handler", TrayToggleDesktopAutoMouse,
-            "checked", EnableAutoMouseMode && EnableDesktopAutoMouseMode))
-        items.Push("")
-        items.Push(Map("label", "Return to SteamShell", "handler", TrayReturnToShell))
+        desktopMouseItem := "Automatic Mouse Throughout Desktop"
+        A_TrayMenu.Add(desktopMouseItem, TrayToggleDesktopAutoMouse)
+        if (EnableAutoMouseMode && EnableDesktopAutoMouseMode)
+            A_TrayMenu.Check(desktopMouseItem)
+        A_TrayMenu.Add()
+        A_TrayMenu.Add("Return to SteamShell", TrayReturnToShell)
     } else {
-        items.Push(Map("label", "Exit Steam to Desktop", "handler", TrayExitToDesktop))
+        A_TrayMenu.Add("Exit Steam to Desktop", TrayExitToDesktop)
     }
-    items.Push("")
-    items.Push(Map("label", "Reload Settings", "handler", (*) => ReloadSettings()))
-    items.Push(Map("label", "Exit SteamShell", "handler", TrayExitSteamShell))
-    return items
+    A_TrayMenu.Add()
+    A_TrayMenu.Add("Reload Settings", (*) => ReloadSettings())
+    A_TrayMenu.Add("Exit SteamShell", TrayExitSteamShell)
+    A_TrayMenu.Default := "Open Quick Menu"
+    A_IconTip := DesktopMode
+        ? "SteamShell — desktop mode"
+        : "SteamShell"
 }
 
-ProductTrayBaseTip() {
-    global DesktopMode, SteamShellDataDir, SteamShellInstallationMode
-    return (DesktopMode ? "SteamShell — desktop mode" : "SteamShell")
-        . (InstallationRecordAlert(
-            A_ScriptDir, SteamShellDataDir, SteamShellInstallationMode) != ""
-            ? " — installation moved" : "")
+InitializeTrayMenu() {
+    ApplyTrayIconImage()
+    RefreshTrayMenu()
+    RegisterTaskbarCreatedListener()
 }
-
 
 ; SPLASH
 ; ==============================================================================
+
+NormalizeMediaPath(p) {
+    ; Trim whitespace and optional surrounding quotes.
+    p := Trim(p)
+    if (p = "")
+    return ""
+    if (SubStr(p, 1, 1) = '"' && SubStr(p, -1) = '"')
+    p := SubStr(p, 2, StrLen(p) - 2)
+    p := Trim(p)
+
+    ; Expand environment variables like %USERPROFILE%
+    p := ExpandEnvVars(p)
+
+    ; If relative, resolve against script dir
+    if (!RegExMatch(p, "i)^[A-Z]:\\") && !InStr(p, "\\") && !InStr(p, "://")) {
+    p := A_ScriptDir "\" p
+    }
+    return p
+}
+
+ExpandEnvVars(s) {
+    ; Expands %VAR% tokens.
+    out := ""
+    pos := 1
+    while (pos <= StrLen(s)) {
+    p1 := InStr(s, "%", , pos)
+    if (!p1) {
+    out .= SubStr(s, pos)
+    break
+    }
+    p2 := InStr(s, "%", , p1 + 1)
+    if (!p2) {
+    out .= SubStr(s, pos)
+    break
+    }
+    out .= SubStr(s, pos, p1 - pos)
+    var := SubStr(s, p1 + 1, p2 - p1 - 1)
+
+    val := ""
+    try {
+    val := EnvGet(var)
+    } catch {
+    val := ""
+    }
+
+    out .= (val != "" ? val : "%" var "%")
+    pos := p2 + 1
+    }
+    return out
+}
+
+
+
 
 ShowSplash() {
     global SplashGui, SplashMode, SplashVideoPath, SplashVideoMute, SplashVideoPlayFull
@@ -4050,6 +3675,8 @@ SplashForceClose() {
     FadeOutSplash()
 }
 
+
+
 SetGuiTransparency(alpha, guiObj) {
     ; WinSetTransparent works most reliably when targeting by HWND.
     try WinSetTransparent(alpha, "ahk_id " guiObj.Hwnd)
@@ -4095,6 +3722,7 @@ FadeOutOverlay(ms) {
     Sleep(sleepMs)
     }
 }
+
 
 FadeOutSplash() {
     global SplashGui, EnableSplashScreen, SplashFadeOutMs
@@ -4458,6 +4086,20 @@ HandleCursorAfterManagedFocus(hwnd, wasAlreadyActive := false) {
         MaybeHideCursorOnRefocus()
 }
 
+SystemCursor(mode := "Show") {
+    static AndM := Buffer(128, 0xFF)
+    static XorM := Buffer(128, 0)
+    static Cursors := [32512,32513,32514,32515,32516,32640,32641,32642,32643,32644,32645,32646,32648,32649,32650,32651]
+    if (mode = "Hide") {
+    for _, id in Cursors {
+    hCur := DllCall("CreateCursor","Ptr",0,"Int",0,"Int",0,"Int",32,"Int",32,"Ptr",AndM,"Ptr",XorM,"Ptr")
+    DllCall("SetSystemCursor","Ptr",hCur,"Int",id)
+    }
+    } else {
+    DllCall("SystemParametersInfo","UInt",0x57,"UInt",0,"Ptr",0,"UInt",0)
+    }
+}
+
 MouseWatch() {
     global AllowExplorer, EnableAutoHideCursor, MouseHidden
     global LastMouseX, LastMouseY, LastMouseMoveTick, MouseHideDelay
@@ -4484,6 +4126,81 @@ MouseWatch() {
 }
 
 
+; ==============================================================================
+; CONTROLLER MOUSE MODE (XInput / Xbox controller)
+; - Hold View/Back to temporarily enable mouse mode.
+; - While held:
+; Left stick => mouse move (RT = fast)
+; Right stick => scroll
+; A => Left click
+; B => Right click
+; X => Enter
+; Y => Win+G
+; LB => Ctrl+Alt+Tab
+; RB => Ctrl+Shift+Esc (Task Manager)
+; LThumb => Toggle drag-lock (hold/release left button)
+; RThumb => Touch keyboard (TabTip/OSK)
+; D-Pad => Arrow keys
+; ==============================================================================
+InitXInput() {
+    global XInputDll
+    if (XInputDll != "")
+    return true
+
+    ; Prefer modern XInput, fall back as needed.
+    for _, dll in ["xinput1_4.dll", "xinput1_3.dll", "xinput9_1_0.dll"] {
+    try {
+    if (DllCall("GetModuleHandle", "Str", dll, "Ptr") || DllCall("LoadLibrary", "Str", dll, "Ptr")) {
+    XInputDll := dll
+    return true
+    }
+    } catch {
+    }
+    }
+    XInputDll := ""
+    return false
+}
+
+XInputGetState(index, &bufState) {
+    global XInputDll
+    if (XInputDll = "" && !InitXInput())
+    return 1167 ; ERROR_DEVICE_NOT_CONNECTED-ish
+
+    ; XINPUT_STATE is 16 bytes: DWORD packet + XINPUT_GAMEPAD (12 bytes)
+    if !IsObject(bufState)
+    bufState := Buffer(16, 0)
+
+    ; Prefer the standard XInputGetState for maximum compatibility (View/Back, sticks, triggers).
+    ; Best-effort: also OR in the Guide bit via XInputGetStateEx (ordinal 100) when available.
+    try {
+    rc := DllCall(XInputDll "\XInputGetState", "UInt", index, "Ptr", bufState, "UInt")
+    if (rc = 0) {
+    ; Try to read the Guide bit (0x0400) if Ex is available.
+    try {
+    ex := Buffer(16, 0)
+    if (DllCall(XInputDll "\100", "UInt", index, "Ptr", ex, "UInt") = 0) {
+    bEx := NumGet(ex, 4, "UShort")
+    if (bEx & 0x0400) {
+    b := NumGet(bufState, 4, "UShort")
+    NumPut("UShort", b | 0x0400, bufState, 4)
+    }
+    }
+    } catch {
+    ; ignore Ex failures
+    }
+    }
+    return rc
+    } catch {
+    ; Fall back: if standard export fails for any reason, try Ex directly.
+    try {
+    return DllCall(XInputDll "\100", "UInt", index, "Ptr", bufState, "UInt")
+    } catch {
+    ; If the DLL is weird, reset and retry next time.
+    XInputDll := ""
+    return 1
+    }
+    }
+}
 
 ControllerTestActive() {
     global ControllerTestGui
@@ -4626,11 +4343,174 @@ ShowControllerTest(*) {
     SetTimer(PollController, ControllerPollIntervalMs)
 }
 
+TryInvokeTouchKeyboard() {
+    ; Windows 11 can keep TabTip/TextInputHost running without presenting the
+    ; keyboard. Ask the same UI host used by the taskbar touch-keyboard button to
+    ; toggle its visible pane instead of treating process launch as presentation.
+    static clsidText := "{4CE576FA-83DC-4F88-951C-9D0782B4E376}"
+    static iidText := "{37C994E7-432B-4834-A2F7-DCE1F13B834B}"
+    clsid := Buffer(16, 0)
+    iid := Buffer(16, 0)
+    tip := 0
+
+    if (DllCall("Ole32\CLSIDFromString", "WStr", clsidText, "Ptr", clsid.Ptr, "Int") != 0
+        || DllCall("Ole32\CLSIDFromString", "WStr", iidText, "Ptr", iid.Ptr, "Int") != 0)
+        return false
+
+    ; CLSCTX_INPROC_SERVER | CLSCTX_LOCAL_SERVER
+    hr := DllCall(
+        "Ole32\CoCreateInstance",
+        "Ptr", clsid.Ptr,
+        "Ptr", 0,
+        "UInt", 0x5,
+        "Ptr", iid.Ptr,
+        "Ptr*", &tip,
+        "Int")
+    if (hr < 0 || !tip)
+        return false
+
+    succeeded := false
+    try {
+        vtable := NumGet(tip, 0, "Ptr")
+        toggleMethod := NumGet(vtable, 3 * A_PtrSize, "Ptr")
+        desktopHwnd := DllCall("User32\GetDesktopWindow", "Ptr")
+        hr := DllCall(toggleMethod, "Ptr", tip, "Ptr", desktopHwnd, "Int")
+        succeeded := hr >= 0
+    } catch as err {
+        try LogLine("Touch keyboard presentation request failed: " err.Message)
+    } finally {
+        try {
+            vtable := NumGet(tip, 0, "Ptr")
+            releaseMethod := NumGet(vtable, 2 * A_PtrSize, "Ptr")
+            DllCall(releaseMethod, "Ptr", tip, "UInt")
+        }
+    }
+    return succeeded
+}
+
+RunViaDesktopShell(filePath, arguments := "", directory := "", show := 1) {
+    ; ShellExecute through Explorer's desktop automation object so an elevated
+    ; SteamShell does not force ordinary interactive utilities such as TabTip to
+    ; inherit its administrator token.
+    static VT_UI4 := 0x13
+    static SWC_DESKTOP := ComValue(VT_UI4, 0x8)
+    static DESKTOP_BROKER_TIMEOUT_MS := 10000
+    startedTick := A_TickCount
+    attempts := 0
+    lastError := "Explorer's desktop automation object was unavailable."
+
+    ; Shell_TrayWnd can exist shortly before Explorer publishes its desktop COM
+    ; automation object during a cold boot. Keep verifying the broker identity
+    ; while that object finishes initializing instead of treating this normal
+    ; readiness gap as a Steam launch failure.
+    Loop {
+        if !DesktopShellMatchesInteractiveUser(&shellReason) {
+            try LogLine(
+                "Desktop-shell launch rejected for " filePath ": " shellReason,
+                "Warning")
+            return false
+        }
+
+        attempts += 1
+        try {
+            desktopWindow := ComObject("Shell.Application").Windows.Item(SWC_DESKTOP)
+            desktopApplication := desktopWindow.Document.Application
+            desktopApplication.ShellExecute(
+                filePath, arguments, directory, "open", show)
+            if (attempts > 1) {
+                try LogLine(
+                    "Desktop-shell broker became ready after "
+                    . (A_TickCount - startedTick) " ms for " filePath ".")
+            }
+            return true
+        } catch as err {
+            lastError := err.Message
+        }
+
+        if (A_TickCount - startedTick >= DESKTOP_BROKER_TIMEOUT_MS)
+            break
+        Sleep 200
+    }
+
+    try LogLine(
+        "Desktop-shell launch failed for " filePath " after " attempts
+        . " attempts: " lastError,
+        "Warning")
+    return false
+}
+
+OpenTouchKeyboard() {
+    ; Present the modern touch keyboard without terminating Windows text-input
+    ; processes. Killing TextInputHost can leave desktop/custom-shell systems
+    ; unable to show a keyboard even though the taskbar button still works.
+    static tabtip1 := A_ProgramFiles "\Common Files\microsoft shared\ink\TabTip.exe"
+    static tabtip2 := ""
+
+    if (tabtip2 = "") {
+    try {
+    pf86 := EnvGet("ProgramFiles(x86)")
+    if (pf86 != "")
+    tabtip2 := pf86 "\Common Files\microsoft shared\ink\TabTip.exe"
+    }
+    }
+
+    ; If it's already present, just show/activate it.
+    if WinExist("ahk_class IPTip_Main_Window") {
+    try WinShow("ahk_class IPTip_Main_Window")
+    try WinActivate("ahk_class IPTip_Main_Window")
+    return
+    }
+
+    ; A successful request is equivalent to pressing the taskbar keyboard button.
+    if TryInvokeTouchKeyboard()
+        return
+
+    tabtipPath := ""
+    if FileExist(tabtip1)
+        tabtipPath := tabtip1
+    else if (tabtip2 != "" && FileExist(tabtip2))
+        tabtipPath := tabtip2
+    if (tabtipPath = "") {
+        try LogLine("Touch keyboard executable was not found; opening classic OSK.")
+        OpenOSK()
+        return
+    }
+    SplitPath(tabtipPath, , &tabtipDir)
+
+    ; Older builds may require TabTip to be started once before the presentation
+    ; interface becomes available. Use Explorer's desktop token because
+    ; SteamShell itself normally runs elevated for Task Manager compatibility.
+    if !ProcessExist("TabTip.exe") {
+        if !RunViaDesktopShell(tabtipPath, "", tabtipDir) {
+            try LogLine("Touch keyboard desktop launch was unavailable; opening classic OSK.")
+            OpenOSK()
+            return
+        }
+    }
+    Sleep 250
+
+    if TryInvokeTouchKeyboard()
+        return
+
+    ; Microsoft documents /SeekDesktop for unusual interactive desktops. It is a
+    ; final modern-keyboard fallback for the SteamShell custom-shell environment.
+    ; Keep this request at the desktop shell's integrity level as well.
+    if RunViaDesktopShell(tabtipPath, "/SeekDesktop", tabtipDir) {
+        try LogLine("Touch keyboard /SeekDesktop fallback requested.")
+    } else {
+        try LogLine("Touch keyboard fallback was unavailable; opening classic OSK.")
+        OpenOSK()
+    }
+}
+
 OpenWindowsSettings() {
     pid := 0
     LaunchInteractiveApp(
         "ms-settings:", "", "", "Normal", &pid, "Windows Settings")
 }
+
+
+
 
 OpenOSK() {
     ; Always open the classic On-Screen Keyboard.
@@ -4678,10 +4558,12 @@ InitDefaultControllerMappings() {
     ControllerMap["Y.Short"] := "Builtin:WinG"
     ControllerMap["Y.Long"] := "Builtin:None"
 
+
     ; While View/Back is held, tap Start for the Windows Start menu or hold it
     ; for File Explorer. Both remain fully customizable in the mapping editor.
     ControllerMap["Start.Short"] := "Builtin:StartMenu"
     ControllerMap["Start.Long"] := "Builtin:Explorer"
+
 
     ; Stick clicks (default: unassigned)
     ControllerMap["L3.Short"] := "Builtin:None"
@@ -4761,118 +4643,58 @@ SaveControllerMappingsToIni() {
     return CommitIniChanges(changes, deletes)
 }
 
-; The builtins that must run at SteamShell's own integrity: three that start a
-; process and two that raise a SteamShell window. The elevated helper implements
-; every other builtin as a fixed keystroke and deliberately declines these, so
-; the two sets partition the builtin list with no overlap and no gap.
-ControllerBindingIsNormalIntegrityOnly(key) {
-    static NORMAL_INTEGRITY_ACTIONS := Map(
-        "builtin:tabtip", true,
-        "builtin:osk", true,
-        "builtin:explorer", true,
-        "builtin:quickmenu", true,
-        "builtin:controlpanel", true)
-    return NORMAL_INTEGRITY_ACTIONS.Has(StrLower(GetBindingValue(key)))
+HasLongBinding(btnKey) {
+    global ControllerMap
+    v := ""
+    try v := ControllerMap[btnKey ".Long"]
+    return (v != "" && v != "Builtin:None")
 }
 
-; Runs while a High/System-integrity window owns the foreground and the helper is
-; handling everything else. Keeps its own press/hold state because the caller
-; clears the shared trackers on this path, and fires nothing but the bindings
-; above, so a button cannot be serviced by both processes.
-ControllerHandleElevatedForeground(buttons, lt, rt, pressed, released, now, chordActive) {
-    global ControllerChordHoldMs
-    static btnDefs := [
-        ["A", 0x1000], ["B", 0x2000], ["X", 0x4000], ["Y", 0x8000],
-        ["LB", 0x0100], ["RB", 0x0200], ["Start", 0x0010],
-        ["L3", 0x0040], ["R3", 0x0080]]
-    static downTick := Map(
-        "A", 0, "B", 0, "X", 0, "Y", 0, "LB", 0, "RB", 0,
-        "Start", 0, "L3", 0, "R3", 0, "LT", 0, "RT", 0)
-    static longFired := Map(
-        "A", false, "B", false, "X", false, "Y", false,
-        "LB", false, "RB", false, "Start", false,
-        "L3", false, "R3", false, "LT", false, "RT", false)
-    static prevTrigDown := Map("LT", false, "RT", false)
-    ; A fixed list rather than enumerating downTick, so the reset never mutates
-    ; a Map while iterating it.
-    static trackedNames := [
-        "A", "B", "X", "Y", "LB", "RB", "Start", "L3", "R3", "LT", "RT"]
-    static lastCallTick := 0
-
-    ; This runs only while an elevated window is foreground, so between episodes
-    ; it is not called at all and its trackers freeze mid-press. Without this, a
-    ; button held as Task Manager lost focus and released after it regained focus
-    ; would fire a mapping the user never completed.
-    resumed := lastCallTick = 0 || (now - lastCallTick) > 250
-    lastCallTick := now
-
-    ; Mirrors the helper's own suppression: while the Quick Menu or Settings
-    ; chord is physically held, main is timing it and its buttons are not
-    ; mappings.
-    ;
-    ; The automatic half is PUBLISHED to the helper here, on the same tick it is
-    ; computed, so the two processes act on one answer instead of two that could
-    ; not agree. This is the only place it needs publishing, because an elevated
-    ; window being foreground is the only time the helper reads it.
-    autoMouse := AutoMouseModeActive()
-    SetElevatedAutoMouseRuntimeEnabled(autoMouse)
-    viewDown := (buttons & 0x0020) || autoMouse
-    if (resumed || chordActive || !viewDown) {
-        for _, name in trackedNames {
-            downTick[name] := 0
-            longFired[name] := false
-        }
-        prevTrigDown["LT"] := false
-        prevTrigDown["RT"] := false
-        return
-    }
-
-    for def in btnDefs {
-        name := def[1]
-        mask := def[2]
-        if (pressed & mask) {
-            downTick[name] := now
-            longFired[name] := false
-        }
-        if ((buttons & mask) && !longFired[name] && downTick[name]
-            && (now - downTick[name]) >= ControllerChordHoldMs
-            && ControllerBindingIsNormalIntegrityOnly(name ".Long")) {
-            longFired[name] := true
-            ExecuteControllerBinding(name ".Long")
-        }
-        if ((released & mask) && downTick[name]) {
-            if (!longFired[name]
-                && ControllerBindingIsNormalIntegrityOnly(name ".Short"))
-                ExecuteControllerBinding(name ".Short")
-            downTick[name] := 0
-            longFired[name] := false
-        }
-    }
-
-    for _, trigger in ["LT", "RT"] {
-        triggerDown := (trigger = "LT") ? (lt > 30) : (rt > 30)
-        triggerPressed := triggerDown && !prevTrigDown[trigger]
-        triggerReleased := !triggerDown && prevTrigDown[trigger]
-        prevTrigDown[trigger] := triggerDown
-        if (triggerPressed) {
-            downTick[trigger] := now
-            longFired[trigger] := false
-        }
-        if (triggerDown && !longFired[trigger] && downTick[trigger]
-            && (now - downTick[trigger]) >= ControllerChordHoldMs
-            && ControllerBindingIsNormalIntegrityOnly(trigger ".Long")) {
-            longFired[trigger] := true
-            ExecuteControllerBinding(trigger ".Long")
-        }
-        if (triggerReleased && downTick[trigger]) {
-            if (!longFired[trigger]
-                && ControllerBindingIsNormalIntegrityOnly(trigger ".Short"))
-                ExecuteControllerBinding(trigger ".Short")
-            downTick[trigger] := 0
-            longFired[trigger] := false
-        }
+GetBindingValue(key) {
+    global ControllerMap
+    try {
+    return ControllerMap[key]
+    } catch {
+    return ""
     }
 }
+
+
+SendChordSafe(keys) {
+    ; Helps avoid "stuck modifier" states and improves reliability for system chords.
+    ; Note: This cannot generate secure sequences like Ctrl+Alt+Del.
+    try SendInput("{Ctrl up}{Alt up}{Shift up}{LWin up}{RWin up}")
+    try SendInput(keys)
+}
+
+; Steam's in-game overlay hook can miss SendInput's effectively instantaneous
+; modifier pulse. SendEvent honours the press duration from SetKeyDelay, giving
+; Steam a real Shift-down window in which to observe Tab. The configured
+; shortcut is retained so custom overlay chords receive the same treatment.
+SendSteamOverlayChord() {
+    global SteamOverlayShortcut
+    foregroundHwnd := 0
+    foregroundExe := ""
+    try foregroundHwnd := WinExist("A")
+    if foregroundHwnd
+        try foregroundExe := WinGetProcessName("ahk_id " foregroundHwnd)
+    LogLine("Steam overlay send: " SendToPretty(SteamOverlayShortcut)
+        . ", foreground=" (foregroundExe != "" ? foregroundExe : "unknown")
+        . ", hwnd=" foregroundHwnd ".")
+    sent := false
+    try {
+        SendEvent("{Ctrl up}{Alt up}{Shift up}{LWin up}{RWin up}")
+        SetKeyDelay(35, 80)
+        SendEvent(SteamOverlayShortcut)
+        sent := true
+    } catch as err {
+        LogLine("Steam overlay send failed: " err.Message)
+    }
+    ; Always release modifiers, including after a partial send failure.
+    try SendEvent("{Ctrl up}{Alt up}{Shift up}{LWin up}{RWin up}")
+    return sent
+}
+
 
 ExecuteControllerBinding(key) {
     v := GetBindingValue(key)
@@ -4928,6 +4750,131 @@ ExecuteControllerBinding(key) {
     }
 }
 
+SendToPretty(sendStr) {
+    ; Consume only the actual modifier prefix. Replacing "^" with "Ctrl+" and
+    ; subsequently replacing every "+" made the inserted separator look like a
+    ; Shift modifier, so "^1" was incorrectly displayed as "CtrlShift+1".
+    static modifiers := Map("#", "Win+", "^", "Ctrl+", "!", "Alt+", "+", "Shift+")
+    text := Trim(sendStr)
+    prefix := ""
+    while (text != "" && modifiers.Has(SubStr(text, 1, 1))) {
+        prefix .= modifiers[SubStr(text, 1, 1)]
+        text := SubStr(text, 2)
+    }
+    text := StrReplace(StrReplace(text, "{", ""), "}", "")
+    return prefix text
+}
+
+
+GetPhysicalModsMap() {
+    return Map(
+    "Ctrl", (GetKeyState("Ctrl", "P") || GetKeyState("Control", "P") || GetKeyState("LControl", "P") || GetKeyState("RControl", "P")),
+    "Alt", (GetKeyState("Alt", "P") || GetKeyState("Menu", "P") || GetKeyState("LAlt", "P") || GetKeyState("RAlt", "P") || GetKeyState("LMenu", "P") || GetKeyState("RMenu", "P")),
+    "Shift", (GetKeyState("Shift", "P") || GetKeyState("LShift", "P") || GetKeyState("RShift", "P")),
+    "Win", (GetKeyState("LWin", "P") || GetKeyState("RWin", "P"))
+    )
+}
+
+RecordShortcutChord() {
+    ; Records a single shortcut chord (modifiers + one key) without typing.
+    ; Returns Map("ok", true/false, "send", "^!{Tab}", "display", "Ctrl+Alt+Tab")
+    global _ShortcutCap
+    res := Map("ok", false, "send", "", "display", "")
+
+    cap := Gui("+AlwaysOnTop -MinimizeBox +ToolWindow", "Record Shortcut")
+    cap.SetFont("s10")
+    cap.AddText("xm", "Press your shortcut (modifiers + one key).")
+    cap.AddText("xm y+4", "Click OK to accept. Esc cancels.")
+    cap.SetFont("s10", "Consolas")
+    txtCur := cap.AddText("xm y+8 w420 vtxtCur", "(none)")
+    cap.SetFont("s10")
+    btnOk := cap.AddButton("xm y+10 w90 Default", "OK")
+    btnCancel := cap.AddButton("x+10 w90", "Cancel")
+
+    _ShortcutCap := Map(
+    "gui", cap,
+    "txt", txtCur,
+    "ih", 0,
+    "mainKey", "",
+    "liveMods", Map("Ctrl", false, "Alt", false, "Shift", false, "Win", false),
+    "snapMods", Map("Ctrl", false, "Alt", false, "Shift", false, "Win", false),
+    "done", false,
+    "cancelled", false
+    )
+
+    btnOk.OnEvent("Click", RecordShortcutChord_Accept)
+    btnCancel.OnEvent("Click", RecordShortcutChord_Cancel)
+    cap.OnEvent("Close", RecordShortcutChord_Cancel)
+    cap.OnEvent("Escape", RecordShortcutChord_Cancel)
+
+    ; Suppress the chord while recording so Win, Alt, and application shortcuts
+    ; do not execute behind this dialog.
+    ih := InputHook()
+    ih.NotifyNonText := true
+    ih.KeyOpt("{All}", "NS")
+    ih.OnKeyDown := RecordShortcutChord_OnKeyDown
+    ih.OnKeyUp := RecordShortcutChord_OnKeyUp
+    _ShortcutCap["ih"] := ih
+
+    cap.Show("AutoSize Center")
+    ih.Start()
+
+    ; Wait until OK/Cancel
+    while IsObject(_ShortcutCap) && !_ShortcutCap["done"] {
+    Sleep 30
+    }
+
+    ; Finalize
+    if !IsObject(_ShortcutCap)
+    return res
+
+    cancelled := _ShortcutCap["cancelled"]
+    mainKey := _ShortcutCap["mainKey"]
+    mods := _ShortcutCap["snapMods"]
+
+    try {
+    _ShortcutCap["ih"].Stop()
+    } catch {
+    }
+    try {
+    _ShortcutCap["gui"].Destroy()
+    } catch {
+    }
+
+    _ShortcutCap := ""
+
+    if (cancelled || mainKey = "")
+    return res
+
+    send := ""
+    display := ""
+
+    if (mods["Ctrl"]) {
+    send .= "^"
+    display .= "Ctrl+"
+    }
+    if (mods["Alt"]) {
+    send .= "!"
+    display .= "Alt+"
+    }
+    if (mods["Shift"]) {
+    send .= "+"
+    display .= "Shift+"
+    }
+    if (mods["Win"]) {
+    send .= "#"
+    display .= "Win+"
+    }
+
+    send .= NormalizeKeyForSend(mainKey)
+    display .= NormalizeKeyForDisplay(mainKey)
+
+    res["ok"] := true
+    res["send"] := send
+    res["display"] := display
+    return res
+}
+
 RecordShortcutChord_OnKeyDown(ihObj, vk, sc) {
     global _ShortcutCap
     if !IsObject(_ShortcutCap)
@@ -4939,7 +4886,7 @@ RecordShortcutChord_OnKeyDown(ihObj, vk, sc) {
 
     ; Esc cancels
     if (keyName = "Escape") {
-    RecordShortcutCancel()
+    RecordShortcutChord_Cancel()
     return
     }
     ; Track modifiers robustly (InputHook key names vary by system).
@@ -4956,6 +4903,7 @@ RecordShortcutChord_OnKeyDown(ihObj, vk, sc) {
     ; Update preview to show the recorded chord (even after user releases keys)
     RecordShortcutChord_UpdatePreview()
 }
+
 
 RecordShortcutChord_OnKeyUp(ihObj, vk, sc) {
     global _ShortcutCap
@@ -5094,6 +5042,38 @@ RecordShortcutChord_Accept(*) {
     _ShortcutCap["done"] := true
 }
 
+RecordShortcutChord_Cancel(*) {
+    global _ShortcutCap
+    if !IsObject(_ShortcutCap)
+    return
+    _ShortcutCap["cancelled"] := true
+    try _ShortcutCap["ih"].Stop()
+    _ShortcutCap["done"] := true
+}
+
+
+NormalizeKeyForSend(keyName) {
+    ; Convert key name to a Send-compatible token.
+    ; For multi-character names, wrap in braces: {Tab}, {Esc}, {F1}, {Left}, etc.
+    k := keyName
+    if (k = "Escape")
+    k := "Esc"
+    if (k = "Return")
+    k := "Enter"
+    if (StrLen(k) > 1)
+    return "{" k "}"
+    return k
+}
+
+NormalizeKeyForDisplay(keyName) {
+    k := keyName
+    if (k = "Escape")
+    return "Esc"
+    if (k = "Return")
+    return "Enter"
+    return k
+}
+
 ; ==============================================================================
 ; CONTROLLER-FIRST QUICK MENU
 ; ==============================================================================
@@ -5229,6 +5209,11 @@ QuickMenuEnsureForeground() {
         . "controller input. Foreground is held by: " DescribeForegroundWindow())
 }
 
+QuickMenuHideThenSend(shortcut, delayMs := 150) {
+    HideQuickMenu()
+    SetTimer(() => SendChordSafe(shortcut), -delayMs)
+}
+
 QuickMenuHideThenSteamMenu(steamInFront) {
     global SteamMenuShortcut
     HideQuickMenu()
@@ -5265,6 +5250,32 @@ HideQuickMenu(restorePrevious := true) {
             HandleCursorAfterManagedFocus(QuickMenuPreviousHwnd, false)
         }
     }
+}
+
+; Detach the Static's bitmap before destroying its parent. The script owns the
+; HBITMAP returned by STM_SETIMAGE, so DestroyWindow alone would leak it.
+QuickMenuDestroyWindow() {
+    global QuickMenuGui, QuickMenuTitleCtrl, QuickMenuRowsCtrl, QuickMenuFooterCtrl
+    global QuickMenuRowsBitmap, QuickMenuRedrawSuspended
+
+    detachedBitmap := 0
+    if (IsSet(QuickMenuRowsCtrl) && IsObject(QuickMenuRowsCtrl)) {
+        try detachedBitmap := SendMessage(0x0172, 0, 0, QuickMenuRowsCtrl)
+    }
+    if IsSet(QuickMenuGui) {
+        try QuickMenuGui.Destroy()
+        QuickMenuGui := unset
+    }
+    if detachedBitmap
+        try DllCall("DeleteObject", "Ptr", detachedBitmap)
+    if (QuickMenuRowsBitmap && QuickMenuRowsBitmap != detachedBitmap)
+        try DllCall("DeleteObject", "Ptr", QuickMenuRowsBitmap)
+    QuickMenuRowsBitmap := 0
+    QuickMenuTitleCtrl := 0
+    QuickMenuRowsCtrl := 0
+    QuickMenuFooterCtrl := 0
+    QuickMenuRedrawSuspended := false
+    ShutdownGdiPlus()
 }
 
 ; Surface-changing operations also wait for DWM to retire the destroyed HWND
@@ -5580,7 +5591,7 @@ QuickMenuGetDefinitions() {
                 item := QuickMenuTaskWindows[firstIndex + A_Index - 1]
                 rows.Push(Map(
                     "id", "taskWindow:" item["hwnd"],
-                    "label", ShortenText(item["title"], 42)
+                    "label", ShortenQuickMenuText(item["title"], 42)
                 ))
             }
         }
@@ -5710,6 +5721,89 @@ QuickMenuGetDefinitions() {
 ; so a fix to the blend or the fallback should be a copy, not a re-derivation.
 ; ---------------------------------------------------------------------------
 
+QuickMenuAccentPresetNames() {
+    global QM_ACCENT_PRESETS
+    names := []
+    for _, pair in QM_ACCENT_PRESETS
+        names.Push(pair[1])
+    return names
+}
+
+QuickMenuAccentPresetHex(name) {
+    global QM_ACCENT_PRESETS
+    wanted := StrLower(Trim(name))
+    for _, pair in QM_ACCENT_PRESETS {
+        if (StrLower(pair[1]) = wanted)
+            return pair[2]
+    }
+    return ""
+}
+
+; Accepts "RRGGBB", "#RRGGBB" or "0xRRGGBB" and returns a bare uppercase
+; "RRGGBB", or "" if the value is not a color. Returning "" rather than a
+; guessed color is what lets the caller fall back visibly instead of painting
+; the menu an unreadable shade.
+NormalizeHexColor(value) {
+    text := Trim(value)
+    if (SubStr(text, 1, 1) = "#")
+        text := SubStr(text, 2)
+    else if (StrLower(SubStr(text, 1, 2)) = "0x")
+        text := SubStr(text, 3)
+    if !RegExMatch(text, "^[0-9A-Fa-f]{6}$")
+        return ""
+    return StrUpper(text)
+}
+
+HexColorChannel(hex, index) {
+    return Integer("0x" SubStr(hex, (index * 2) - 1, 2))
+}
+
+; Linear per-channel blend. Not gamma-correct, which is the right call here:
+; the original QM_ROW_SELECTED was picked by eye in sRGB, so matching it means
+; blending the same way it was chosen.
+BlendHexColor(baseHex, mixHex, ratio) {
+    out := ""
+    Loop 3 {
+        base := HexColorChannel(baseHex, A_Index)
+        mix := HexColorChannel(mixHex, A_Index)
+        value := Round(base + ((mix - base) * ratio))
+        out .= Format("{:02X}", ClampInt(value, 0, 255))
+    }
+    return out
+}
+
+; Custom shows the hex actually in use, so a malformed value is visible as the
+; Purple fallback rather than silently looking like it applied.
+QuickMenuAccentValueText() {
+    global QuickMenuAccentName, QM_ACCENT
+    return (StrLower(QuickMenuAccentName) = "custom")
+        ? "Custom · " QM_ACCENT
+        : QuickMenuAccentName
+}
+
+; Resolves the configured accent into the live palette. Safe to call repeatedly;
+; the Quick Menu calls it whenever the setting changes so the change is visible
+; without a restart.
+QuickMenuApplyAccent(presetName, customHex) {
+    global QM_ACCENT, QM_ROW_SELECTED, QM_BG, QM_ACCENT_BLEND
+    global QuickMenuAccentName, QuickMenuAccentCustomHex
+    name := Trim(presetName)
+    custom := NormalizeHexColor(customHex)
+    hex := (StrLower(name) = "custom")
+        ? custom
+        : NormalizeHexColor(QuickMenuAccentPresetHex(name))
+    if (hex = "") {
+        ; An unknown preset or a malformed custom hex falls back to the default
+        ; rather than leaving the menu unreadable. The configured name is kept as
+        ; the user wrote it so Settings still shows what they chose.
+        hex := QuickMenuAccentPresetHex("Purple")
+    }
+    QuickMenuAccentName := (name != "") ? name : "Purple"
+    QuickMenuAccentCustomHex := (custom != "") ? custom : "107C10"
+    QM_ACCENT := hex
+    QM_ROW_SELECTED := BlendHexColor(QM_BG, hex, QM_ACCENT_BLEND)
+}
+
 ; ---------------------------------------------------------------------------
 ; Quick Menu row painter (GDI+).
 ;
@@ -5731,6 +5825,40 @@ QuickMenuGetDefinitions() {
 ; indentation.
 ; ---------------------------------------------------------------------------
 
+EnsureGdiPlus() {
+    global GdiPlusToken, GdiPlusModule
+    if (GdiPlusToken)
+        return true
+    ; The handle is kept so ShutdownGdiPlus can release it. The Quick Menu starts
+    ; and shuts GDI+ down once per open/close cycle, so a LoadLibrary with no
+    ; matching FreeLibrary added one module reference every time the menu was
+    ; opened.
+    if !GdiPlusModule
+        GdiPlusModule := DllCall("LoadLibrary", "Str", "gdiplus", "Ptr")
+    if !GdiPlusModule
+        return false
+    ; GdiplusStartupInput: version, then a pointer and two BOOLs.
+    input := Buffer(A_PtrSize = 8 ? 24 : 16, 0)
+    NumPut("UInt", 1, input, 0)
+    token := 0
+    if (DllCall("gdiplus\GdiplusStartup", "Ptr*", &token, "Ptr", input, "Ptr", 0, "UInt") != 0)
+        return false
+    GdiPlusToken := token
+    return true
+}
+
+ShutdownGdiPlus() {
+    global GdiPlusToken, GdiPlusModule
+    if GdiPlusToken {
+        try DllCall("gdiplus\GdiplusShutdown", "Ptr", GdiPlusToken)
+        GdiPlusToken := 0
+    }
+    if GdiPlusModule {
+        try DllCall("FreeLibrary", "Ptr", GdiPlusModule)
+        GdiPlusModule := 0
+    }
+}
+
 ; The last painted bitmap is owned by this script, not by the control, so it
 ; outlives the GUI unless it is released explicitly.
 ReleaseQuickMenuPaintResources() {
@@ -5742,6 +5870,76 @@ ReleaseQuickMenuPaintResources() {
     ShutdownGdiPlus()
 }
 
+QuickMenuArgb(hex, alpha := 255) {
+    return (alpha << 24) | Integer("0x" hex)
+}
+
+; Four arcs and a close. GDI+ has no rounded-rectangle primitive.
+QuickMenuAddRoundedPath(path, x, y, w, h, radius) {
+    radius := Min(radius, Min(w, h) / 2)
+    if (radius <= 0) {
+        DllCall("gdiplus\GdipAddPathRectangle", "Ptr", path
+            , "Float", x, "Float", y, "Float", w, "Float", h)
+        return
+    }
+    d := radius * 2
+    DllCall("gdiplus\GdipAddPathArc", "Ptr", path, "Float", x, "Float", y
+        , "Float", d, "Float", d, "Float", 180, "Float", 90)
+    DllCall("gdiplus\GdipAddPathArc", "Ptr", path, "Float", x + w - d, "Float", y
+        , "Float", d, "Float", d, "Float", 270, "Float", 90)
+    DllCall("gdiplus\GdipAddPathArc", "Ptr", path, "Float", x + w - d, "Float", y + h - d
+        , "Float", d, "Float", d, "Float", 0, "Float", 90)
+    DllCall("gdiplus\GdipAddPathArc", "Ptr", path, "Float", x, "Float", y + h - d
+        , "Float", d, "Float", d, "Float", 90, "Float", 90)
+    DllCall("gdiplus\GdipClosePathFigure", "Ptr", path)
+}
+
+QuickMenuFillRounded(graphics, x, y, w, h, radius, argb) {
+    path := 0
+    DllCall("gdiplus\GdipCreatePath", "Int", 0, "Ptr*", &path)
+    if !path
+        return
+    QuickMenuAddRoundedPath(path, x, y, w, h, radius)
+    brush := 0
+    DllCall("gdiplus\GdipCreateSolidFill", "UInt", argb, "Ptr*", &brush)
+    if brush {
+        DllCall("gdiplus\GdipFillPath", "Ptr", graphics, "Ptr", brush, "Ptr", path)
+        DllCall("gdiplus\GdipDeleteBrush", "Ptr", brush)
+    }
+    DllCall("gdiplus\GdipDeletePath", "Ptr", path)
+}
+
+QuickMenuStrokeRounded(graphics, x, y, w, h, radius, argb, width) {
+    path := 0
+    DllCall("gdiplus\GdipCreatePath", "Int", 0, "Ptr*", &path)
+    if !path
+        return
+    QuickMenuAddRoundedPath(path, x, y, w, h, radius)
+    pen := 0
+    DllCall("gdiplus\GdipCreatePen1", "UInt", argb, "Float", width, "Int", 2, "Ptr*", &pen)
+    if pen {
+        DllCall("gdiplus\GdipDrawPath", "Ptr", graphics, "Ptr", pen, "Ptr", path)
+        DllCall("gdiplus\GdipDeletePen", "Ptr", pen)
+    }
+    DllCall("gdiplus\GdipDeletePath", "Ptr", path)
+}
+
+; GDI+ has no blur. The glow is concentric strokes stepping outward with
+; falling alpha, which is cheap, needs no second surface, and at these radii is
+; visually indistinguishable from a real one.
+QuickMenuDrawGlow(graphics, x, y, w, h, radius, hex, steps, maxAlpha, scale) {
+    Loop steps {
+        spread := A_Index * scale
+        fade := (steps - A_Index + 1) / steps
+        alpha := Round(maxAlpha * fade * fade)
+        if (alpha < 2)
+            continue
+        QuickMenuStrokeRounded(graphics
+            , x - spread, y - spread, w + (spread * 2), h + (spread * 2)
+            , radius + spread, QuickMenuArgb(hex, alpha), 2.2 * scale)
+    }
+}
+
 ; The one line of the painter that differs between the two trees, isolated so
 ; the rest can stay identical: standalone resolves a row's value live, while XFE
 ; rebuilds its whole row list per repaint and already carries it.
@@ -5749,9 +5947,202 @@ QuickMenuRowValueText(row) {
     return QuickMenuValue(row["id"])
 }
 
+QuickMenuMakeFont(pixelSize, bold) {
+    family := 0
+    DllCall("gdiplus\GdipCreateFontFamilyFromName", "Str", "Segoe UI", "Ptr", 0, "Ptr*", &family)
+    if !family
+        return 0
+    font := 0
+    DllCall("gdiplus\GdipCreateFont", "Ptr", family, "Float", pixelSize
+        , "Int", bold ? 1 : 0, "Int", 2, "Ptr*", &font)
+    DllCall("gdiplus\GdipDeleteFontFamily", "Ptr", family)
+    return font
+}
+
+; align: 0 near, 1 centre, 2 far. Vertically centred and never wrapped, with an
+; ellipsis when a value is too long -- the old Static controls clipped instead,
+; which read as a rendering fault rather than as truncation.
+QuickMenuDrawText(graphics, text, font, argb, x, y, w, h, align) {
+    if (text = "" || !font)
+        return
+    layout := Buffer(16, 0)
+    NumPut("Float", x, layout, 0)
+    NumPut("Float", y, layout, 4)
+    NumPut("Float", w, layout, 8)
+    NumPut("Float", h, layout, 12)
+    format := 0
+    DllCall("gdiplus\GdipCreateStringFormat", "Int", 0, "Int", 0, "Ptr*", &format)
+    if !format
+        return
+    DllCall("gdiplus\GdipSetStringFormatAlign", "Ptr", format, "Int", align)
+    DllCall("gdiplus\GdipSetStringFormatLineAlign", "Ptr", format, "Int", 1)
+    DllCall("gdiplus\GdipSetStringFormatTrimming", "Ptr", format, "Int", 3)
+    DllCall("gdiplus\GdipSetStringFormatFlags", "Ptr", format, "Int", 0x1000)
+    brush := 0
+    DllCall("gdiplus\GdipCreateSolidFill", "UInt", argb, "Ptr*", &brush)
+    if brush {
+        DllCall("gdiplus\GdipDrawString", "Ptr", graphics, "Str", text, "Int", -1
+            , "Ptr", font, "Ptr", layout, "Ptr", format, "Ptr", brush)
+        DllCall("gdiplus\GdipDeleteBrush", "Ptr", brush)
+    }
+    DllCall("gdiplus\GdipDeleteStringFormat", "Ptr", format)
+}
+
+; Paints every row into one bitmap and hands it to the row control. Called on
+; each refresh; there is no partial repaint, because composing the whole band is
+; already well under a frame and a partial one would have to reason about which
+; neighbours a glow spills onto.
+QuickMenuPaintRows() {
+    global QuickMenuRowsCtrl, QuickMenuRowsBitmap, QuickMenuRows, QuickMenuSelected
+    global QuickMenuRedrawSuspended
+    global QM_BG, QM_ROW_SELECTED, QM_ACCENT, QM_LABEL, QM_LABEL_SELECTED, QM_VALUE
+    static warnedNoBitmap := false
+    if (!IsSet(QuickMenuRowsCtrl) || !QuickMenuRowsCtrl)
+        return
+    if !EnsureGdiPlus()
+        return
+
+    ; Physical pixels. AutoHotkey scales the control from logical units, so asking
+    ; the control itself is the only way to match the surface to the screen.
+    clientRect := Buffer(16, 0)
+    if !DllCall("GetClientRect", "Ptr", QuickMenuRowsCtrl.Hwnd, "Ptr", clientRect)
+        return
+    width := NumGet(clientRect, 8, "Int")
+    height := NumGet(clientRect, 12, "Int")
+    if (width < 1 || height < 1)
+        return
+    rowCount := QuickMenuRows.Length
+    if (rowCount < 1)
+        return
+
+    ; One scale factor derived from the control itself, so every measurement below
+    ; is in logical units and DPI is handled in exactly one place.
+    scale := width / QuickMenuWidth()
+    px(value) => value * scale
+
+    screenDC := DllCall("GetDC", "Ptr", 0, "Ptr")
+    memDC := DllCall("CreateCompatibleDC", "Ptr", screenDC, "Ptr")
+    header := Buffer(40, 0)
+    NumPut("UInt", 40, header, 0)
+    NumPut("Int", width, header, 4)
+    NumPut("Int", -height, header, 8) ; top-down, so y grows downward as drawn
+    NumPut("UShort", 1, header, 12)
+    NumPut("UShort", 32, header, 14)
+    bits := 0
+    bitmap := DllCall("CreateDIBSection", "Ptr", memDC, "Ptr", header, "UInt", 0
+        , "Ptr*", &bits, "Ptr", 0, "UInt", 0, "Ptr")
+    ; Without this the painter carries on into the DC's default 1x1 monochrome
+    ; bitmap and then hands the control a null image, which blanks the rows with
+    ; no error anywhere. An empty menu reads as a rendering fault rather than as
+    ; the GDI handle exhaustion it actually is.
+    if !bitmap {
+        if !warnedNoBitmap {
+            warnedNoBitmap := true
+            LogLine("Quick Menu: CreateDIBSection failed for a "
+                . width "x" height " row surface; the page cannot be painted. "
+                . "This usually means GDI handle exhaustion.", "Warning")
+        }
+        DllCall("DeleteDC", "Ptr", memDC)
+        DllCall("ReleaseDC", "Ptr", 0, "Ptr", screenDC)
+        return
+    }
+    previous := DllCall("SelectObject", "Ptr", memDC, "Ptr", bitmap, "Ptr")
+    graphics := 0
+    DllCall("gdiplus\GdipCreateFromHDC", "Ptr", memDC, "Ptr*", &graphics)
+    if graphics {
+        DllCall("gdiplus\GdipSetSmoothingMode", "Ptr", graphics, "Int", 4)
+        ; The surface is opaque, so ClearType is available and text quality does
+        ; not regress against the Static controls this replaced.
+        DllCall("gdiplus\GdipSetTextRenderingHint", "Ptr", graphics, "Int", 5)
+        QuickMenuFillRounded(graphics, 0, 0, width, height, 0, QuickMenuArgb(QM_BG))
+
+        labelFont := QuickMenuMakeFont(px(16), false)
+        labelFontBold := QuickMenuMakeFont(px(16), true)
+        valueFont := QuickMenuMakeFont(px(14.7), false)
+        rowHeight := QuickMenuRowHeight()
+        glowPad := QuickMenuGlowPadding()
+        inset := QuickMenuRowInset()
+        rowWidth := QuickMenuWidth() - (inset * 2)
+        radius := px(10)
+        textPad := px(16)
+        barWidth := px(4)
+
+        boxHeight := px(rowHeight - 6)
+        left := px(inset)
+        boxWidth := px(rowWidth)
+        ; Paint selection decoration before any text. The stronger glow extends
+        ; into neighbouring slots; drawing it inside the row loop would haze text
+        ; belonging to an earlier row whenever a middle/lower row was selected.
+        if (QuickMenuSelected >= 1 && QuickMenuSelected <= QuickMenuRows.Length) {
+            selectedTop := px(glowPad + ((QuickMenuSelected - 1) * rowHeight) + 3)
+            QuickMenuDrawGlow(graphics, left, selectedTop, boxWidth, boxHeight, radius
+                , QM_ACCENT, 8, 120, px(1))
+            QuickMenuFillRounded(graphics, left, selectedTop, boxWidth, boxHeight, radius
+                , QuickMenuArgb(QM_ROW_SELECTED))
+            QuickMenuStrokeRounded(graphics, left, selectedTop, boxWidth, boxHeight, radius
+                , QuickMenuArgb(QM_ACCENT), px(2))
+            QuickMenuFillRounded(graphics
+                , left + px(6), selectedTop + px(7), barWidth, boxHeight - px(14)
+                , barWidth / 2, QuickMenuArgb(QM_ACCENT))
+        }
+
+        for index, row in QuickMenuRows {
+            selected := (index = QuickMenuSelected)
+            top := px(glowPad + ((index - 1) * rowHeight) + 3)
+            labelLeft := left + textPad + (selected ? px(10) : 0)
+            labelWidth := (boxWidth * 0.52) - textPad
+            QuickMenuDrawText(graphics, row["label"]
+                , selected ? labelFontBold : labelFont
+                , QuickMenuArgb(selected ? QM_LABEL_SELECTED : QM_LABEL)
+                , labelLeft, top, labelWidth, boxHeight, 0)
+            valueLeft := left + (boxWidth * 0.52)
+            QuickMenuDrawText(graphics, QuickMenuRowValueText(row), valueFont
+                , QuickMenuArgb(selected ? QM_ACCENT : QM_VALUE)
+                , valueLeft, top, (boxWidth * 0.48) - textPad, boxHeight, 2)
+        }
+
+        if labelFont
+            DllCall("gdiplus\GdipDeleteFont", "Ptr", labelFont)
+        if labelFontBold
+            DllCall("gdiplus\GdipDeleteFont", "Ptr", labelFontBold)
+        if valueFont
+            DllCall("gdiplus\GdipDeleteFont", "Ptr", valueFont)
+        DllCall("gdiplus\GdipDeleteGraphics", "Ptr", graphics)
+    }
+
+    DllCall("SelectObject", "Ptr", memDC, "Ptr", previous)
+    DllCall("DeleteDC", "Ptr", memDC)
+    DllCall("ReleaseDC", "Ptr", 0, "Ptr", screenDC)
+
+    ; Suppress the Static control's erase/paint between images. STM_SETIMAGE
+    ; invalidates the control; without this atomic swap Windows briefly exposes its
+    ; background before drawing the new bitmap, which reads as a flash on each move.
+    replaced := 0
+    try DllCall("User32\SendMessageW", "Ptr", QuickMenuRowsCtrl.Hwnd
+        , "UInt", 0x000B, "Ptr", 0, "Ptr", 0)
+    try {
+        replaced := SendMessage(0x0172, 0, bitmap, QuickMenuRowsCtrl)
+    } finally {
+        try DllCall("User32\SendMessageW", "Ptr", QuickMenuRowsCtrl.Hwnd
+            , "UInt", 0x000B, "Ptr", 1, "Ptr", 0)
+        if !QuickMenuRedrawSuspended {
+            ; RDW_INVALIDATE | RDW_NOERASE | RDW_UPDATENOW
+            try DllCall("User32\RedrawWindow", "Ptr", QuickMenuRowsCtrl.Hwnd
+                , "Ptr", 0, "Ptr", 0, "UInt", 0x0121)
+        }
+    }
+    ; STM_SETIMAGE returns the bitmap it replaced. Not deleting it leaks one
+    ; bitmap per repaint, and the menu repaints on every keypress.
+    if (replaced && replaced != bitmap)
+        try DllCall("DeleteObject", "Ptr", replaced)
+    if (QuickMenuRowsBitmap && QuickMenuRowsBitmap != bitmap && QuickMenuRowsBitmap != replaced)
+        try DllCall("DeleteObject", "Ptr", QuickMenuRowsBitmap)
+    QuickMenuRowsBitmap := bitmap
+}
+
 QuickMenuBuildGui() {
     global QuickMenuGui, QuickMenuRows, QuickMenuPage, QuickMenuVisible
-    global QuickMenuTitleCtrl, QuickMenuStatusCtrl
+    global QuickMenuTitleCtrl, QuickMenuFooterCtrl
     global QuickMenuRowsCtrl
     global QuickMenuPreviousHwnd
     global QM_BG, QM_LABEL, QM_VALUE, QM_LABEL_SELECTED
@@ -5786,7 +6177,7 @@ QuickMenuBuildGui() {
         QuickMenuRowsCtrl.Opt("+0x14E")
         QuickMenuRowsCtrl.OnEvent("Click", QuickMenuRowsClick)
         QuickMenuGui.SetFont("s9 c" QM_VALUE " Norm", "Segoe UI")
-        QuickMenuStatusCtrl := QuickMenuGui.AddText(
+        QuickMenuFooterCtrl := QuickMenuGui.AddText(
             "x" (rowInset + 12) " y600 w" (rowWidth - 12) " h36 +Wrap", "")
         QuickMenuGui.OnEvent("Escape", (*) => QuickMenuGoBack())
     }
@@ -5807,10 +6198,10 @@ QuickMenuBuildGui() {
             , (Max(1, QuickMenuRows.Length) * QuickMenuRowHeight())
                 + (2 * QuickMenuGlowPadding()))
 
-        QuickMenuStatusCtrl.Move(
+        QuickMenuFooterCtrl.Move(
             rowInset + 12, QuickMenuStatusY(defs.Length),
             rowWidth - 12, QuickMenuStatusHeight())
-        QuickMenuStatusCtrl.Text := GuiLiteralText(QuickMenuHintText())
+        QuickMenuFooterCtrl.Text := GuiLiteralText(QuickMenuHintText())
         menuH := Min(
             QuickMenuStatusY(defs.Length) + QuickMenuStatusHeight()
                 + QuickMenuBottomMargin(),
@@ -5827,6 +6218,58 @@ QuickMenuBuildGui() {
     }
 }
 
+QuickMenuTitleText() {
+    global QuickMenuPage
+    titles := Map(
+        "AUDIO", "Audio",
+        "DISPLAY", "Display & HDR",
+        "RTSS", "RTSS & Performance",
+        "LAYOUT", "Controller Mappings",
+        "TASKS", "Task Switcher",
+        "SETTINGS", "Settings",
+        "SETTINGS_GENERAL", "Settings  ›  General & Startup",
+        "SETTINGS_INPUT", "Settings  ›  Controller & Cursor",
+        "SETTINGS_FOCUS", "Settings  ›  Focus & Windows",
+        "SETTINGS_RTSS", "Settings  ›  RTSS & Performance",
+        "SYSTEM", "System")
+    if !titles.Has(QuickMenuPage)
+        return "SteamShell"
+    return "SteamShell  ›  " titles[QuickMenuPage]
+}
+
+QuickMenuWidth() {
+    return 620
+}
+
+QuickMenuRowTop() {
+    return 74
+}
+
+QuickMenuRowHeight() {
+    return 40
+}
+
+; Space around the row band for the selected-row glow. Without this, the first
+; and last rows clip the effect at the Static control's bitmap boundary.
+QuickMenuGlowPadding() {
+    return 8
+}
+
+QuickMenuRowInset() {
+    return 20
+}
+
+QuickMenuStatusY(rowCount) {
+    return QuickMenuRowTop() + 8 + (rowCount * QuickMenuRowHeight())
+}
+
+QuickMenuStatusHeight() {
+    return 36
+}
+
+QuickMenuBottomMargin() {
+    return 16
+}
 
 QuickMenuHintText() {
     global QuickMenuPage
@@ -5848,12 +6291,55 @@ QuickMenuHintText() {
     return "D-Pad Move  •  A Select  •  B Back"
 }
 
+QuickMenuSetRedraw(enabled) {
+    global QuickMenuGui, QuickMenuRedrawSuspended
+    if !IsSet(QuickMenuGui)
+        return
+    QuickMenuRedrawSuspended := !enabled
+    try DllCall(
+        "User32\SendMessageW", "Ptr", QuickMenuGui.Hwnd,
+        "UInt", 0x000B, "Ptr", enabled ? 1 : 0, "Ptr", 0)
+    if enabled {
+        ; RDW_INVALIDATE | RDW_NOERASE | RDW_ALLCHILDREN | RDW_UPDATENOW
+        try DllCall(
+            "User32\RedrawWindow", "Ptr", QuickMenuGui.Hwnd,
+            "Ptr", 0, "Ptr", 0, "UInt", 0x01A1)
+    }
+}
+
+MoveWindowPhysical(hwnd, x, y, w := 0, h := 0) {
+    static SWP_NOSIZE := 0x0001
+    static SWP_NOZORDER := 0x0004
+    static SWP_NOACTIVATE := 0x0010
+    flags := SWP_NOZORDER | SWP_NOACTIVATE
+    if (w <= 0 || h <= 0)
+        flags |= SWP_NOSIZE
+    result := 0
+    try result := DllCall(
+        "User32\SetWindowPos", "Ptr", hwnd, "Ptr", 0,
+        "Int", x, "Int", y, "Int", w, "Int", h, "UInt", flags, "Int")
+    return result != 0
+}
+
 RevealWindow(guiObj, noActivate := false) {
     static SW_SHOWNOACTIVATE := 4
     static SW_SHOW := 5
     try DllCall(
         "User32\ShowWindow", "Ptr", guiObj.Hwnd,
         "Int", noActivate ? SW_SHOWNOACTIVATE : SW_SHOW)
+}
+
+CenteredPosition(left, top, right, bottom, windowWidth, windowHeight, &x, &y) {
+    x := left + Floor(((right - left) - windowWidth) / 2)
+    y := top + Floor(((bottom - top) - windowHeight) / 2)
+    if (windowWidth < right - left)
+        x := ClampInt(x, left, right - windowWidth)
+    else
+        x := left
+    if (windowHeight < bottom - top)
+        y := ClampInt(y, top, bottom - windowHeight)
+    else
+        y := top
 }
 
 PositionQuickMenuOnTarget(guiObj, targetHwnd, width, height, deferShow := false) {
@@ -5899,8 +6385,8 @@ PositionQuickMenuOnTarget(guiObj, targetHwnd, width, height, deferShow := false)
 }
 
 QuickMenuEnsureContentFits() {
-    global QuickMenuGui, QuickMenuStatusCtrl, QuickMenuPreviousHwnd
-    if (!IsSet(QuickMenuGui) || !IsObject(QuickMenuStatusCtrl))
+    global QuickMenuGui, QuickMenuFooterCtrl, QuickMenuPreviousHwnd
+    if (!IsSet(QuickMenuGui) || !IsObject(QuickMenuFooterCtrl))
         return
 
     statusY := 0
@@ -5911,7 +6397,7 @@ QuickMenuEnsureContentFits() {
     try {
         ControlGetPos(
             , &measuredStatusY, , &measuredStatusHeight,
-            QuickMenuStatusCtrl, QuickMenuGui)
+            QuickMenuFooterCtrl, QuickMenuGui)
         WinGetClientPos(
             , , , &measuredClientHeight, "ahk_id " QuickMenuGui.Hwnd)
         WinGetPos(
@@ -5939,6 +6425,54 @@ QuickMenuEnsureContentFits() {
         MoveWindowPhysical(QuickMenuGui.Hwnd, x, y, winWidth, finalHeight)
     else
         MoveWindowPhysical(QuickMenuGui.Hwnd, x, y)
+}
+
+ApplyRoundedCorners(guiObj, radius) {
+    ; Never shape a hidden window.
+    ;
+    ; WinSetRegion CLIPS the window to the region, and a window that is not yet on
+    ; screen can report a size that is wrong -- the same hazard the centering path
+    ; already compensates for. Measured on a 4K television: the region came out at
+    ; the logical height while the window was at the scaled height, so the menu was
+    ; cut off with a clean rounded edge straight through a row. That is why every
+    ; page change afterwards looked right: those measure a real, visible window.
+    visible := false
+    try visible := DllCall("IsWindowVisible", "Ptr", guiObj.Hwnd, "Int") != 0
+    if !visible
+        return
+    ; Windows 11 rounds the window itself, antialiased and composited by DWM.
+    ; DWMWA_WINDOW_CORNER_PREFERENCE is 33, DWMWCP_ROUND is 2. The region path
+    ; below is a 1-bit mask with visibly stepped corners, so it is now only the
+    ; Windows 10 fallback rather than what everyone sees.
+    try {
+        ; DWMWA_BORDER_COLOR (34) with DWMWA_COLOR_NONE suppresses the thin
+        ; system-drawn frame while retaining DWM's antialiased rounded corners.
+        borderColor := Buffer(4, 0)
+        NumPut("UInt", 0xFFFFFFFE, borderColor, 0)
+        DllCall("dwmapi\DwmSetWindowAttribute", "Ptr", guiObj.Hwnd
+            , "UInt", 34, "Ptr", borderColor, "UInt", 4, "UInt")
+        preference := Buffer(4, 0)
+        NumPut("Int", 2, preference, 0)
+        if (DllCall("dwmapi\DwmSetWindowAttribute", "Ptr", guiObj.Hwnd
+            , "UInt", 33, "Ptr", preference, "UInt", 4, "UInt") = 0) {
+            ; A region set by an earlier call would clip the rounded corners DWM
+            ; is now drawing, so it has to be cleared.
+            try WinSetRegion("", "ahk_id " guiObj.Hwnd)
+            return
+        }
+    }
+    try {
+        ; Windows 10 has no border-color attribute. Remove the native border before
+        ; applying its region fallback; on Windows 11 we retain the structural
+        ; frame and suppress only its drawing so DWM can still round the window.
+        try guiObj.Opt("-Border")
+        WinGetPos(, , &realWidth, &realHeight, "ahk_id " guiObj.Hwnd)
+        if (realWidth > 0 && realHeight > 0) {
+            scaled := Round(radius * (A_ScreenDPI / 96.0))
+            WinSetRegion("0-0 w" realWidth " h" realHeight
+                . " R" scaled "-" scaled, "ahk_id " guiObj.Hwnd)
+        }
+    }
 }
 
 GetTargetMonitorWorkArea(targetHwnd, &left, &top, &right, &bottom) {
@@ -6019,6 +6553,13 @@ CenterGuiOnTargetMonitor(guiObj, targetHwnd := 0) {
     }
 }
 
+ShortenQuickMenuText(text, maxChars) {
+    text := Trim(text)
+    if (StrLen(text) <= maxChars)
+        return text
+    return SubStr(text, 1, Max(1, maxChars - 1)) "…"
+}
+
 GetAudioMenuSummary() {
     volumeText := ""
     outputName := ""
@@ -6030,7 +6571,7 @@ GetAudioMenuSummary() {
         return volumeText
     ; The value column clips from the left, so keep the volume at the right edge
     ; just as XFE does. A long device name may shorten; the percentage stays clear.
-    return ShortenText(outputName, 22) "  •  " volumeText
+    return ShortenQuickMenuText(outputName, 22) "  •  " volumeText
 }
 
 GetTaskSwitcherWindows() {
@@ -6083,7 +6624,7 @@ GetPinnedForegroundSummary() {
         count := GetTaskSwitcherWindows().Length
         return count ? count " Window" (count = 1 ? "" : "s") : "No Windows"
     }
-    return "Locked  •  " ShortenText(PinnedForegroundTitle, 18)
+    return "Locked  •  " ShortenQuickMenuText(PinnedForegroundTitle, 18)
 }
 
 ReleasePinnedForeground(showNotice := true) {
@@ -6116,6 +6657,257 @@ GetControllerLayoutText(buttonName) {
     shortBinding := ControllerBindingPretty(buttonName ".Short")
     longBinding := ControllerBindingPretty(buttonName ".Long")
     return shortBinding "  /  " longBinding
+}
+
+DistinctDisplayResolutions() {
+    global QuickMenuDisplayModes
+    seen := Map()
+    resolutions := []
+    for _, mode in QuickMenuDisplayModes {
+        key := mode["width"] "x" mode["height"]
+        if seen.Has(key)
+            continue
+        seen[key] := true
+        resolutions.Push(Map("width", mode["width"], "height", mode["height"]))
+    }
+    return resolutions
+}
+
+FrequenciesForResolution(width, height) {
+    global QuickMenuDisplayModes
+    frequencies := []
+    for _, mode in QuickMenuDisplayModes {
+        if (mode["width"] = width && mode["height"] = height)
+            frequencies.Push(mode["frequency"])
+    }
+    return frequencies
+}
+
+EnsureDisplaySelection() {
+    global DisplaySelectedWidth, DisplaySelectedHeight, DisplaySelectedFrequency
+    if (!DisplaySelectedWidth || !DisplaySelectedHeight) {
+        current := GetPrimaryDisplayMode()
+        if IsObject(current) {
+            DisplaySelectedWidth := current["width"]
+            DisplaySelectedHeight := current["height"]
+            DisplaySelectedFrequency := current["frequency"]
+        } else {
+            resolutions := DistinctDisplayResolutions()
+            if (resolutions.Length = 0)
+                return
+            DisplaySelectedWidth := resolutions[1]["width"]
+            DisplaySelectedHeight := resolutions[1]["height"]
+            DisplaySelectedFrequency := 0
+        }
+    }
+    frequencies := FrequenciesForResolution(
+        DisplaySelectedWidth, DisplaySelectedHeight)
+    if (frequencies.Length = 0)
+        return
+    for _, frequency in frequencies {
+        if (frequency = DisplaySelectedFrequency)
+            return
+    }
+    best := frequencies[1]
+    for _, frequency in frequencies {
+        if (frequency > best)
+            best := frequency
+    }
+    DisplaySelectedFrequency := best
+}
+
+CycleDisplayResolution(direction) {
+    global DisplaySelectedWidth, DisplaySelectedHeight
+    resolutions := DistinctDisplayResolutions()
+    if (resolutions.Length = 0)
+        return
+    selectedIndex := 1
+    for index, resolution in resolutions {
+        if (resolution["width"] = DisplaySelectedWidth
+            && resolution["height"] = DisplaySelectedHeight) {
+            selectedIndex := index
+            break
+        }
+    }
+    selectedIndex += direction
+    if (selectedIndex < 1)
+        selectedIndex := resolutions.Length
+    if (selectedIndex > resolutions.Length)
+        selectedIndex := 1
+    DisplaySelectedWidth := resolutions[selectedIndex]["width"]
+    DisplaySelectedHeight := resolutions[selectedIndex]["height"]
+    EnsureDisplaySelection()
+}
+
+CycleDisplayFrequency(direction) {
+    global DisplaySelectedWidth, DisplaySelectedHeight, DisplaySelectedFrequency
+    frequencies := FrequenciesForResolution(
+        DisplaySelectedWidth, DisplaySelectedHeight)
+    if (frequencies.Length = 0)
+        return
+    selectedIndex := 1
+    for index, frequency in frequencies {
+        if (frequency = DisplaySelectedFrequency) {
+            selectedIndex := index
+            break
+        }
+    }
+    selectedIndex += direction
+    if (selectedIndex < 1)
+        selectedIndex := frequencies.Length
+    if (selectedIndex > frequencies.Length)
+        selectedIndex := 1
+    DisplaySelectedFrequency := frequencies[selectedIndex]
+}
+
+EnsureDisplayScaleSelection() {
+    global DisplaySelectedScalePercent
+    info := GetPrimaryDisplayScale()
+    if !IsObject(info) {
+        DisplaySelectedScalePercent := 0
+        return 0
+    }
+    if DisplaySelectedScalePercent {
+        for _, option in info["options"] {
+            if (option = DisplaySelectedScalePercent)
+                return info
+        }
+    }
+    DisplaySelectedScalePercent := info["percent"]
+    return info
+}
+
+CycleDisplayScale(direction) {
+    global DisplaySelectedScalePercent
+    info := EnsureDisplayScaleSelection()
+    if !IsObject(info)
+        return
+    options := info["options"]
+    selectedIndex := 1
+    for index, option in options {
+        if (option = DisplaySelectedScalePercent) {
+            selectedIndex := index
+            break
+        }
+    }
+    selectedIndex += direction
+    if (selectedIndex < 1)
+        selectedIndex := options.Length
+    if (selectedIndex > options.Length)
+        selectedIndex := 1
+    DisplaySelectedScalePercent := options[selectedIndex]
+}
+
+GetDisplayApplyValue() {
+    global DisplaySelectedWidth, DisplaySelectedHeight, DisplaySelectedFrequency
+    global DisplaySelectedScalePercent
+    global DisplayPendingOldMode, DisplayPendingUntilTick
+    if IsObject(DisplayPendingOldMode) {
+        seconds := Max(0, Ceil((DisplayPendingUntilTick - A_TickCount) / 1000))
+        return "Select To KEEP (" seconds "s)"
+    }
+    current := GetPrimaryDisplayMode()
+    scale := GetPrimaryDisplayScale()
+    scaleSame := !DisplaySelectedScalePercent
+        || (IsObject(scale) && scale["percent"] = DisplaySelectedScalePercent)
+    if (IsObject(current) && scaleSame
+        && current["width"] = DisplaySelectedWidth
+        && current["height"] = DisplaySelectedHeight
+        && current["frequency"] = DisplaySelectedFrequency)
+        return "CURRENT"
+    return "Select To Apply"
+}
+
+ApplyDisplaySelection() {
+    global QuickMenuDisplayModes
+    global DisplaySelectedWidth, DisplaySelectedHeight, DisplaySelectedFrequency
+    global DisplaySelectedScalePercent
+    global DisplayPendingOldMode, DisplayPendingOldScale, DisplayPendingUntilTick
+    candidate := 0
+    for _, mode in QuickMenuDisplayModes {
+        if (mode["width"] = DisplaySelectedWidth
+            && mode["height"] = DisplaySelectedHeight
+            && mode["frequency"] = DisplaySelectedFrequency) {
+            candidate := mode
+            break
+        }
+    }
+    if !IsObject(candidate) {
+        ShowNotification("That display mode is no longer offered", "Warning")
+        return
+    }
+    currentMode := GetPrimaryDisplayMode()
+    if !IsObject(currentMode) {
+        ShowNotification("Current display mode is unavailable", "Warning")
+        return
+    }
+    currentScale := GetPrimaryDisplayScale()
+    modeSame := candidate["width"] = currentMode["width"]
+        && candidate["height"] = currentMode["height"]
+        && candidate["frequency"] = currentMode["frequency"]
+    scaleSame := !DisplaySelectedScalePercent
+        || (IsObject(currentScale)
+            && currentScale["percent"] = DisplaySelectedScalePercent)
+    if IsObject(DisplayPendingOldMode) {
+        if (modeSame && scaleSame)
+            ConfirmPrimaryDisplayMode()
+        else
+            ShowNotification(
+                "Keep or revert the pending display change first", "Warning")
+        return
+    }
+    if (modeSame && scaleSame)
+        return
+    if (DisplaySelectedScalePercent && !IsObject(currentScale)) {
+        ShowNotification("Windows display scaling is unavailable", "Warning")
+        return
+    }
+    modeChanged := false
+    if !modeSame {
+        if !ApplyPrimaryDisplayMode(candidate) {
+            ShowNotification("Windows rejected that display mode", "Warning")
+            return
+        }
+        modeChanged := true
+    }
+    if !scaleSame && !ApplyPrimaryDisplayScale(DisplaySelectedScalePercent) {
+        modeRestored := !modeChanged || ApplyPrimaryDisplayMode(currentMode)
+        scaleRestored := !IsObject(currentScale)
+            || ApplyPrimaryDisplayScale(currentScale["percent"])
+        QueueQuickMenuDisplayReflow()
+        ShowNotification(
+            modeRestored && scaleRestored
+                ? "Windows rejected that display scale; the old settings were restored"
+                : "Windows rejected that display scale; not all old settings restored",
+            "Warning")
+        return
+    }
+    DisplayPendingOldMode := currentMode
+    DisplayPendingOldScale := currentScale
+    DisplayPendingUntilTick := A_TickCount + 15000
+    SetTimer(DisplayChangeSafetyTick, 500)
+    QueueQuickMenuDisplayReflow()
+    ShowNotification(
+        "Display changed. Select CURRENT again within 15 seconds to keep it.",
+        "Warning")
+}
+
+GetRtssAvailability() {
+    global EnableRTSSIntegration, RtssPath
+    if !EnableRTSSIntegration
+        return "Setup Required"
+    if ProcessExist("RTSS.exe")
+        return "Running"
+    return ResolveRtssExecutablePath() != ""
+        ? "Ready To Start"
+        : "Not Found"
+}
+
+GetFrameCapLabel() {
+    global RtssPresetFrameCap
+    return RtssPresetFrameCap > 0
+        ? RtssPresetFrameCap " FPS Preset"
+        : "RTSS Preset"
 }
 
 QuickMenuMouseSelect(index, *) {
@@ -6151,7 +6943,7 @@ QuickMenuValue(id) {
         return GetControllerLayoutText(SubStr(id, 8))
     if (SubStr(id, 1, 11) = "taskWindow:") {
         item := FindTaskSwitcherWindow(ToInt(SubStr(id, 12), 0))
-        return IsObject(item) ? ShortenText(item["exe"], 20) : "CLOSED"
+        return IsObject(item) ? ShortenQuickMenuText(item["exe"], 20) : "CLOSED"
     }
 
     switch id {
@@ -6159,7 +6951,7 @@ QuickMenuValue(id) {
             return GetAudioMenuSummary()
         case "audioOutput":
             try {
-                return ShortenText(SoundGetName(), 34)
+                return ShortenQuickMenuText(SoundGetName(), 34)
             } catch {
                 return "Unavailable"
             }
@@ -6185,7 +6977,7 @@ QuickMenuValue(id) {
             if !IsObject(hdrState)
                 return "Unavailable"
             if !hdrState["supported"]
-                return "Not Supported"
+                return "Unsupported"
             return hdrState["forceDisabled"] ? "Disabled By Windows" : "Unavailable"
         case "displayResolution":
             return "‹ " DisplaySelectedWidth " × " DisplaySelectedHeight " ›"
@@ -6326,7 +7118,7 @@ QuickMenuValue(id) {
 QuickMenuRefresh() {
     global QuickMenuRows, QuickMenuSelected, QuickMenuConfirmAction, QuickMenuConfirmUntilTick
     global QM_BG, QM_ROW_SELECTED, QM_ACCENT, QM_LABEL, QM_LABEL_SELECTED, QM_VALUE
-    global QuickMenuStatusCtrl, QuickMenuRedrawSuspended
+    global QuickMenuFooterCtrl, QuickMenuRedrawSuspended
     resumeRedraw := !QuickMenuRedrawSuspended
     if resumeRedraw
         QuickMenuSetRedraw(false)
@@ -6340,7 +7132,7 @@ QuickMenuRefresh() {
         if (QuickMenuConfirmAction != "" && A_TickCount >= QuickMenuConfirmUntilTick)
             QuickMenuConfirmAction := ""
 
-        try QuickMenuStatusCtrl.Text := GuiLiteralText(QuickMenuHintText())
+        try QuickMenuFooterCtrl.Text := GuiLiteralText(QuickMenuHintText())
 
         ; Every row is one bitmap, so selection, value text and colour all change in a
         ; single repaint rather than by touching 28 controls individually.
@@ -6349,6 +7141,43 @@ QuickMenuRefresh() {
         if resumeRedraw
             QuickMenuSetRedraw(true)
     }
+}
+
+; Maps a click on the painted band back to a row. The Static controls used to
+; carry their own index; with one surface the index has to be recovered from
+; where the pointer actually is.
+QuickMenuRowsClick(*) {
+    global QuickMenuRowsCtrl, QuickMenuRows
+    if (!IsSet(QuickMenuRowsCtrl) || !QuickMenuRowsCtrl || QuickMenuRows.Length = 0)
+        return
+    point := Buffer(8, 0)
+    if !DllCall("GetCursorPos", "Ptr", point)
+        return
+    if !DllCall("ScreenToClient", "Ptr", QuickMenuRowsCtrl.Hwnd, "Ptr", point)
+        return
+    clientRect := Buffer(16, 0)
+    if !DllCall("GetClientRect", "Ptr", QuickMenuRowsCtrl.Hwnd, "Ptr", clientRect)
+        return
+    height := NumGet(clientRect, 12, "Int")
+    if (height < 1)
+        return
+    y := NumGet(point, 4, "Int")
+    scale := NumGet(clientRect, 8, "Int") / QuickMenuWidth()
+    glowPad := Round(QuickMenuGlowPadding() * scale)
+    rowBandHeight := height - (2 * glowPad)
+    y -= glowPad
+    if (rowBandHeight < 1 || y < 0 || y >= rowBandHeight)
+        return
+    index := Floor((y / rowBandHeight) * QuickMenuRows.Length) + 1
+    QuickMenuMouseSelect(ClampInt(index, 1, QuickMenuRows.Length))
+}
+
+QuickMenuKeyboardActive(*) {
+    global QuickMenuVisible, QuickMenuGui
+    if (!QuickMenuVisible || !IsSet(QuickMenuGui))
+        return false
+    try return WinActive("ahk_id " QuickMenuGui.Hwnd) != 0
+    return false
 }
 
 ; Normalizes the selection index, wrapping at both ends.
@@ -6369,17 +7198,25 @@ QuickMenuClampSelection() {
         QuickMenuSelected := 1
 }
 
-; Rows that only report state and cannot be acted on.
-;
-; A list of ids rather than a flag on every row, because there are six of them
-; and every other row in the menu does something. XFE answers the same question
-; from its row "action" field being "none"; the two sets are deliberately the
-; same six rows.
-; Per-tree seam for SteamShell-Shared.ahk's QuickMenuMoveSelection. This tree
-; CLAMPS at the ends; XFE wraps. Delegates rather than reimplementing, so the
-; three other callers of QuickMenuClampSelection cannot drift from this one.
-QuickMenuNormalizeSelection() {
+QuickMenuMoveSelection(direction) {
+    global QuickMenuRows, QuickMenuSelected
+    if (QuickMenuRows.Length = 0)
+        return
+    QuickMenuSelected += direction
     QuickMenuClampSelection()
+    QuickMenuRefresh()
+}
+
+QuickMenuSelectFirst() {
+    global QuickMenuSelected
+    QuickMenuSelected := 1
+    QuickMenuRefresh()
+}
+
+QuickMenuSelectLast() {
+    global QuickMenuSelected, QuickMenuRows
+    QuickMenuSelected := Max(1, QuickMenuRows.Length)
+    QuickMenuRefresh()
 }
 
 QuickMenuCloseSelected() {
@@ -6391,6 +7228,32 @@ QuickMenuCloseSelected() {
     }
 }
 
+RegisterQuickMenuKeys() {
+    HotIf QuickMenuKeyboardActive
+    Hotkey("Up", (*) => QuickMenuMoveSelection(-1))
+    Hotkey("Down", (*) => QuickMenuMoveSelection(1))
+    Hotkey("Left", (*) => QuickMenuAdjustSelected(-1))
+    Hotkey("Right", (*) => QuickMenuAdjustSelected(1))
+    Hotkey("Enter", (*) => QuickMenuActivateSelected())
+    Hotkey("NumpadEnter", (*) => QuickMenuActivateSelected())
+    Hotkey("Space", (*) => QuickMenuActivateSelected())
+    Hotkey("Backspace", (*) => QuickMenuGoBack())
+    Hotkey("Delete", (*) => QuickMenuCloseSelected())
+    Hotkey("Home", (*) => QuickMenuSelectFirst())
+    Hotkey("End", (*) => QuickMenuSelectLast())
+    HotIf
+}
+
+; Rows whose value is a number the user dials, rather than a list they step
+; through. Only these accept hold-to-repeat.
+QuickMenuRowAcceptsRepeat() {
+    global QuickMenuRows, QuickMenuSelected
+    static ids := QuickMenuIdSet("rtssFrameLimitCustom|volume|qMouseSpeed")
+    if (QuickMenuRows.Length = 0
+        || QuickMenuSelected < 1 || QuickMenuSelected > QuickMenuRows.Length)
+        return false
+    return ids.Has(QuickMenuRows[QuickMenuSelected]["id"])
+}
 
 QuickMenuHandleController(pressed, released := 0, lx := 0, ly := 0, buttons := 0) {
     global QuickMenuSelected, QuickMenuPage, TaskForceCloseHoldMs, ControllerChordHoldMs
@@ -6557,6 +7420,20 @@ QuickMenuHandleController(pressed, released := 0, lx := 0, ly := 0, buttons := 0
     }
 }
 
+QuickMenuGoBack() {
+    global QuickMenuPage, QuickMenuSelected
+    if (QuickMenuPage = "MAIN") {
+        HideQuickMenu()
+        return
+    }
+    if (SubStr(QuickMenuPage, 1, 9) = "SETTINGS_" )
+        QuickMenuPage := "SETTINGS"
+    else
+        QuickMenuPage := "MAIN"
+    QuickMenuSelected := 1
+    QuickMenuBuildGui()
+}
+
 PersistQuickMenuSetting(section, key, value) {
     global EnableAutoHideCursor, MouseHidden
     if !CommitIniChanges([Map("section", section, "key", key, "value", value)]) {
@@ -6573,6 +7450,15 @@ PersistQuickMenuSetting(section, key, value) {
     return true
 }
 
+QuickMenuIdSet(pipeList) {
+    result := Map()
+    for _, name in StrSplit(pipeList, "|") {
+        trimmed := Trim(name)
+        if (trimmed != "")
+            result[trimmed] := true
+    }
+    return result
+}
 
 ; One source of truth for the Quick Menu's settings rows, shared by activation
 ; and left/right adjustment. These were duplicated `case` lists until AutoHotkey
@@ -6813,7 +7699,7 @@ SelectTaskSwitcherWindow(hwnd, lockFocus := false) {
         HandleCursorAfterManagedFocus(hwnd, false)
         ShowNotification(
             (lockFocus ? "Focus lock: " : "Switched to: ")
-                . ShortenText(item["title"], 36),
+                . ShortenQuickMenuText(item["title"], 36),
             "Success")
     } else {
         if lockFocus
@@ -6926,6 +7812,19 @@ IsProtectedTaskProcess(exeName) {
     return protected.Has(StrLower(Trim(exeName)))
 }
 
+QuickMenuConfirm(id, label) {
+    global QuickMenuConfirmAction, QuickMenuConfirmUntilTick
+    if (QuickMenuConfirmAction = id && A_TickCount < QuickMenuConfirmUntilTick) {
+        QuickMenuConfirmAction := ""
+        return true
+    }
+    QuickMenuConfirmAction := id
+    QuickMenuConfirmUntilTick := A_TickCount + 5000
+    ShowNotification("Select again to confirm " label, "Warning")
+    QuickMenuRefresh()
+    return false
+}
+
 QuickMenuActivateSelected() {
     global QuickMenuRows, QuickMenuSelected, QuickMenuPage
     global SteamQuickAccessShortcut
@@ -7000,9 +7899,7 @@ QuickMenuActivateSelected() {
         case "limiterToggle":
             ToggleRtssFrameLimiter()
         case "rtssFrameLimit":
-            ; Wraps: A is the only control on this row for a user who never
-            ; discovers Left/Right, so it has to be able to reach every entry.
-            if CycleRtssFrameCap(1, true) {
+            if CycleRtssFrameCap(1) {
                 QuickMenuBuildGui()
                 return
             }
@@ -7138,6 +8035,118 @@ QuickMenuActivateSelected() {
     QuickMenuRefresh()
 }
 
+; ------------------------------------------------------------------------------
+; Quick-menu integrations: display, HDR shortcut, and RTSS HotkeyHandler
+; ------------------------------------------------------------------------------
+GetActiveAudioOutputDevices() {
+    devices := []
+    iidDevice := "{D666063F-1587-4E43-81F1-B948E807363F}" ; IMMDevice
+
+    Loop 32 {
+        index := A_Index
+        try {
+            name := SoundGetName(, index)
+        } catch {
+            break
+        }
+        if (name = "")
+            continue
+
+        try {
+            device := SoundGetInterface(iidDevice, , index)
+            idPtr := 0
+            ComCall(5, device, "Ptr*", &idPtr) ; IMMDevice::GetId
+            id := idPtr ? StrGet(idPtr, "UTF-16") : ""
+            if (idPtr)
+                DllCall("Ole32\CoTaskMemFree", "Ptr", idPtr)
+            if (id != "")
+                devices.Push(Map("name", name, "id", id))
+        } catch {
+            ; Keep enumeration safe; unsupported devices are omitted.
+        }
+    }
+    return devices
+}
+
+SetDefaultAudioEndpointId(endpointId) {
+    if (endpointId = "")
+        return false
+    ; Windows exposes default-endpoint selection through the PolicyConfig COM
+    ; interface used by the Sound control panel. Try the modern interface first,
+    ; then the Vista-compatible interface retained by current Windows versions.
+    policy := 0
+    try policy := ComObject(
+        "{870AF99C-171D-4F9E-AF0D-E63DF40C2BC9}",
+        "{F8679F50-850A-41CF-9C72-430F290290C8}")
+    catch {
+        try policy := ComObject(
+            "{294935CE-F637-4E7C-A41B-AB255460B862}",
+            "{568B9108-44BF-40B4-9006-86AFE5B5A620}")
+    }
+    if !IsObject(policy)
+        return false
+
+    try {
+        ; Apply to console, multimedia, and communications roles.
+        ComCall(13, policy, "WStr", endpointId, "Int", 0)
+        ComCall(13, policy, "WStr", endpointId, "Int", 1)
+        ComCall(13, policy, "WStr", endpointId, "Int", 2)
+        return true
+    } catch {
+        return false
+    }
+}
+
+CycleDefaultAudioOutput(direction) {
+    global QuickMenuAudioDevices
+    if (QuickMenuAudioDevices.Length = 0)
+        QuickMenuAudioDevices := GetActiveAudioOutputDevices()
+    if (QuickMenuAudioDevices.Length = 0) {
+        ShowNotification("No active Windows audio outputs were found", "Warning")
+        return
+    }
+
+    currentName := ""
+    try currentName := SoundGetName()
+    currentIndex := 0
+    for index, device in QuickMenuAudioDevices {
+        if (device["name"] = currentName) {
+            currentIndex := index
+            break
+        }
+    }
+    if (currentIndex = 0)
+        currentIndex := 1
+    nextIndex := currentIndex + direction
+    if (nextIndex < 1)
+        nextIndex := QuickMenuAudioDevices.Length
+    if (nextIndex > QuickMenuAudioDevices.Length)
+        nextIndex := 1
+
+    target := QuickMenuAudioDevices[nextIndex]
+    if SetDefaultAudioEndpointId(target["id"]) {
+        ShowNotification("Audio output: " target["name"], "Success")
+    } else {
+        ShowNotification("Windows could not switch the audio output", "Warning")
+    }
+    QuickMenuRefresh()
+}
+
+GetPrimaryDisplayMode() {
+    dm := Buffer(220, 0)
+    NumPut("UShort", 220, dm, 68)
+    try {
+        if !DllCall("User32\EnumDisplaySettingsW", "Ptr", 0, "Int", -1, "Ptr", dm, "Int")
+            return 0
+    } catch {
+        return 0
+    }
+    return Map(
+        "width", NumGet(dm, 172, "UInt"),
+        "height", NumGet(dm, 176, "UInt"),
+        "frequency", NumGet(dm, 184, "UInt")
+    )
+}
 
 GetCurrentDisplayModeText() {
     global DisplayPendingOldMode, DisplayPendingUntilTick
@@ -7155,6 +8164,631 @@ GetCurrentDisplayModeText() {
     return text
 }
 
+GetPrimaryDisplayModes() {
+    modes := []
+    seen := Map()
+    modeIndex := 0
+    ; Drivers commonly enumerate low-resolution/refresh combinations first. A
+    ; fixed 512-entry ceiling cut modern TV/GPU mode tables off around 1280x1024,
+    ; before their 1440p and 4K entries were reached. EnumDisplaySettings returns
+    ; zero at the real end of the list, so let the API define the boundary.
+    Loop {
+        dm := Buffer(220, 0)
+        NumPut("UShort", 220, dm, 68)
+        ok := false
+        try ok := DllCall("User32\EnumDisplaySettingsW", "Ptr", 0, "UInt", modeIndex, "Ptr", dm, "Int")
+        if (!ok)
+            break
+        modeIndex += 1
+
+        width := NumGet(dm, 172, "UInt")
+        height := NumGet(dm, 176, "UInt")
+        frequency := NumGet(dm, 184, "UInt")
+        bpp := NumGet(dm, 168, "UInt")
+        if (width < 640 || height < 480 || frequency < 24 || bpp < 24)
+            continue
+
+        key := width "x" height "@" frequency
+        if seen.Has(key)
+            continue
+        seen[key] := true
+        modes.Push(Map("width", width, "height", height, "frequency", frequency))
+    }
+
+    LogLine("Display modes: Windows reported " modeIndex
+        . " entries; SteamShell retained " modes.Length " compatible combinations.")
+
+    ; Stable insertion sort: resolution first, then refresh rate.
+    sorted := []
+    for _, mode in modes {
+        insertAt := sorted.Length + 1
+        for pos, existing in sorted {
+            lhs := mode["width"] * mode["height"]
+            rhs := existing["width"] * existing["height"]
+            if (lhs < rhs || (lhs = rhs && mode["frequency"] < existing["frequency"])) {
+                insertAt := pos
+                break
+            }
+        }
+        sorted.InsertAt(insertAt, mode)
+    }
+    return sorted
+}
+
+ApplyPrimaryDisplayMode(mode) {
+    if !IsObject(mode)
+        return false
+    dm := Buffer(220, 0)
+    NumPut("UShort", 220, dm, 68)
+    NumPut("UInt", 0x580000, dm, 72) ; width | height | display frequency
+    NumPut("UInt", mode["width"], dm, 172)
+    NumPut("UInt", mode["height"], dm, 176)
+    NumPut("UInt", mode["frequency"], dm, 184)
+    try {
+        result := DllCall("User32\ChangeDisplaySettingsExW"
+            , "Ptr", 0, "Ptr", dm, "Ptr", 0, "UInt", 0, "Ptr", 0, "Int")
+        return (result = 0)
+    } catch {
+        return false
+    }
+}
+
+GetPrimaryDisplayDeviceName() {
+    Loop 16 {
+        device := Buffer(840, 0)
+        NumPut("UInt", 840, device, 0)
+        ok := false
+        try ok := DllCall("User32\EnumDisplayDevicesW", "Ptr", 0,
+            "UInt", A_Index - 1, "Ptr", device, "UInt", 0, "Int")
+        if !ok
+            break
+        stateFlags := NumGet(device, 324, "UInt")
+        if (stateFlags & 0x4)
+            return StrGet(device.Ptr + 4, 32, "UTF-16")
+    }
+    return ""
+}
+
+; Resolve the primary GDI display to its active DisplayConfig source and target.
+; The target identity is what Windows' Advanced Color packets require.
+GetPrimaryDisplayConfigSource() {
+    primaryName := GetPrimaryDisplayDeviceName()
+    if (primaryName = "")
+        return 0
+    flags := 0x2
+    Loop 3 {
+        pathCount := 0
+        modeCount := 0
+        result := -1
+        try result := DllCall("User32\GetDisplayConfigBufferSizes",
+            "UInt", flags, "UInt*", &pathCount, "UInt*", &modeCount, "Int")
+        if (result != 0 || pathCount < 1)
+            return 0
+        paths := Buffer(pathCount * 72, 0)
+        modes := Buffer(Max(1, modeCount) * 64, 0)
+        try result := DllCall("User32\QueryDisplayConfig",
+            "UInt", flags, "UInt*", &pathCount, "Ptr", paths,
+            "UInt*", &modeCount, "Ptr", modes, "Ptr", 0, "Int")
+        if (result = 122)
+            continue
+        if (result != 0)
+            return 0
+        Loop pathCount {
+            pathOffset := (A_Index - 1) * 72
+            adapterLow := NumGet(paths, pathOffset, "UInt")
+            adapterHigh := NumGet(paths, pathOffset + 4, "Int")
+            sourceId := NumGet(paths, pathOffset + 8, "UInt")
+            sourceName := Buffer(84, 0)
+            NumPut("UInt", 1, sourceName, 0)
+            NumPut("UInt", 84, sourceName, 4)
+            NumPut("UInt", adapterLow, sourceName, 8)
+            NumPut("Int", adapterHigh, sourceName, 12)
+            NumPut("UInt", sourceId, sourceName, 16)
+            getResult := -1
+            try getResult := DllCall(
+                "User32\DisplayConfigGetDeviceInfo", "Ptr", sourceName, "Int")
+            if (getResult != 0)
+                continue
+            gdiName := StrGet(sourceName.Ptr + 20, 32, "UTF-16")
+            if (StrLower(gdiName) = StrLower(primaryName)) {
+                return Map(
+                    "adapterLow", adapterLow,
+                    "adapterHigh", adapterHigh,
+                    "sourceId", sourceId,
+                    "targetAdapterLow", NumGet(paths, pathOffset + 20, "UInt"),
+                    "targetAdapterHigh", NumGet(paths, pathOffset + 24, "Int"),
+                    "targetId", NumGet(paths, pathOffset + 28, "UInt"))
+            }
+        }
+        return 0
+    }
+    return 0
+}
+
+DisplayScaleLevels() {
+    ; Windows' fixed scale ladder. The source DPI packet reports min/current/max
+    ; as positions relative to the recommended step; min therefore anchors the
+    ; first supported entry in this list.
+    return [100, 125, 150, 175, 200, 225, 250, 300, 350, 400, 450, 500]
+}
+
+; Windows Settings uses private-but-stable DisplayConfig DPI packets for its
+; per-display scale ladder. Failures are non-fatal and simply make the row
+; unavailable while resolution, refresh, and HDR continue to work.
+GetPrimaryDisplayScale() {
+    static warned := false
+    source := GetPrimaryDisplayConfigSource()
+    if !IsObject(source)
+        return 0
+    packet := Buffer(32, 0)
+    NumPut("UInt", 0xFFFFFFFD, packet, 0)
+    NumPut("UInt", 32, packet, 4)
+    NumPut("UInt", source["adapterLow"], packet, 8)
+    NumPut("Int", source["adapterHigh"], packet, 12)
+    NumPut("UInt", source["sourceId"], packet, 16)
+    result := -1
+    try result := DllCall(
+        "User32\DisplayConfigGetDeviceInfo", "Ptr", packet, "Int")
+    if (result != 0) {
+        if !warned {
+            warned := true
+            LogLine("Display scale unavailable; GET_DPI_SCALE returned " result ".")
+        }
+        return 0
+    }
+    minimum := NumGet(packet, 20, "Int")
+    current := NumGet(packet, 24, "Int")
+    maximum := NumGet(packet, 28, "Int")
+    levels := DisplayScaleLevels()
+    count := maximum - minimum + 1
+    currentIndex := current - minimum + 1
+    if (count < 1 || count > levels.Length
+        || currentIndex < 1 || currentIndex > count)
+        return 0
+    warned := false
+    options := []
+    Loop count
+        options.Push(levels[A_Index])
+    return Map(
+        "percent", options[currentIndex],
+        "options", options,
+        "minimum", minimum,
+        "current", current,
+        "maximum", maximum)
+}
+
+ApplyPrimaryDisplayScale(percent) {
+    info := GetPrimaryDisplayScale()
+    if !IsObject(info)
+        return false
+    selectedIndex := 0
+    for index, option in info["options"] {
+        if (option = percent) {
+            selectedIndex := index
+            break
+        }
+    }
+    if !selectedIndex
+        return false
+    source := GetPrimaryDisplayConfigSource()
+    if !IsObject(source)
+        return false
+    packet := Buffer(24, 0)
+    NumPut("UInt", 0xFFFFFFFC, packet, 0)
+    NumPut("UInt", 24, packet, 4)
+    NumPut("UInt", source["adapterLow"], packet, 8)
+    NumPut("Int", source["adapterHigh"], packet, 12)
+    NumPut("UInt", source["sourceId"], packet, 16)
+    NumPut("Int", info["minimum"] + selectedIndex - 1, packet, 20)
+    result := -1
+    try result := DllCall(
+        "User32\DisplayConfigSetDeviceInfo", "Ptr", packet, "Int")
+    if (result = 0)
+        LogLine("Display scale: primary display set to " percent "%.")
+    else
+        LogLine("Display scale: SET_DPI_SCALE failed with error " result ".")
+    return result = 0
+}
+
+QueueQuickMenuDisplayReflow() {
+    SetTimer(QuickMenuDisplayReflow, -350)
+}
+
+QuickMenuDisplayReflow() {
+    global QuickMenuVisible
+    if QuickMenuVisible
+        QuickMenuBuildGui()
+}
+
+GetPrimaryHdrState() {
+    static warned := false
+    path := GetPrimaryDisplayConfigSource()
+    if !IsObject(path)
+        return 0
+    packet := Buffer(32, 0)
+    NumPut("UInt", 9, packet, 0) ; DISPLAYCONFIG_GET_ADVANCED_COLOR_INFO
+    NumPut("UInt", 32, packet, 4)
+    NumPut("UInt", path["targetAdapterLow"], packet, 8)
+    NumPut("Int", path["targetAdapterHigh"], packet, 12)
+    NumPut("UInt", path["targetId"], packet, 16)
+    result := -1
+    try result := DllCall(
+        "User32\DisplayConfigGetDeviceInfo", "Ptr", packet, "Int")
+    if (result != 0) {
+        if !warned {
+            warned := true
+            LogLine("HDR live state unavailable; DisplayConfig returned " result ".")
+        }
+        return 0
+    }
+    warned := false
+    flags := NumGet(packet, 20, "UInt")
+    return Map(
+        "supported", (flags & 0x1) != 0,
+        "enabled", (flags & 0x2) != 0,
+        "wideColorEnforced", (flags & 0x4) != 0,
+        "forceDisabled", (flags & 0x8) != 0)
+}
+
+ApplyPrimaryHdrState(enabled) {
+    path := GetPrimaryDisplayConfigSource()
+    if !IsObject(path)
+        return false
+    packet := Buffer(24, 0)
+    NumPut("UInt", 10, packet, 0) ; DISPLAYCONFIG_SET_ADVANCED_COLOR_STATE
+    NumPut("UInt", 24, packet, 4)
+    NumPut("UInt", path["targetAdapterLow"], packet, 8)
+    NumPut("Int", path["targetAdapterHigh"], packet, 12)
+    NumPut("UInt", path["targetId"], packet, 16)
+    NumPut("UInt", enabled ? 1 : 0, packet, 20)
+    result := -1
+    try result := DllCall(
+        "User32\DisplayConfigSetDeviceInfo", "Ptr", packet, "Int")
+    if (result = 0)
+        LogLine("HDR: primary display turned " (enabled ? "on." : "off."))
+    else
+        LogLine("HDR: SET_ADVANCED_COLOR_STATE failed with error " result ".")
+    return result = 0
+}
+
+; Compatibility fallback for Windows and display drivers that do not expose
+; Advanced Color state through DisplayConfig.
+;
+; Win+Alt+B is a toggle, so this is only ever correct for the toggle entry
+; point. An explicit On or Off request has nothing to aim at when the current
+; state cannot be read, which is why this is a separate function rather than a
+; flag on SetQuickMenuHdrState -- that flag made the `enabled` argument silently
+; meaningless on the one path that used it.
+RequestHdrToggleFallback() {
+    SendChordSafe("#!b")
+    ShowNotification("Windows HDR toggle requested; live state is unavailable", "Warning")
+}
+
+SetQuickMenuHdrState(enabled) {
+    current := GetPrimaryHdrState()
+    if !IsObject(current) {
+        ShowNotification("Windows HDR state is unavailable; use A to toggle", "Warning")
+        return
+    }
+    if !current["supported"] {
+        ShowNotification("The primary display does not report HDR support", "Warning")
+        return
+    }
+    if current["forceDisabled"] {
+        ShowNotification("HDR is disabled by Windows or the display driver", "Warning")
+        return
+    }
+    if (current["enabled"] = enabled) {
+        ShowNotification("HDR is already " (enabled ? "on" : "off"))
+        return
+    }
+    if ApplyPrimaryHdrState(enabled) {
+        ShowNotification("HDR turned " (enabled ? "on" : "off"), "Success")
+        ; The display can blank briefly and Windows updates the reported state
+        ; asynchronously. Reuse the display reflow timer to refresh the row from
+        ; the authoritative state once that transition has settled.
+        QueueQuickMenuDisplayReflow()
+    } else {
+        ShowNotification("Windows could not turn HDR " (enabled ? "on" : "off"), "Warning")
+    }
+}
+
+ToggleQuickMenuHdrState() {
+    current := GetPrimaryHdrState()
+    if !IsObject(current) {
+        RequestHdrToggleFallback()
+        return
+    }
+    SetQuickMenuHdrState(!current["enabled"])
+}
+
+ConfirmPrimaryDisplayMode() {
+    global DisplayPendingOldMode, DisplayPendingOldScale, DisplayPendingUntilTick
+    if !IsObject(DisplayPendingOldMode)
+        return
+    DisplayPendingOldMode := 0
+    DisplayPendingOldScale := 0
+    DisplayPendingUntilTick := 0
+    SetTimer(DisplayChangeSafetyTick, 0)
+    ShowNotification("Display settings kept", "Success")
+    QuickMenuRefresh()
+}
+
+DisplayChangeSafetyTick() {
+    global DisplayPendingOldMode, DisplayPendingOldScale
+    global DisplayPendingUntilTick, QuickMenuVisible
+    if !IsObject(DisplayPendingOldMode) {
+        SetTimer(DisplayChangeSafetyTick, 0)
+        return
+    }
+    if (A_TickCount >= DisplayPendingUntilTick) {
+        oldMode := DisplayPendingOldMode
+        oldScale := DisplayPendingOldScale
+        DisplayPendingOldMode := 0
+        DisplayPendingOldScale := 0
+        DisplayPendingUntilTick := 0
+        SetTimer(DisplayChangeSafetyTick, 0)
+        modeRestored := ApplyPrimaryDisplayMode(oldMode)
+        scaleRestored := !IsObject(oldScale)
+            || ApplyPrimaryDisplayScale(oldScale["percent"])
+        QueueQuickMenuDisplayReflow()
+        if (modeRestored && scaleRestored)
+            ShowNotification("Display settings reverted for safety", "Warning")
+        else
+            ShowNotification("Unable to restore all previous display settings", "Warning")
+    }
+    ; This is a one-second timer that runs for the whole 15-second revert window,
+    ; and the countdown it repaints is only visible while the menu is open.
+    if QuickMenuVisible
+        QuickMenuRefresh()
+}
+
+ResolveRtssExecutablePath() {
+    global RtssPath
+    path := NormalizeMediaPath(RtssPath)
+    attributes := path != "" ? FileExist(path) : ""
+    if (attributes = "" || InStr(attributes, "D")) {
+        programFilesX86 := ""
+        try programFilesX86 := EnvGet("ProgramFiles(x86)")
+        defaultPath := programFilesX86 "\RivaTuner Statistics Server\RTSS.exe"
+        if (programFilesX86 != "" && FileExist(defaultPath)) {
+            path := defaultPath
+            RtssPath := defaultPath
+            attributes := FileExist(defaultPath)
+            LogLine("RTSS: adopted the default install path " defaultPath ".")
+        }
+    }
+    return (attributes != "" && !InStr(attributes, "D")) ? path : ""
+}
+
+EnsureRtssRunning() {
+    path := ResolveRtssExecutablePath()
+    if ProcessExist("RTSS.exe")
+        return true
+    if (path = "")
+        return false
+    SplitPath(path, , &directory)
+    pid := 0
+    if LaunchInteractiveApp(
+        path, "", directory, "Minimized", &pid, "RTSS")
+        && ProcessWait("RTSS.exe", 3)
+        return true
+    return false
+}
+
+ShutdownRtssHooksApi() {
+    global RtssHooksModule, RtssHooksDllPath
+    global RtssGetFlagsProc, RtssSetFlagsProc
+    global RtssLoadProfileProc, RtssGetProfilePropertyProc
+    global RtssSetProfilePropertyProc, RtssSaveProfileProc, RtssUpdateProfilesProc
+    if RtssHooksModule
+        try DllCall("Kernel32\FreeLibrary", "Ptr", RtssHooksModule, "Int")
+    RtssHooksModule := 0
+    RtssHooksDllPath := ""
+    RtssGetFlagsProc := 0
+    RtssSetFlagsProc := 0
+    RtssLoadProfileProc := 0
+    RtssGetProfilePropertyProc := 0
+    RtssSetProfilePropertyProc := 0
+    RtssSaveProfileProc := 0
+    RtssUpdateProfilesProc := 0
+}
+
+; RTSS publishes its global overlay/limiter flags and profile properties through
+; RTSSHooks64.dll. This is optional: older or unusual installations continue to
+; use the configured HotkeyHandler shortcuts.
+GetRtssHooksApi() {
+    global RtssPath, RtssUseDllIntegration
+    global RtssHooksModule, RtssHooksDllPath, RtssHooksLastFailure
+    global RtssGetFlagsProc, RtssSetFlagsProc
+    global RtssLoadProfileProc, RtssGetProfilePropertyProc
+    global RtssSetProfilePropertyProc, RtssSaveProfileProc, RtssUpdateProfilesProc
+    if !RtssUseDllIntegration
+        return 0
+    rtssExe := ResolveRtssExecutablePath()
+    installDir := ""
+    if (rtssExe != "")
+        SplitPath(rtssExe, , &installDir)
+    dllPath := installDir != "" ? installDir "\RTSSHooks64.dll" : ""
+    if (RtssHooksModule && RtssHooksDllPath = dllPath
+        && RtssGetFlagsProc && RtssSetFlagsProc) {
+        return Map(
+            "get", RtssGetFlagsProc, "set", RtssSetFlagsProc,
+            "loadProfile", RtssLoadProfileProc,
+            "getProfileProperty", RtssGetProfilePropertyProc,
+            "setProfileProperty", RtssSetProfilePropertyProc,
+            "saveProfile", RtssSaveProfileProc,
+            "updateProfiles", RtssUpdateProfilesProc)
+    }
+    if RtssHooksModule
+        ShutdownRtssHooksApi()
+    if (dllPath = "" || !FileExist(dllPath)) {
+        if (RtssHooksLastFailure != dllPath) {
+            RtssHooksLastFailure := dllPath
+            LogLine("RTSS live state unavailable: RTSSHooks64.dll was not found; shortcut fallback remains available.")
+        }
+        return 0
+    }
+    module := 0
+    try module := DllCall("Kernel32\LoadLibraryW", "WStr", dllPath, "Ptr")
+    getProc := 0
+    setProc := 0
+    loadProfileProc := 0
+    getProfilePropertyProc := 0
+    setProfilePropertyProc := 0
+    saveProfileProc := 0
+    updateProfilesProc := 0
+    if module {
+        try getProc := DllCall(
+            "Kernel32\GetProcAddress", "Ptr", module, "AStr", "GetFlags", "Ptr")
+        try setProc := DllCall(
+            "Kernel32\GetProcAddress", "Ptr", module, "AStr", "SetFlags", "Ptr")
+        try loadProfileProc := DllCall(
+            "Kernel32\GetProcAddress", "Ptr", module, "AStr", "LoadProfile", "Ptr")
+        try getProfilePropertyProc := DllCall(
+            "Kernel32\GetProcAddress", "Ptr", module,
+            "AStr", "GetProfileProperty", "Ptr")
+        ; Write path. Deliberately optional: an RTSS build without these still
+        ; drives the overlay and limiter flags, and the frame-cap row degrades to
+        ; read-only rather than taking the whole integration down with it.
+        try setProfilePropertyProc := DllCall(
+            "Kernel32\GetProcAddress", "Ptr", module,
+            "AStr", "SetProfileProperty", "Ptr")
+        try saveProfileProc := DllCall(
+            "Kernel32\GetProcAddress", "Ptr", module, "AStr", "SaveProfile", "Ptr")
+        try updateProfilesProc := DllCall(
+            "Kernel32\GetProcAddress", "Ptr", module, "AStr", "UpdateProfiles", "Ptr")
+    }
+    if (!module || !getProc || !setProc) {
+        if module
+            try DllCall("Kernel32\FreeLibrary", "Ptr", module, "Int")
+        if (RtssHooksLastFailure != dllPath) {
+            RtssHooksLastFailure := dllPath
+            LogLine("RTSS live state unavailable: required DLL exports were not found; shortcut fallback remains available.")
+        }
+        return 0
+    }
+    RtssHooksModule := module
+    RtssHooksDllPath := dllPath
+    RtssGetFlagsProc := getProc
+    RtssSetFlagsProc := setProc
+    RtssLoadProfileProc := loadProfileProc
+    RtssGetProfilePropertyProc := getProfilePropertyProc
+    RtssSetProfilePropertyProc := setProfilePropertyProc
+    RtssSaveProfileProc := saveProfileProc
+    RtssUpdateProfilesProc := updateProfilesProc
+    RtssHooksLastFailure := ""
+    LogLine("RTSS live state connected through RTSSHooks64.dll"
+        . (RtssFrameCapWritable() ? " (frame cap writable)." : "; frame cap is read-only."))
+    return Map(
+        "get", getProc, "set", setProc,
+        "loadProfile", loadProfileProc,
+        "getProfileProperty", getProfilePropertyProc,
+        "setProfileProperty", setProfilePropertyProc,
+        "saveProfile", saveProfileProc,
+        "updateProfiles", updateProfilesProc)
+}
+
+; True when every export the write path needs resolved. Checked before the
+; Quick Menu offers a value the user cannot actually apply.
+RtssFrameCapWritable() {
+    global RtssSetProfilePropertyProc, RtssSaveProfileProc, RtssLoadProfileProc
+    return RtssLoadProfileProc && RtssSetProfilePropertyProc && RtssSaveProfileProc
+}
+
+GetRtssGlobalState() {
+    global EnableRTSSIntegration, RtssUseDllIntegration
+    if (!EnableRTSSIntegration || !RtssUseDllIntegration || !ProcessExist("RTSS.exe"))
+        return 0
+    api := GetRtssHooksApi()
+    if !IsObject(api)
+        return 0
+    try flags := DllCall(api["get"], "UInt")
+    catch as err {
+        LogLine("RTSS GetFlags failed: " err.Message)
+        return 0
+    }
+    return Map(
+        "overlay", (flags & 0x1) != 0,
+        "limiter", (flags & 0x4) = 0,
+        "flags", flags)
+}
+
+GetQuickMenuPreviousExe() {
+    global QuickMenuPreviousHwnd
+    if (QuickMenuPreviousHwnd && DllCall("IsWindow", "Ptr", QuickMenuPreviousHwnd, "Int"))
+        try return WinGetProcessName("ahk_id " QuickMenuPreviousHwnd)
+    return ""
+}
+
+; True while the foreground application is eligible for automatic mouse mode:
+; the explicit allowlist in SteamShell presentation, or any non-excluded app in
+; Windows desktop mode.
+;
+; The mechanism is deliberately "pretend View/Back is held" rather than a second
+; input mode. The View mappings are already a complete desktop mouse by default --
+; right stick moves, left stick scrolls, D-pad arrows, RB left-click, RT
+; right-click, Start opens the Start menu -- so reusing them means nothing new to
+; design, nothing new to configure, and no second keymap that can drift from the
+; first. What happens automatically is exactly what holding View/Back does.
+;
+; Cached briefly: this is evaluated on every poll tick at ~16 ms, and the
+; foreground process cannot change faster than a person can alt-tab.
+AutoMouseProcessMatches(exeName) {
+    global AutoMouseExeSet
+    exeName := StrLower(Trim(exeName))
+    if AutoMouseExeSet.Has(exeName)
+        return true
+    ; Explorer owns the desktop and taskbar, but modern Windows moves Start and
+    ; its search surface into separate system processes. Treat those implementation
+    ; details as one Explorer shell family so the user's single explorer.exe opt-in
+    ; keeps working across Windows 10 and 11.
+    if !AutoMouseExeSet.Has("explorer.exe")
+        return false
+    static explorerShellHosts := Map(
+        "startmenuexperiencehost.exe", true,
+        "shellexperiencehost.exe", true,
+        "searchhost.exe", true,
+        "searchui.exe", true)
+    return explorerShellHosts.Has(exeName)
+}
+
+AutoMouseModeActive() {
+    global EnableAutoMouseMode, EnablePersistentMouseMode, AutoMouseExeSet, ScriptPid, DesktopMode
+    global EnableDesktopAutoMouseMode, DesktopAutoMouseExcludeExeSet
+    static cachedResult := false
+    static cachedTick := 0
+    ; All kill switches are checked ahead of the cache so tray/Settings changes
+    ; take effect on the next poll rather than up to 250 ms later.
+    if EnablePersistentMouseMode
+        return true
+    if !EnableAutoMouseMode
+        return false
+    if (DesktopMode && !EnableDesktopAutoMouseMode)
+        return false
+    if (!DesktopMode && AutoMouseExeSet.Count = 0)
+        return false
+    if (cachedTick && A_TickCount - cachedTick < 250)
+        return cachedResult
+    cachedTick := A_TickCount
+    cachedResult := false
+    try {
+        hwnd := DllCall("User32\GetForegroundWindow", "Ptr")
+        if (hwnd && WinGetPID("ahk_id " hwnd) != ScriptPid) {
+            foregroundExe := StrLower(WinGetProcessName("ahk_id " hwnd))
+            cachedResult := DesktopMode
+                ? !DesktopAutoMouseExcludeExeSet.Has(foregroundExe)
+                : AutoMouseProcessMatches(foregroundExe)
+        }
+    }
+    return cachedResult
+}
+
+IsSteamProcess(exeName) {
+    exeName := StrLower(Trim(exeName))
+    return exeName = "steam.exe" || exeName = "steamwebhelper.exe"
+}
+
 IsSteamRunning() {
     ; A single Quick Menu repaint asks about Steam once per row. ProcessExist walks
     ; a process snapshot, so cache the answer for long enough to cover one repaint
@@ -7166,6 +8800,39 @@ IsSteamRunning() {
     cachedResult := ProcessExist("steam.exe") != 0
     cachedTick := A_TickCount
     return cachedResult
+}
+
+GetRtssFrameLimit(profileExe := "") {
+    global EnableRTSSIntegration, RtssUseDllIntegration
+    if (!EnableRTSSIntegration || !RtssUseDllIntegration || !ProcessExist("RTSS.exe"))
+        return 0
+    api := GetRtssHooksApi()
+    if (!IsObject(api) || !api["loadProfile"] || !api["getProfileProperty"])
+        return 0
+    profileName := Trim(profileExe)
+    if (profileName != "") {
+        fileName := ""
+        SplitPath(profileName, &fileName)
+        ; Only adopt the split result when it produced something. A SplitPath that
+        ; yields nothing would otherwise silently turn a named profile request into
+        ; a request for the global profile, which reads a different value.
+        if (fileName != "")
+            profileName := fileName
+    }
+    value := Buffer(4, 0)
+    try {
+        DllCall(api["loadProfile"], "AStr", profileName)
+        ok := DllCall(api["getProfileProperty"],
+            "AStr", "FramerateLimit", "Ptr", value, "UInt", value.Size, "Int")
+        if !ok
+            return 0
+        return Map(
+            "fps", NumGet(value, 0, "UInt"),
+            "profile", profileName != "" ? profileName : "Global")
+    } catch as err {
+        LogLine("RTSS FramerateLimit query failed: " err.Message, "Warning")
+        return 0
+    }
 }
 
 ; ------------------------------------------------------------------------------
@@ -7187,11 +8854,359 @@ IsSteamRunning() {
 ; user's own tuning and are deliberately never written: a quick menu that edits
 ; whichever profile happens to be in the foreground is a menu that can silently
 ; change a game's configuration.
+RtssGlobalFrameLimit() {
+    global RtssFrameLimitCacheFps, RtssFrameLimitCacheTick
+    static CACHE_MS := 400
+    if (RtssFrameLimitCacheTick
+        && A_TickCount - RtssFrameLimitCacheTick < CACHE_MS)
+        return RtssFrameLimitCacheFps
+    limit := GetRtssFrameLimit("")
+    RtssFrameLimitCacheFps := IsObject(limit) ? limit["fps"] : 0
+    RtssFrameLimitCacheTick := A_TickCount
+    return RtssFrameLimitCacheFps
+}
 
+IsRtssFrameCapPreset(fps) {
+    global RtssFrameCapPresets
+    for _, preset in RtssFrameCapPresets {
+        if (fps = preset)
+            return true
+    }
+    return false
+}
 
+; Resolves the flag and the value into the single state the row displays:
+;   "off"         limiter flag cleared, or flag set with no target
+;   "preset"      a value from RtssFrameCapPresets
+;   "configured"  the separately configured Preset value
+;   "custom"      any other non-zero value, or the user cycling to Custom
+GetRtssFrameCapState() {
+    global RtssFrameCapPresets, RtssPresetFrameCap, RtssFrameCapCustomMode
+    state := GetRtssGlobalState()
+    if !IsObject(state)
+        return 0
+    fps := RtssGlobalFrameLimit()
+    if (!state["limiter"] || fps <= 0)
+        return Map("mode", "off", "fps", fps, "limiter", state["limiter"])
+    if RtssFrameCapCustomMode
+        return Map("mode", "custom", "fps", fps, "limiter", true)
+    for _, preset in RtssFrameCapPresets {
+        if (fps = preset)
+            return Map("mode", "preset", "fps", fps, "limiter", true)
+    }
+    ; A configured Preset that duplicates a standard cap is deliberately shown
+    ; as that standard cap. RTSS stores only the number, so treating identical
+    ; values as two distinct entries would make the next cycle jump over every
+    ; standard cap between them.
+    if (RtssPresetFrameCap > 0 && fps = RtssPresetFrameCap)
+        return Map("mode", "configured", "fps", fps, "limiter", true)
+    return Map("mode", "custom", "fps", fps, "limiter", true)
+}
 
+RtssFrameCapValueText() {
+    state := GetRtssFrameCapState()
+    if !IsObject(state)
+        return "Unavailable"
+    if !RtssFrameCapWritable()
+        return state["mode"] = "off" ? "OFF (read-only)" : state["fps"] " FPS (read-only)"
+    switch state["mode"] {
+        case "off":
+            return "‹ OFF ›"
+        case "configured":
+            return "‹ PRESET · " state["fps"] " FPS ›"
+        case "custom":
+            return "‹ CUSTOM ›"
+    }
+    return "‹ " state["fps"] " FPS ›"
+}
 
+; Writes FramerateLimit into the global profile. SaveProfile persists it to
+; RTSS's own configuration, so this is a real edit the user will see in RTSS --
+; intended, but worth a log line rather than happening silently.
+SetRtssGlobalFrameLimit(fps) {
+    global RtssFrameLimitCacheTick
+    if !EnsureRtssRunning()
+        return false
+    api := GetRtssHooksApi()
+    if (!IsObject(api) || !RtssFrameCapWritable()) {
+        ShowNotification("This RTSS build cannot set the frame cap directly", "Warning")
+        return false
+    }
+    fps := ClampInt(fps, 0, 1000)
+    value := Buffer(4, 0)
+    NumPut("UInt", fps, value, 0)
+    try {
+        DllCall(api["loadProfile"], "AStr", "")
+        ok := DllCall(api["setProfileProperty"],
+            "AStr", "FramerateLimit", "Ptr", value, "UInt", value.Size, "Int")
+        if !ok {
+            LogLine("RTSS FramerateLimit write was rejected.")
+            ShowNotification("RTSS did not accept the frame cap", "Warning")
+            return false
+        }
+        DllCall(api["saveProfile"], "AStr", "")
+        if api["updateProfiles"]
+            DllCall(api["updateProfiles"])
+        NotifyRtssSettingsChanged()
+        RtssFrameLimitCacheTick := 0
+        LogLine("RTSS global FramerateLimit set to " fps ".")
+        return true
+    } catch as err {
+        LogLine("RTSS FramerateLimit write failed: " err.Message)
+        ShowNotification("RTSS did not accept the frame cap", "Warning")
+        return false
+    }
+}
 
+; Left/Right on the Frame Limit row. Returns true when the row set changed, so
+; the caller knows a full rebuild is needed rather than a repaint: the Custom
+; row is composed in QuickMenuGetDefinitions, which QuickMenuRefresh never runs.
+CycleRtssFrameCap(direction) {
+    global RtssFrameCapPresets, RtssPresetFrameCap, RtssCustomFrameCap
+    global RtssFrameCapCustomMode
+    state := GetRtssFrameCapState()
+    if !IsObject(state) {
+        ShowNotification("RTSS live state is unavailable", "Warning")
+        return false
+    }
+    if !RtssFrameCapWritable() {
+        ShowNotification("This RTSS build cannot set the frame cap directly", "Warning")
+        return false
+    }
+
+    ; Coming off "Off" restores the number the profile still holds instead of
+    ; jumping to the first preset. This is the payoff for never writing 0: the
+    ; user's 72 survives an off/on round trip untouched. Only applies when the
+    ; flag is what turned it off; a flag that is on with no target has nothing to
+    ; restore and falls through to the list below.
+    if (direction > 0 && state["mode"] = "off"
+        && !state["limiter"] && state["fps"] > 0) {
+        RtssFrameCapCustomMode := false
+        ApplyRtssGlobalState("limiter", true)
+        return !IsRtssFrameCapPreset(state["fps"])
+            && state["fps"] != RtssPresetFrameCap
+    }
+
+    ; Anything still being dialled in on the Custom row must not land after this.
+    CancelPendingRtssFrameCap()
+
+    ; One ordered list: Off, standard caps, the user-configured Preset, then
+    ; the separately retained Custom value.
+    entries := ["off"]
+    for _, preset in RtssFrameCapPresets
+        entries.Push(preset)
+    if (RtssPresetFrameCap > 0 && !IsRtssFrameCapPreset(RtssPresetFrameCap))
+        entries.Push("configured")
+    entries.Push("custom")
+
+    index := 1
+    switch state["mode"] {
+        case "custom":
+            index := entries.Length
+        case "configured":
+            for entryIndex, entry in entries {
+                if (entry = "configured") {
+                    index := entryIndex
+                    break
+                }
+            }
+        case "preset":
+            for entryIndex, entry in entries {
+                if (entry = state["fps"]) {
+                    index := entryIndex
+                    break
+                }
+            }
+    }
+    index := ClampInt(index + direction, 1, entries.Length)
+    target := entries[index]
+
+    wasCustom := (state["mode"] = "custom")
+    if (target = "off") {
+        RtssFrameCapCustomMode := false
+        ; Value untouched on purpose -- see the header comment.
+        ;
+        ; Only written when the flag actually has to change. Left clamps to this
+        ; entry at the end of the list, so without the guard every further press
+        ; re-issued the SetFlags call and re-showed its notification.
+        if state["limiter"]
+            ApplyRtssGlobalState("limiter", false)
+        return wasCustom
+    }
+    if (target = "custom") {
+        ; Restore the last Custom value instead of inheriting whichever preset
+        ; happened to be selected immediately before it.
+        customFps := ClampInt(RtssCustomFrameCap, 10, 1000)
+        if !SetRtssGlobalFrameLimit(customFps)
+            return false
+        RtssFrameCapCustomMode := true
+        if !state["limiter"]
+            ApplyRtssGlobalState("limiter", true)
+        return !wasCustom
+    }
+    if (target = "configured") {
+        RtssFrameCapCustomMode := false
+        if !SetRtssGlobalFrameLimit(RtssPresetFrameCap)
+            return wasCustom
+        if !state["limiter"]
+            ApplyRtssGlobalState("limiter", true)
+        return wasCustom
+    }
+    RtssFrameCapCustomMode := false
+    SetRtssGlobalFrameLimit(target)
+    if !state["limiter"]
+        ApplyRtssGlobalState("limiter", true)
+    return wasCustom
+}
+
+; The one place a per-game profile is written, and only ever on an explicit,
+; confirmed request. Returns the executable this would target, or "" when there
+; is nothing valid to save to.
+;
+; The name comes from what owned the screen BEFORE the menu opened; asking now
+; would always answer SteamShell. Steam's own surfaces are excluded because a
+; profile named steam.exe or steamwebhelper.exe caps the client rather than a
+; game, which is never what this row means.
+; A profile named steam.exe caps the Steam client rather than a game, and one
+; named after the shell or Explorer is meaningless.
+IsUsableProfileExe(exeName) {
+    exeName := StrLower(Trim(exeName))
+    if (exeName = "" || IsSteamProcess(exeName))
+        return false
+    return exeName != "steamshell.exe" && exeName != "explorer.exe"
+}
+
+; Two sources, in order of directness.
+;
+; What owned the screen before the menu opened is the best answer when it is
+; usable. It is not always: the window engine's Steam refocus can pull Big
+; Picture forward moments before the menu opens, and a borderless game can sit
+; behind a Steam surface -- in both cases the raw foreground is steam.exe, which
+; is excluded, and the row read "No game in foreground" while Task Switcher was
+; still listing the game.
+;
+; So fall back to the window engine's detected game. That is the same detection
+; driving Game Foreground Assist and the Task Switcher's view of what is running,
+; which is precisely what a user looking at this row means by "the game".
+RtssProfileTargetExe() {
+    global LastBestCandidateProc
+    exeName := Trim(GetQuickMenuPreviousExe())
+    if IsUsableProfileExe(exeName)
+        return exeName
+    exeName := Trim(LastBestCandidateProc)
+    if IsUsableProfileExe(exeName)
+        return exeName
+    return ""
+}
+
+; Names what it actually saw rather than reporting a bare negative. "Steam is in
+; front and no game was detected" and "nothing is running" are different
+; problems, and the row is the only place the difference is visible.
+RtssSaveProfileValueText() {
+    global LastBestCandidateProc
+    if !RtssFrameCapWritable()
+        return "Unavailable"
+    exeName := RtssProfileTargetExe()
+    if (exeName != "")
+        return exeName
+    previous := Trim(GetQuickMenuPreviousExe())
+    if (previous != "" && IsSteamProcess(previous))
+        return "Steam in front, no game detected"
+    return "No game in foreground"
+}
+
+; Copies the current global frame cap into the foreground executable's own RTSS
+; profile.
+;
+; Deliberately surgical: the target profile is loaded FIRST so that whatever
+; else the user has tuned for that game survives, and only FramerateLimit is
+; replaced. Cloning the global profile wholesale would be one call shorter and
+; would silently overwrite that game's overlay and hotkey settings.
+;
+; RTSS applies a per-game profile automatically whenever that executable runs,
+; so this is a persistent change the user will not see again until it surprises
+; them. Hence the confirmation at the call site and the log line here.
+SaveRtssFrameLimitToProfile() {
+    global RtssFrameLimitCacheTick, LastBestCandidateProc
+    exeName := RtssProfileTargetExe()
+    if (exeName = "") {
+        ShowNotification("No foreground game to save a profile for", "Warning")
+        return false
+    }
+    if !RtssFrameCapWritable() {
+        ShowNotification("This RTSS build cannot write profiles directly", "Warning")
+        return false
+    }
+    if !EnsureRtssRunning()
+        return false
+    api := GetRtssHooksApi()
+    if !IsObject(api)
+        return false
+
+    ; Flush anything still pending so the profile gets the value on screen.
+    CommitRtssPendingFrameCap()
+    fps := RtssGlobalFrameLimit()
+    value := Buffer(4, 0)
+    NumPut("UInt", fps, value, 0)
+    LogLine("RTSS profile target " exeName " (foreground was '"
+        . GetQuickMenuPreviousExe() "', engine game '" LastBestCandidateProc "').")
+    try {
+        ; Load the game's existing profile so unrelated properties are preserved.
+        DllCall(api["loadProfile"], "AStr", exeName)
+        ok := DllCall(api["setProfileProperty"],
+            "AStr", "FramerateLimit", "Ptr", value, "UInt", value.Size, "Int")
+        if !ok {
+            LogLine("RTSS profile write was rejected for " exeName ".")
+            ShowNotification("RTSS did not accept the profile write", "Warning")
+            return false
+        }
+        DllCall(api["saveProfile"], "AStr", exeName)
+        if api["updateProfiles"]
+            DllCall(api["updateProfiles"])
+        NotifyRtssSettingsChanged()
+        ; The global profile was displaced by the LoadProfile above; restore it so
+        ; the Frame Limit row keeps reading the value it is supposed to show.
+        try DllCall(api["loadProfile"], "AStr", "")
+        RtssFrameLimitCacheTick := 0
+        LogLine("RTSS profile " exeName " saved with FramerateLimit " fps ".")
+        ShowNotification(exeName ": " (fps > 0 ? fps " FPS" : "uncapped") " saved", "Success")
+        return true
+    } catch as err {
+        LogLine("RTSS profile write failed for " exeName ": " err.Message)
+        ShowNotification("RTSS did not accept the profile write", "Warning")
+        try DllCall(api["loadProfile"], "AStr", "")
+        RtssFrameLimitCacheTick := 0
+        return false
+    }
+}
+
+; Left/Right on the Custom FPS row.
+;
+; Quick Menu navigation is edge-triggered -- the poll loop reports
+; `buttons & ~prevButtons` and nothing in the menu auto-repeats -- so a fixed
+; step of 1 would need sixty presses to get from 60 to 120. Consecutive presses
+; in the same direction therefore escalate 1 -> 5 -> 10, and any pause or
+; reversal drops back to 1 so a single press is still a single frame.
+; Cancels a value that was being dialled in but must not land.
+;
+; Needed because the commit is deferred: cycling from Custom to a preset while a
+; pending value is still in flight would otherwise let the timer fire afterwards
+; and overwrite the preset the user just chose.
+CancelPendingRtssFrameCap() {
+    global RtssPendingFrameCap
+    RtssPendingFrameCap := 0
+    SetTimer(CommitRtssPendingFrameCap, 0)
+}
+
+CommitRtssPendingFrameCap() {
+    global RtssPendingFrameCap
+    if (RtssPendingFrameCap <= 0)
+        return
+    value := RtssPendingFrameCap
+    RtssPendingFrameCap := 0
+    if SetRtssGlobalFrameLimit(value)
+        PersistRtssCustomFrameCap(value)
+}
 
 PersistRtssCustomFrameCap(value) {
     global RtssCustomFrameCap
@@ -7203,34 +9218,179 @@ PersistRtssCustomFrameCap(value) {
         return false
     }
     RtssCustomFrameCap := value
-    ; Committing a Custom value is also a selection of Custom at that value.
-    ; Recorded here rather than in the caller: CommitRtssPendingFrameCap is one
-    ; of the functions SHARED_FUNCTIONS.txt keeps byte-identical with XFE.
-    PersistRtssFrameCapSelection("custom", value)
     return true
 }
 
-; Discard every press/hold tracker, so a button held across an interruption
-; cannot complete a Short or Long the user never finished.
+; Left/Right on the Custom FPS row.
 ;
-; This existed as SEVEN hand-copied blocks inside PollController -- the same four
-; statements written four slightly different ways, at every early return. XFE has
-; had one function for this since it was written; standalone never got one, and a
-; reset that has to be remembered seven times is a reset that will eventually be
-; forgotten once. That matters more than tidiness: the hold-to-drag work adds
-; "release any synthetic mouse button" to exactly this set, and a missed site
-; there leaves a button held down in the Windows shell with no keyboard.
+; Two things make naive stepping unpleasant, and they are separate problems.
 ;
-; previousViewDown is by reference because it is a plain Boolean; the Maps and
-; the definition array are objects and already carry through. XFE sets its own
-; copy separately at each call site, which is the same duplication one variable
-; smaller -- aligning the two signatures is what lets this move into the shared
-; input file rather than being written a third time for the helper.
-ResetControllerHoldState(
-    &previousViewDown, downTick, longFired, triggerDown, buttonDefinitions) {
-    previousViewDown := false
-    ResetControllerEdgeState(downTick, longFired, triggerDown, buttonDefinitions)
+; 1. WRITING ON EVERY PRESS. SetRtssGlobalFrameLimit is a LoadProfile plus a
+;    SetProfileProperty plus a SaveProfile -- a disk write -- plus UpdateProfiles.
+;    Doing that per press means the limiter is genuinely reconfigured a dozen
+;    times while the user scrolls, and the frame rate chases the number. So the
+;    value is held pending, the row shows it immediately, and RTSS is written
+;    once the user stops.
+;
+; 2. ESCALATING OFF-GRID. Quick Menu navigation is edge-triggered with no
+;    auto-repeat, so a fixed step of 1 needs sixty presses to cross 60->120 and
+;    the step has to grow. But growing it from an arbitrary value lands on
+;    arbitrary values: 63 stepping by 5 gives 68, 73, 78, and 60 or 90 become
+;    unreachable without slowing down and creeping. Coarse steps therefore snap
+;    to their own grid -- 63 by 5 goes to 65, then 70 -- so fast stepping lands
+;    on round numbers and fine stepping still moves by exactly 1.
+AdjustRtssCustomFrameCap(direction) {
+    global RtssPendingFrameCap, RtssCustomFrameCap
+    static COMMIT_DELAY_MS := 400
+
+    if !RtssFrameCapWritable() {
+        ShowNotification("This RTSS build cannot set the frame cap directly", "Warning")
+        return
+    }
+    current := RtssPendingFrameCap > 0 ? RtssPendingFrameCap : RtssCustomFrameCap
+    RtssPendingFrameCap := ClampInt(current + direction, 10, 1000)
+    SetTimer(CommitRtssPendingFrameCap, -COMMIT_DELAY_MS)
 }
+
+NotifyRtssSettingsChanged() {
+    hwnd := 0
+    try hwnd := DllCall("User32\FindWindowW", "Ptr", 0, "WStr", "RTSS", "Ptr")
+    if !hwnd
+        try hwnd := DllCall("User32\FindWindowW", "Ptr", 0,
+            "WStr", "RivaTuner Statistics Server", "Ptr")
+    if hwnd
+        try DllCall("User32\PostMessageW", "Ptr", hwnd,
+            "UInt", 0x8064, "UPtr", 0, "Ptr", 0, "Int")
+}
+
+ApplyRtssGlobalState(feature, enabled) {
+    if !EnsureRtssRunning()
+        return false
+    api := GetRtssHooksApi()
+    if !IsObject(api)
+        return false
+    if (feature = "overlay") {
+        andMask := 0xFFFFFFFE
+        xorMask := enabled ? 0x1 : 0
+        label := "overlay"
+    } else {
+        andMask := 0xFFFFFFFB
+        xorMask := enabled ? 0 : 0x4
+        label := "frame limiter"
+    }
+    try {
+        DllCall(api["set"], "UInt", andMask, "UInt", xorMask, "UInt")
+        NotifyRtssSettingsChanged()
+        state := GetRtssGlobalState()
+        if (IsObject(state) && state[feature] = enabled) {
+            ShowNotification("RTSS " label " " (enabled ? "enabled" : "disabled"), "Success")
+            return true
+        }
+    } catch as err {
+        LogLine("RTSS SetFlags failed: " err.Message)
+    }
+    ShowNotification("RTSS did not confirm the " label " change", "Warning")
+    return false
+}
+
+ToggleRtssOverlay() {
+    global EnableRTSSIntegration, RtssOverlayToggleShortcut
+    if (!EnableRTSSIntegration) {
+        ShowNotification("Set [RTSS] EnableIntegration=true to use RTSS controls", "Warning")
+        return
+    }
+    state := GetRtssGlobalState()
+    if IsObject(state) {
+        ApplyRtssGlobalState("overlay", !state["overlay"])
+        return
+    }
+    if !EnsureRtssRunning() {
+        ShowNotification("RTSS was not found. Configure [RTSS] Path first.", "Warning")
+        return
+    }
+    if (RtssOverlayToggleShortcut = "") {
+        ShowNotification("Configure RTSS OverlayToggleShortcut first", "Warning")
+        return
+    }
+    SendChordSafe(RtssOverlayToggleShortcut)
+    ShowNotification("RTSS overlay toggled", "Success")
+}
+
+SetRtssOverlayState(showOverlay) {
+    global EnableRTSSIntegration, RtssOverlayOnShortcut, RtssOverlayOffShortcut
+    if (!EnableRTSSIntegration) {
+        ShowNotification("Set [RTSS] EnableIntegration=true to use RTSS controls", "Warning")
+        return
+    }
+    state := GetRtssGlobalState()
+    if IsObject(state) {
+        if (state["overlay"] != showOverlay)
+            ApplyRtssGlobalState("overlay", showOverlay)
+        return
+    }
+    shortcut := showOverlay ? RtssOverlayOnShortcut : RtssOverlayOffShortcut
+    if (shortcut = "") {
+        actionName := showOverlay ? "OverlayOnShortcut" : "OverlayOffShortcut"
+        ShowNotification("Configure RTSS " actionName " first", "Warning")
+        return
+    }
+    if !EnsureRtssRunning() {
+        ShowNotification("RTSS was not found. Configure [RTSS] Path first.", "Warning")
+        return
+    }
+    SendChordSafe(shortcut)
+    ShowNotification(showOverlay ? "RTSS overlay show requested" : "RTSS overlay hide requested", "Success")
+}
+
+ToggleRtssFrameLimiter() {
+    global EnableRTSSIntegration, RtssCustomFrameCapShortcut
+    if (!EnableRTSSIntegration) {
+        ShowNotification("Set [RTSS] EnableIntegration=true to use the frame limiter", "Warning")
+        return
+    }
+    state := GetRtssGlobalState()
+    if IsObject(state) {
+        ApplyRtssGlobalState("limiter", !state["limiter"])
+        return
+    }
+    if (RtssCustomFrameCapShortcut = "") {
+        ShowNotification("Configure RTSS CustomFrameCapShortcut first", "Warning")
+        return
+    }
+    if !EnsureRtssRunning() {
+        ShowNotification("RTSS was not found. Configure [RTSS] Path first.", "Warning")
+        return
+    }
+    SendChordSafe(RtssCustomFrameCapShortcut)
+    ShowNotification("RTSS frame limiter toggled", "Success")
+}
+
+SetRtssFrameLimiterState(enableLimiter) {
+    global EnableRTSSIntegration, RtssFrameLimiterOnShortcut, RtssFrameLimiterOffShortcut
+    if (!EnableRTSSIntegration) {
+        ShowNotification("Set [RTSS] EnableIntegration=true to use the frame limiter", "Warning")
+        return
+    }
+    state := GetRtssGlobalState()
+    if IsObject(state) {
+        if (state["limiter"] != enableLimiter)
+            ApplyRtssGlobalState("limiter", enableLimiter)
+        return
+    }
+    shortcut := enableLimiter ? RtssFrameLimiterOnShortcut : RtssFrameLimiterOffShortcut
+    if (shortcut = "") {
+        actionName := enableLimiter ? "FrameLimiterOnShortcut" : "FrameLimiterOffShortcut"
+        ShowNotification("Configure RTSS " actionName " first", "Warning")
+        return
+    }
+    if !EnsureRtssRunning() {
+        ShowNotification("RTSS was not found. Configure [RTSS] Path first.", "Warning")
+        return
+    }
+    SendChordSafe(shortcut)
+    ShowNotification(enableLimiter ? "RTSS frame limiter enable requested" : "RTSS frame limiter disable requested", "Success")
+}
+
 
 PollController() {
     global EnableControllerMouseMode, ControllerIndex, ControllerDeadzone
@@ -7256,6 +9416,7 @@ PollController() {
     static prevTrigDown := Map("LT", false, "RT", false)
     static settingsPrevLtDown := false
     static settingsPrevRtDown := false
+
 
     static inPoll := false
     static btnDefs := [
@@ -7307,14 +9468,21 @@ PollController() {
         ; Discard all edge/hold state while disconnected. Otherwise reconnecting
         ; can synthesize stale releases or complete an old long-press.
         prevButtons := 0
+        prevViewDown := false
         quickChordSince := 0
         quickChordFired := false
         settingsChordSince := 0
         settingsChordFired := false
+        prevTrigDown["LT"] := false
+        prevTrigDown["RT"] := false
         settingsPrevLtDown := false
         settingsPrevRtDown := false
-        ResetControllerHoldState(
-            &prevViewDown, downTick, longFired, prevTrigDown, btnDefs)
+        for def in btnDefs {
+            downTick[def[1]] := 0
+            longFired[def[1]] := false
+        }
+        downTick["LT"] := 0, longFired["LT"] := false
+        downTick["RT"] := 0, longFired["RT"] := false
         return
     }
 
@@ -7333,14 +9501,19 @@ PollController() {
     if ControllerTestActive() {
         UpdateControllerTest(buttons, lt, rt, lx, ly, rx, ry)
         prevButtons := buttons
+        prevViewDown := false
         quickChordSince := 0
         quickChordFired := false
         settingsChordSince := 0
         settingsChordFired := false
+        for def in btnDefs {
+            downTick[def[1]] := 0
+            longFired[def[1]] := false
+        }
+        downTick["LT"] := 0, longFired["LT"] := false, prevTrigDown["LT"] := false
+        downTick["RT"] := 0, longFired["RT"] := false, prevTrigDown["RT"] := false
         settingsPrevLtDown := false
         settingsPrevRtDown := false
-        ResetControllerHoldState(
-            &prevViewDown, downTick, longFired, prevTrigDown, btnDefs)
         return
     }
 
@@ -7353,6 +9526,7 @@ PollController() {
     rx := 0
     if (Abs(ry) < ControllerDeadzone)
     ry := 0
+
 
     ; Controller chord: LT+RT+LB+RB+L3+R3 opens Full Settings (works even without
     ; holding View/Back). This is the emergency route on a handheld with no
@@ -7402,8 +9576,13 @@ PollController() {
     ; destroyed. Establish one edge-free sample and clear every hold tracker so
     ; its later release cannot also fire the normal persistent mapping.
     if ControllerNeedsFreshBaseline {
-        ResetControllerHoldState(
-            &prevViewDown, downTick, longFired, prevTrigDown, btnDefs)
+        prevViewDown := false
+        for def in btnDefs {
+            downTick[def[1]] := 0
+            longFired[def[1]] := false
+        }
+        downTick["LT"] := 0, longFired["LT"] := false, prevTrigDown["LT"] := false
+        downTick["RT"] := 0, longFired["RT"] := false, prevTrigDown["RT"] := false
         ControllerNeedsFreshBaseline := false
         return
     }
@@ -7475,8 +9654,14 @@ PollController() {
                 SystemCursor("Show")
                 MouseHidden := false
             }
-            ResetControllerHoldState(
-                &prevViewDown, downTick, longFired, prevTrigDown, btnDefs)
+            prevViewDown := false
+            for def in btnDefs {
+                name := def[1]
+                downTick[name] := 0
+                longFired[name] := false
+            }
+            downTick["LT"] := 0, longFired["LT"] := false, prevTrigDown["LT"] := false
+            downTick["RT"] := 0, longFired["RT"] := false, prevTrigDown["RT"] := false
             if (SettingsEditorDialogActive || settingsPrimaryActive)
                 SettingsEditorHandleController(
                     pressed, lx, ly, rx, ry, settingsCategoryDirection)
@@ -7491,19 +9676,14 @@ PollController() {
     ; interval; stop here so cursor motion and releases cannot be handled twice.
     ; Quick Menu, recovery, and Settings were evaluated first, allowing their
     ; chords to bring a normal-integrity SteamShell surface forward immediately.
-    ;
-    ; Not a clean return, though. The helper refuses to start processes or raise
-    ; SteamShell windows from a High-integrity token, so yielding everything left
-    ; TabTip, OSK, Explorer, Quick Menu, and Control Panel handled by neither
-    ; process -- with Task Manager focused there was no way to reach the on-screen
-    ; keyboard and type into it. Those five stay here, at normal integrity, and
-    ; are exactly the ones the helper's builtin switch declines.
     if ElevatedHelperOwnsForeground() {
-        ControllerHandleElevatedForeground(
-            buttons, lt, rt, pressed, released, now,
-            quickChordNow || settingsComboNow)
-        ResetControllerHoldState(
-            &prevViewDown, downTick, longFired, prevTrigDown, btnDefs)
+        prevViewDown := false
+        for def in btnDefs {
+            downTick[def[1]] := 0
+            longFired[def[1]] := false
+        }
+        downTick["LT"] := 0, longFired["LT"] := false, prevTrigDown["LT"] := false
+        downTick["RT"] := 0, longFired["RT"] := false, prevTrigDown["RT"] := false
         return
     }
 
@@ -7511,8 +9691,13 @@ PollController() {
     ; controller mouse/mapping mode is disabled. Stop here before processing any
     ; View/Back mapping, stick movement, scrolling, or D-pad passthrough.
     if (!EnableControllerMouseMode) {
-        ResetControllerHoldState(
-            &prevViewDown, downTick, longFired, prevTrigDown, btnDefs)
+        prevViewDown := false
+        for def in btnDefs {
+            downTick[def[1]] := 0
+            longFired[def[1]] := false
+        }
+        downTick["LT"] := 0, longFired["LT"] := false, prevTrigDown["LT"] := false
+        downTick["RT"] := 0, longFired["RT"] := false, prevTrigDown["RT"] := false
         return
     }
 
@@ -7533,9 +9718,15 @@ if (autoMouse && MouseHidden) {
 }
 viewDown := (buttons & 0x0020) || autoMouse
 if (!viewDown) {
+    prevViewDown := false
     ; Reset press tracking so Short/Long doesn't misfire when View/Back is not held.
-    ResetControllerHoldState(
-        &prevViewDown, downTick, longFired, prevTrigDown, btnDefs)
+    for def in btnDefs {
+    name := def[1]
+    downTick[name] := 0
+    longFired[name] := false
+    }
+    downTick["LT"] := 0, longFired["LT"] := false, prevTrigDown["LT"] := false
+    downTick["RT"] := 0, longFired["RT"] := false, prevTrigDown["RT"] := false
     return
 }
 
@@ -7562,35 +9753,37 @@ if (!prevViewDown) {
 }
 prevViewDown := true
 
+
     ; Right stick -> mouse move (RT can act as a "fast" modifier)
-    ApplyControllerMouseMove(rx, ry,
-        rt > 30 ? Round(ControllerMouseSpeed * ControllerMouseFastMultiplier)
-                : ControllerMouseSpeed)
+    if (rx != 0 || ry != 0) {
+    speed := ControllerMouseSpeed
+    if (rt > 30)
+    speed := Round(speed * ControllerMouseFastMultiplier)
+    dx := Round((rx / 32767.0) * speed)
+    dy := Round((-ry / 32767.0) * speed) ; up is negative screen y
+    if (dx != 0 || dy != 0)
+    try MouseMove(dx, dy, 0, "R")
+    }
 
     ; Left stick Y -> scroll wheel (rate-limited)
-    if (ly != 0 && now - lastScroll >= ControllerScrollIntervalMs) {
-        lastScroll := now
-        ApplyControllerMouseScroll(ly, ControllerScrollStep)
+    if (ly != 0) {
+    if (now - lastScroll >= ControllerScrollIntervalMs) {
+    lastScroll := now
+    steps := ControllerScrollStep
+    if (ly > 0) {
+    Loop steps
+    try Send("{WheelUp}")
+    } else {
+    Loop steps
+    try Send("{WheelDown}")
+    }
+    }
     }
 
     ; Configurable digital buttons (Short/Long) while holding View/Back
     for def in btnDefs {
     name := def[1]
     mask := def[2]
-
-    ; Left click is press-and-hold, so it can drag. Down on press, up on
-    ; release, and no Short/Long for that button -- the two models cannot both
-    ; apply, because Short fires on release and a drag has already started by
-    ; then. The Long slot is shown as reserved in the mapping editor.
-    if ControllerBindingHoldsMouseButton(GetBindingValue(name ".Short")) {
-    if (pressed & mask)
-    HoldControllerMouseButton("LButton")
-    if (released & mask)
-    ReleaseControllerMouseButtons()
-    downTick[name] := 0
-    longFired[name] := false
-    continue
-    }
 
     if (pressed & mask) {
     downTick[name] := now
@@ -7619,14 +9812,6 @@ prevViewDown := true
     ltReleasedEdge := (!ltIsDown && prevTrigDown["LT"])
     prevTrigDown["LT"] := ltIsDown
 
-    if ControllerBindingHoldsMouseButton(GetBindingValue("LT.Short")) {
-    if (ltPressedEdge)
-    HoldControllerMouseButton("LButton")
-    if (ltReleasedEdge)
-    ReleaseControllerMouseButtons()
-    downTick["LT"] := 0
-    longFired["LT"] := false
-    } else {
     if (ltPressedEdge) {
     downTick["LT"] := now
     longFired["LT"] := false
@@ -7643,7 +9828,6 @@ prevViewDown := true
     downTick["LT"] := 0
     longFired["LT"] := false
     }
-    }
 
     ; RT
     rtIsDown := (rt > 30)
@@ -7651,14 +9835,6 @@ prevViewDown := true
     rtReleasedEdge := (!rtIsDown && prevTrigDown["RT"])
     prevTrigDown["RT"] := rtIsDown
 
-    if ControllerBindingHoldsMouseButton(GetBindingValue("RT.Short")) {
-    if (rtPressedEdge)
-    HoldControllerMouseButton("LButton")
-    if (rtReleasedEdge)
-    ReleaseControllerMouseButtons()
-    downTick["RT"] := 0
-    longFired["RT"] := false
-    } else {
     if (rtPressedEdge) {
     downTick["RT"] := now
     longFired["RT"] := false
@@ -7674,7 +9850,6 @@ prevViewDown := true
     ExecuteControllerBinding("RT.Short")
     downTick["RT"] := 0
     longFired["RT"] := false
-    }
     }
 
     ; D-Pad arrows (one-shot per press)
@@ -8947,8 +11122,175 @@ IsSteamForeground() {
 }
 
 
+; ==============================================================================
+; AUDIO ASSIST (CoreAudio per-process peak)
+; ==============================================================================
+GuidBuf(guidStr) {
+    buf := Buffer(16, 0)
+    DllCall("ole32\CLSIDFromString", "WStr", guidStr, "Ptr", buf, "Int")
+    return buf
+}
 
+GetActiveAudioPidPeaksCached() {
+    static lastTick := 0
+    static lastMap := Map()
+    if (A_TickCount - lastTick < 750)
+    return lastMap
+    lastTick := A_TickCount
+    lastMap := GetActiveAudioPidPeaks()
+    return lastMap
+}
 
+GetActiveAudioPidPeaks() {
+    pids := Map()
+    static CLSID_MMDeviceEnumerator := "{BCDE0395-E52F-467C-8E3D-C4579291692E}"
+    static IID_IMMDeviceEnumerator := "{A95664D2-9614-4F35-A746-DE8DB63617E6}"
+    static IID_IAudioSessionControl2:= "{BFB7FF88-7239-4FC9-8FA2-07C950BE9C6D}"
+    static IID_IAudioMeterInformation:= "{C02216F6-8C67-4B5B-9D00-D008E73E0064}"
+
+    eRender := 0
+    eMultimedia := 1
+    CLSCTX_ALL := 23
+
+    pDevice := 0, pMgr := 0, pEnum := 0
+    try {
+    enum := ComObject(CLSID_MMDeviceEnumerator, IID_IMMDeviceEnumerator)
+
+    ComCall(4, enum, "UInt", eRender, "UInt", eMultimedia, "Ptr*", pDevice)
+    if (!pDevice)
+    return pids
+
+    dev := ComValue(13, pDevice)
+    iidMgr := GuidBuf("{77AA99A0-1BD6-484F-8BC7-2C654C9A9B6F}") ; IAudioSessionManager2
+
+    ComCall(3, dev, "Ptr", iidMgr, "UInt", CLSCTX_ALL, "Ptr", 0, "Ptr*", pMgr)
+        if (!pMgr)
+            return pids
+
+    mgr := ComValue(13, pMgr)
+
+    ComCall(5, mgr, "Ptr*", pEnum) ; GetSessionEnumerator
+        if (!pEnum)
+            return pids
+
+    sesEnum := ComValue(13, pEnum)
+
+    count := 0
+    ComCall(3, sesEnum, "Int*", count) ; GetCount
+
+    iidCtl2 := GuidBuf(IID_IAudioSessionControl2)
+    iidMeter := GuidBuf(IID_IAudioMeterInformation)
+
+    Loop count {
+    idx := A_Index - 1
+    pCtrl := 0
+    ComCall(4, sesEnum, "Int", idx, "Ptr*", pCtrl) ; GetSession
+    if (!pCtrl)
+    continue
+
+    ctrl := ComValue(13, pCtrl)
+
+    pid := 0
+    pCtrl2 := 0
+    ComCall(0, ctrl, "Ptr", iidCtl2, "Ptr*", pCtrl2)
+        if (pCtrl2) {
+        ctrl2 := ComValue(13, pCtrl2)
+        ComCall(14, ctrl2, "UInt*", pid) ; GetProcessId
+        }
+
+    peak := 0.0
+    pMeter := 0
+    ComCall(0, ctrl, "Ptr", iidMeter, "Ptr*", pMeter)
+        if (pMeter) {
+        meter := ComValue(13, pMeter)
+        ComCall(3, meter, "Float*", peak) ; GetPeakValue
+        }
+
+    if (pid) {
+    if (!pids.Has(pid))
+    pids[pid] := peak
+    else if (peak > pids[pid])
+    pids[pid] := peak
+    }
+
+        }
+
+        return pids
+    } catch {
+        ; Each non-null interface pointer is wrapped in ComValue immediately.
+        ; Those wrappers own and release the pointers automatically.
+        return pids
+    }
+}
+
+; ==============================================================================
+; LOGGING (fixed columns + truncate)
+; ==============================================================================
+; pendingBytes is the size of the line the caller is about to append.
+;
+; The running estimate exists so the common case costs no filesystem call at
+; all. Asking for the real size on every line was one syscall per line, and the
+; log is written from the controller poll and the window engine tick. The
+; estimate is only ever used to decide whether it is worth *asking*; the real
+; size is always confirmed before anything is deleted or moved.
+RotateLogIfNeeded(pendingBytes := 0) {
+    global LogPath, GameLogRotateMaxKB, GameLogRotateBackups
+    static estimatedSize := -1
+    if (GameLogRotateBackups <= 0)
+    return
+    if !FileExist(LogPath) {
+    estimatedSize := 0
+    return
+    }
+
+    threshold := GameLogRotateMaxKB * 1024
+    if (estimatedSize < 0) {
+    ; First call of the session, or a measurement that previously failed.
+    try estimatedSize := FileGetSize(LogPath)
+    catch {
+    estimatedSize := -1
+    return
+    }
+    }
+    estimatedSize += pendingBytes
+    if (estimatedSize <= threshold)
+    return
+
+    ; The estimate says we are over. Confirm against the real size before doing
+    ; anything destructive -- the file may have been truncated or replaced.
+    try estimatedSize := FileGetSize(LogPath)
+    catch
+    return
+    if (estimatedSize <= threshold)
+    return
+    estimatedSize := 0
+
+    Loop GameLogRotateBackups {
+    idx := GameLogRotateBackups - A_Index + 1
+    src := LogPath "." idx
+    dst := LogPath "." (idx + 1)
+    if (idx = GameLogRotateBackups) {
+    if FileExist(src)
+    try FileDelete(src)
+    } else {
+    if FileExist(src)
+    try FileMove(src, dst, 1)
+    }
+    }
+    try FileMove(LogPath, LogPath ".1", 1)
+}
+
+; Writes a line exactly as given, with no prefix.
+;
+; Only for the game-score diagnostic table. That table is columnar and formats
+; its own leading timestamp, so a second prefix would misalign every row of it.
+LogRawLine(line) {
+    global LogPath
+    ; StrLen undercounts multi-byte UTF-8, which is fine: the estimate only has to
+    ; be close enough to decide when to measure for real.
+    RotateLogIfNeeded(StrLen(line) + 2)
+    try FileAppend(line "`r`n", LogPath, "UTF-8")
+}
 
 ; Every operational line gets a timestamp and a level, matching XFE.
 ;
@@ -8961,17 +11303,102 @@ LogLine(message, level := "Info") {
     LogRawLine(FormatTime(A_Now, "yyyy-MM-dd HH:mm:ss") " [" level "] " message)
 }
 
+ShouldLogRateLimited() {
+    global _LastGameLogTick, GameLogIntervalMs
+    if (A_TickCount - _LastGameLogTick >= GameLogIntervalMs) {
+    _LastGameLogTick := A_TickCount
+    return true
+    }
+    return false
+}
 
+TruncPad(s, width, leftAlign := true) {
+    s := (s = "" ? "" : s)
+    if (StrLen(s) > width) {
+    if (width >= 2)
+    s := SubStr(s, 1, width - 1) "…"
+    else
+    s := SubStr(s, 1, width)
+    }
+    pad := width - StrLen(s)
+    if (pad <= 0)
+    return s
+    return leftAlign ? (s . StrRepeat(" ", pad)) : (StrRepeat(" ", pad) . s)
+}
 
+FmtPid(pid) {
+    return pid ? TruncPad(pid "", 6, false) : "------"
+}
 
+FmtCpu(cpu, known := true) {
+    return known ? TruncPad(Format("{:0.1f}", cpu + 0.0), 6, false) : TruncPad("---.-", 6, false)
+}
 
+FmtScore(score, known := true) {
+    return known ? Format("{:03}", ClampInt(score, 0, 999)) : "---"
+}
 
+FmtHwnd(hwnd) {
+    return hwnd ? TruncPad("0x" Format("{:08X}", hwnd), 10, true) : "----------"
+}
 
+FmtRect(x, y, w, h) {
+    return (x "," y " " w "x" h)
+}
 
+LogRow(ts, evt, scoreStr, exe, pidStr, cpuStr, audChar, fsChar, rectStr, hwndStr, reason, title := "") {
+    global GameLogIncludeTitles
+    line :=
+    TruncPad(ts, 19, true) " "
+    . TruncPad(evt, 7, true) " "
+    . TruncPad(scoreStr, 3, false) " "
+    . TruncPad(exe, 24, true) " "
+    . TruncPad(pidStr, 6, false) " "
+    . TruncPad(cpuStr, 6, false) " "
+    . TruncPad(audChar, 1, true) " "
+    . TruncPad(fsChar, 1, true) " "
+    . TruncPad(rectStr, 19, true) " "
+    . TruncPad(hwndStr, 10, true) " "
+    . TruncPad(reason, 22, true)
+
+    if (GameLogIncludeTitles) {
+    if (title = "")
+    title := "-"
+    line .= " " . TruncPad(title, 60, true)
+    }
+    return line
+}
 
 ; ==============================================================================
 ; GAME ASSIST
 ; ==============================================================================
+SortCandidatesByScoreAreaDesc(cands) {
+    n := cands.Length
+    if (n < 2)
+    return
+    Loop n - 1 {
+    i := A_Index
+    best := i
+    bestScore := cands[i]["score"]
+    bestArea := cands[i]["w"] * cands[i]["h"]
+    j := i + 1
+    while (j <= n) {
+    s := cands[j]["score"]
+    a := cands[j]["w"] * cands[j]["h"]
+    if (s > bestScore) || (s = bestScore && a > bestArea) {
+    best := j
+    bestScore := s
+    bestArea := a
+    }
+    j++
+    }
+    if (best != i) {
+    tmp := cands[i]
+    cands[i] := cands[best]
+    cands[best] := tmp
+    }
+    }
+}
 
 ActivateWindowRobust(hwnd) {
     id := "ahk_id " hwnd
@@ -8999,39 +11426,45 @@ ActivateWindowRobust(hwnd) {
     }
 }
 
+; Takes the foreground for one of SteamShell's own windows. A topmost window can
+; be visible over Steam while Steam still owns focus and continues processing
+; controller navigation. Temporarily joining the foreground thread's input
+; queue permits the user-opened Quick Menu to become the real foreground window.
+ForceForegroundWindow(hwnd) {
+    if !hwnd
+        return false
+    try {
+        if (DllCall("User32\GetForegroundWindow", "Ptr") = hwnd)
+            return true
+        currentForeground := DllCall("User32\GetForegroundWindow", "Ptr")
+        ourThread := DllCall("Kernel32\GetCurrentThreadId", "UInt")
+        foregroundThread := currentForeground
+            ? DllCall(
+                "User32\GetWindowThreadProcessId",
+                "Ptr", currentForeground, "Ptr", 0, "UInt")
+            : 0
+        attached := false
+        if (foregroundThread && foregroundThread != ourThread)
+            attached := DllCall(
+                "User32\AttachThreadInput",
+                "UInt", ourThread, "UInt", foregroundThread, "Int", 1) != 0
+        try {
+            DllCall("User32\BringWindowToTop", "Ptr", hwnd)
+            DllCall("User32\SetForegroundWindow", "Ptr", hwnd)
+        } finally {
+            if attached
+                DllCall(
+                    "User32\AttachThreadInput",
+                    "UInt", ourThread, "UInt", foregroundThread, "Int", 0)
+        }
+        return DllCall("User32\GetForegroundWindow", "Ptr") = hwnd
+    }
+    return false
+}
 
 ForceGameAssistOnce() {
     snapshot := WindowEngineBuildSnapshot()
     return TryBringFullscreenCandidateToFront(true, true, snapshot)
-}
-
-; The tunables the shared scorer needs, gathered in one place so both the
-; evaluate loop and any future caller pass exactly the same set.
-;
-; borderlessRatio was a bare 0.90 written inline in the scoring loop, with no
-; setting behind it and no name. It keeps that value here; naming it was the
-; only way to hand it to a shared function without inventing a setting the
-; product never had.
-WindowEngineScoreWeights() {
-    global FullscreenTolerance, FullscreenPosTolerancePx
-    global ScoreFullscreen, ScoreBorderlessLarge, ScoreTitleBonus
-    global GameCPUThresholdPercent, ScoreCpuAboveThreshold, ScoreCpuNonZeroBonus
-    global GameAllowZeroCpuAsCandidate
-    return Map(
-        "fullscreenTolerance", FullscreenTolerance,
-        "positionTolerancePx", FullscreenPosTolerancePx,
-        "borderlessRatio", 0.90,
-        "fullscreen", ScoreFullscreen,
-        "borderlessLarge", ScoreBorderlessLarge,
-        "titleBonus", ScoreTitleBonus,
-        "cpuThresholdPercent", GameCPUThresholdPercent,
-        "cpuAboveThreshold", ScoreCpuAboveThreshold,
-        "cpuNonZeroBonus", ScoreCpuNonZeroBonus,
-        "allowZeroCpu", GameAllowZeroCpuAsCandidate,
-        ; Carried for parity with the companion's weights map. The evaluate loop
-        ; still adds this bonus itself, because it only builds the audio map once
-        ; a candidate has survived the CPU verdict.
-        "audioActive", ScoreAudioActive)
 }
 
 WindowEngineEvaluateGame(snapshot, forceRun, &allowActivate, &skipReason) {
@@ -9096,18 +11529,15 @@ WindowEngineEvaluateGame(snapshot, forceRun, &allowActivate, &skipReason) {
         w := item["w"]
         h := item["h"]
         area := item["area"]
-        ; Shape verdict from SteamShell-Common.ahk, so the companion reaches the
-        ; same answer from the same numbers. CPU is still sampled only after this
-        ; passes, and audio only after CPU passes -- that laziness is why the
-        ; scorer is two calls rather than one.
-        shapeVerdict := GameWindowShapeVerdict(
-            Map("w", w, "h", h, "x", x, "y", y,
-                "screenW", A_ScreenWidth, "screenH", A_ScreenHeight,
-                "titleLength", StrLen(title),
-                "minimizedLegacy", minimizedLegacyGame),
-            WindowEngineScoreWeights())
-        nearFS := shapeVerdict["nearFS"]
-        if (!shapeVerdict["accepted"]) {
+        nearFS := minimizedLegacyGame
+            || (w >= (A_ScreenWidth * FullscreenTolerance)
+                && h >= (A_ScreenHeight * FullscreenTolerance)
+                && Abs(x) <= FullscreenPosTolerancePx
+                && Abs(y) <= FullscreenPosTolerancePx)
+        bigBorderless := !minimizedLegacyGame
+            && w >= (A_ScreenWidth * 0.90)
+            && h >= (A_ScreenHeight * 0.90)
+        if (!nearFS && !bigBorderless) {
             if (EnableGameScoreLogging && GameLogMode = "DIAGNOSTIC"
                 && GameLogRejectNearCandidates && area >= rejectAreaMin) {
                 rejects.Push(LogRow(
@@ -9119,24 +11549,29 @@ WindowEngineEvaluateGame(snapshot, forceRun, &allowActivate, &skipReason) {
             continue
         }
 
-        score := shapeVerdict["score"]
+        score := nearFS ? ScoreFullscreen : ScoreBorderlessLarge
+        if (StrLen(title) >= 3)
+            score += ScoreTitleBonus
 
         cpuSample := GetProcessCpuSample(item["pid"])
         cpu := cpuSample["usage"]
         cpuKnown := cpuSample["known"]
-        cpuVerdict := GameWindowCpuVerdict(
-            score, cpu, cpuKnown, WindowEngineScoreWeights())
-        score := cpuVerdict["score"]
-        if (!cpuVerdict["accepted"]) {
-            if (EnableGameScoreLogging && GameLogMode = "DIAGNOSTIC"
-                && GameLogRejectNearCandidates && area >= rejectAreaMin) {
-                rejects.Push(LogRow(
-                    NowStamp(), "REJ", FmtScore(score, true), proc,
-                    FmtPid(item["pid"]), FmtCpu(cpu, true), "-",
-                    nearFS ? "Y" : "N", FmtRect(x, y, w, h),
-                    FmtHwnd(item["hwnd"]), cpuVerdict["reject"], title))
+        if cpuKnown {
+            if (cpu >= GameCPUThresholdPercent)
+                score += ScoreCpuAboveThreshold
+            else if (cpu > 0)
+                score += ScoreCpuNonZeroBonus
+            else if (!GameAllowZeroCpuAsCandidate) {
+                if (EnableGameScoreLogging && GameLogMode = "DIAGNOSTIC"
+                    && GameLogRejectNearCandidates && area >= rejectAreaMin) {
+                    rejects.Push(LogRow(
+                        NowStamp(), "REJ", FmtScore(score, true), proc,
+                        FmtPid(item["pid"]), FmtCpu(cpu, true), "-",
+                        nearFS ? "Y" : "N", FmtRect(x, y, w, h),
+                        FmtHwnd(item["hwnd"]), "CPU_ZERO_STRICT", title))
+                }
+                continue
             }
-            continue
         }
 
         audioActive := false
@@ -9176,13 +11611,37 @@ WindowEngineEvaluateGame(snapshot, forceRun, &allowActivate, &skipReason) {
         LastBestCandidateText := "-"
     }
 
-    ; The table itself lives in SteamShell-Shared.ahk so the companion can render
-    ; the same one. Only the header is built here: the activation threshold and
-    ; the skip reason are this engine's own context.
-    headerNote := "min=" GameMinScoreToActivate
-    if (!allowActivate && skipReason != "")
-        headerNote := "SKIP_" skipReason " " headerNote
-    LogGameCandidateTable(candidates, rejects, headerNote)
+    if (EnableGameScoreLogging && (GameLogMode = "TOPN" || GameLogMode = "DIAGNOSTIC") && ShouldLogRateLimited()) {
+        if (candidates.Length = 0) {
+            LogRawLine(LogRow(
+                NowStamp(), "TOPN", "---", "-", "------", FmtCpu(0, false),
+                "-", "-", "-", "----------", "NO_CANDIDATES", "-"))
+        } else {
+            header := "min=" GameMinScoreToActivate
+            if (!allowActivate && skipReason != "")
+                header := "SKIP_" skipReason " " header
+            LogRawLine(LogRow(
+                NowStamp(), "TOPN", "---", "-", "------", FmtCpu(0, false),
+                "-", "-", "-", "----------", header, "-"))
+            maxN := Min(candidates.Length, GameLogTopN)
+            Loop maxN {
+                candidate := candidates[A_Index]
+                LogRawLine(LogRow(
+                    NowStamp(), "CAND#" A_Index,
+                    FmtScore(candidate["score"], true),
+                    candidate["proc"], FmtPid(candidate["pid"]),
+                    FmtCpu(candidate["cpu"], candidate["cpuKnown"]),
+                    candidate["audio"] ? "Y" : "N",
+                    candidate["nearFS"] ? "Y" : "N",
+                    FmtRect(candidate["x"], candidate["y"], candidate["w"], candidate["h"]),
+                    FmtHwnd(candidate["hwnd"]), "-", candidate["title"]))
+            }
+        }
+        if (GameLogMode = "DIAGNOSTIC") {
+            for _, line in rejects
+                LogRawLine(line)
+        }
+    }
     return candidates.Length ? candidates[1] : 0
 }
 
@@ -9302,8 +11761,64 @@ SteamBpmSurfacePresent() {
     return false
 }
 
+WindowEngineItemIntersectsMonitor(item) {
+    x1 := item["x"]
+    y1 := item["y"]
+    x2 := x1 + item["w"]
+    y2 := y1 + item["h"]
+    if (x2 <= x1 || y2 <= y1)
+        return false
+    try {
+        Loop MonitorGetCount() {
+            MonitorGet(A_Index, &left, &top, &right, &bottom)
+            if (x1 < right && x2 > left && y1 < bottom && y2 > top)
+                return true
+        }
+        return false
+    } catch {
+        return x1 < A_ScreenWidth && x2 > 0
+            && y1 < A_ScreenHeight && y2 > 0
+    }
+}
 
+WindowEngineIsLegacyApplicationSurface(item, allowMinimized := false) {
+    ; Older DirectX games sometimes expose an untitled top-level window or mark
+    ; their main render surface as WS_EX_TOOLWINDOW. Accept only a substantial,
+    ; unowned, on-screen surface that Windows is allowed to activate.
+    if (item["scriptOwned"] || item["desktop"] || item["steam"]
+        || item["proc"] = "")
+        return false
+    if (item["exStyle"] & 0x08000000) ; WS_EX_NOACTIVATE
+        return false
+    if (item["exStyle"] & 0x00000020) ; WS_EX_TRANSPARENT
+        return false
+    if (item["owner"] && !(item["exStyle"] & 0x00040000)) ; WS_EX_APPWINDOW
+        return false
+    if (item["minMax"] = -1) {
+        ; Exclusive-fullscreen games often minimize themselves as soon as Steam
+        ; wins focus. Task Switcher may still offer an activatable, unowned
+        ; top-level surface so selecting it can restore the application.
+        return allowMinimized
+    }
+    if (item["w"] < 320 || item["h"] < 200)
+        return false
+    minLegacyArea := Min(A_ScreenWidth * A_ScreenHeight * 0.10, 640 * 360)
+    if (item["area"] < minLegacyArea)
+        return false
+    return WindowEngineItemIntersectsMonitor(item)
+}
 
+WindowEngineIsMinimizedLegacyGameSurface(item) {
+    ; A minimized window has unusable geometry. Restrict automatic restoration
+    ; to unowned, activatable WS_POPUP surfaces without a caption—the retained
+    ; style signature of an exclusive-fullscreen game such as older DirectX
+    ; titles. Ordinary minimized desktop applications remain Task-Switcher-only.
+    if (!WindowEngineIsLegacyApplicationSurface(item, true)
+        || item["minMax"] != -1)
+        return false
+    return (item["style"] & 0x80000000) ; WS_POPUP
+        && !(item["style"] & 0x00C00000) ; WS_CAPTION
+}
 
 WindowEngineIsApplicationBlocker(item) {
     legacySurface := WindowEngineIsLegacyApplicationSurface(item)
@@ -9762,6 +12277,8 @@ ShowAlwaysFocusManager(*) {
     RefreshAlwaysFocusManagerLists()
 }
 
+
+
 ; ==============================================================================
 ; CONTROL PANEL + LIVE LOG VIEWER
 ; ==============================================================================
@@ -9787,6 +12304,7 @@ SyncControlPanel() {
     } catch {
     }
 }
+
 
 OnCtlMouseSpeedChanged(ctrl, *) {
     global ControllerMouseSpeed, CPCtlSpeedTextCtrl
@@ -9966,6 +12484,8 @@ UpdateStatusIndicators() {
     }
 }
 
+
+
 RefreshPanelLog(*) {
     global ControlGui, LiveLogGui, LogPath, PanelLogMaxLines, DetachedLogMaxLines
 
@@ -10064,6 +12584,9 @@ RevertPanelToRuntime(*) {
     RefreshPanelLog()
 }
 
+
+
+
 TimedDisableFromGui(*) {
     global ControlGui
     if !IsSet(ControlGui)
@@ -10079,6 +12602,7 @@ TimedDisableFromGui(*) {
     TempDisableFeature("Max", secs)
     if (ControlGui["cbLiveLog"].Value = 1)
     TempDisableFeature("LiveLog", secs)
+
 
     if (ControlGui["cbSkipLog"].Value = 1)
     TempDisableFeature("SkipLog", secs)
@@ -10127,14 +12651,16 @@ WriteToIniFromGui(*) {
     changes.Push(Map("section", "Logging", "key", "GameLogTopN", "value", GameLogTopN))
     }
     if !CommitIniChanges(changes) {
-        SteamShellMsgBox("SteamShell could not save the Control Panel settings.",
-            "Iconx", "SteamShell Settings")
+        MsgBox("SteamShell could not save the Control Panel settings.",
+            "SteamShell Settings", "Iconx")
         return
     }
 
     ReloadSettings()
     RefreshPanelLog()
 }
+
+
 
 ReloadFromIniFromGui(*) {
     ReloadSettings()
@@ -10143,6 +12669,7 @@ ReloadFromIniFromGui(*) {
     UpdateStatusIndicators()
     RefreshPanelLog()
 }
+
 
 GetFeatureState(feature) {
     global EnableGameForegroundAssist, EnableSteamRefocusMode, EnableWindowManagement
@@ -10232,10 +12759,8 @@ SettingsEditorMsgBox(message, options := "OK", title := "SteamShell Settings") {
     global SettingsGui, SettingsEditorDialogActive
     SettingsEditorNormalizeWindow()
     dialogOptions := Trim(options)
-    ; Not "SettingsGui if it exists": it may be hidden, and a dialog opened from
-    ; a window Settings itself opened belongs above THAT window.
-    ownerHwnd := SteamShellDialogOwnerHwnd()
-    dialogOptions .= ownerHwnd ? " Owner" ownerHwnd : " 262144"
+    if IsSet(SettingsGui)
+        dialogOptions .= " Owner" SettingsGui.Hwnd
     result := "Cancel"
     SettingsEditorDialogActive := true
     try {
@@ -10380,7 +12905,7 @@ SettingsEditorMarkDirty(*) {
 SettingsEditorAddCheckbox(category, section, key, label, &y, defaultValue := "false") {
     global SettingsGui, SettingsEditorFields
     ctrl := SettingsGui.AddCheckbox("x255 y" y " w690 h25", label)
-    ctrl.Value := ReadBool(section, key, ToBool(defaultValue, false))
+    ctrl.Value := ToBool(IniReadS(section, key, defaultValue), ToBool(defaultValue, false))
     ctrl.OnEvent("Click", SettingsEditorMarkDirty)
     SettingsEditorRegisterControl(category, ctrl)
     field := Map(
@@ -10893,7 +13418,7 @@ SettingsEditorApplyCategoryLayout(activeCategory) {
             }
         }
 
-        SettingsUpdateScrollBar(offset, maxOffset)
+        SettingsEditorUpdateScrollBar(offset, maxOffset)
     } finally {
         SettingsEditorSetRedraw(true)
         SettingsEditorRepaint()
@@ -10925,6 +13450,31 @@ SettingsEditorRepaint() {
         , "Int")
 }
 
+SettingsEditorUpdateScrollBar(offset, maxOffset) {
+    global SettingsEditorScrollBar, SettingsEditorContentTop, SettingsEditorContentBottom
+    if !IsObject(SettingsEditorScrollBar)
+        return
+    if (maxOffset <= 0) {
+        try SettingsEditorScrollBar.Visible := false
+        return
+    }
+
+    viewportHeight := Max(1, SettingsEditorContentBottom - SettingsEditorContentTop)
+    contentHeight := viewportHeight + maxOffset
+    scrollInfo := Buffer(28, 0)
+    NumPut("UInt", 28, scrollInfo, 0)
+    NumPut("UInt", 0x7, scrollInfo, 4) ; SIF_RANGE | SIF_PAGE | SIF_POS
+    NumPut("Int", 0, scrollInfo, 8)
+    NumPut("Int", contentHeight - 1, scrollInfo, 12)
+    NumPut("UInt", viewportHeight, scrollInfo, 16)
+    NumPut("Int", offset, scrollInfo, 20)
+    try DllCall("User32\SetScrollInfo"
+        , "Ptr", SettingsEditorScrollBar.Hwnd
+        , "Int", 2 ; SB_CTL
+        , "Ptr", scrollInfo
+        , "Int", true)
+    try SettingsEditorScrollBar.Visible := true
+}
 
 SettingsEditorGetScrollTrackPosition() {
     global SettingsEditorScrollBar
@@ -11003,16 +13553,9 @@ SettingsEditorMouseWheel(wParam, lParam, msg, hwnd) {
     rootHwnd := DllCall("GetAncestor", "Ptr", hwnd, "UInt", 2, "Ptr")
     if (rootHwnd != SettingsGui.Hwnd)
         return
-    ; A list box owns its own wheel: scrolling the page out from under the
-    ; category list while the user is picking a row is not helpful.
-    ;
-    ; ListBox was missing here and present in the companion, and that difference
-    ; was recorded as a deliberate one -- "XFE also excludes the ListBox class" --
-    ; when this window has a category ListBox of its own. Hovering it and
-    ; scrolling moved the settings page instead of the list.
     controlClass := ""
     try controlClass := WinGetClass("ahk_id " hwnd)
-    if (controlClass = "ListBox" || controlClass = "SysListView32")
+    if (controlClass = "SysListView32")
         return
     delta := (wParam >> 16) & 0xFFFF
     if (delta & 0x8000)
@@ -11042,37 +13585,47 @@ SettingsEditorRevealControl(ctrl) {
 }
 
 SettingsEditorControllerActive() {
+    global SettingsGui, ControllerMapGui, AlwaysFocusGui, ControlGui
+    global SetupAssistantGui, AutoLogonGui, SetupCompletionGui
+    global HealthCheckGui, QuickMenuLayoutGui, LiveLogGui
     global SettingsEditorDialogActive, ScriptPid
-    ; Any window this process owns is a surface the user has to be able to move
-    ; around, so this asks that question directly instead of naming windows.
-    ;
-    ; This is the same rule XFE uses, and it used to be an enumerated list here.
-    ; The list was justified on the grounds that standalone evaluates this before
-    ; the Quick Menu branch; that was simply wrong -- PollController returns from
-    ; the Quick Menu branch first. The other worry, that the splash and the
-    ; desktop backdrop would wrongly qualify, is also unfounded: all three
-    ; presentation windows are created WS_EX_NOACTIVATE and can never be the
-    ; active window. What the list actually did was go stale.
-    if SettingsEditorDialogActive
-        return true
+    rootHwnds := []
+    for _, guiRef in [
+        IsSet(SettingsGui) ? SettingsGui : 0,
+        IsSet(ControllerMapGui) ? ControllerMapGui : 0,
+        IsSet(AlwaysFocusGui) ? AlwaysFocusGui : 0,
+        IsSet(ControlGui) ? ControlGui : 0,
+        IsSet(SetupAssistantGui) ? SetupAssistantGui : 0,
+        IsSet(AutoLogonGui) ? AutoLogonGui : 0,
+        IsSet(SetupCompletionGui) ? SetupCompletionGui : 0,
+        IsSet(HealthCheckGui) ? HealthCheckGui : 0,
+        IsSet(QuickMenuLayoutGui) ? QuickMenuLayoutGui : 0,
+        IsSet(LiveLogGui) ? LiveLogGui : 0] {
+        if (IsObject(guiRef) && IsGuiVisible(guiRef))
+            rootHwnds.Push(guiRef.Hwnd)
+    }
+    if (rootHwnds.Length = 0)
+        return false
     activeHwnd := 0
     try activeHwnd := WinGetID("A")
     if !activeHwnd
         return false
+    if SettingsEditorDialogActive
+        return true
     try {
         if (WinGetPID("ahk_id " activeHwnd) = ScriptPid)
             return true
     }
-    ; Native common dialogs may be hosted outside this process. Accept an active
-    ; window whose owner chain leads back to a window of ours.
+    ; Native common dialogs may be hosted outside the script process. Accept an
+    ; active window whose owner chain leads back to Settings.
     ownerHwnd := activeHwnd
     Loop 8 {
         ownerHwnd := DllCall(
             "User32\GetWindow", "Ptr", ownerHwnd, "UInt", 4, "Ptr") ; GW_OWNER
         if !ownerHwnd
             break
-        try {
-            if (WinGetPID("ahk_id " ownerHwnd) = ScriptPid)
+        for _, rootHwnd in rootHwnds {
+            if (ownerHwnd = rootHwnd)
                 return true
         }
     }
@@ -11287,9 +13840,13 @@ SettingsEditorComboIsOpen(ctrl) {
 
 SettingsEditorHandlePointer(pressed, rx := 0, ry := 0) {
     global ControllerMouseSpeed
-    ; No fast modifier here: the triggers change Settings category, so RT is not
-    ; free to mean "move faster" on this surface.
-    ApplyControllerMouseMove(rx, ry, ControllerMouseSpeed)
+    if (rx != 0 || ry != 0) {
+        speed := ControllerMouseSpeed
+        dx := Round((rx / 32767.0) * speed)
+        dy := Round((-ry / 32767.0) * speed)
+        if (dx != 0 || dy != 0)
+            try MouseMove(dx, dy, 0, "R")
+    }
 
     ; RB uses its configured short action inside Settings (Left Click by
     ; default), allowing the right-stick pointer to operate every control.
@@ -12050,6 +14607,12 @@ SettingsEditorResetAll(*) {
     SettingsEditorReloadAfterFileChange()
 }
 
+HealthResult(results, status, checkName, detail) {
+    results.Push(Map(
+        "status", StrUpper(status),
+        "name", checkName,
+        "detail", detail))
+}
 
 AppendProcessIntegrityHealth(results, checkName, pid, expectedIntegrity := "Medium") {
     global ExpectedInteractiveUserSid, ExpectedInteractiveSessionId
@@ -12075,9 +14638,7 @@ AppendProcessIntegrityHealth(results, checkName, pid, expectedIntegrity := "Medi
             : "; interactive user or session does not match."))
 }
 
-; Seam for SteamShell-Shared.ahk: this tree's own checks. The harness around them
-; -- the window, the list, the report text, Copy and Refresh -- is shared.
-ProductHealthResults() {
+GetSteamShellHealthResults() {
     global SteamPath, SettingsPath, CurrentSettingsSchemaVersion
     global ShellRegKey, SteamShellInstalledExe, SteamShellVersion
     global SteamShellDataDir, SteamShellInstallationMode
@@ -12098,17 +14659,12 @@ ProductHealthResults() {
     global EnableMouseParkOnFocusChange, MouseParkLastResult
     global EnableElevatedInputHelper, DesktopMode
     global ElevatedHelperAvailable, ElevatedHelperPid, ElevatedHelperLastError
-    global ElevatedHelperPath
     global StandardLaunchLastRoute, StandardLaunchLastError
     global StandardLaunchSuccessCount, StandardLaunchFailureCount
     global StandardLaunchTrackedProcesses
     global ExpectedInteractiveUserSid, ExpectedInteractiveSessionId
 
     results := []
-    ; A_ScriptDir rather than SteamShellInstallDir: the question is where this
-    ; executable is running from, not where the record says it was put.
-    AddInstallationRecordHealthRow(
-        results, A_ScriptDir, SteamShellDataDir, SteamShellInstallationMode)
     HealthResult(results, "info", "Session state", SessionState)
     HealthResult(results, "info", "Presentation mode",
         DesktopMode
@@ -12134,26 +14690,6 @@ ProductHealthResults() {
                 . "; input activates only for High/System foreground windows, and geometry follows Shell mode."
             : ElevatedHelperLastError)
     HealthResult(results, helperStatus, "Elevated helper", helperDetail)
-    ; Reported separately from "is it running" because this is the property that
-    ; makes elevating it safe at all, and it is the one a hand-moved or
-    ; pre-1.9.9.2 installation silently loses.
-    helperBinaryPath := ElevatedHelperPath != ""
-        ? ElevatedHelperPath : GetElevatedHelperPath()
-    if !EnableElevatedInputHelper {
-        HealthResult(results, "info", "Elevated helper protection",
-            "Not evaluated because the helper is disabled in Settings.")
-    } else if !FileExist(helperBinaryPath) {
-        HealthResult(results, "warn", "Elevated helper protection",
-            "The helper is not installed yet: " helperBinaryPath)
-    } else if ElevatedHelperLocationIsProtected(
-        helperBinaryPath, &helperProtectionDetail) {
-        HealthResult(results, "pass", "Elevated helper protection",
-            "The helper and its directory have trusted owners, and only SYSTEM and Administrators can write " helperBinaryPath ".")
-    } else {
-        HealthResult(results, "fail", "Elevated helper protection",
-            helperProtectionDetail
-            . " SteamShell refuses to elevate it. Run SteamShell as administrator and apply Setup again.")
-    }
     if !A_IsAdmin {
         standardCapabilityStatus := "pass"
         standardCapabilityDetail :=
@@ -12286,7 +14822,7 @@ ProductHealthResults() {
             (desktopVisible ? "visible." : "hidden."))
     }
 
-    startupEnabled := ReadBool("StartupPrograms", "Enable", true)
+    startupEnabled := ToBool(IniReadS("StartupPrograms", "Enable", "true"), true)
     invalidStartup := []
     configuredStartup := 0
     Loop 20 {
@@ -12399,8 +14935,55 @@ ProductHealthResults() {
     return results
 }
 
+FormatHealthReport(results := 0) {
+    global SteamShellVersion
+    if !IsObject(results)
+        results := GetSteamShellHealthResults()
+    report := "SteamShell " SteamShellVersion " Health Check`r`n"
+        . "Generated: " NowStamp() "`r`n`r`n"
+    for _, item in results
+        report .= "[" item["status"] "] " item["name"] "`r`n  " item["detail"] "`r`n"
+    return report
+}
 
+RefreshHealthCheck(*) {
+    global HealthCheckGui, HealthCheckResults
+    HealthCheckResults := GetSteamShellHealthResults()
+    if !IsSet(HealthCheckGui)
+        return
+    try {
+        listView := HealthCheckGui["HealthResults"]
+        listView.Delete()
+        counts := Map("PASS", 0, "WARN", 0, "FAIL", 0, "INFO", 0)
+        for _, item in HealthCheckResults {
+            listView.Add("", item["status"], item["name"], item["detail"])
+            if counts.Has(item["status"])
+                counts[item["status"]] += 1
+        }
+        listView.ModifyCol(1, 75)
+        listView.ModifyCol(2, 185)
+        listView.ModifyCol(3, 555)
+        HealthCheckGui["HealthSummary"].Text :=
+            counts["PASS"] " passed   •   " counts["WARN"] " warnings   •   "
+            . counts["FAIL"] " failed   •   " counts["INFO"] " informational"
+    }
+}
 
+CopyHealthReport(*) {
+    global HealthCheckResults
+    A_Clipboard := FormatHealthReport(HealthCheckResults)
+}
+
+SanitizeDiagnosticText(text) {
+    userProfile := EnvGet("USERPROFILE")
+    localAppData := EnvGet("LOCALAPPDATA")
+    if (userProfile != "")
+        text := StrReplace(text, userProfile, "%USERPROFILE%", false)
+    if (localAppData != "")
+        text := StrReplace(text, localAppData, "%LOCALAPPDATA%", false)
+    text := StrReplace(text, A_ScriptDir, "%STEAMSHELL_DIR%", false)
+    return text
+}
 
 ExportDiagnosticBundle(*) {
     global HealthCheckResults, SettingsPath, LogPath, SteamShellVersion, ShellRegKey
@@ -12410,7 +14993,7 @@ ExportDiagnosticBundle(*) {
     zipPath := A_Desktop "\SteamShell-Diagnostics-" stamp ".zip"
     try {
         DirCreate(tempDir)
-        results := ProductHealthResults()
+        results := GetSteamShellHealthResults()
         HealthCheckResults := results
         FileAppend(
             SanitizeDiagnosticText(FormatHealthReport(results)),
@@ -12469,70 +15052,46 @@ ExportDiagnosticBundle(*) {
     }
 }
 
-
-; The window a dialog must sit above, or 0 when none is showing.
-;
-; Almost every SteamShell window is +AlwaysOnTop, because this is a kiosk shell
-; that has to stay in front of Steam and games. The consequence is that an
-; unowned MsgBox opens BEHIND whichever of them is up, and the user is left with
-; a frozen window and nothing to click -- there is no taskbar to find the dialog
-; on either. An owned window is always drawn above its owner, so ownership is the
-; fix; this is the one place that decides who the owner is.
-;
-; Ordered innermost first: a dialog raised from the Controller Test belongs above
-; the Controller Test, not above the Settings window behind it.
-SteamShellDialogOwnerHwnd() {
-    global ScriptPid
-    ; The window the dialog must appear above is the one the user is looking at,
-    ; which is the active window. Asking that directly beats an ordered list of
-    ; every window in the application, which cannot express "innermost" any
-    ; better and has to be maintained forever.
-    ;
-    ; Returning 0 when the active window is not ours is deliberate: a dialog
-    ; owned by a SteamShell window that is itself behind a fullscreen game would
-    ; be behind the game too. The caller adds MB_TOPMOST instead.
-    ;
-    ; The splash, splash overlay, and desktop backdrop cannot be selected here
-    ; because all three are WS_EX_NOACTIVATE and never become active.
-    activeHwnd := 0
-    try activeHwnd := WinGetID("A")
-    if !activeHwnd
-        return 0
-    try {
-        if (WinGetPID("ahk_id " activeHwnd) = ScriptPid)
-            return activeHwnd
+ShowHealthCheck(*) {
+    global HealthCheckGui, SteamShellVersion
+    if !IsSet(HealthCheckGui) {
+        HealthCheckGui := Gui("+AlwaysOnTop +ToolWindow -Resize", "SteamShell Health Check")
+        HealthCheckGui.Opt("+OwnDialogs")
+        HealthCheckGui.SetFont("s10", "Segoe UI")
+        title := HealthCheckGui.AddText("xm ym w850 h30", "SteamShell Health Check")
+        title.SetFont("s17 Bold", "Segoe UI")
+        HealthCheckGui.AddText(
+            "xm y+2 w850 h36 +Wrap",
+            "Read-only checks for paths, recovery, shell registration, integrations, and safety settings.")
+        HealthCheckGui.AddListView(
+            "xm y+8 w850 r13 -Multi vHealthResults", ["Status", "Check", "Details"])
+        HealthCheckGui.AddText("xm y+8 w850 h24 vHealthSummary", "")
+        refreshButton := HealthCheckGui.AddButton("xm y+8 w145 h32", "Refresh")
+        refreshButton.OnEvent("Click", RefreshHealthCheck)
+        copyButton := HealthCheckGui.AddButton("x+8 yp w145 h32", "Copy Report")
+        copyButton.OnEvent("Click", CopyHealthReport)
+        exportButton := HealthCheckGui.AddButton("x+8 yp w190 h32", "Export Diagnostic ZIP")
+        exportButton.OnEvent("Click", ExportDiagnosticBundle)
+        closeButton := HealthCheckGui.AddButton("x+8 yp w120 h32", "Close")
+        closeButton.OnEvent("Click", (*) => HealthCheckGui.Hide())
+        HealthCheckGui.OnEvent("Close", (*) => HealthCheckGui.Hide())
+        HealthCheckGui.OnEvent("Escape", (*) => HealthCheckGui.Hide())
     }
-    return 0
-}
-
-; The default MsgBox for this application.
-;
-; Owns the dialog to whatever is on top, and when nothing is showing adds
-; MB_TOPMOST (262144) instead -- SteamShell hides the taskbar, so a message with
-; neither an owner nor topmost can end up behind a fullscreen game with no way
-; to reach it.
-SteamShellMsgBox(message, options := "OK", title := "SteamShell") {
-    global SettingsEditorDialogActive
-    dialogOptions := Trim(options)
-    ownerHwnd := SteamShellDialogOwnerHwnd()
-    dialogOptions .= ownerHwnd ? " Owner" ownerHwnd : " 262144"
-    SettingsEditorDialogActive := true
-    try return MsgBox(message, title, dialogOptions)
-    finally {
-        SettingsEditorDialogActive := false
-        if ownerHwnd
-            try WinActivate("ahk_id " ownerHwnd)
-    }
+    HealthCheckGui.Show()
+    CenterGuiOnTargetMonitor(HealthCheckGui)
+    RefreshHealthCheck()
 }
 
 SetupAssistantMsgBox(message, options := "OK", title := "SteamShell Setup") {
     global SetupAssistantGui, SettingsGui, SettingsEditorDialogActive
     dialogOptions := Trim(options)
-    ownerHwnd := SteamShellDialogOwnerHwnd()
+    ownerHwnd := 0
+    if IsSet(SetupAssistantGui) && IsGuiVisible(SetupAssistantGui)
+        ownerHwnd := SetupAssistantGui.Hwnd
+    else if IsSet(SettingsGui) && IsGuiVisible(SettingsGui)
+        ownerHwnd := SettingsGui.Hwnd
     if ownerHwnd
         dialogOptions .= " Owner" ownerHwnd
-    else
-        dialogOptions .= " 262144"
     SettingsEditorDialogActive := true
     try return MsgBox(message, title, dialogOptions)
     finally {
@@ -12760,9 +15319,7 @@ SetupAssistantSelectDirectory(prompt, initialDirectory := "") {
     selectedDirectory := ""
     SettingsEditorDialogActive := true
     try {
-        ; +OwnDialogs is per-thread in AutoHotkey, so it has to be set again
-        ; here rather than relying on the one applied when the GUI was created.
-        SetupAssistantGui.Opt("+OwnDialogs -AlwaysOnTop")
+        SetupAssistantGui.Opt("-AlwaysOnTop")
         WinSetAlwaysOnTop(0, "ahk_id " SetupAssistantGui.Hwnd)
         selectedDirectory := FileSelect("D", initialDirectory, prompt)
     } catch {
@@ -12789,858 +15346,15 @@ SetupAssistantBrowseInstall(*) {
     SetupAssistantRefreshDeployment()
 }
 
-; The XFE logon task, queried rather than inferred from the registry record.
-;
-; The task is the thing that actually makes XFE start, so it is the honest
-; answer to "is XFE installed here" even when the HKCU record was lost, written
-; by a different profile, or never made it (a failed registration still leaves a
-; working manual installation behind).
-SteamShellXfeLogonTaskExists(name := "") {
-    ; Defaults to the current name so existing detection callers are unchanged;
-    ; RemoveXfeLogonTask passes the legacy name too, to confirm its own work.
-    if (Trim(name) = "")
-        name := XfeLogonTaskName()
-    taskCommand := QuoteWindowsCommandLineArg(A_WinDir "\System32\schtasks.exe")
-        . " /query /tn " QuoteWindowsCommandLineArg(name)
-    try return RunWait(taskCommand, A_WinDir, "Hide") = 0
-    return false
-}
-
-; True when SteamShell is the shell Winlogon will actually start. Read from
-; Winlogon rather than from SteamShell's own record, for the same reason: the
-; registry value is the thing with the effect.
-SteamShellIsRegisteredWindowsShell() {
-    global ShellRegKey
-    configured := ""
-    try configured := RegRead(ShellRegKey, "Shell")
-    return InStr(StrLower(configured), "steamshell") > 0
-}
-
-; Where the installed shell actually lives, from whichever record still exists.
-;
-; InstalledPath is written only for MANAGED installs -- a portable copy is
-; deliberately self-describing through its sidecar and must not overwrite a
-; managed installation's record -- so a portable installation registered as the
-; shell has no InstalledPath at all. Detection recognised it as Standalone, since
-; registration says so, and then had nowhere to point: Setup Assistant could not
-; preselect the folder it was being asked to upgrade.
-;
-; RegisteredPath is the record that covers it. It is written whenever the shell
-; is registered, portable or not, because it is written inside the "if
-; registerShell" branch rather than the "if !portableMode" one. The Winlogon
-; value itself is the last resort, and the most authoritative of the three: it is
-; what Windows will actually launch.
-; Whether the installed shell is a portable copy.
-;
-; Inferred from the absence of InstalledPath rather than from InstallationMode,
-; because InstallationMode is written by the same "if !portableMode" branch that
-; writes InstalledPath -- a portable installation records neither. What it does
-; record, when it is the registered shell, is RegisteredPath. So "registered but
-; no InstalledPath" is exactly the shape of a portable installation, and it is
-; the shape the deploy code guarantees rather than one inferred from a name.
-InstalledShellIsPortable() {
-    global SteamShellRegKey
-    recorded := ""
-    try recorded := RegRead(SteamShellRegKey, "InstalledPath")
-    if (Trim(recorded) != "")
-        return false
-    registered := ""
-    try registered := RegRead(SteamShellRegKey, "RegisteredPath")
-    return Trim(registered) != "" || SteamShellIsRegisteredWindowsShell()
-}
-
-ResolveInstalledShellExecutable() {
-    global SteamShellRegKey, ShellRegKey
-    candidates := []
-    recorded := ""
-    try recorded := RegRead(SteamShellRegKey, "InstalledPath")
-    candidates.Push(Trim(recorded))
-    registered := ""
-    try registered := RegRead(SteamShellRegKey, "RegisteredPath")
-    candidates.Push(Trim(registered))
-    configured := ""
-    try configured := RegRead(ShellRegKey, "Shell")
-    ; Stored as a quoted command, so it needs the same parsing a saved previous
-    ; shell gets rather than being treated as a bare path.
-    candidates.Push(ShellCommandExecutablePath(configured))
-    for _, candidate in candidates {
-        if (candidate != "" && FileExist(candidate) != "")
-            return candidate
-    }
-    return ""
-}
-
-; What is already on this PC, so Setup can open on the answer instead of the
-; default. Detection is deliberately evidence-first -- the Winlogon value and the
-; scheduled task -- and resolves the install directory from whichever record
-; survives, which for a portable install is not InstalledPath.
-DetectExistingSteamShellInstallation(&product, &directory, &registeredAsShell, &xfeStartsAtLogon) {
-    global SteamShellRegKey
-    product := ""
-    directory := ""
-    registeredAsShell := SteamShellIsRegisteredWindowsShell()
-    xfeStartsAtLogon := SteamShellXfeLogonTaskExists()
-
-    xfePath := GetXfeInstalledPath()
-
-    ; INSTALLED means REGISTERED TO START, not "a file is present".
-    ;
-    ; Both uninstalls deliberately leave the executable and its settings on disk
-    ; -- they say so to the user in as many words -- so file presence outlives
-    ; the installation it was standing in for. Testing it made an uninstalled
-    ; product report itself installed for the rest of the machine's life, and
-    ; because XFE is checked first, it did so over a shell installation that was
-    ; genuinely there.
-    ;
-    ; What does not outlive an uninstall is the registration: the logon task and
-    ; its flag for XFE, the Winlogon shell value and RegisteredPath for the
-    ; shell. Those are removed by the code that removes the installation, which
-    ; is what makes them the honest question to ask.
-    xfeRegisteredFlag := false
-    try xfeRegisteredFlag := ToBool(
-        RegRead(SteamShellRegKey, "XfeLogonTaskRegistered", "false"), false)
-    shellRegisteredPath := ""
-    try shellRegisteredPath := RegRead(SteamShellRegKey, "RegisteredPath")
-
-    ; XFE is the more specific claim and is still tested first, but now on
-    ; evidence that an uninstall actually clears.
-    if (xfeStartsAtLogon || xfeRegisteredFlag) {
-        product := "XFE"
-        if (xfePath != "" && FileExist(xfePath) != "")
-            SplitPath(xfePath, , &directory)
-        return true
-    }
-    if (registeredAsShell || Trim(shellRegisteredPath) != "") {
-        product := "Standalone"
-        installedExe := ResolveInstalledShellExecutable()
-        if (installedExe != "")
-            SplitPath(installedExe, , &directory)
-        return true
-    }
-    return false
-}
-
-; Opens Setup on what is already installed rather than on the defaults, so an
-; upgrade does not depend on the user reproducing choices they made months ago.
-; Everything remains editable; this only changes where the dialog starts.
-SetupAssistantPreselectExistingInstallation() {
-    global SetupAssistantGui
-    if !IsSet(SetupAssistantGui)
-        return false
-    if !DetectExistingSteamShellInstallation(
-        &product, &directory, &registeredAsShell, &xfeStartsAtLogon)
-        return false
-
-    isXfe := SteamShellProductIsXfe(product)
-    try SetupAssistantGui["SetupProductStandalone"].Value := isXfe ? 0 : 1
-    try SetupAssistantGui["SetupProductXfe"].Value := isXfe ? 1 : 0
-    SetupAssistantRefreshProductMode()
-
-    ; Braced deliberately: AutoHotkey v2 cannot parse a bare "try" as an if-body
-    ; when an else follows it.
-    if isXfe {
-        try SetupAssistantGui["SetupRegisterXfeStartup"].Value := xfeStartsAtLogon ? 1 : 0
-    } else {
-        try SetupAssistantGui["SetupRegisterShell"].Value := registeredAsShell ? 1 : 0
-    }
-
-    if (directory != "") {
-        standardDirectory := isXfe
-            ? SetupAssistantXfeStandardDirectory()
-            : A_ProgramFiles "\SteamShell"
-        if (StrLower(RTrim(directory, "\/")) = StrLower(RTrim(standardDirectory, "\/"))) {
-            try SetupAssistantGui["SetupStandard"].Value := 1
-        } else if (StrLower(RTrim(directory, "\/")) = StrLower(RTrim(A_ScriptDir, "\/"))) {
-            try SetupAssistantGui["SetupCurrent"].Value := 1
-        } else {
-            try SetupAssistantGui["SetupBrowse"].Value := 1
-            try SetupAssistantGui["SetupInstallPath"].Text := directory
-        }
-    }
-    ; Restored, not left at its default. Without this an upgrade of a portable
-    ; installation came back as "Custom": the browse radio was selected and this
-    ; box was clear, and SetupAssistantGetDeployment reads exactly those two
-    ; things. Applying would then have demanded administrator approval and moved
-    ; the data into ProgramData -- converting a portable install into a managed
-    ; one because a checkbox was never ticked back.
-    if (!isXfe && InstalledShellIsPortable())
-        try SetupAssistantGui["SetupPortable"].Value := 1
-
-    SetupAssistantRefreshDeployment()
-
-    detail := isXfe
-        ? "Existing SteamShell-XFE installation detected"
-            . (directory != "" ? " at " directory : "")
-            . (xfeStartsAtLogon ? " with a sign-in logon task." : " (no logon task).")
-        : "Existing SteamShell installation detected"
-            . (directory != "" ? " at " directory : "")
-            . (registeredAsShell
-                ? " and it is the registered Windows shell."
-                : " (not currently the registered Windows shell).")
-    SetupAssistantSetStatus(detail " Apply upgrades it; every option below can still be changed.")
-    return true
-}
-
-; ==============================================================================
-; OPTIONAL FILE REMOVAL
-; ==============================================================================
-; Setup records where everything went, so finding the files is not the problem.
-; The problem is that an install DIRECTORY is not necessarily ours. A portable
-; EXE dropped into a folder of other tools, a "use current location" install, a
-; browsed directory the user already had -- deleting any of those wholesale
-; destroys files that have nothing to do with SteamShell.
-;
-; So the rule is: remove a directory only when SteamShell chose the path itself
-; and created it. Everywhere else, remove only the exact files this installer
-; wrote and leave the directory alone. That is why the plan below is a list the
-; user can read before agreeing to it, rather than a folder path and a promise.
-
-; The registry record is a claim, not proof. It is written by whichever copy ran
-; Setup, it survives a manual delete, and a freshly downloaded EXE inherits it
-; wholesale. Before removing a directory, confirm it still contains something
-; SteamShell actually put there -- a folder that no longer holds any of these is
-; no longer demonstrably ours, whatever HKCU says about it.
-SteamShellDirectoryContainsOurArtifacts(path) {
-    static MARKERS := [
-        "SteamShell.exe",
-        "SteamShell-XFE.exe",
-        "SteamShellSettings.ini",
-        "SteamShell-XFE.ini",
-        "SteamShell-XFE-Controllers.ini",
-        "bin\SteamShell-Helper.exe",
-        "components\bin\SteamShell-Helper.exe",
-        "SteamShell\SteamShellSettings.ini",
-        "SteamShell-Helper.exe",
-        "SteamShell\bin\SteamShell-Helper.exe",
-        "logs\SteamShell.log",
-        "logs\SteamShell-Helper.log"]
-    path := RTrim(Trim(path), "\/")
-    if (path = "")
-        return false
-    for _, marker in MARKERS {
-        if FileExist(path "\" marker)
-            return true
-    }
-    ; A data directory that has been emptied of logs still counts when it holds
-    ; the backup folder Setup creates, which nothing else would put there.
-    return DirExist(path "\backups") && FileExist(path "\backups\*.bak")
-}
-
-; Independent evidence of where the shell installation is: the Winlogon value is
-; the path Windows will actually run, so it does not depend on SteamShell's own
-; bookkeeping being intact.
-SteamShellRegisteredShellDirectory() {
-    global ShellRegKey
-    configured := ""
-    try configured := RegRead(ShellRegKey, "Shell")
-    if !InStr(StrLower(configured), "steamshell")
-        return ""
-    resolved := ShellCommandExecutablePath(configured)
-    if (resolved = "")
-        return ""
-    SplitPath(GetAbsoluteSteamShellPath(resolved), , &directory)
-    return directory
-}
-
-; The same for XFE, read out of the logon task's own action. Failure is treated
-; as "no second opinion available", never as an error.
-SteamShellXfeLogonTaskDirectory() {
-    global ScriptPid
-    xmlPath := A_Temp "\SteamShell-xfe-query-" ScriptPid ".xml"
-    try {
-        if FileExist(xmlPath)
-            FileDelete(xmlPath)
-        command := A_ComSpec ' /d /c '
-            . QuoteWindowsCommandLineArg(A_WinDir "\System32\schtasks.exe")
-            . " /query /tn " QuoteWindowsCommandLineArg(XfeLogonTaskName())
-            . " /xml ONE > " QuoteWindowsCommandLineArg(xmlPath)
-        RunWait(command, A_WinDir, "Hide")
-        if !FileExist(xmlPath)
-            return ""
-        text := ""
-        try text := FileRead(xmlPath, "UTF-16")
-        if (Trim(text) = "")
-            try text := FileRead(xmlPath, "UTF-8")
-        if !RegExMatch(text, "is)<Command>(.*?)</Command>", &commandMatch)
-            return ""
-        exePath := Trim(commandMatch[1])
-        exePath := StrReplace(StrReplace(exePath, "&quot;", Chr(34)), "&amp;", "&")
-        exePath := Trim(ExpandEnvVars(Trim(exePath, " `t`r`n" Chr(34))))
-        if (exePath = "" || !FileExist(exePath))
-            return ""
-        SplitPath(GetAbsoluteSteamShellPath(exePath), , &directory)
-        return directory
-    } catch {
-        return ""
-    } finally {
-        try {
-            if FileExist(xmlPath)
-                FileDelete(xmlPath)
-        }
-    }
-}
-
-; Directories SteamShell picked and created, and can therefore remove whole.
-SteamShellRemovableDirectoryKind(path, installDirectory, product) {
-    path := RTrim(GetAbsoluteSteamShellPath(path), "\/")
-    installDirectory := RTrim(GetAbsoluteSteamShellPath(installDirectory), "\/")
-    if (path = "")
-        return ""
-    lower := StrLower(path)
-    ; Locations SteamShell chose, not the user.
-    if (lower = StrLower(RTrim(SteamShellProgramData "\SteamShell", "\/")))
-        return "SteamShell's writable data directory"
-    if (!SteamShellProductIsXfe(product)
-        && lower = StrLower(RTrim(A_ProgramFiles "\SteamShell", "\/")))
-        return "the Program Files installation directory"
-    if (SteamShellProductIsXfe(product)
-        && lower = StrLower(RTrim(SetupAssistantXfeStandardDirectory(), "\/")))
-        return "the recommended XFE installation directory"
-    ; The elevated helper's bin directory, in either of the two places it can be.
-    ;
-    ; Without this it fell through to "not a folder SteamShell created, so only
-    ; its own files are removed" -- untrue, and it left an administrator-owned
-    ; directory behind that the user cannot delete themselves, for a product
-    ; they had just uninstalled.
-    if (lower = StrLower(RTrim(A_ProgramFiles "\SteamShell\bin", "\/"))
-        || lower = StrLower(RTrim(A_ProgramFiles "\SteamShell-XFE\bin", "\/")))
-        return "the protected elevated helper folder"
-    if (installDirectory != ""
-        && lower = StrLower(RTrim(installDirectory "\SteamShell\bin", "\/")))
-        return "the protected elevated helper folder beside the application"
-    ; Fixed-name subdirectories SteamShell creates inside whatever install
-    ; directory was chosen. The name alone is not enough -- it must also sit
-    ; directly beneath the install directory we know about.
-    if (installDirectory != "") {
-        SplitPath(path, &leaf, &parent)
-        if (StrLower(RTrim(parent, "\/")) = StrLower(installDirectory)) {
-            if (StrLower(leaf) = "steamshell")
-                return "the portable data folder beside the application"
-            if (StrLower(leaf) = "components")
-                return "the installed component folder"
-        }
-    }
-    return ""
-}
-
-; Refuses anything that is not a plain, non-reparse directory under a drive, and
-; anything containing the executable currently running. Mirrors the guards the
-; upgrade-sidecar cleanup already uses, for the same reason.
-SteamShellRemovalPathIsSafe(path, &reason) {
-    reason := ""
-    path := RTrim(GetAbsoluteSteamShellPath(path), "\/")
-    if (path = "" || !RegExMatch(path, "i)^[A-Z]:\\.+")) {
-        reason := "the path is not an absolute local directory"
-        return false
-    }
-    if RegExMatch(path, "i)^[A-Z]:\\?$") {
-        reason := "the path is a drive root"
-        return false
-    }
-    for _, protectedPath in [A_WinDir, A_ProgramFiles, SteamShellProgramData,
-        EnvGet("ProgramFiles(x86)"), EnvGet("USERPROFILE"), EnvGet("LOCALAPPDATA")] {
-        if (protectedPath != ""
-            && StrLower(path) = StrLower(RTrim(protectedPath, "\/"))) {
-            reason := "the path is a protected system location"
-            return false
-        }
-    }
-    if SteamShellPathUsesLinkOrJunction(path) {
-        reason := "the path uses a link or junction"
-        return false
-    }
-    if (InStr(StrLower(GetAbsoluteSteamShellPath(A_ScriptFullPath)),
-        StrLower(path) "\") = 1) {
-        reason := "it contains the SteamShell executable that is running now"
-        return false
-    }
-    return true
-}
-
-; The concrete list of what deletion would remove, so it can be shown before it
-; happens. Never guesses: every entry comes from what Setup recorded.
-; Deletes the registry record for ONE product, and the key only when empty.
-;
-; This replaced RegDeleteKey on the whole SteamShell key, which was wrong on any
-; machine that has run both products. Removing XFE took the shell's
-; InstalledPath, DataPath and InstallationMode with it -- exactly the three that
-; RemoveSteamShellRegistration deliberately preserves so a retained managed EXE
-; can still find its ProgramData -- and PreviousShell, which is what a later
-; restore needs to put the user's original shell back.
-;
-; The shell's location records ARE deleted here, unlike in an ordinary uninstall,
-; because this path is only reached when the user has separately confirmed that
-; the files themselves should go. A pointer to a deleted installation is not
-; worth keeping; a pointer to a retained one is.
-RemoveSteamShellRegistryRecordForProduct(product) {
-    global SteamShellRegKey
-    values := SteamShellProductIsXfe(product)
-        ? ["Product", "XfeInstalledPath", "XfeLogonTaskRegistered", "XfeHelperDeployed"]
-        : ["Product", "InstalledPath", "DataPath", "InstallationMode",
-           "RegisteredPath", "PreviousShell", "HelperTaskRegistered"]
-    for _, name in values
-        try RegDelete(SteamShellRegKey, name)
-    ; Omitting both K and V from Loop Reg enumerates values only, which is the
-    ; question being asked: is anything of the other product's still recorded?
-    remaining := 0
-    try {
-        Loop Reg, SteamShellRegKey
-            remaining += 1
-    }
-    if (remaining = 0)
-        try RegDeleteKey(SteamShellRegKey)
-    return remaining = 0
-}
-
-BuildSteamShellRemovalPlan(product, &items, &retained) {
-    global SteamShellRegKey
-    items := []
-    retained := []
-    isXfe := SteamShellProductIsXfe(product)
-
-    exePath := ""
-    try exePath := RegRead(
-        SteamShellRegKey, isXfe ? "XfeInstalledPath" : "InstalledPath")
-    exePath := Trim(exePath)
-    if (exePath != "" && !FileExist(exePath)) {
-        retained.Push(exePath " — recorded, but nothing is there now")
-        exePath := ""
-    }
-    installDirectory := ""
-    if (exePath != "")
-        SplitPath(GetAbsoluteSteamShellPath(exePath), , &installDirectory)
-
-    ; Second opinion, from the thing that actually has the effect: Winlogon's
-    ; shell value, or the logon task's own action. This is what makes an
-    ; uninstall work from a freshly downloaded EXE that has no record of its
-    ; own, and what catches a record that has gone stale.
-    evidenceDirectory := isXfe
-        ? SteamShellXfeLogonTaskDirectory()
-        : SteamShellRegisteredShellDirectory()
-    evidenceDirectory := RTrim(Trim(evidenceDirectory), "\/")
-    if (installDirectory = "" && evidenceDirectory != "") {
-        installDirectory := evidenceDirectory
-    } else if (installDirectory != "" && evidenceDirectory != ""
-        && StrLower(RTrim(installDirectory, "\/")) != StrLower(evidenceDirectory)) {
-        ; Two sources, two answers. Deleting on a coin toss is exactly the
-        ; mistake this whole path exists to avoid, so nothing is offered.
-        retained.Push(
-            "Everything — the recorded location (" installDirectory
-            . ") and the one actually in use (" evidenceDirectory
-            . ") disagree, so no files are offered for deletion")
-        items := []
-        return false
-    }
-
-    directories := []
-    if !isXfe {
-        dataPath := ""
-        try dataPath := RegRead(SteamShellRegKey, "DataPath")
-        if (Trim(dataPath) != "")
-            directories.Push(Trim(dataPath))
-        if (installDirectory != "")
-            directories.Push(installDirectory "\components")
-    }
-    ; The elevated helper may be in Program Files OR beside a portable install,
-    ; and an uninstall cannot read the [Setup] record that says which: it is
-    ; routinely driven by a freshly downloaded SteamShell.exe whose own INI
-    ; describes nothing. So both candidates are offered, derived from the
-    ; installDirectory resolved above rather than from A_ScriptDir -- which is
-    ; the Downloads folder in exactly that case.
-    ;
-    ; Program Files is included even when the record says "Portable", because a
-    ; user who reinstalled and changed the answer would otherwise leave the old
-    ; one behind: an administrator-protected directory and a scheduled task for
-    ; a product they believe is gone.
-    helperDirectories := isXfe
-        ? [XfeElevatedHelperDirectory()]
-        : SteamShellElevatedHelperDirectories(installDirectory)
-    for _, helperDirectory in helperDirectories {
-        if DirExist(helperDirectory)
-            directories.Push(helperDirectory)
-    }
-    if (installDirectory != "")
-        directories.Push(installDirectory)
-
-    seen := Map()
-    for _, candidate in directories {
-        resolved := RTrim(GetAbsoluteSteamShellPath(candidate), "\/")
-        if (resolved = "" || seen.Has(StrLower(resolved)) || !DirExist(resolved))
-            continue
-        seen[StrLower(resolved)] := true
-        kind := SteamShellRemovableDirectoryKind(resolved, installDirectory, product)
-        if (kind = "") {
-            retained.Push(resolved " — not a folder SteamShell created, so only its own files are removed")
-            continue
-        }
-        ; Proof, not just provenance. The path may be right and the folder may
-        ; still have been emptied and reused since.
-        if !SteamShellDirectoryContainsOurArtifacts(resolved) {
-            retained.Push(
-                resolved " — no SteamShell files are in it any more, so it is not removed")
-            continue
-        }
-        if !SteamShellRemovalPathIsSafe(resolved, &unsafeReason) {
-            retained.Push(resolved " — kept because " unsafeReason)
-            continue
-        }
-        items.Push(Map("path", resolved, "kind", "directory", "detail", kind))
-    }
-
-    ; Files are removed even from directories that are not ours, because the
-    ; file itself unambiguously is.
-    if (exePath != "" && FileExist(exePath)) {
-        alreadyCovered := false
-        for _, item in items {
-            if (InStr(StrLower(GetAbsoluteSteamShellPath(exePath)),
-                StrLower(item["path"]) "\") = 1)
-                alreadyCovered := true
-        }
-        if !alreadyCovered {
-            if (StrLower(GetAbsoluteSteamShellPath(exePath))
-                = StrLower(GetAbsoluteSteamShellPath(A_ScriptFullPath)))
-                retained.Push(exePath " — cannot delete the executable that is running now")
-            else
-                items.Push(Map("path", exePath, "kind", "file", "detail", "the installed application"))
-        }
-    }
-    return items.Length > 0
-}
-
-; The executables an uninstall can find resident, resolved from the removal plan
-; itself rather than from a guessed install path: whichever directories and files
-; the plan already decided are ours are the only places worth looking. Returns
-; the paths that could NOT be stopped, so the caller can log them without being
-; blocked by them.
-;
-; SteamShell.exe is deliberately absent. Uninstall runs from it, so the copy
-; holding the lock is this process -- the removal planner already records that
-; as a retained item rather than pretending it can delete itself.
-StopResidentSteamShellExecutablesForRemoval(items) {
-    static RESIDENT_NAMES := [
-        "SteamShell-XFE.exe",
-        "SteamShell-Helper.exe",
-        "bin\SteamShell-Helper.exe",
-        "components\bin\SteamShell-Helper.exe",
-        "SteamShell\bin\SteamShell-Helper.exe"]
-    unstopped := []
-    seen := Map()
-    candidates := []
-    for _, item in items {
-        if (item["kind"] = "directory") {
-            for _, relative in RESIDENT_NAMES
-                candidates.Push(RTrim(item["path"], "\/") "\" relative)
-        } else {
-            SplitPath(item["path"], &itemName)
-            if (StrLower(itemName) = "steamshell-xfe.exe"
-                || StrLower(itemName) = "steamshell-helper.exe")
-                candidates.Push(item["path"])
-        }
-    }
-    for _, candidate in candidates {
-        key := StrLower(candidate)
-        if (seen.Has(key) || !FileExist(candidate))
-            continue
-        seen[key] := true
-        if !StopRunningSteamShellExecutable(
-            candidate, &stoppedPids, &stopFailure)
-            unstopped.Push(candidate " — " stopFailure)
-    }
-    return unstopped
-}
-
-ExecuteSteamShellRemovalPlan(items, &removedCount, &failures) {
-    removedCount := 0
-    failures := []
-    ; Uninstall had the same lock problem as install, and it was quieter: a
-    ; running companion or helper made DirDelete fail partway, leaving a
-    ; half-removed installation reported as a failure list. Stop the two
-    ; executables that can be resident before removing anything, using the same
-    ; identity-checked, WM_CLOSE-first path Setup uses. Best effort by design --
-    ; a stop failure must not block an uninstall the user has confirmed, and the
-    ; per-item failures below still report anything that survives.
-    for _, resident in StopResidentSteamShellExecutablesForRemoval(items) {
-        LogLine("Uninstall could not stop " resident ", so removal of it may "
-            . "fail.", "Warning")
-    }
-    for _, item in items {
-        path := item["path"]
-        try {
-            if (item["kind"] = "directory") {
-                if !SteamShellRemovalPathIsSafe(path, &recheckReason)
-                    throw Error("Refused: " recheckReason)
-                DirDelete(path, true)
-                if DirExist(path)
-                    throw Error("The folder still exists after deletion.")
-            } else {
-                FileDelete(path)
-                if FileExist(path)
-                    throw Error("The file still exists after deletion.")
-            }
-            removedCount += 1
-            LogLine("Uninstall removed " item["kind"] ": " path)
-        } catch as err {
-            failures.Push(path " — " err.Message)
-            LogLine("Uninstall could not remove " path ": " err.Message, "Warning")
-        }
-    }
-    return failures.Length = 0
-}
-
-; Uninstall from inside the assistant.
-;
-; The fallback for a user who cannot reach a command line -- which on a machine
-; where SteamShell is the shell and something has gone wrong is not a rare
-; position to be in. It removes registration and automatic startup and leaves
-; every file and setting alone, which is what makes it safe to offer here.
-SetupAssistantUninstall(*) {
-    global SteamShellRegKey
-    chosenByHand := false
-    if !DetectExistingSteamShellInstallation(
-        &product, &directory, &registeredAsShell, &xfeStartsAtLogon) {
-        ; Nothing REGISTERED is not the same as nothing installed, and this path
-        ; used to end here with "nothing was detected" and no way forward.
-        ;
-        ; The cases are real: an XFE install whose logon task was declined, a
-        ; shell whose Winlogon value was already put back by hand or by a
-        ; half-finished uninstall, and the documented workflow of running
-        ; uninstall from a freshly downloaded SteamShell.exe against a registry
-        ; that has been partly cleaned. Detection became stricter when it stopped
-        ; accepting a leftover file as proof, which makes reaching this more
-        ; likely rather than less.
-        ;
-        ; ChooseSteamShellProductToRemove already existed for exactly this and
-        ; was reachable only from /uninstall on the command line. Setup Assistant
-        ; now reaches it too, so a user looking at the window can say what is
-        ; there when the machine cannot.
-        ResolveInstalledSteamShellProduct(&recordedProduct, &resolveDetail)
-        choice := ChooseSteamShellProductToRemove(
-            "Nothing is currently registered to start on this PC. "
-            . (Trim(resolveDetail) != "" ? resolveDetail " " : "")
-            . "Files may still be present from an installation that was only "
-            . "partly removed, or removed from a different copy of SteamShell. "
-            . "Choose which one to unwind, or cancel to change nothing.")
-        if (choice = "cancel") {
-            SetupAssistantSetStatus(
-                "Uninstall was cancelled. Nothing was changed.")
-            return
-        }
-        product := (choice = "xfe") ? "XFE" : "Standalone"
-        directory := ""
-        chosenByHand := true
-        LogLine("Uninstall: nothing was registered; the user chose " product
-            . " at the product prompt.")
-    }
-    isXfe := SteamShellProductIsXfe(product)
-    summary := isXfe
-        ? "SteamShell-XFE will stop starting at sign-in. Its logon task is removed."
-        : "SteamShell will be removed as the Windows shell and Explorer will be restored for the next sign-in."
-    ; Held in locals rather than written inline. A continued line whose first
-    ; character is "(" starts a continuation SECTION in v2, so an inline ternary
-    ; wrapped that way is read as continuation options instead of an expression.
-    confirmHeading := chosenByHand
-        ? "Remove the installation you chose?"
-        : "Remove the detected installation?"
-    confirmNote := chosenByHand
-        ? "`n`nNothing was registered to start, so this unwinds whatever is "
-            . "left of that product. Anything already gone is skipped."
-        : ""
-    confirm := SetupAssistantMsgBox(
-        confirmHeading
-        . "`n`n"
-        . (isXfe ? "SteamShell-XFE" : "SteamShell")
-        . (directory != "" ? "`n" directory : "")
-        . "`n`n" summary
-        . confirmNote
-        . "`n`nFiles and settings are left in place, so nothing you configured is lost."
-        . "`n`nContinue?",
-        "YesNo Icon!")
-    if (confirm != "Yes") {
-        SetupAssistantSetStatus("Uninstall was cancelled. Nothing was changed.")
-        return
-    }
-    if !RemoveSteamShellInstallationForProduct(true, true, product) {
-        SetupAssistantSetStatus(
-            "The installation could not be fully removed. Check the SteamShell log for details.")
-        return
-    }
-    productName := isXfe ? "SteamShell-XFE" : "SteamShell"
-    SetupAssistantSetStatus(
-        productName " was removed. Its files and settings were left in place.")
-
-    ; Offered only after the registration is gone, and only as a second,
-    ; separate decision. Deleting files is the one part of this that cannot be
-    ; undone, so it is never bundled into the first confirmation.
-    if !BuildSteamShellRemovalPlan(product, &removalItems, &retainedNotes) {
-        ; Nothing offered is a result, not a non-event. Say why, so a user who
-        ; expected a cleanup knows whether it found nothing or refused to guess.
-        if retainedNotes.Length {
-            skippedText := ""
-            for _, note in retainedNotes
-                skippedText .= "`n    " note
-            SetupAssistantMsgBox(
-                productName " was unregistered. No files were offered for deletion:"
-                . skippedText
-                . "`n`nAnything you want removed can be deleted by hand.",
-                "OK Iconi")
-        }
-        SetupAssistantPreselectExistingInstallation()
-        return
-    }
-    planText := ""
-    for _, item in removalItems
-        planText .= "`n    " item["path"] "  (" item["detail"] ")"
-    retainedText := ""
-    for _, note in retainedNotes
-        retainedText .= "`n    " note
-    deleteChoice := SetupAssistantMsgBox(
-        productName " is no longer registered. Delete its files as well?`n`n"
-        . "This would permanently remove:" planText
-        . (retainedText != ""
-            ? "`n`nThese are kept:" retainedText
-            : "")
-        . "`n`nSteamShell only deletes folders it created itself. Anything else — a "
-        . "folder you chose, or one holding other files — keeps only its own files removed."
-        . "`n`nThis cannot be undone. Delete these files?",
-        "YesNo Iconx")
-    if (deleteChoice != "Yes") {
-        SetupAssistantSetStatus(
-            productName " was unregistered. Its files were kept.")
-        SetupAssistantPreselectExistingInstallation()
-        return
-    }
-    if ExecuteSteamShellRemovalPlan(removalItems, &removedCount, &removalFailures) {
-        keyRemoved := RemoveSteamShellRegistryRecordForProduct(product)
-        SetupAssistantSetStatus(
-            productName " was removed along with " removedCount " item(s) and its registry record."
-            . (keyRemoved
-                ? ""
-                : " The other product's record was left in place."))
-    } else {
-        failureText := ""
-        for _, failure in removalFailures
-            failureText .= "`n    " failure
-        SetupAssistantMsgBox(
-            "Some files could not be deleted. " removedCount " item(s) were removed."
-            . "`n`nRemaining:" failureText
-            . "`n`nA file that is still in use usually means the application is running. "
-            . "Close it, or sign out and back in, then try again.",
-            "OK Icon!")
-        SetupAssistantSetStatus(
-            productName " was unregistered, but some files could not be deleted.")
-    }
-    SetupAssistantPreselectExistingInstallation()
-}
-
-; Closing Setup Assistant in first-run mode exits SteamShell.
-;
-; In that mode SteamShell is an installer, not the shell: it is running from
-; wherever the user happened to launch it, Explorer owns the desktop, and it has
-; deliberately suppressed Steam, the splash, the blackout, and taskbar hiding.
-; Leaving it resident after the window closes means a copy of the shell running
-; out of a downloads folder or a network share with no visible window and no
-; reason to be there -- which is exactly what happened once, and is not
-; recoverable by any means the user can see.
-;
-; On a completed installation the assistant is just a settings window, and
-; SteamShell IS the running shell, so closing it only hides the window.
-SetupAssistantCloseRequested(*) {
-    global SetupAssistantGui, FirstRunSetupMode, IntentionalExitMode
-    if IsSet(SetupAssistantGui)
-        try SetupAssistantGui.Hide()
-    if !FirstRunSetupMode
-        return
-    IntentionalExitMode := "setup-closed"
-    try LogLine(
-        "Setup Assistant was closed during first-run setup; SteamShell is exiting "
-        . "rather than staying resident as an unconfigured shell.")
-    EnsureExplorerAvailableForSetupExit(true)
-    ExitApp()
-}
-
-SetupAssistantSelectedProduct() {
-    global SetupAssistantGui
-    if !IsSet(SetupAssistantGui)
-        return "Standalone"
-    selected := false
-    try selected := SetupAssistantGui["SetupProductXfe"].Value = 1
-    return selected ? "XFE" : "Standalone"
-}
-
-; XFE has no Windows-shell registration and no elevated helper, so the controls
-; that only mean something for the shell product are disabled rather than left
-; enabled and ignored. A control that does nothing is a promise the installer
-; does not keep.
-SetupAssistantRefreshProductMode(*) {
-    global SetupAssistantGui
-    if !IsSet(SetupAssistantGui)
-        return
-    isXfe := SetupAssistantSelectedProduct() = "XFE"
-    try SetupAssistantGui["SetupRegisterShell"].Enabled := !isXfe
-    try SetupAssistantGui["SetupRegisterXfeStartup"].Enabled := isXfe
-    ; Each branch sets BOTH boxes: the selected product's registration on, the
-    ; other product's off. Clearing only one left the other showing a tick it had
-    ; carried since the controls were created, so shell mode displayed "Start
-    ; SteamShell-XFE automatically at sign-in" as ticked. Disabling alone is not
-    ; enough -- a ticked box reads as something that is going to happen, whether
-    ; or not it can be clicked.
-    if isXfe {
-        try SetupAssistantGui["SetupRegisterShell"].Value := 0
-        try SetupAssistantGui["SetupRegisterXfeStartup"].Value := 1
-        SetupAssistantSetStatus(
-            "XFE mode: the companion installs to the selected location, starts at sign-in through a "
-            . "normal logon task, and never registers itself as the Windows shell or elevates.")
-    } else {
-        try SetupAssistantGui["SetupRegisterShell"].Value := 1
-        try SetupAssistantGui["SetupRegisterXfeStartup"].Value := 0
-        SetupAssistantSetStatus(
-            "Shell mode: SteamShell is registered as the Windows shell and the elevated input helper is installed.")
-    }
-    SetupAssistantRefreshDeployment()
-}
-
-; XFE keeps its INI, controller profiles, and log beside its own executable, and
-; Setup makes that directory writable by the signed-in user. Program Files is
-; therefore the wrong recommended location for it -- a user-writable Program
-; Files subdirectory is poor hygiene even when nothing in it is ever elevated.
-; A per-user Programs directory is where an ordinary application of this shape
-; belongs.
-SetupAssistantXfeStandardDirectory() {
-    return EnvGet("LOCALAPPDATA") "\Programs\SteamShell-XFE"
-}
-
 SetupAssistantRefreshDeployment(*) {
     global SetupAssistantGui, SteamShellProgramData
     if !IsSet(SetupAssistantGui)
         return
-    isXfe := SetupAssistantSelectedProduct() = "XFE"
     browseSelected := SetupAssistantGui["SetupBrowse"].Value = 1
     currentSelected := SetupAssistantGui["SetupCurrent"].Value = 1
     SetupAssistantGui["SetupInstallPath"].Enabled := browseSelected
     SetupAssistantGui["SetupBrowseButton"].Enabled := browseSelected
-    ; Portable is a shell-layout concept: it decides whether the writable data
-    ; sits beside the EXE or in ProgramData. XFE has no such choice -- its data
-    ; is always beside it -- so the checkbox would be a control that does nothing.
-    SetupAssistantGui["SetupPortable"].Enabled := browseSelected && !isXfe
-    if isXfe
-        SetupAssistantGui["SetupPortable"].Value := 0
-
-    if isXfe {
-        if SetupAssistantGui["SetupStandard"].Value = 1
-            xfeDirectory := SetupAssistantXfeStandardDirectory()
-        else if currentSelected
-            xfeDirectory := A_ScriptDir
-        else
-            xfeDirectory := Trim(SetupAssistantGui["SetupInstallPath"].Text)
-        existingXfe := xfeDirectory != ""
-            && FileExist(xfeDirectory "\SteamShell-XFE.exe")
-        SetupAssistantGui["SetupLocationSummary"].Text := existingXfe
-            ? "Existing XFE installation: " xfeDirectory
-                . "`r`nApply replaces SteamShell-XFE.exe; its settings are preserved."
-            : "Companion: " (xfeDirectory != "" ? xfeDirectory : "Choose a directory")
-                . "`r`nSettings, controller profiles, and log stay beside it. No Windows shell change."
-        return
-    }
+    SetupAssistantGui["SetupPortable"].Enabled := browseSelected
 
     if SetupAssistantGui["SetupStandard"].Value = 1 {
         standardDirectory := A_ProgramFiles "\SteamShell"
@@ -13686,12 +15400,7 @@ SetupAssistantGetDeployment(&targetDirectory, &portableMode, &installationMode) 
         return false
 
     if SetupAssistantGui["SetupStandard"].Value = 1 {
-        ; The recommended location differs by product. See
-        ; SetupAssistantXfeStandardDirectory for why XFE does not go in
-        ; Program Files.
-        targetDirectory := SetupAssistantSelectedProduct() = "XFE"
-            ? SetupAssistantXfeStandardDirectory()
-            : A_ProgramFiles "\SteamShell"
+        targetDirectory := A_ProgramFiles "\SteamShell"
         installationMode := "Standard"
     } else if SetupAssistantGui["SetupCurrent"].Value = 1 {
         targetDirectory := A_ScriptDir
@@ -13720,9 +15429,6 @@ SetupAssistantGetDeployment(&targetDirectory, &portableMode, &installationMode) 
 
 SetupAssistantApply(*) {
     global SetupAssistantGui, SteamPath, RtssPath
-    ; Read by InstallationRecordAlert; an undeclared global would resolve to an
-    ; empty local here and report a consistent installation as moved.
-    global SteamShellDataDir, SteamShellInstallationMode
     if !A_IsAdmin {
         PromptForAdministratorSetupAndExit()
         return
@@ -13739,25 +15445,6 @@ SetupAssistantApply(*) {
     if !SetupAssistantGetDeployment(
         &targetDirectory, &portableMode, &installationMode)
         return
-
-    ; The product branch. XFE shares the application discovery, the location
-    ; choice, Auto-Login, and the UAC guidance above; everything below this point
-    ; is shell-specific and is skipped entirely for it.
-    if (SetupAssistantSelectedProduct() = "XFE") {
-        registerXfeStartup := SetupAssistantGui["SetupRegisterXfeStartup"].Value = 1
-        SetupAssistantSetStatus("Installing the SteamShell-XFE companion…")
-        if DeploySteamShellXfe(targetDirectory, registerXfeStartup, true) {
-            SetupAssistantSetStatus(
-                "SteamShell-XFE is installed and "
-                . (registerXfeStartup
-                    ? "will start at sign-in through a normal logon task. "
-                    : "will not start automatically; launch it when you want it. ")
-                . "SteamShell.exe was not registered as the Windows shell.")
-            MarkSteamShellSetupCompleteForXfe(targetDirectory)
-        }
-        return
-    }
-
     registerShell := SetupAssistantGui["SetupRegisterShell"].Value = 1
     SetupAssistantSetStatus(
         "Applying and verifying the selected installation…"
@@ -13765,10 +15452,6 @@ SetupAssistantApply(*) {
     if DeploySteamShell(
         targetDirectory, portableMode, registerShell, false, true,
         installationMode) {
-        ; Setup has just rewritten the record it would otherwise be judged by.
-        CachedInstallationVerdict(
-            A_ScriptDir, SteamShellDataDir, SteamShellInstallationMode, true)
-        BuildProductTrayMenu()
         SetupAssistantSetStatus(
             "Setup is complete. "
             . (registerShell
@@ -13828,17 +15511,12 @@ StoreWindowsAutoLogonSecret(password, clearSecret, &failureReason) {
         }
         return true
     } finally {
-        ; RtlSecureZeroMemory is an inline function in winnt.h, not an export of
-        ; kernel32 or anything else, so the DllCall that used to be here threw on
-        ; every call and a bare try swallowed it -- the plaintext password was
-        ; never actually wiped. RtlZeroMemory is genuinely exported. No try:
-        ; failing to clear a password in an elevated process is not a detail to
-        ; discard silently.
         if IsObject(passwordBuffer)
-            DllCall(
-                "Kernel32\RtlZeroMemory",
+            try DllCall(
+                "Kernel32\RtlSecureZeroMemory",
                 "Ptr", passwordBuffer.Ptr,
-                "UPtr", passwordBuffer.Size)
+                "UPtr", passwordBuffer.Size,
+                "Ptr")
         DllCall("Advapi32\LsaClose", "Ptr", policyHandle, "UInt")
     }
 }
@@ -13930,17 +15608,8 @@ DisableWindowsAutoLogon(&failureReason) {
 AutoLogonDialogMessage(message, options := "OK", title := "SteamShell Auto-Login") {
     global AutoLogonGui, SettingsEditorDialogActive
     dialogOptions := Trim(options)
-    ; Owner when the Auto-Login window exists, MB_TOPMOST when it does not.
-    ;
-    ; The fallback was missing: with no AutoLogonGui this asked for neither, so
-    ; the dialog took ordinary z-order and could open behind whatever was in
-    ; front. Every other dialog helper here picks one or the other, and this one
-    ; is reached during sign-in configuration, where a prompt nobody can see is
-    ; a machine that appears to have stopped.
     if IsSet(AutoLogonGui)
         dialogOptions .= " Owner" AutoLogonGui.Hwnd
-    else
-        dialogOptions .= " 262144"
     SettingsEditorDialogActive := true
     try return MsgBox(message, title, dialogOptions)
     finally SettingsEditorDialogActive := false
@@ -14261,9 +15930,6 @@ SetupAssistantResized(guiObj, minMax, newWidth, newHeight) {
 ShowSetupAssistant(*) {
     global SetupAssistantGui, SteamShellVersion, FirstRunSetupMode
     global SetupAssistantScrollOffset, SetupAssistantViewportHeight
-    ; Read by InstallationRecordAlert; an undeclared global would resolve to an
-    ; empty local here and report a consistent installation as moved.
-    global SteamShellDataDir, SteamShellInstallationMode
     if !IsSet(SetupAssistantGui) {
         SetupAssistantGui := Gui(
             "+AlwaysOnTop +ToolWindow +Resize",
@@ -14277,32 +15943,7 @@ ShowSetupAssistant(*) {
             "xm y+2 w720 h38 +Wrap",
             "Prepare a recoverable SteamShell installation. First-run setup keeps Explorer available and does not launch Steam or enable kiosk presentation.")
 
-        ; The first question, because every later one depends on the answer.
-        SetupAssistantGui.AddGroupBox("xm y+10 w720 h128", "1. What are you setting up?")
-        ; The two radios are created back to back on purpose. AutoHotkey groups
-        ; radio buttons that are created CONSECUTIVELY, so a control added
-        ; between them ends the run and the pair stops being mutually exclusive:
-        ; both render selected and Apply reads whichever it feels like. The
-        ; per-option descriptions are therefore positioned afterwards, from the
-        ; radios' own measured positions, rather than interleaved.
-        shellModeRadio := SetupAssistantGui.AddRadio(
-            "xp+14 yp+26 w680 h24 vSetupProductStandalone Group Checked",
-            "Replace the Windows shell — SteamShell owns the desktop and launches Steam Big Picture")
-        xfeModeRadio := SetupAssistantGui.AddRadio(
-            "xp y+24 w680 h24 vSetupProductXfe",
-            "Work alongside Xbox Full Screen Experience — install the SteamShell-XFE companion")
-        shellModeRadio.GetPos(&productRadioX, &shellRadioY, , &productRadioH)
-        xfeModeRadio.GetPos( , &xfeRadioY)
-        SetupAssistantGui.AddText(
-            "x" (productRadioX + 22) " y" (shellRadioY + productRadioH + 1) " w650 h20 +Wrap",
-            "Registers SteamShell as the Windows shell and installs the elevated input helper.")
-        SetupAssistantGui.AddText(
-            "x" (productRadioX + 22) " y" (xfeRadioY + productRadioH + 1) " w650 h20 +Wrap",
-            "Never becomes the Windows shell and never elevates. Starts at sign-in through a normal logon task.")
-        for _, productControl in [shellModeRadio, xfeModeRadio]
-            productControl.OnEvent("Click", SetupAssistantRefreshProductMode)
-
-        SetupAssistantGui.AddGroupBox("xm y+14 w720 h128", "2. Applications")
+        SetupAssistantGui.AddGroupBox("xm y+10 w720 h128", "1. Applications")
         SetupAssistantGui.AddText(
             "xp+14 yp+25 w680 h24 +Wrap",
             "Steam is required. RTSS is optional. Default Program Files locations are detected automatically.")
@@ -14319,7 +15960,7 @@ ShowSetupAssistant(*) {
             "x+8 yp-1 w120 h29", "Select…")
         rtssButton.OnEvent("Click", SetupAssistantChooseRtss)
 
-        SetupAssistantGui.AddGroupBox("xm y+10 w720 h230", "3. Installation location")
+        SetupAssistantGui.AddGroupBox("xm y+10 w720 h230", "2. Installation location")
         standardRadio := SetupAssistantGui.AddRadio(
             "xp+14 yp+26 w680 h24 vSetupStandard Group Checked",
             "Standard installation (recommended) — Program Files with writable data in ProgramData")
@@ -14342,17 +15983,10 @@ ShowSetupAssistant(*) {
             deploymentControl.OnEvent("Click", SetupAssistantRefreshDeployment)
         pathEdit.OnEvent("Change", SetupAssistantRefreshDeployment)
 
-        SetupAssistantGui.AddGroupBox("xm y+10 w720 h186", "4. Windows integration and sign-in")
-        ; One startup registration per product, and only the relevant one is
-        ; enabled. Both are optional for the same reason: a user may already
-        ; start the application their own way, and an installer that silently
-        ; creates an automatic-start entry is one that is hard to undo.
+        SetupAssistantGui.AddGroupBox("xm y+10 w720 h156", "3. Windows integration and sign-in")
         registerCheck := SetupAssistantGui.AddCheckbox(
-            "xp+14 yp+26 w460 h24 vSetupRegisterShell Checked",
+            "xp+14 yp+26 w420 h24 vSetupRegisterShell Checked",
             "Register the selected SteamShell.exe as the Windows shell")
-        xfeStartupCheck := SetupAssistantGui.AddCheckbox(
-            "xp y+6 w460 h24 vSetupRegisterXfeStartup Checked",
-            "Start SteamShell-XFE automatically at sign-in (logon task)")
         uacButton := SetupAssistantGui.AddButton(
             "xp y+32 w180 h30", "Open UAC Settings")
         uacButton.OnEvent("Click", SetupAssistantOpenUacSettings)
@@ -14366,7 +16000,7 @@ ShowSetupAssistant(*) {
             "xp-400 y+8 w620 h36 +Wrap",
             "Auto-Login uses Windows' protected LSA secret. SteamShell never writes the password to its INI or log.")
 
-        SetupAssistantGui.AddGroupBox("xm y+10 w720 h70", "5. Verify this PC")
+        SetupAssistantGui.AddGroupBox("xm y+10 w720 h70", "4. Verify this PC")
         controllerButton := SetupAssistantGui.AddButton(
             "xp+14 yp+28 w210 h32", "Test / Calibrate Controller")
         controllerButton.OnEvent("Click", ShowControllerTest)
@@ -14374,15 +16008,6 @@ ShowSetupAssistant(*) {
         healthButton.OnEvent("Click", ShowHealthCheck)
         settingsButton := SetupAssistantGui.AddButton("x+10 yp w180 h32", "Open Full Settings")
         settingsButton.OnEvent("Click", ShowSettingsEditor)
-
-        SetupAssistantGui.AddGroupBox("xm y+10 w720 h96", "6. Remove an installation")
-        SetupAssistantGui.AddText(
-            "xp+14 yp+24 w680 h34 +Wrap",
-            "Retires the detected installation's Windows shell registration or sign-in task. "
-            . "Files and settings are left in place, so nothing you configured is lost.")
-        uninstallButton := SetupAssistantGui.AddButton(
-            "xp y+6 w260 h32", "Uninstall Detected Installation…")
-        uninstallButton.OnEvent("Click", SetupAssistantUninstall)
 
         SetupAssistantGui.AddText(
             "xm y+10 w720 h42 +Wrap vSetupStatus",
@@ -14392,34 +16017,17 @@ ShowSetupAssistant(*) {
         restoreButton := SetupAssistantGui.AddButton("x+10 yp w170 h34", "Restore Desktop")
         restoreButton.OnEvent("Click", SettingsEditorRestoreDesktop)
         closeButton := SetupAssistantGui.AddButton("x+200 yp w160 h34", "Close Setup")
-        closeButton.OnEvent("Click", SetupAssistantCloseRequested)
-        SetupAssistantGui.OnEvent("Close", SetupAssistantCloseRequested)
-        SetupAssistantGui.OnEvent("Escape", SetupAssistantCloseRequested)
+        closeButton.OnEvent("Click", (*) => SetupAssistantGui.Hide())
+        SetupAssistantGui.OnEvent("Close", (*) => SetupAssistantGui.Hide())
+        SetupAssistantGui.OnEvent("Escape", (*) => SetupAssistantGui.Hide())
         SetupAssistantGui.OnEvent("Size", SetupAssistantResized)
         SetupAssistantInitializeScrolling()
     }
     SetupAssistantDetectInstalledApplications()
-    ; Open on what is already installed. Falls through to the first-run message
-    ; and plain defaults when nothing is detected.
-    preselected := SetupAssistantPreselectExistingInstallation()
-    recordAlert := InstallationRecordAlert(
-        A_ScriptDir, SteamShellDataDir, SteamShellInstallationMode)
-    ; Product mode must be applied even when nothing was preselected. Its only
-    ; other callers are the product radios and the preselect above, and preselect
-    ; returns early on a PC with nothing installed -- so on a clean machine the
-    ; sign-in checkboxes kept the state they were created with: both ticked, and
-    ; both enabled. It runs BEFORE the first-run message because it sets a status
-    ; line of its own, and it calls SetupAssistantRefreshDeployment itself.
-    if !preselected
-        SetupAssistantRefreshProductMode()
-    if (FirstRunSetupMode && !preselected)
+    if FirstRunSetupMode
         SetupAssistantSetStatus(
             "First-run Setup Mode is active. Explorer remains available until setup is completed.")
-    ; Last, because both branches above set a status of their own and this is the
-    ; more urgent thing to say: the paths on screen were read from a record that
-    ; describes a different location.
-    if (recordAlert != "")
-        SetupAssistantSetStatus(recordAlert)
+    SetupAssistantRefreshDeployment()
     targetHwnd := 0
     try targetHwnd := WinExist("A")
     if (targetHwnd = SetupAssistantGui.Hwnd)
@@ -14714,13 +16322,6 @@ ShowSettingsEditor(*) {
     SettingsEditorAddTextField(
         category, "RTSS", "PresetFrameCap",
         "Preset Frame Cap (FPS)", &y, "158", "integer", 0, 1000)
-    SettingsEditorAddCheckbox(
-        category, "RTSS", "RestoreFrameLimitOnStartup",
-        "Restore the last Frame Limit selection when RTSS starts", &y, "true")
-    SettingsEditorAddCheckbox(
-        category, "RTSS", "EnableElevatedFrameCapWrites",
-        "Use the elevated helper to set the Frame Limit (needed when RTSS is in Program Files)",
-        &y, "true")
     SettingsEditorAddShortcutField(category, "RTSS", "CustomFrameCapShortcut", "Frame limiter toggle shortcut", &y, "^+f")
     SettingsEditorAddShortcutField(category, "RTSS", "FrameLimiterOnShortcut", "Frame limiter on shortcut", &y, "^+5")
     SettingsEditorAddShortcutField(category, "RTSS", "FrameLimiterOffShortcut", "Frame limiter off shortcut", &y, "^+6")
@@ -15029,6 +16630,7 @@ stat8 := ControlGui.AddText("x" x2 " y+2 w" colW " vstat8 +Wrap", "LC Last: -")
     UpdateStatusIndicators()
 }
 
+
 HideControlPanel() {
     global ControlGui
     if IsSet(ControlGui) {
@@ -15055,6 +16657,7 @@ EnsureLogRefreshTimer() {
     }
 }
 
+
 EnsureStatusRefreshTimer() {
     global ControlGui, LiveLogGui
     if ((IsSet(ControlGui) && IsGuiVisible(ControlGui)) || (IsSet(LiveLogGui) && IsGuiVisible(LiveLogGui))) {
@@ -15064,6 +16667,7 @@ EnsureStatusRefreshTimer() {
     SetTimer(UpdateStatusIndicators, 0)
     }
 }
+
 
 ShowLiveLogWindow(*) {
     global LiveLogGui, LogPath, DetachedLogMaxLines
@@ -15163,10 +16767,7 @@ ShowControllerMappingWindow(*) {
 
     buttons := ["A","B","X","Y","LB","RB","LT","RT","Start","L3","R3"]
     for btn in buttons {
-    lv.Add("", btn, ControllerBindingPretty(btn ".Short"),
-    ControllerBindingHoldsMouseButton(GetBindingValue(btn ".Short"))
-    ? "Reserved for mouse (hold to drag)"
-    : ControllerBindingPretty(btn ".Long"))
+    lv.Add("", btn, ControllerBindingPretty(btn ".Short"), ControllerBindingPretty(btn ".Long"))
     }
     lv.Modify(1, "Select Focus")
 
@@ -15224,8 +16825,6 @@ ShowControllerMappingWindow(*) {
     g_ControllerMapUI["txtSel"] := txtSel
     g_ControllerMapUI["cbShort"] := cbShort
     g_ControllerMapUI["cbLong"] := cbLong
-    g_ControllerMapUI["btnRecLong"] := btnRecLong
-    g_ControllerMapUI["btnClrLong"] := btnClrLong
     g_ControllerMapUI["txtCustomShort"] := txtCustomShort
     g_ControllerMapUI["txtCustomLong"] := txtCustomLong
     g_ControllerMapUI["selectedBtn"] := "A"
@@ -15287,10 +16886,7 @@ ControllerMapUI_RefreshLv(*) {
 
     lv.Delete()
     for btn in buttons {
-    lv.Add("", btn, ControllerBindingPretty(btn ".Short"),
-    ControllerBindingHoldsMouseButton(GetBindingValue(btn ".Short"))
-    ? "Reserved for mouse (hold to drag)"
-    : ControllerBindingPretty(btn ".Long"))
+    lv.Add("", btn, ControllerBindingPretty(btn ".Short"), ControllerBindingPretty(btn ".Long"))
     }
 
     ; Reselect current button if possible
@@ -15324,26 +16920,13 @@ ControllerMapUI_UpdateEditor(*) {
     g_ControllerMapUI["cbLong"].Text := ControllerBindingChoice(sel ".Long")
 
     g_ControllerMapUI["txtCustomShort"].Text := ControllerCustomLine(sel ".Short", "Short")
-
-    ; Left click on Short makes that button press-and-hold, so its Long can never
-    ; fire: Short is resolved on RELEASE, and holding is the whole point. Disable
-    ; the row rather than warning about it afterwards -- an unreachable control is
-    ; not a rule to remember.
-    holdsMouse := ControllerBindingHoldsMouseButton(GetBindingValue(sel ".Short"))
-    for ctrlName in ["cbLong", "btnRecLong", "btnClrLong"]
-    g_ControllerMapUI[ctrlName].Enabled := !holdsMouse
-    if holdsMouse {
-    g_ControllerMapUI["cbLong"].Text := "None"
-    g_ControllerMapUI["txtCustomLong"].Text :=
-    "Reserved for mouse: hold " sel " to drag."
-    } else {
     g_ControllerMapUI["txtCustomLong"].Text := ControllerCustomLine(sel ".Long", "Long")
-    }
 
     } catch {
     return
     }
 }
+
 
 ; ----- Controller Mapping UI event wrappers (avoid .Bind / #Warn issues) -----
 ControllerMapUI_OnShortChange(*) {
@@ -15454,6 +17037,7 @@ ControllerMapUI_Clear(which, *) {
     }
 }
 
+
 ControllerBindingPretty(key) {
     global ControllerMap, ControllerMapDisplay
     v := GetBindingValue(key)
@@ -15532,6 +17116,7 @@ ChoiceToBinding(choice) {
     }
 }
 
+
 HideLiveLogWindow() {
     global LiveLogGui
     if IsSet(LiveLogGui) {
@@ -15600,14 +17185,10 @@ ExitSteamAndRestoreDesktop() {
     ; have to be visible. ShowNotification is log-only.
     if (steamExe = "" || !FileExist(steamExe)) {
         ShowNotification("Steam's executable could not be found. Desktop restore was cancelled.", "Warning")
-        ; Owner when SteamShell has an active window, MB_TOPMOST when it does
-        ; not -- the helper picks. A bare 262144 is above everything EXCEPT a
-        ; topmost fullscreen game, which is precisely when a restore prompt goes
-        ; unseen and the user thinks the shell has hung.
-        SetupAssistantMsgBox(
+        MsgBox(
             "Steam's executable could not be found, so it could not be asked to close.`n`n"
             . "Open Settings and select the correct Steam executable, or use System ▸ Exit SteamShell.",
-            "Iconx", "SteamShell")
+            "SteamShell", "Iconx 262144")
         return
     }
 
@@ -15620,9 +17201,8 @@ ExitSteamAndRestoreDesktop() {
         "Steam shutdown") {
         DesktopRestorePending := false
         ShowNotification("Steam could not be asked to close. Desktop restore was cancelled.", "Warning")
-        SetupAssistantMsgBox(
-            "Steam could not be asked to close. The desktop was not restored.",
-            "Iconx", "SteamShell")
+        MsgBox("Steam could not be asked to close. The desktop was not restored.",
+            "SteamShell", "Iconx 262144")
         return
     }
 
@@ -15633,10 +17213,10 @@ ExitSteamAndRestoreDesktop() {
 
     if ProcessExist("steam.exe") {
         ShowNotification("Steam did not close within 20 seconds.", "Warning")
-        result := SetupAssistantMsgBox(
+        result := MsgBox(
             "Steam did not close within 20 seconds.`n`n"
             . "Restore the Windows desktop anyway? Steam will be left running.",
-            "YesNo Icon!", "SteamShell")
+            "SteamShell", "YesNo Icon! 262144")
         if (result != "Yes") {
             DesktopRestorePending := false
             return
@@ -15701,7 +17281,7 @@ ReturnToShellMode(reason := "") {
     ; question of rescheduling: ApplyRuntimeTimers restarts shell monitoring, the
     ; window engine, and the Taskbar Guard, which hides the taskbar immediately.
     ApplyRuntimeTimers()
-    BuildProductTrayMenu()
+    RefreshTrayMenu()
     SetSessionState("ACTIVE", reason != "" ? reason : "returned to SteamShell")
     LogLine("Returned to SteamShell presentation ("
         . (reason != "" ? reason : "user request") . ").")
@@ -15732,13 +17312,10 @@ LaunchSteamAndReturnToShell() {
         DisarmSteamLifecycle()
         SetSessionState("DESKTOP", "Steam launch failed")
         ShowNotification("Steam could not be started. " . failureReason, "Warning")
-        ; Owner when there is one, MB_TOPMOST otherwise. A bare 262144 is above
-        ; everything except a topmost fullscreen window, and this fires on the
-        ; shell desktop where the user has nothing else to read.
-        SetupAssistantMsgBox(
+        MsgBox(
             "Steam could not be started.`n`n" . failureReason
             . "`n`nSteamShell has stayed on the Windows desktop.",
-            "Iconx", "SteamShell")
+            "SteamShell", "Iconx 262144")
         return false
     }
     ReturnToShellMode("Steam launched from SteamShell")
@@ -15887,10 +17464,8 @@ RestoreExplorerDesktop(PermanentRestore, &resultMessage) {
 }
 
 ExitCleanup(ExitReason, ExitCode) {
-    ; Before anything else: a held button must not outlive the process.
-    ReleaseControllerMouseButtons()
     global IntentionalExitMode, DesktopMode, SafeMode
-    global ElevatedGeometryEventHandle, ElevatedAutoMouseEventHandle
+    global ElevatedGeometryEventHandle
     global DisplayPendingOldMode, DisplayPendingOldScale, DisplayPendingUntilTick
     global ShellRegKey
     StopTaskbarGuard(true)
@@ -15904,11 +17479,6 @@ ExitCleanup(ExitReason, ExitCode) {
         try DllCall(
             "Kernel32\CloseHandle", "Ptr", ElevatedGeometryEventHandle, "Int")
         ElevatedGeometryEventHandle := 0
-    }
-    if ElevatedAutoMouseEventHandle {
-        try DllCall(
-            "Kernel32\CloseHandle", "Ptr", ElevatedAutoMouseEventHandle, "Int")
-        ElevatedAutoMouseEventHandle := 0
     }
     SystemCursor("Show")
     if IsObject(DisplayPendingOldMode) {
@@ -16023,10 +17593,6 @@ StartSafeModeSession() {
 SetupAssistantRequired() {
     setupState := StrLower(Trim(IniReadS("Setup", "SetupState", "Pending")))
     setupVersion := ToInt(IniReadS("Setup", "SetupVersion", "0"), 0)
-    ; A machine configured for XFE must never have SteamShell.exe start the shell
-    ; runtime. There it is the installer and the uninstaller, not the product.
-    if SteamShellProductIsXfe(IniReadS("Setup", "Product", "Standalone"))
-        return true
     return setupState != "complete" || setupVersion < 1
 }
 
@@ -16158,37 +17724,16 @@ RunSteamShellSelfTests(showResult := true) {
         : "SteamShell self-test passed.`n`n"
             . schema.Length " settings keys and core parser/recovery invariants were checked."
     if (showResult)
-        SteamShellMsgBox(
-            report, failures.Length ? "Iconx" : "Iconi", "SteamShell Self-Test")
+        MsgBox(report, "SteamShell Self-Test", failures.Length ? "Iconx" : "Iconi")
     return failures.Length = 0
 }
 
-WriteSetupStateToIni(iniFile, setupState, installationMode, installDirectory, dataDirectory, product := "Standalone", portableHelperLocation := "ProgramFiles") {
+WriteSetupStateToIni(iniFile, setupState, installationMode, installDirectory, dataDirectory) {
     IniWrite(setupState, iniFile, "Setup", "SetupState")
     IniWrite("1", iniFile, "Setup", "SetupVersion")
-    IniWrite(NormalizeSteamShellProduct(product), iniFile, "Setup", "Product")
     IniWrite(installationMode, iniFile, "Setup", "InstallationMode")
     IniWrite(installDirectory, iniFile, "Setup", "InstallDirectory")
     IniWrite(dataDirectory, iniFile, "Setup", "DataDirectory")
-    ; Recorded, not re-derived. A folder whose permissions change after Setup
-    ; must not silently move the helper out from under an already-registered
-    ; task; the location is a decision made once, with the evidence available.
-    IniWrite(portableHelperLocation, iniFile, "Setup", "PortableHelperLocation")
-}
-
-; After an XFE install, SteamShell.exe has done its job as an installer. Record
-; that so a later launch opens Setup instead of starting the shell runtime on a
-; machine the user deliberately configured not to have a replaced shell.
-MarkSteamShellSetupCompleteForXfe(targetDirectory) {
-    global SettingsPath
-    try {
-        WriteSetupStateToIni(
-            SettingsPath, "Complete", "XFE", targetDirectory, targetDirectory, "XFE")
-        return true
-    } catch as err {
-        LogLine("The XFE product state could not be recorded: " err.Message, "Warning")
-        return false
-    }
 }
 
 GrantSteamShellDataAccess(dataDirectory, &failureReason) {
@@ -16472,87 +18017,13 @@ DeploySteamShell(targetDirectory, portableMode := false, registerShell := true, 
             : (StrLower(targetDirectory) = StrLower(A_ProgramFiles "\SteamShell")
                 ? "Standard" : "Custom"))
 
-    ; Where the elevated helper goes for a Portable install.
-    ;
-    ; CHECKED, not asked. A scheduled task is an unprompted elevation to whatever
-    ; binary sits at its action path, so the question is whether the interactive
-    ; user can replace that binary -- and that is answerable directly. A folder
-    ; the user cannot write is as safe as Program Files, and keeping the helper
-    ; there costs nothing and keeps the install genuinely self-contained.
-    ;
-    ; Only when the folder IS user-writable is there a trade, and then it is the
-    ; user's to make: full portability, or an unprompted elevation path that
-    ; anything running as them could hijack.
-    portableHelperChoice := "ProgramFiles"
-    if portableMode {
-        portableFolderProtected := SteamShellPathIsAdminOnlyWritable(
-            targetDirectory, &portableGrantedTo, &portableAclError)
-        if portableFolderProtected {
-            portableHelperChoice := "Portable"
-            LogLine("Portable install: " targetDirectory " is "
-                . "administrator-only-writable, so the elevated helper stays "
-                . "beside the executable and the install remains self-contained.")
-        } else {
-            reason := portableAclError != ""
-                ? "its permissions could not be read (" portableAclError ")"
-                : "it can be written by " portableGrantedTo
-            keepPortable := SetupAssistantMsgBox(
-                "Where should the elevated input helper go?`n`n"
-                . "This folder is not protected — " reason ".`n`n"
-                . "PROGRAM FILES (recommended)`n"
-                . "Choose Yes. The helper is installed to`n"
-                . A_ProgramFiles "\SteamShell\bin`n"
-                . "where your account cannot replace it. SteamShell can then use "
-                . "a scheduled task to start it, so Windows never asks for "
-                . "administrator approval — which matters because that prompt "
-                . "appears on a secure desktop a controller cannot answer.`n"
-                . "The cost: this copy is not self-contained, and moving the "
-                . "folder to another machine needs Setup run there again.`n`n"
-                . "THIS FOLDER (fully portable)`n"
-                . "Choose No. Everything stays together. Because anything running "
-                . "as your account can replace files here, it could also replace "
-                . "the helper and use that task to gain administrator rights "
-                . "without a prompt. Reasonable on a machine only you use; not on "
-                . "a shared one.`n`n"
-                . "Install the helper to Program Files?",
-                "YesNo Icon?", "SteamShell Setup — helper location")
-            portableHelperChoice := (keepPortable = "No") ? "Portable" : "ProgramFiles"
-            LogLine("Portable install: helper location chosen by the user: "
-                . portableHelperChoice " (" reason ").")
-        }
-    }
-
     if registerShell && portableMode {
         portableWarning := SetupAssistantMsgBox(
             "Portable mode keeps the executable and writable data together. "
             . "Only register it as the Windows shell when this is a trusted, permanent directory whose SteamShell.exe cannot be replaced by another user.`n`n"
-            . targetExe
-            . "`n`n" (portableHelperChoice = "ProgramFiles"
-                ? "The elevated input helper is installed to`n"
-                    . A_ProgramFiles "\SteamShell\bin`nrather than beside the "
-                    . "executable, so this copy is not self-contained. Moving the "
-                    . "folder to another machine needs Setup run there again, "
-                    . "which was already true of the scheduled task and the "
-                    . "registry record."
-                : "The elevated input helper stays in this folder, so the install "
-                    . "is fully self-contained.")
-            . " Uninstall from Setup Assistant removes it either way.`n`n"
-            . "Continue with portable shell registration?",
+            . targetExe "`n`nContinue with portable shell registration?",
             "YesNo Icon!")
         if (portableWarning != "Yes")
-            return false
-    }
-
-    if registerShell && StrLower(installationMode) = "custom" {
-        customWarning := SetupAssistantMsgBox(
-            "A Custom installation can be below a user-writable parent directory. "
-            . "SteamShell secures the helper's own bin directory, but it cannot safely register an independently invokable elevated task for an arbitrary ancestor chain.`n`n"
-            . targetExe
-            . "`n`nWindows will therefore ask for administrator approval each time the elevated helper starts, including at sign-in. "
-            . "Use the recommended Standard location to avoid that prompt.`n`n"
-            . "Continue with Custom shell registration?",
-            "YesNo Icon!")
-        if (customWarning != "Yes")
             return false
     }
 
@@ -16579,12 +18050,7 @@ DeploySteamShell(targetDirectory, portableMode := false, registerShell := true, 
     try {
         DirCreate(targetDirectory)
         DirCreate(dataDirectory)
-        ; The chosen location, not the runtime one: SteamShellInstallationMode
-        ; and the INI still describe the PREVIOUS install at this point.
-        helperBinDirectory := portableHelperChoice = "Portable"
-            ? dataDirectory "\bin"
-            : A_ProgramFiles "\SteamShell\bin"
-        DirCreate(helperBinDirectory)
+        DirCreate(componentDirectory "\bin")
         DirCreate(dataDirectory "\logs")
         DirCreate(dataDirectory "\backups")
 
@@ -16607,7 +18073,7 @@ DeploySteamShell(targetDirectory, portableMode := false, registerShell := true, 
         }
         WriteSetupStateToIni(
             targetIni, "InProgress", installationMode,
-            targetDirectory, dataDirectory, "Standalone", portableHelperChoice)
+            targetDirectory, dataDirectory)
 
         if sourceDiffersFromTarget {
             if FileExist(stagedExe)
@@ -16621,55 +18087,10 @@ DeploySteamShell(targetDirectory, portableMode := false, registerShell := true, 
         if !FileExist(targetExe) || FileGetSize(targetExe) <= 0
             throw Error("The installed SteamShell.exe could not be verified.")
 
-        ; A helper from an earlier session can still be resident and holding its
-        ; image open. Stopped BEFORE the directory is hardened, for the same
-        ; reason as the XFE path: hardening a locked file secures a directory
-        ; around a stale binary. This one is High integrity, so only an elevated
-        ; Setup can close it -- which is exactly the context this runs in.
-        deployedHelper := helperBinDirectory "\SteamShell-Helper.exe"
-        if !StopRunningSteamShellExecutable(
-            deployedHelper, &stoppedHelperPids, &helperStopError)
-            throw Error("A running elevated helper could not be closed, so the "
-                . "helper was not installed. " helperStopError)
-        ; Every mode, not just Program Files. Only bin is restricted, so a
-        ; portable layout keeps its writable INI, logs, and backups beside it
-        ; while the payload SteamShell elevates stops being user-replaceable.
-        if !HardenElevatedHelperDirectory(
-            helperBinDirectory, &helperHardenError)
-            throw Error(
-                "The elevated helper directory could not be secured, so the helper was not installed. "
-                . helperHardenError)
-        ; Never bless a pre-existing file merely because it carries the expected
-        ; version resource. Lock the directory first, then replace the payload
-        ; from the embedding unconditionally while only administrators can write
-        ; there.
-        if !ExtractEmbeddedElevatedHelper(
-            deployedHelper, &helperDeployError, true)
+        deployedHelper := componentDirectory "\bin\SteamShell-Helper.exe"
+        if !ExtractEmbeddedElevatedHelper(deployedHelper, &helperDeployError)
             throw Error("The elevated helper could not be deployed. " helperDeployError)
-        ; Harden a second time, now that the payload exists.
-        ;
-        ; The first pass locks the directory so the write above cannot be raced.
-        ; It cannot set the owner of a file that is not there yet, and Windows
-        ; takes a new file's owner from the creating token: the "default owner
-        ; for objects created by members of the Administrators group" policy has
-        ; defaulted to the object creator since XP SP2, so the freshly extracted
-        ; helper is owned by the installing administrator's own SID rather than
-        ; Administrators. The verification below checks the file as well as the
-        ; directory and would correctly refuse it, failing every install.
-        if !HardenElevatedHelperDirectory(
-            helperBinDirectory, &helperOwnerError)
-            throw Error(
-                "The deployed elevated helper could not be secured. "
-                . helperOwnerError)
-        if !ElevatedHelperLocationIsProtected(deployedHelper, &helperProtectionError)
-            throw Error(
-                "The elevated helper directory did not verify as administrator-protected. "
-                . helperProtectionError)
         helperTaskRegistered := false
-        ; Only Standard has a known protected ancestor chain. Custom and
-        ; Portable paths may sit below a user-writable parent that can replace
-        ; the whole secured bin directory, so they must not get an independently
-        ; invokable auto-elevation task.
         if (StrLower(installationMode) = "standard") {
             helperTaskRegistered := RegisterElevatedHelperTask(
                 deployedHelper, targetExe, targetIni, targetLog,
@@ -16682,7 +18103,7 @@ DeploySteamShell(targetDirectory, portableMode := false, registerShell := true, 
                     . helperTaskError, "Warning")
         } else {
             ; A previous Standard installation may have left an on-demand task
-            ; pointing at its protected helper. Portable/Custom deployment uses
+            ; pointing at its protected helper. Portable/custom deployment uses
             ; explicit UAC instead and must not retain that stale launch route.
             try RemoveElevatedHelperTask()
             try RegDelete(SteamShellRegKey, "HelperTaskRegistered")
@@ -16731,7 +18152,7 @@ DeploySteamShell(targetDirectory, portableMode := false, registerShell := true, 
         ; a warning because the same EXE always supports the /restore command.
         WriteSetupStateToIni(
             targetIni, "Complete", installationMode,
-            targetDirectory, dataDirectory, "Standalone", portableHelperChoice)
+            targetDirectory, dataDirectory)
         if (StrLower(IniRead(targetIni, "Setup", "SetupState", "")) != "complete")
             throw Error("The completed setup state could not be verified.")
 
@@ -16769,13 +18190,11 @@ DeploySteamShell(targetDirectory, portableMode := false, registerShell := true, 
                 ? "The emergency Restore Windows Desktop shortcut was verified."
                 : "The recovery shortcut could not be created. Recovery remains available with:`n"
                     . targetExe " /restore"
-            helperText := (StrLower(installationMode) = "standard")
+            helperText := StrLower(installationMode) = "standard"
                 ? (helperTaskRegistered
-                    ? "The helper directory was secured for administrators only and the protected elevated-helper task was registered. "
-                    : "The helper directory was secured for administrators only, but the helper task was unavailable, so Windows will request UAC when the helper starts. ")
-                : ((StrLower(installationMode) = "custom")
-                    ? "The Custom helper was version-verified and its directory was secured for administrators only. Its arbitrary parent path is not eligible for an auto-elevation task, so Windows will request UAC when the helper starts. "
-                    : "The portable helper was version-verified and its directory was secured for administrators only. Windows will request UAC when the helper starts. ")
+                    ? "The protected elevated-helper task was registered. "
+                    : "The helper task was unavailable, so Windows will request UAC when the helper starts. ")
+                : "The embedded portable helper was version-verified. "
             completionChoice := ShowSetupCompletionDialog(
                 action, targetExe, dataDirectory, registerShell,
                 helperText . shortcutText, cleanupDetail)
@@ -16811,313 +18230,6 @@ DeploySteamShell(targetDirectory, portableMode := false, registerShell := true, 
         LogLine("SteamShell setup failed: " err.Message)
         return false
     }
-}
-
-; Where XFE's opt-in elevated RTSS helper is installed.
-;
-; Fixed, and deliberately NOT inside the XFE install directory. Setup grants the
-; signed-in user write access to that directory -- XFE keeps its INI, learned
-; controller profiles and log beside its executable -- and a user-writable
-; parent can be deleted and recreated whole, which is exactly why standalone
-; refuses to give its Custom and Portable layouts an independently invokable
-; helper task. Program Files supplies the protected ancestor chain that makes
-; the payload's own ACL mean something.
-;
-; A_ProgramFiles is read here in an ADMINISTRATOR process during Setup, and
-; XfeElevatedHelperPath() in the XFE tree resolves the same string at normal
-; integrity. Neither is trusted on its own: XFE verifies owner, DACL and
-; readability through ElevatedHelperLocationIsProtected before launching it, so
-; a redirected environment pointing somewhere the user can write fails closed.
-XfeElevatedHelperDirectory() {
-    return A_ProgramFiles "\SteamShell-XFE\bin"
-}
-
-; Installs the XFE companion instead of the shell.
-;
-; Deliberately narrower than DeploySteamShell: XFE never becomes the Windows
-; shell, never registers a shell-integrity component directory beside itself,
-; and never gets the protected on-demand helper task, because it is an ordinary
-; normal-integrity application started from a desktop that already exists.
-; Everything this does not do is the point.
-;
-; It DOES deploy the elevated helper payload, dormant. XFE has no embedded
-; payload and no administrator rights, so a user who later opts in from XFE's
-; own Settings would otherwise be told to re-run an installer they have already
-; run. A binary on disk is not an elevated process: nothing starts it until
-; [RTSS] EnableElevatedFrameCapWrites is turned on, and that is off by default.
-DeploySteamShellXfe(targetDirectory, registerStartup := true, showResult := true) {
-    global SteamShellRegKey, ScriptPid, IntentionalExitMode, SteamShellProduct
-
-    if !A_IsCompiled {
-        if showResult
-            SetupAssistantMsgBox(
-                "Compile SteamShell before applying an installation.", "Icon!")
-        return false
-    }
-    if !A_IsAdmin {
-        if showResult
-            PromptForAdministratorSetupAndExit()
-        return false
-    }
-
-    targetDirectory := ExpandEnvVars(Trim(targetDirectory))
-    if !RegExMatch(targetDirectory, "i)^[A-Z]:\\$")
-        targetDirectory := RTrim(targetDirectory, "\/")
-    targetDirectory := GetAbsoluteSteamShellPath(targetDirectory)
-    targetExe := targetDirectory "\SteamShell-XFE.exe"
-    stagedExe := targetExe ".setup-" ScriptPid ".tmp"
-
-    try {
-        DirCreate(targetDirectory)
-        ; The companion is running on every XFE machine that has signed in, so
-        ; this is the normal case rather than the awkward one. Recorded, because
-        ; a companion Setup stopped is one the user expects back afterwards.
-        if !StopRunningSteamShellExecutable(
-            targetExe, &stoppedXfePids, &xfeStopError)
-            throw Error("The running XFE companion could not be closed. "
-                . xfeStopError)
-        xfeWasRunning := stoppedXfePids.Length > 0
-        if !ExtractEmbeddedXfe(targetExe, &xfeDeployError, true)
-            throw Error("The XFE companion could not be deployed. " xfeDeployError)
-
-        ; XFE keeps its INI, controller profiles, and log beside its executable,
-        ; so the install directory must stay writable by the signed-in user.
-        ; That is safe here for the same reason it is not for the helper: nothing
-        ; in this layout is ever handed an elevated token.
-        if !GrantSteamShellDataAccess(targetDirectory, &permissionError)
-            throw Error(
-                "Writable permissions could not be applied to the XFE directory. "
-                . permissionError)
-
-        ; The opt-in elevated RTSS helper, deployed dormant.
-        ;
-        ; Same ordering as the shell path, for the same reason it exists there:
-        ; harden the directory FIRST so the write below cannot be raced, then
-        ; replace the payload unconditionally while only administrators can
-        ; write there, then harden AGAIN. The second pass is not redundant --
-        ; icacls cannot set the owner of a file that does not exist yet, and
-        ; Windows takes a new file's owner from the creating token, so the
-        ; freshly extracted helper is owned by the installing administrator's
-        ; own SID rather than by Administrators. XFE's runtime gate checks the
-        ; file as well as the directory and would correctly refuse it, which
-        ; would fail every install. An earlier revision of the shell path ran
-        ; /setowner once, before the payload existed, and had exactly that bug.
-        helperDeployed := false
-        helperDeployFailure := ""
-        helperBinDirectory := XfeElevatedHelperDirectory()
-        deployedHelper := helperBinDirectory "\SteamShell-Helper.exe"
-        try {
-            DirCreate(helperBinDirectory)
-            ; Stopped BEFORE the directory is hardened, not after. Once bin is
-            ; administrator-only the payload still cannot be replaced while a
-            ; process holds the image open, so hardening a locked file would
-            ; produce a secured directory around a stale binary.
-            if !StopRunningSteamShellExecutable(
-                deployedHelper, &stoppedXfeHelperPids, &helperStopError)
-                throw Error("The running XFE elevated helper could not be "
-                    . "closed. " helperStopError)
-            if !HardenElevatedHelperDirectory(
-                helperBinDirectory, &helperHardenError)
-                throw Error(helperHardenError)
-            if !ExtractEmbeddedElevatedHelper(
-                deployedHelper, &helperExtractError, true)
-                throw Error(helperExtractError)
-            if !HardenElevatedHelperDirectory(
-                helperBinDirectory, &helperOwnerError)
-                throw Error(helperOwnerError)
-            if !ElevatedHelperLocationIsProtected(
-                deployedHelper, &helperProtectionError)
-                throw Error(helperProtectionError)
-            helperDeployed := true
-        } catch as helperError {
-            helperDeployFailure := helperError.Message
-        }
-        ; NOT fatal, and this is a deliberate difference from the shell path.
-        ; The shell needs its helper to reach elevated windows at all; XFE needs
-        ; it only for a frame cap the user has not asked for yet. Refusing to
-        ; install the whole companion over a dormant optional payload would be
-        ; the wrong trade. It is reported rather than swallowed.
-        if !helperDeployed
-            LogLine(
-                "The optional XFE elevated RTSS helper was not deployed; the "
-                . "frame cap will stay read-only where RTSS needs administrator "
-                . "rights: " helperDeployFailure, "Warning")
-        RegWrite(helperDeployed ? "true" : "false",
-            "REG_SZ", SteamShellRegKey, "XfeHelperDeployed")
-
-        startupRegistered := false
-        if registerStartup {
-            startupRegistered := RegisterXfeLogonTask(targetExe, &xfeTaskError)
-            if !startupRegistered
-                LogLine(
-                    "XFE logon task registration failed; the companion must be started manually: "
-                    . xfeTaskError, "Warning")
-        } else {
-            try RemoveXfeLogonTask()
-        }
-
-        ; A machine can only have one of the two products configured at a time.
-        ; Retiring the shell registration here is what makes switching to XFE a
-        ; supported move rather than something that leaves Winlogon pointing at
-        ; an executable the user has stopped using.
-        shellRetired := ""
-        try {
-            currentShell := RegRead(ShellRegKey, "Shell")
-            if InStr(StrLower(currentShell), "steamshell") {
-                if RestoreExplorerDesktop(true, &restoreMessage) {
-                    shellRetired :=
-                        "SteamShell was removed as the Windows shell and Explorer was restored."
-                    try RemoveElevatedHelperTask()
-                    try RegDelete(SteamShellRegKey, "HelperTaskRegistered")
-                    try RegDelete(SteamShellRegKey, "RegisteredPath")
-                } else {
-                    throw Error(
-                        "SteamShell is currently registered as the Windows shell and could not be "
-                        . "returned to Explorer, so XFE was not installed. " restoreMessage)
-                }
-            }
-        }
-
-        RegWrite(targetExe, "REG_SZ", SteamShellRegKey, "XfeInstalledPath")
-        RegWrite("XFE", "REG_SZ", SteamShellRegKey, "Product")
-        RegWrite(startupRegistered ? "true" : "false",
-            "REG_SZ", SteamShellRegKey, "XfeLogonTaskRegistered")
-        SteamShellProduct := "XFE"
-
-        ; Put back what Setup stopped. The logon task would start it at the next
-        ; sign-in anyway, but leaving a mid-session user without their companion
-        ; because they applied an update is a regression the user did not ask
-        ; for -- and one they would reasonably read as the update having broken
-        ; something.
-        ;
-        ; Through Explorer's desktop automation object, never Run: this process
-        ; is elevated, and a child of it would inherit an administrator token.
-        ; XFE is normal-integrity by design, and an accidentally elevated
-        ; companion is the one outcome its whole architecture exists to avoid.
-        xfeRestarted := false
-        if xfeWasRunning {
-            xfeRestarted := RunViaDesktopShell(targetExe, "", targetDirectory)
-            LogLine(xfeRestarted
-                ? "Setup restarted the XFE companion it stopped to apply the update."
-                : "Setup stopped the XFE companion to apply the update and could "
-                    . "not restart it; it will start at the next sign-in.",
-                xfeRestarted ? "Info" : "Warning")
-        }
-
-        LogLine("SteamShell-XFE companion installed: " targetExe
-            . "; startup=" (startupRegistered ? "logon task" : "manual")
-            . "; elevated RTSS helper=" (helperDeployed ? "deployed (off by default)" : "not deployed")
-            . (shellRetired != "" ? "; " shellRetired : ""))
-
-        if showResult {
-            startupText := registerStartup
-                ? (startupRegistered
-                    ? "It will start automatically at sign-in through a normal-integrity logon task."
-                    : "The logon task could not be registered, so start it manually or add it to your startup programs.")
-                : "Automatic startup was not requested, so start it manually when you want it."
-            ; Stated plainly, because a user chooses XFE precisely to avoid an
-            ; elevated process and is entitled to know one was placed on disk.
-            helperText := helperDeployed
-                ? "An optional elevated RTSS helper was installed to " helperBinDirectory
-                    . " and is TURNED OFF. XFE runs with nothing elevated unless you enable "
-                    . "it in Settings under RTSS & Performance, which it needs only to set the "
-                    . "frame cap when RTSS is installed under Program Files."
-                : "The optional elevated RTSS helper was not installed, so the frame cap "
-                    . "stays read-only where RTSS needs administrator rights."
-            ; Only mentioned when Setup actually stopped something, so a first
-            ; install says nothing about a companion that was never running.
-            restartText := !xfeWasRunning ? ""
-                : xfeRestarted
-                    ? "`n`nThe running companion was closed to replace it and has been restarted."
-                    : "`n`nThe running companion was closed to replace it and could not be "
-                        . "restarted automatically. Start it from " targetExe
-                        . ", or sign out and back in."
-            SetupAssistantMsgBox(
-                "SteamShell-XFE was installed.`n`n" targetExe "`n`n"
-                . startupText
-                . "`n`n" helperText
-                . restartText
-                . (shellRetired != "" ? "`n`n" shellRetired : "")
-                . "`n`nXFE runs alongside Xbox Full Screen Experience and never replaces the Windows shell, "
-                . "so no restart is required.",
-                "OK Iconi")
-        }
-        return true
-    } catch as err {
-        try {
-            if FileExist(stagedExe)
-                FileDelete(stagedExe)
-        }
-        if showResult
-            SetupAssistantMsgBox(
-                "The XFE companion could not be installed.`n`n" err.Message
-                . "`n`nNothing was registered as the Windows shell and Explorer remains available.",
-                "Iconx")
-        LogLine("SteamShell-XFE install failed: " err.Message, "Error")
-        return false
-    }
-}
-
-RemoveSteamShellXfeInstallation(showResult := true) {
-    global SteamShellRegKey, SteamShellProduct
-    taskRemoved := RemoveXfeLogonTask()
-    ; Registered lazily by the companion the first time elevated RTSS writes are
-    ; used, so Setup never created it and must still clear it. A stale
-    ; HighestAvailable task pointing at a removed binary is the worst artefact an
-    ; uninstall can leave behind.
-    try RemoveXfeElevatedHelperTask()
-    try RegDelete(SteamShellRegKey, "XfeLogonTaskRegistered")
-    try RegDelete(SteamShellRegKey, "Product")
-    ; The location records go too, and this is not housekeeping.
-    ;
-    ; The companion's executable is deliberately left on disk, so a surviving
-    ; XfeInstalledPath still points at a file that still exists -- and that pair
-    ; is exactly what product detection used to read as "XFE is installed". A
-    ; machine that had XFE removed reported XFE forever after, so an uninstall
-    ; offered to remove the thing that was already gone while the shell
-    ; installation beside it went unseen.
-    ;
-    ; Nothing needs these afterwards. XFE reads its settings from beside its own
-    ; executable rather than from a recorded path, and XfeHelperDeployed is
-    ; written and never read at all. Standalone's InstalledPath/DataPath/
-    ; InstallationMode are deliberately NOT treated this way: its startup matches
-    ; the recorded EXE against the running one to find its ProgramData, so
-    ; deleting those would strand a retained installation's settings.
-    try RegDelete(SteamShellRegKey, "XfeInstalledPath")
-    try RegDelete(SteamShellRegKey, "XfeHelperDeployed")
-    SteamShellProduct := "Standalone"
-    ; The executable and its settings are left in place, matching what the shell
-    ; uninstall does: retiring the automatic startup is reversible, deleting a
-    ; user's configuration is not.
-    ;
-    ; The elevated helper is left too, and that is worth saying out loud rather
-    ; than leaving for someone to find. It is an administrator-owned binary in an
-    ; administrator-only directory that nothing starts on its own: with the
-    ; companion no longer running there is no parent to ask it for anything, and
-    ; it exits when its parent does. Deleting it would mean an elevated recursive
-    ; delete of a Program Files path during an uninstall, which is a larger risk
-    ; than the dormant file it removes.
-    helperDirectory := XfeElevatedHelperDirectory()
-    helperPresent := FileExist(helperDirectory "\SteamShell-Helper.exe") != ""
-    LogLine("SteamShell-XFE startup registration removed; logon task removed="
-        . (taskRemoved ? "yes" : "no")
-        . "; elevated helper left in place=" (helperPresent ? "yes" : "no") ".")
-    if showResult {
-        SetupAssistantMsgBox(
-            "The SteamShell-XFE companion will no longer start automatically at sign-in."
-            . (taskRemoved
-                ? ""
-                : "`n`nThe logon task could not be removed. Check Task Scheduler for '"
-                    . XfeLogonTaskName() "'.")
-            . "`n`nIts files and settings were left in place so nothing you configured is lost."
-            . (helperPresent
-                ? "`n`nThe optional elevated helper in " helperDirectory
-                    . " was also left in place. Nothing starts it once the companion is gone; "
-                    . "delete that folder as an administrator if you want it removed."
-                : ""),
-            taskRemoved ? "Iconi" : "Icon!", "SteamShell-XFE")
-    }
-    return taskRemoved
 }
 
 InstallOrRepairSteamShell(isRepair := false, showResult := true) {
@@ -17207,9 +18319,8 @@ RemoveSteamShellRegistration(showResult := true, restorePreviousShell := false) 
 
     if !RestoreExplorerDesktop(true, &restoreMessage) {
         if (showResult)
-            SetupAssistantMsgBox(
-                "SteamShell could not restore Explorer.`n`n" restoreMessage,
-                "Iconx", "SteamShell Recovery")
+            MsgBox("SteamShell could not restore Explorer.`n`n" restoreMessage,
+                "SteamShell Recovery", "Iconx")
         return false
     }
 
@@ -17224,32 +18335,23 @@ RemoveSteamShellRegistration(showResult := true, restorePreviousShell := false) 
                 . " could not be reinstated; Explorer remains registered. "
                 . previousShellError, "Warning")
             if (showResult) {
-                SetupAssistantMsgBox(
+                MsgBox(
                     "Explorer was restored, but the shell that was registered before SteamShell "
                     . "could not be reinstated for the next sign-in.`n`n"
                     . previousShellError "`n`n"
                     . "SteamShell's recovery shortcut and PreviousShell metadata were retained "
                     . "so the restore can be retried safely.",
-                    "Icon!", "SteamShell Recovery")
+                    "SteamShell Recovery", "Icon!")
             }
             return false
         }
     }
 
     try FileDelete(A_Programs "\Restore Windows Desktop.lnk")
-    ; Attempted unconditionally, not gated on HelperTaskRegistered.
-    ;
-    ; That flag is written by Setup, so anything that created the task without
-    ; reaching the end of Setup -- an interrupted install, a hand-edited
-    ; registry, an upgrade from a build that did not record it -- left the task
-    ; behind on uninstall with nothing to notice. A stale HighestAvailable task
-    ; pointing at a binary is the worst artefact an uninstall can leave, which is
-    ; why the XFE path has always removed its equivalent without asking first.
-    ; schtasks simply reports failure when there is no such task.
     helperTaskWasRegistered := false
     try helperTaskWasRegistered := ToBool(
         RegRead(SteamShellRegKey, "HelperTaskRegistered", "false"), false)
-    if (!RemoveElevatedHelperTask() && helperTaskWasRegistered)
+    if helperTaskWasRegistered && !RemoveElevatedHelperTask()
         LogLine(
             "Desktop restore warning: the on-demand elevated helper task could not be removed.",
             "Warning")
@@ -17264,151 +18366,13 @@ RemoveSteamShellRegistration(showResult := true, restorePreviousShell := false) 
             ? "`n`nThe shell that was registered before SteamShell has been put back "
                 . "and takes effect at the next sign-in:`n" restoredPrevious
             : ""
-        ; Named rather than left for someone to find, which is what the XFE path
-        ; has always done for its own helper. The binary is administrator-owned
-        ; in an administrator-only directory and nothing starts it once the shell
-        ; is gone -- it watches its parent and exits with it -- so it is dormant
-        ; rather than dangerous. That is a reason to say where it is, not a
-        ; reason to stay quiet about it.
-        helperDirectory := ""
-        try helperDirectory := SteamShellElevatedHelperDirectory()
-        helperText := (helperDirectory != ""
-            && FileExist(helperDirectory "\SteamShell-Helper.exe") != "")
-            ? "`n`nThe elevated helper in " helperDirectory " was also left in "
-                . "place. Nothing starts it once SteamShell is no longer the "
-                . "shell; delete that folder as an administrator if you want it "
-                . "removed."
-            : ""
-        SetupAssistantMsgBox(
+        MsgBox(
             "The normal Windows desktop has been restored permanently.`n`n"
             . "SteamShell's files were left in place so your settings and EXE are not deleted."
-            . shellText . helperText,
-            "Iconi", "SteamShell Recovery")
+            . shellText,
+            "SteamShell Recovery", "Iconi")
     }
     return true
-}
-
-; Product-aware uninstall/restore.
-;
-; The two products need opposite things undone: the shell install has to give
-; Windows its shell back, while the XFE install only has to stop starting itself
-; at sign-in. Doing the wrong one is not harmless -- running the shell restore on
-; an XFE machine would rewrite a Winlogon value SteamShell never set.
-;
-; The recorded product answers this. The dialog is the fallback for a missing or
-; contradicted record, because a question the installer should be able to answer
-; itself is a question that collects wrong answers.
-ProductRemovalSelect(choice, *) {
-    global ProductRemovalGui, ProductRemovalChoice
-    ProductRemovalChoice := choice
-    if IsSet(ProductRemovalGui) {
-        try ProductRemovalGui.Destroy()
-        ProductRemovalGui := unset
-    }
-}
-
-; Asks which product to remove using buttons that name the products.
-;
-; This replaced a Yes/No/Cancel message box where Yes meant SteamShell and No
-; meant SteamShell-XFE, which is not a question anyone can answer correctly from
-; the buttons. It is also an owned window: the Setup Assistant is always-on-top,
-; so an unowned dialog opens behind it and the user is left with a frozen
-; assistant and nothing to click.
-ChooseSteamShellProductToRemove(detail) {
-    global ProductRemovalGui, ProductRemovalChoice
-    global SetupAssistantGui, SettingsGui
-    ProductRemovalChoice := "cancel"
-    ownerHwnd := 0
-    if IsSet(SetupAssistantGui) && IsGuiVisible(SetupAssistantGui)
-        ownerHwnd := SetupAssistantGui.Hwnd
-    else if IsSet(SettingsGui) && IsGuiVisible(SettingsGui)
-        ownerHwnd := SettingsGui.Hwnd
-    options := "+AlwaysOnTop +ToolWindow -Resize"
-    if ownerHwnd
-        options .= " +Owner" ownerHwnd
-    ProductRemovalGui := Gui(options, "SteamShell Uninstall")
-    ProductRemovalGui.Opt("+OwnDialogs")
-    ProductRemovalGui.SetFont("s10", "Segoe UI")
-    heading := ProductRemovalGui.AddText(
-        "xm ym w620 h30", "Which installation should be removed?")
-    heading.SetFont("s14 Bold", "Segoe UI")
-    ProductRemovalGui.AddText("xm y+4 w620 h40 +Wrap", detail)
-
-    shellButton := ProductRemovalGui.AddButton("xm y+14 w220 h36", "SteamShell")
-    shellButton.OnEvent("Click", (*) => ProductRemovalSelect("standalone"))
-    ProductRemovalGui.AddText(
-        "x+14 yp+2 w380 h34 +Wrap",
-        "The Windows shell replacement. Unregisters it and restores Explorer for the next sign-in.")
-
-    xfeButton := ProductRemovalGui.AddButton("xm y+12 w220 h36", "SteamShell-XFE")
-    xfeButton.OnEvent("Click", (*) => ProductRemovalSelect("xfe"))
-    ProductRemovalGui.AddText(
-        "x+14 yp+2 w380 h34 +Wrap",
-        "The companion that runs alongside Xbox Full Screen Experience. Stops it starting at sign-in.")
-
-    cancelButton := ProductRemovalGui.AddButton(
-        "xm y+12 w220 h36 Default", "Cancel")
-    cancelButton.OnEvent("Click", (*) => ProductRemovalSelect("cancel"))
-    ProductRemovalGui.AddText(
-        "x+14 yp+2 w380 h34 +Wrap",
-        "Nothing is changed. No files or settings are removed either way.")
-
-    ProductRemovalGui.OnEvent("Close", (*) => ProductRemovalSelect("cancel"))
-    ProductRemovalGui.OnEvent("Escape", (*) => ProductRemovalSelect("cancel"))
-    removalHwnd := ProductRemovalGui.Hwnd
-    ProductRemovalGui.Show("AutoSize")
-    CenterGuiOnTargetMonitor(ProductRemovalGui, ownerHwnd)
-    WinWaitClose("ahk_id " removalHwnd)
-    if ownerHwnd
-        try WinActivate("ahk_id " ownerHwnd)
-    return ProductRemovalChoice
-}
-
-RemoveSteamShellInstallationForProduct(showResult := true, restorePreviousShell := false, knownProduct := "") {
-    ; A caller that has already identified the product says so, rather than
-    ; letting this resolve it a second way and possibly reach a different answer.
-    ; Setup Assistant detects from the Winlogon value and the scheduled task;
-    ; re-deriving from the HKCU record here could fail where that succeeded and
-    ; put an ambiguity prompt in front of a user who was never ambiguous.
-    if (Trim(knownProduct) != "") {
-        LogLine("Uninstall using the caller's resolved product: " knownProduct ".")
-        return SteamShellProductIsXfe(knownProduct)
-            ? RemoveSteamShellXfeInstallation(showResult)
-            : RemoveSteamShellRegistration(showResult, restorePreviousShell)
-    }
-    if ResolveInstalledSteamShellProduct(&product, &detail) {
-        LogLine("Uninstall resolved the installed product: " detail)
-        return SteamShellProductIsXfe(product)
-            ? RemoveSteamShellXfeInstallation(showResult)
-            : RemoveSteamShellRegistration(showResult, restorePreviousShell)
-    }
-    ; Second opinion before giving up: the Winlogon value and the logon task are
-    ; evidence the HKCU record is not.
-    if DetectExistingSteamShellInstallation(
-        &evidenceProduct, &evidenceDirectory, &evidenceShell, &evidenceTask) {
-        LogLine(
-            "Uninstall resolved the installed product from live evidence: "
-            . evidenceProduct ".")
-        return SteamShellProductIsXfe(evidenceProduct)
-            ? RemoveSteamShellXfeInstallation(showResult)
-            : RemoveSteamShellRegistration(showResult, restorePreviousShell)
-    }
-
-    LogLine("The installed product could not be resolved: " detail, "Warning")
-    if !showResult {
-        ; Unattended and ambiguous. Do nothing rather than guess at which of two
-        ; system-level registrations to unwind.
-        return false
-    }
-    choice := ChooseSteamShellProductToRemove(
-        "SteamShell could not determine which product is installed on this PC. "
-        . detail)
-    if (choice = "standalone")
-        return RemoveSteamShellRegistration(showResult, restorePreviousShell)
-    if (choice = "xfe")
-        return RemoveSteamShellXfeInstallation(showResult)
-    LogLine("Uninstall was cancelled at the product prompt.")
-    return false
 }
 
 HandleSteamShellCommandMode() {
@@ -17447,12 +18411,9 @@ HandleSteamShellCommandMode() {
     else if (mode = "repair")
         InstallOrRepairSteamShell(true, true)
     else if (mode = "restore")
-        ; An emergency restore is always about the shell: it is the command a
-        ; user reaches for when the desktop is gone, which cannot happen on an
-        ; XFE machine. It stays product-independent on purpose.
         RemoveSteamShellRegistration(true, false)
     else if (mode = "uninstall")
-        RemoveSteamShellInstallationForProduct(true, true)
+        RemoveSteamShellRegistration(true, true)
     else if (mode = "selftest")
         RunSteamShellSelfTests(true)
 
@@ -17559,7 +18520,7 @@ SettingsEditorRestoreDesktop(*) {
 KickUserStartupPrograms() {
     global SettingsPath
     ; Optional user-defined hidden programs to start with the shell.
-    enable := ReadBool("StartupPrograms", "Enable", true)
+    enable := ToBool(IniReadS("StartupPrograms", "Enable", "true"), true)
     if (!enable)
     return
 
@@ -17580,21 +18541,13 @@ StartUserStartupProgramsNow() {
     return
     started := true
 
-    windowMode := NormalizeStartupWindowMode(
-        IniReadS("StartupPrograms", "WindowMode", "Hidden"))
-    staggerMs := ReadInt("StartupPrograms", "StaggerMs", 1200, 0, 30000)
-    programs := ReadStartupProgramList(
-        (key) => IniReadS("StartupPrograms", key, ""))
-    if (programs.Length = 0)
-    return
-    LogLine("Launching " programs.Length " startup program(s).")
-    delay := 0
-    for _, entry in programs {
-    if (delay = 0)
-    RunStartupCommandLine(entry, windowMode)
-    else
-    SetTimer(RunStartupCommandLine.Bind(entry, windowMode), -delay)
-    delay += staggerMs
+    windowMode := IniReadS("StartupPrograms", "WindowMode", "Hidden")
+    Loop 20 {
+    k := "Program" A_Index
+    cmdline := Trim(IniReadS("StartupPrograms", k, ""))
+    if (cmdline = "")
+    continue
+    RunStartupCommandLine(cmdline, windowMode)
     }
 }
 ; LAUNCHER CLEANUP (Optional)
@@ -17819,9 +18772,9 @@ try {
     }
 }
 
+
 HasGameLikeWindow(excludeSet) {
-    ; The fullscreen tolerances moved into WindowEngineScoreWeights() with the
-    ; shape test itself, so they are no longer read here.
+    global FullscreenTolerance, FullscreenPosTolerancePx
     global LauncherCleanupLauncherList, LauncherCleanupBackgroundList
 
     ; Build an ignore set (lowercase exe names) so we don't treat Steam/launchers as "games"
@@ -17855,17 +18808,15 @@ HasGameLikeWindow(excludeSet) {
             || (item["title"] = "" && !legacySurface)
             || item["proc"] = "" || ignore.Has(item["proc"]))
             continue
-        ; Same shape verdict the scoring loop uses. This test was a second copy
-        ; of those two expressions, constants and all, so a tolerance changed in
-        ; one place silently disagreed with the other about what a game is.
-        ; Only the shape matters here -- no score is computed, so no CPU or
-        ; audio is sampled and the fast path stays fast.
-        if GameWindowShapeVerdict(
-            Map("w", item["w"], "h", item["h"], "x", item["x"], "y", item["y"],
-                "screenW", A_ScreenWidth, "screenH", A_ScreenHeight,
-                "titleLength", StrLen(item["title"]),
-                "minimizedLegacy", minimizedLegacyGame),
-            WindowEngineScoreWeights())["accepted"]
+        nearFS := minimizedLegacyGame
+            || (item["w"] >= (A_ScreenWidth * FullscreenTolerance)
+                && item["h"] >= (A_ScreenHeight * FullscreenTolerance)
+                && Abs(item["x"]) <= FullscreenPosTolerancePx
+                && Abs(item["y"]) <= FullscreenPosTolerancePx)
+        bigBorderless := !minimizedLegacyGame
+            && item["w"] >= (A_ScreenWidth * 0.90)
+            && item["h"] >= (A_ScreenHeight * 0.90)
+        if (nearFS || bigBorderless)
             return true
     }
     return false
@@ -17973,6 +18924,7 @@ HasGameRunningRobust(excludeSet, useWindowHeuristic := true) {
     return false
 }
 
+
 ; Attempt to stop any running Windows services whose PathName contains any of the provided exe substrings.
 ; Best-effort; may require admin/service permissions. "needles" should be lowercase exe names, e.g. ["eabackgroundservice.exe"].
 StopRunningServicesByExeNeedles(needles) {
@@ -18021,6 +18973,12 @@ StopRunningServicesByExeNeedles(needles) {
 
     return stopped
 }
+
+
+
+
+
+
 
 JoinDetails(arr, maxItems := 3) {
     if (!IsObject(arr) || arr.Length = 0)
@@ -18127,6 +19085,43 @@ CloseExeProcesses(exeName, tryWinClose := true, gracefulMs := 2000, hardKill := 
     return Map("before", beforeCount, "after", afterCount, "removed", removed)
 }
 
+
+GetPidsByExeName(exeName) {
+    pids := []
+    exe := StrLower(Trim(exeName))
+    if (exe = "")
+        return pids
+    if !InStr(exe, ".exe")
+        exe .= ".exe"
+
+    ; Prefer Toolhelp snapshot enumeration (more reliable than WMI for some launchers)
+    snap := DllCall("CreateToolhelp32Snapshot", "UInt", 0x00000002, "UInt", 0, "Ptr") ; TH32CS_SNAPPROCESS
+    if (snap = -1 || snap = 0)
+        return pids
+
+    size := (A_PtrSize = 8) ? 568 : 556 ; PROCESSENTRY32W
+    pe := Buffer(size, 0)
+    NumPut("UInt", size, pe, 0)
+
+    if !DllCall("Process32FirstW", "Ptr", snap, "Ptr", pe) {
+        DllCall("CloseHandle", "Ptr", snap)
+        return pids
+    }
+
+    loop {
+        pid := NumGet(pe, 8, "UInt")
+        name := StrLower(StrGet(pe.Ptr + ((A_PtrSize = 8) ? 44 : 36), "UTF-16"))
+        if (name = exe)
+            pids.Push(pid)
+        if !DllCall("Process32NextW", "Ptr", snap, "Ptr", pe)
+            break
+    }
+
+    DllCall("CloseHandle", "Ptr", snap)
+    return pids
+}
+
+
 GetRunningExeCountsText(exeList, &procCount, &exeCount, maxItems := 4) {
     procCount := 0
     exeCount := 0
@@ -18167,6 +19162,7 @@ GetRunningExeCountsText(exeList, &procCount, &exeCount, maxItems := 4) {
         out .= ", +" (exeCount - maxItems) " more"
     return out
 }
+
 
 ; ==============================================================================
 ; Launcher Cleanup — Download/Update Guard (Disk I/O heuristic)
@@ -18317,40 +19313,21 @@ GetProcessWriteTransferBytes(pid) {
     return NumGet(buf, 32, "UInt64")
 }
 
+
 RunStartupCommandLine(cmdline, windowMode := "Hidden") {
     target := ""
     params := ""
-    if !SplitStartupCommandLine(cmdline, &target, &params) {
-        LogLine("Startup program entry could not be parsed: " cmdline, "Warning")
-        return false
-    }
-    SplitPath(target, &exeName)
-    ; Do not start a second copy of something already running. The companion has
-    ; always done this; the shell would happily launch a duplicate after a
-    ; reload.
-    if (exeName != "" && ProcessExist(exeName)) {
-        LogLine("Startup program already running, skipped: " exeName)
-        return false
-    }
-    mode := NormalizeStartupWindowMode(windowMode)
-    pid := 0
-    ; The launch primitive stays per-tree: the shell must de-elevate through its
-    ; verified path, where the companion uses a plain Run.
-    launched := LaunchInteractiveApp(
-        target, params, "", mode, &pid,
-        "Startup program: " (target != "" ? target : cmdline))
-    if (launched && mode != "normal" && exeName != "")
-        StartupWindowModeSweep(exeName, mode, A_TickCount + 6000)
-    return launched
-}
+    SplitTargetAndParams(cmdline, &target, &params)
 
-; Re-arms itself until the deadline. The old code made a single attempt 200 ms
-; after launch, and only for "hidden" -- so "minimized" was a setting the editor
-; offered, saved, and never applied.
-StartupWindowModeSweep(exeName, mode, deadlineTick) {
-    if !ApplyStartupWindowModeOnce(exeName, mode, deadlineTick)
-        return
-    SetTimer(() => StartupWindowModeSweep(exeName, mode, deadlineTick), -400)
+    normalizedMode := StrLower(Trim(windowMode))
+    pid := 0
+    launched := LaunchInteractiveApp(
+        target, params, "", normalizedMode, &pid,
+        "Startup program: " (target != "" ? target : cmdline))
+
+    if (pid && normalizedMode = "hidden")
+        SetTimer(() => HideWindowsForPid(pid), -200)
+    return launched
 }
 
 SplitTargetAndParams(cmdline, &target, &params) {
@@ -18378,6 +19355,20 @@ SplitTargetAndParams(cmdline, &target, &params) {
     }
 }
 
+HideWindowsForPid(pid) {
+    ; Some apps ignore Run(..., "Hide"). Try to hide any visible top-level windows for a short time.
+    try {
+    Loop 10 {
+    for _, hwnd in WinGetList("ahk_pid " pid) {
+    try WinHide(hwnd)
+    }
+    Sleep(150)
+    }
+    } catch {
+    }
+}
+
+
 ArmSplashAutoClose() {
     global EnableSplashScreen, SplashScreenDuration, SplashMode, SplashVideoPlayFull, SplashVideoSafetyMaxMs
     if (!EnableSplashScreen)
@@ -18402,18 +19393,9 @@ if HandleSteamShellCommandMode()
 
 InitDpiAwareness()
 EnsureSettingsIniExists()
-SweepAbandonedSettingsUpdates()
 EnsureSettingsIniUnicode()
 SyncSettingsIniSchema()
 LoadSettings()
-; Read, compared and logged -- never acted on. InstallationMode, InstallDirectory
-; and DataDirectory were written by Setup and consumed by nothing, so the record
-; described the installation without ever being able to contradict it. A
-; disagreement is worth a log line and is never worth refusing to start over:
-; this is the Windows shell, and a stale path in a settings file must not be able
-; to leave a machine with nothing to log in to.
-LogSteamShellSetupRecordDrift(
-    A_ScriptDir, SteamShellDataDir, SteamShellInstallationMode)
 administratorSetupRequested := false
 administratorSetupRequestError := ""
 administratorSetupMarkerPresent := FileExist(
@@ -18495,11 +19477,6 @@ if FirstRunSetupMode {
 
     KickUserStartupPrograms()
 
-    ; Armed after the startup entries that usually bring RTSS up. The tick polls
-    ; for RTSS rather than launching it, and stops on the first successful
-    ; restore or at its own deadline.
-    SetTimer(RestoreRtssFrameLimitTick, 2000)
-
     ; Launch Steam BPM. A failed launch remains in SteamShell and presents a
     ; controller-friendly recovery screen after the splash is out of the way.
     if (!SteamLaunched && !LaunchSteamBpm()) {
@@ -18527,172 +19504,3 @@ RegisterQuickMenuKeys()
 
 if SafeMode && !FirstRunSetupMode
     SetTimer(ShowSettingsEditor, -400)
-
-; Seam for SteamShell-Shared.ahk. The window engine's scored best candidate is
-; this tree's answer to "what game is running".
-ProductBestGameExe() {
-    global LastBestCandidateProc
-    return LastBestCandidateProc
-}
-
-; Seams for the shared health harness.
-ProductVersionText() {
-    global SteamShellVersion
-    return SteamShellVersion
-}
-
-ProductCenterGui(guiObj) {
-    CenterGuiOnTargetMonitor(guiObj)
-}
-
-; Seam for SteamShell-Shared.ahk. This tree checks the process exists AND
-; re-verifies its identity on a one-second cache, which is stronger than the
-; companion needs but is what this product already had.
-ProductElevatedHelperAlive() {
-    return ElevatedHelperIsVerified()
-}
-
-; Seams for the shared settings scrollbar. This tree keeps the content bounds
-; in two globals; the companion computes them from SettingsLayout().
-ProductSettingsScrollBar() {
-    global SettingsEditorScrollBar
-    return IsObject(SettingsEditorScrollBar) ? SettingsEditorScrollBar : ""
-}
-
-ProductSettingsViewportHeight() {
-    global SettingsEditorContentTop, SettingsEditorContentBottom
-    return Max(1, SettingsEditorContentBottom - SettingsEditorContentTop)
-}
-
-
-RunViaDesktopShell(filePath, arguments := "", directory := "", show := 1) {
-    ; ShellExecute through Explorer's desktop automation object so an elevated
-    ; SteamShell does not force ordinary interactive utilities such as TabTip to
-    ; inherit its administrator token.
-    static VT_UI4 := 0x13
-    static SWC_DESKTOP := ComValue(VT_UI4, 0x8)
-    static DESKTOP_BROKER_TIMEOUT_MS := 10000
-    startedTick := A_TickCount
-    attempts := 0
-    lastError := "Explorer's desktop automation object was unavailable."
-
-    ; Shell_TrayWnd can exist shortly before Explorer publishes its desktop COM
-    ; automation object during a cold boot. Keep verifying the broker identity
-    ; while that object finishes initializing instead of treating this normal
-    ; readiness gap as a Steam launch failure.
-    Loop {
-        if !DesktopShellMatchesInteractiveUser(&shellReason) {
-            try LogLine(
-                "Desktop-shell launch rejected for " filePath ": " shellReason,
-                "Warning")
-            return false
-        }
-
-        attempts += 1
-        try {
-            desktopWindow := ComObject("Shell.Application").Windows.Item(SWC_DESKTOP)
-            desktopApplication := desktopWindow.Document.Application
-            desktopApplication.ShellExecute(
-                filePath, arguments, directory, "open", show)
-            if (attempts > 1) {
-                try LogLine(
-                    "Desktop-shell broker became ready after "
-                    . (A_TickCount - startedTick) " ms for " filePath ".")
-            }
-            return true
-        } catch as err {
-            lastError := err.Message
-        }
-
-        if (A_TickCount - startedTick >= DESKTOP_BROKER_TIMEOUT_MS)
-            break
-        Sleep 200
-    }
-
-    try LogLine(
-        "Desktop-shell launch failed for " filePath " after " attempts
-        . " attempts: " lastError,
-        "Warning")
-    return false
-}
-
-
-OpenTouchKeyboard() {
-    ; Present the modern touch keyboard without terminating Windows text-input
-    ; processes. Killing TextInputHost can leave desktop/custom-shell systems
-    ; unable to show a keyboard even though the taskbar button still works.
-    static tabtip1 := A_ProgramFiles "\Common Files\microsoft shared\ink\TabTip.exe"
-    static tabtip2 := ""
-
-    if (tabtip2 = "") {
-    try {
-    pf86 := EnvGet("ProgramFiles(x86)")
-    if (pf86 != "")
-    tabtip2 := pf86 "\Common Files\microsoft shared\ink\TabTip.exe"
-    }
-    }
-
-    ; If it's already present, just show/activate it.
-    if WinExist("ahk_class IPTip_Main_Window") {
-    try WinShow("ahk_class IPTip_Main_Window")
-    try WinActivate("ahk_class IPTip_Main_Window")
-    return
-    }
-
-    ; A successful request is equivalent to pressing the taskbar keyboard button.
-    if TryInvokeTouchKeyboard()
-        return
-
-    tabtipPath := ""
-    if FileExist(tabtip1)
-        tabtipPath := tabtip1
-    else if (tabtip2 != "" && FileExist(tabtip2))
-        tabtipPath := tabtip2
-    if (tabtipPath = "") {
-        try LogLine("Touch keyboard executable was not found; opening classic OSK.")
-        OpenOSK()
-        return
-    }
-    SplitPath(tabtipPath, , &tabtipDir)
-
-    ; Older builds may require TabTip to be started once before the presentation
-    ; interface becomes available. Use Explorer's desktop token because
-    ; SteamShell itself normally runs elevated for Task Manager compatibility.
-    if !ProcessExist("TabTip.exe") {
-        if !RunViaDesktopShell(tabtipPath, "", tabtipDir) {
-            try LogLine("Touch keyboard desktop launch was unavailable; opening classic OSK.")
-            OpenOSK()
-            return
-        }
-    }
-    Sleep 250
-
-    if TryInvokeTouchKeyboard()
-        return
-
-    ; Microsoft documents /SeekDesktop for unusual interactive desktops. It is a
-    ; final modern-keyboard fallback for the SteamShell custom-shell environment.
-    ; Keep this request at the desktop shell's integrity level as well.
-    if RunViaDesktopShell(tabtipPath, "/SeekDesktop", tabtipDir) {
-        try LogLine("Touch keyboard /SeekDesktop fallback requested.")
-    } else {
-        try LogLine("Touch keyboard fallback was unavailable; opening classic OSK.")
-        OpenOSK()
-    }
-}
-
-
-EnsureRtssRunning() {
-    path := ResolveRtssExecutablePath()
-    if ProcessExist("RTSS.exe")
-        return true
-    if (path = "")
-        return false
-    SplitPath(path, , &directory)
-    pid := 0
-    if LaunchInteractiveApp(
-        path, "", directory, "Minimized", &pid, "RTSS")
-        && ProcessWait("RTSS.exe", 3)
-        return true
-    return false
-}

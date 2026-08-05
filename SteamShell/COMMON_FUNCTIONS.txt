@@ -87,6 +87,7 @@ ReleaseControllerMouseButtons
 ResetControllerEdgeState
 ResolveXInputDll
 RtssFrameCapModeIsKnown
+SendChordReleasingModifiers
 SendToPretty
 SetDefaultAudioEndpointId
 ShortenText

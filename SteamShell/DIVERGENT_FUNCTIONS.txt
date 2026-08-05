@@ -53,12 +53,9 @@ ControllerBindingPretty: resolution logic is shared; the LABELS are deliberately
 # Same routine, different text only: parameter names, line wrapping, an if-chain
 # against a ternary. No abstraction needed; adopt the superset version.
 
-AutoMouseModeActive: PENDING Phase 2a -- companion is standalone minus the DesktopMode branch; share once XFE declares DesktopMode/EnableDesktopAutoMouseMode as false
 ElevatedRtssRequestPath: PENDING Phase 2a -- identical call sequence, differs only in how the path is spelled
 ExecuteControllerBinding: PENDING Phase 2a -- 0.88; the builtin action sets differ, the dispatch does not
 MouseWatch: PENDING Phase 2a -- identical call sequence
-SendChordSafe: PENDING Phase 2a -- identical call sequence
-SendSteamOverlayChord: PENDING Phase 2a -- identical but for the companion's CompanionDisabled guard, which hoists to the caller
 
 # ------------------------------------------------------------------------------
 # PENDING Phase 2b -- one is a strict subset of the other
@@ -74,8 +71,6 @@ ToggleQuickMenu: PENDING Phase 2b -- companion is standalone minus the desktop-m
 # PENDING Phase 2c -- resolvable through an abstraction that already exists
 # ------------------------------------------------------------------------------
 
-SetRtssFrameLimiterState: PENDING Phase 2c -- identical but for ShowNotification against SetStatus, which is exactly what SharedNotify was built for
-SetRtssOverlayState: PENDING Phase 2c -- same, via SharedNotify
 
 # ------------------------------------------------------------------------------
 # PERMANENT -- the privilege boundary
@@ -105,4 +100,10 @@ ReadBool: three-line wrapper binding IniPath or SettingsPath to ReadIniBool in S
 ReadInt: three-line wrapper binding IniPath or SettingsPath to ReadIniInt in SteamShell-Common.ahk
 InitXInput: three-line wrapper caching ResolveXInputDll in each program's own XInputDll global
 HasLongBinding: three-line wrapper passing each program's ControllerMap to ControllerBindingHasLong
+ElevatedRtssRequestPath: the two programs write to different places by design -- standalone to its ProgramData directory, the companion beside its own script, because it is portable and standalone is the shell
+ToggleQuickMenu: standalone guards on DesktopRestorePending and on EnableQuickMenu, and names its own settings file in the refusal; the companion has no desktop restore to be in the middle of
+QuickMenuHideThenSteamMenu: the companion resolves the shortcut through SendSteamMenu rather than reading SteamMenuShortcut, so the two take their value from different places
+MouseWatch: the gates genuinely differ -- standalone suppresses hiding while Explorer is allowed, the companion while Settings is visible. Unifying is a cursor-behaviour change in both and belongs in a pass that can be tested on hardware.
+ExecuteControllerBinding: the builtin ACTION SET is per-product, the same divergence recorded for ControllerBindingPretty -- the companion has TaskView, WindowsDesktop and Settings, standalone has ControlPanel and launches Explorer through its de-elevation path. Phase 4a's table should absorb both.
+SendChordSafe: three-line wrapper over SendChordReleasingModifiers in SteamShell-Common.ahk; the shared copy also declines while the companion is disabled, which the helper has no concept of
 

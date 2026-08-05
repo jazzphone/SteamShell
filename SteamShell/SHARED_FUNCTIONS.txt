@@ -89,6 +89,7 @@ ApplyElevatedRtssFrameLimit
 ApplyElevatedRtssProfileFrameLimit
 ApplyRtssGlobalState
 ApplyTrayIconImage
+AutoMouseModeActive
 AutoMouseProcessMatches
 BuildProductTrayMenu
 CachedInstallationVerdict
@@ -184,9 +185,13 @@ RtssProfileTargetExe
 RtssSaveProfileValueText
 SanitizeDiagnosticText
 SaveRtssFrameLimitToProfile
+SendChordSafe
 SendRtssShortcut
+SendSteamOverlayChord
 SetQuickMenuHdrState
+SetRtssFrameLimiterState
 SetRtssGlobalFrameLimit
+SetRtssOverlayState
 SettingsUpdateScrollBar
 SharedNotify
 ShouldLogRateLimited

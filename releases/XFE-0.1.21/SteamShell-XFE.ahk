@@ -18,14 +18,6 @@
 ; ==============================================================================
 #Requires AutoHotkey v2.0.19 64-bit
 #SingleInstance Ignore
-
-; Shared function definitions, compiled into both trees. See the file header
-; for the rules and for the per-tree seam it depends on.
-#Include SteamShell-Common.ahk
-#Include SteamShell-Shared.ahk
-;@Ahk2Exe-SetName SteamShell XFE Companion
-;@Ahk2Exe-SetDescription Controller-first companion for Xbox Full Screen Experience
-;@Ahk2Exe-SetVersion 1.9.9.0
 Persistent
 SendMode "Input"
 SetTitleMatchMode 2
@@ -46,8 +38,8 @@ SetTitleMatchMode 2
 ; hotkey thread too. MouseMove(..., "R") is relative and unaffected.
 CoordMode "Mouse", "Screen"
 
-global AppVersion := "1.9.9"
-global SettingsSchemaVersion := 16
+global AppVersion := "0.1.21"
+global SettingsSchemaVersion := 8
 global IniPath := A_ScriptDir "\SteamShell-XFE.ini"
 global LogPath := A_ScriptDir "\SteamShell-XFE.log"
 global ScriptPid := DllCall("GetCurrentProcessId", "UInt")
@@ -80,28 +72,6 @@ global EnableQuickMenu := true
 global QuickMenuChordHoldMs := 500
 global EnableControllerMouseMode := true
 global EnablePersistentMouseMode := false
-; Automatic mouse mode: a master toggle and an allowlist of executables. This is
-; standalone's non-desktop-mode behaviour exactly, and it is the whole feature.
-;
-; It used to have a second gate. Standalone chooses between an allowlist and a
-; blanket "everywhere except these" using DesktopMode, and the companion has no
-; DesktopMode -- it never owns the shell -- so EnableDesktopAutoMouseMode was
-; introduced to make that choice by hand, with a default exclusion list naming
-; Xbox FSE's shell surfaces.
-;
-; That was the wrong shape, because the question it was standing in for is "am I
-; inside Xbox FSE right now?" and Windows exposes no way to ask it. The
-; exclusion list was a hand-maintained guess at FSE's process names, and a guess
-; that has to stay current with someone else's shell is not a feature -- it is a
-; standing bug with a configuration field in front of it. "Everywhere except a
-; list I have to keep correct" was removed rather than kept working badly.
-;
-; What remains says only what it can actually know: name the applications where
-; the controller should be a mouse. Xbox FSE needs no exclusion because it is
-; simply never on the list.
-global EnableAutoMouseMode := true
-global AutoMouseExeListRaw := "explorer.exe"
-global AutoMouseExeSet := Map()
 ; "auto" (default), "rawinput", "xinput", or "gameinput".
 ;
 ; Auto reads RawInput whenever HID reports are arriving and XInput otherwise.
@@ -166,27 +136,6 @@ global EnableSteamAssistLite := true
 global EnableLauncherCleanupLite := true
 global AssistTickIntervalMs := 2000
 global AssistCpuThresholdPercent := 12
-; Scoring inputs for XfeBestGameWindow. The values match the shell's defaults so
-; both products answer "which window is the game" identically out of the box.
-; Game-score diagnostics. Off by default: this writes a table on every evaluation
-; and is a troubleshooting aid, not something a normal session should pay for.
-global EnableGameScoreLogging := false
-global GameLogMode := "OFF" ; OFF | TOPN | DIAGNOSTIC
-global GameLogTopN := 3
-global GameLogIntervalMs := 3000
-global GameLogIncludeTitles := true
-global _LastGameLogTick := 0
-global AssistScoreFullscreen := 70
-global AssistScoreBorderlessLarge := 45
-global AssistScoreTitleBonus := 10
-global AssistScoreCpuAboveThreshold := 20
-global AssistScoreCpuNonZeroBonus := 15
-global AssistScoreAudioActive := 30
-global AssistFullscreenTolerance := 0.98
-global AssistFullscreenPosTolerancePx := 2
-global AssistAllowZeroCpuAsCandidate := true
-global EnableAudioAssist := true
-global AudioPeakThreshold := 0.02
 global AssistForegroundStableSec := 30
 global AssistCooldownSec := 300
 global AssistGracefulCloseMs := 4000
@@ -271,13 +220,6 @@ global RtssFrameLimiterControlMode := "separate"
 global RtssPresetFrameCap := 158
 global RtssCustomFrameCap := 158
 global RtssCustomFrameCapShortcut := "^+f"
-global RtssRestoreFrameLimitOnStartup := true
-; The Frame Limit selection last applied. RTSS persists only the FPS number
-; in its global profile; the limiter on/off flag is runtime state in its
-; shared memory, and "Custom" is a concept RTSS never sees. Without these,
-; none of the selection survives an RTSS restart. See SteamShell-Shared.ahk.
-global RtssLastFrameCapMode := ""
-global RtssLastFrameCapFps := 0
 global RtssFrameLimiterOnShortcut := "^+5"
 global RtssFrameLimiterOffShortcut := "^+6"
 ; RTSS exposes its global visibility/limiter flags from RTSSHooks64.dll. Keep
@@ -300,9 +242,6 @@ global RtssFrameCapPresets := [30, 40, 60, 90, 120]
 ; to equal a preset; without it the next repaint would derive "preset" again and
 ; the Custom row would vanish under the selection. Never persisted.
 global RtssFrameCapCustomMode := false
-; Set the first time RTSS accepts a FramerateLimit write and then reports a
-; different value. See RtssFrameCapBlockedReason in SteamShell-Shared.ahk.
-global RtssFrameCapWriteBlocked := false
 ; Repaint cache for the global FramerateLimit read. QuickMenuRender rebuilds
 ; every row on every refresh and each miss costs a LoadProfile plus a
 ; GetProfileProperty round trip. Zeroed after any write so the row never shows
@@ -312,31 +251,6 @@ global RtssFrameLimitCacheTick := 0
 ; Value the user is currently dialling in, before it reaches RTSS. 0 = nothing
 ; pending. See AdjustRtssCustomFrameCap.
 global RtssPendingFrameCap := 0
-
-; ------------------------------------------------------------------------------
-; Opt-in elevated RTSS helper
-; ------------------------------------------------------------------------------
-; OFF by default, and that is the point: choosing XFE means choosing a companion
-; with nothing elevated in it, and turning this on is the user deciding
-; otherwise. See StartElevatedRtssHelper for what it does and does not do.
-global RtssElevatedFrameCapWrites := false
-global ElevatedHelperPath := ""
-global ElevatedHelperPid := 0
-global ElevatedHelperAvailable := false
-global ElevatedHelperLastError := "Not started"
-; Must match SteamShell.ahk. One payload, embedded once in SteamShell.exe and
-; deployed by one Setup Assistant, so a mismatch here means the two trees were
-; built from different commits.
-global ElevatedHelperExpectedVersion := "1.9.9.4"
-; Recorded once at startup from this process's own token. XFE never re-launches
-; itself across the elevation boundary, so unlike standalone there is no
-; pre-elevation identity to carry forward -- see InitializeExpectedInteractiveIdentity
-; there, which stayed per-tree for exactly that reason.
-global ExpectedInteractiveUserSid := ""
-global ExpectedInteractiveSessionId := -1
-global ElevatedRtssEventHandle := 0
-global ElevatedRtssDoneEventHandle := 0
-global RtssElevatedRequestSeq := 0
 
 ; Controller mappings use View/Back unless persistent Mouse Mode is enabled.
 global ControllerMap := Map()
@@ -352,30 +266,15 @@ global LastObservedForegroundExe := ""
 ; LastObservedForegroundExe is overwritten the moment Steam comes forward -- and
 ; "which game is running" has to survive that.
 global LastObservedGameExe := ""
-; Set by RegisterTaskbarCreatedListener in SteamShell-Shared.ahk. Declared here
-; because every other global in this tree is, not because the assignment needs
-; it -- an undeclared global would be created by that assignment anyway, which is
-; exactly the kind of thing that should not be left to chance.
-global TaskbarCreatedMessage := 0
 global LastObservedForegroundHwnd := 0
 global LastObservedForegroundWasGame := false
 
 ; Quick Menu state.
 global QuickMenuGui := unset
-; Declared so AutoMouseModeActive can be defined once. Xbox FSE owns the shell,
-; so the companion has no desktop mode to be in and these are constant -- which
-; makes the shared function take the same branch it always took here.
-global DesktopMode := false
-global EnableDesktopAutoMouseMode := false
-global DesktopAutoMouseExcludeExeSet := Map()
-
 global QuickMenuVisible := false
 global QuickMenuPage := "MAIN"
 global QuickMenuRows := []
 global QuickMenuSelected := 1
-; How many rows the window was last sized for. A refresh re-derives the row
-; list, so this is what tells it the page grew and the window has to follow.
-global QuickMenuSizedRowCount := 0
 ; Quick Menu palette. One place to change the look; every row color is derived
 ; from these rather than repeated as literals through the renderer.
 global QM_BG := "242424"          ; dark neutral charcoal window background
@@ -437,18 +336,6 @@ global DisplayPendingOldMode := 0
 global DisplayPendingOldScale := 0
 global DisplayPendingUntilTick := 0
 
-; Health Check state, owned by SteamShell-Shared.ahk.
-;
-; Declared here because the shared file's rule is that every global it touches
-; exists in BOTH trees, and these two existed only in SteamShell.ahk. Nothing
-; enforced the rule until now, and the companion got away with it for one
-; accidental reason: ShowHealthCheck calls RefreshHealthCheck before the window
-; is interactive, so HealthCheckResults is always assigned before Copy Report
-; can read it. Move that single line and the companion throws on a button the
-; shell handles fine. The empty array is the same default standalone uses.
-global HealthCheckGui := unset
-global HealthCheckResults := []
-
 ; Settings and shortcut-capture state.
 global SettingsGui := unset
 global SettingsFields := Map()
@@ -456,21 +343,6 @@ global SettingsVisible := false
 global SettingsDirty := false
 global SettingsDialogActive := false
 global SettingsCategoryControls := Map()
-; Scrolling Settings viewport.
-;
-; XFE's Settings window is a fixed 920x660 and its pages were positioned by hand,
-; which is why two of them grew sideways into a second column instead of down.
-; Rows now place themselves, so a page can be taller than the window, and the
-; content area scrolls -- the same arrangement standalone has had, ported here so
-; the two windows can finally be laid out the same way.
-;
-; SettingsControlPositions holds each control's ORIGINAL, unscrolled geometry.
-; Everything is measured once, when the native controls exist, so scrolling is a
-; pure transform of recorded positions and repeated scrolling cannot accumulate
-; drift.
-global SettingsControlPositions := Map()
-global SettingsCategoryOffsets := Map()
-global SettingsScrollBar := 0
 global StartupProgramsList := unset
 global LogonTaskStatusCtrl := unset
 global SettingsCategoryList := 0
@@ -484,30 +356,10 @@ global _ShortcutCap := ""
 DefaultSettings() {
     return Map(
         "Companion", Map(
-            "SettingsSchemaVersion", 16,
+            "SettingsSchemaVersion", 8,
             "HeartbeatSeconds", 60,
             "LogRotateMaxKB", 256,
             "LogRotateBackups", 2
-        ),
-        ; Schema 12. Standalone keeps its cross-cutting feature switches in
-        ; [Features] rather than beside the settings they gate, and a user who
-        ; has configured one product should find the same switch in the same
-        ; place in the other. Only settings that exist in BOTH trees under the
-        ; SAME name moved; XFE-only concepts stayed where they were, because
-        ; putting them in a section standalone does not have would align nothing.
-        "Features", Map(
-            "EnableAutoMouseMode", "true",
-            ; Schema 13. Same intent as standalone's, so the same name and the
-            ; same section; a user who configured one product finds it here.
-            "EnableAutoHideCursor", "true",
-            "EnableMouseParkOnBoot", "true"
-        ),
-        "Timing", Map(
-            "MouseHideDelay", 1000
-        ),
-        "MousePark", Map(
-            "MouseParkEdge", "right",
-            "MouseParkYPercent", 0.50
         ),
         "QuickMenu", Map(
             "Enable", "true",
@@ -518,7 +370,6 @@ DefaultSettings() {
         "Controller", Map(
             "EnableControllerMouseMode", "true",
             "EnablePersistentMouseMode", "false",
-            "AutoMouseExeList", "explorer.exe",
             "Backend", "auto",
             "DiagnosticLogging", "false",
             "RawInputProbe", "false",
@@ -556,70 +407,24 @@ DefaultSettings() {
             "TickIntervalMs", 2000,
             "CpuThresholdPercent", 12,
             "ForegroundStableSec", 30,
-            "ProtectedProcesses", "explorer.exe|steam.exe|steamwebhelper.exe|AnyFSE.exe|SteamShell-XFE.exe|dwm.exe|csrss.exe|winlogon.exe",
-            "IgnoreForegroundProcesses", "explorer.exe|ApplicationFrameHost.exe|ShellHost.exe|GameBar.exe|XboxGameBarWidgets.exe|SearchHost.exe|StartMenuExperienceHost.exe|ShellExperienceHost.exe",
-            "SuspendOnShellOverlay", "true",
-            "ShellOverlayProcesses", "class:XamlExplorerHostIslandWindow|class:MultitaskingViewFrame|class:Windows.UI.Core.CoreWindow|XboxPcApp.exe|GameBar.exe|XboxGameBarWidgets.exe|ShellHost.exe",
-            ; Schema 14. The scorer that decides which window is the game, used
-            ; by the per-game RTSS frame cap. Values match SteamShell's defaults
-            ; so both products pick the same window; the assist features above
-            ; keep their own simpler shape test and are unaffected.
-            "ScoreFullscreen", 70,
-            "ScoreBorderlessLarge", 45,
-            "ScoreTitleBonus", 10,
-            "ScoreCpuAboveThreshold", 20,
-            "ScoreCpuNonZeroBonus", 15,
-            "ScoreAudioActive", 30,
-            "FullscreenTolerance", 0.98,
-            "FullscreenPosTolerancePx", 2,
-            "AllowZeroCpuAsCandidate", "true",
-            "EnableAudioAssist", "true",
-            "AudioPeakThreshold", 0.02
-        ),
-        ; Schema 15. This product had no [Logging] section: rotation lived under
-        ; [Companion] and there was nothing to configure about diagnostics
-        ; because there were none. Rotation stays where it is -- moving a key
-        ; every existing INI already carries would break them for no gain.
-        ; Schema 16. What this installation believes it is, in the file that
-        ; travels with it. The registry record is the better source while it
-        ; exists and is exactly what does not survive a move: copy this folder to
-        ; another PC and HKCU is empty while this section still describes the old
-        ; machine, which is the only way to notice.
-        ;
-        ; The companion writes its own, because the Setup Assistant that deploys
-        ; it records the install in SteamShell's registry key and SteamShell's
-        ; INI, not here -- and because a companion copied into place by hand
-        ; never met that installer at all.
-        "Setup", Map(
-            "SetupState", "Complete",
-            "SetupVersion", "1",
-            "Product", "XFE",
-            "InstallationMode", "Portable",
-            "InstallDirectory", "",
-            "DataDirectory", ""
-        ),
-        "Logging", Map(
-            "EnableGameScoreLogging", "false",
-            "GameLogMode", "OFF",
-            "GameLogTopN", 3,
-            "GameLogIntervalMs", 3000,
-            "GameLogIncludeTitles", "true"
-        ),
-        ; Schema 12. These five carry standalone's own names, so they now carry
-        ; standalone's section as well. The rest of the cleanup tuning stayed in
-        ; [Assist]: XFE's names for it do not match standalone's, and moving a
-        ; differently-named setting into a shared section aligns nothing while
-        ; still breaking every existing INI.
-        "LauncherCleanup", Map(
             "CooldownSec", 300,
             "GracefulCloseMs", 4000,
             "HardKill", "true",
             "RequireNoGame", "true",
-            "LauncherProcesses", "UbisoftConnect.exe|upc.exe|EpicGamesLauncher.exe|EADesktop.exe|EALauncher.exe|Origin.exe|Battle.net.exe|RockstarGamesLauncher.exe|GalaxyClient.exe|RiotClientServices.exe|RiotClientUx.exe|wgc.exe|Heroic.exe|UbisoftConnectService.exe|UplayWebCore.exe|UplayService.exe|EpicWebHelper.exe|EABackgroundService.exe|BlizzardUpdateAgent.exe|Agent.exe|RockstarService.exe|SocialClubHelper.exe|GalaxyClientService.exe|GalaxyCommunication.exe|RiotClientUxRender.exe|legendary.exe|gogdl.exe|nile.exe"
+            "LauncherProcesses", "UbisoftConnect.exe|upc.exe|EpicGamesLauncher.exe|EADesktop.exe|EALauncher.exe|Origin.exe|Battle.net.exe|RockstarGamesLauncher.exe|GalaxyClient.exe|RiotClientServices.exe|RiotClientUx.exe|wgc.exe|Heroic.exe|UbisoftConnectService.exe|UplayWebCore.exe|UplayService.exe|EpicWebHelper.exe|EABackgroundService.exe|BlizzardUpdateAgent.exe|Agent.exe|RockstarService.exe|SocialClubHelper.exe|GalaxyClientService.exe|GalaxyCommunication.exe|RiotClientUxRender.exe|legendary.exe|gogdl.exe|nile.exe",
+            "ProtectedProcesses", "explorer.exe|steam.exe|steamwebhelper.exe|AnyFSE.exe|SteamShell-XFE.exe|dwm.exe|csrss.exe|winlogon.exe",
+            "IgnoreForegroundProcesses", "explorer.exe|ApplicationFrameHost.exe|ShellHost.exe|GameBar.exe|XboxGameBarWidgets.exe|SearchHost.exe|StartMenuExperienceHost.exe|ShellExperienceHost.exe",
+            "SuspendOnShellOverlay", "true",
+            "ShellOverlayProcesses", "class:XamlExplorerHostIslandWindow|class:MultitaskingViewFrame|class:Windows.UI.Core.CoreWindow|XboxPcApp.exe|GameBar.exe|XboxGameBarWidgets.exe|ShellHost.exe"
         ),
         "Cursor", Map(
+            "EnableAutoHide", "true",
+            "HideDelayMs", 1000,
+            "ParkOnStartup", "true",
             "ParkOnGameStart", "true",
             "ParkOnSteamReturn", "true",
+            "ParkEdge", "right",
+            "ParkYPercent", 0.50,
             "ForegroundPollMs", 500
         ),
         "Audio", Map(
@@ -639,10 +444,6 @@ DefaultSettings() {
             "FrameLimiterControlMode", "separate",
             "PresetFrameCap", 158,
             "CustomFrameCap", 158,
-            "RestoreFrameLimitOnStartup", "true",
-            "EnableElevatedFrameCapWrites", "false",
-            "LastFrameCapMode", "",
-            "LastFrameCapFps", 0,
             "CustomFrameCapShortcut", "^+f",
             "FrameLimiterOnShortcut", "^+5",
             "FrameLimiterOffShortcut", "^+6"
@@ -675,9 +476,7 @@ DefaultControllerMappings() {
 EnsureSettingsFile() {
     global IniPath, SettingsSchemaVersion, ControllerMap, ControllerMapDisplay
     RetireStartupSplashSettings()
-    RetireDesktopAutoMouseSettings()
     MigrateRtssPresetFrameCap()
-    MigrateSectionsToStandaloneLayout()
     defaults := DefaultSettings()
     for section, values in defaults {
         for key, value in values {
@@ -724,132 +523,6 @@ MigrateRtssPresetFrameCap() {
     try IniWrite(custom, IniPath, "RTSS", "PresetFrameCap")
 }
 
-; Schema 11 retires the "automatic mouse everywhere except these" mode. Its
-; exclusion list was a hand-maintained guess at Xbox FSE's process names,
-; standing in for a question Windows gives no way to ask; see the globals.
-;
-; This narrows behaviour for anyone who had the default on, so it is logged
-; rather than done quietly: they had a pointer in every foreground application
-; and will now have one only in those on AutoMouseExeList. Both keys are removed
-; so a stale value cannot look like it is still doing something, and their
-; absence is what makes the removal visible in the file the user edits.
-RetireDesktopAutoMouseSettings() {
-    global IniPath
-    marker := "__STEAMSHELL_XFE_MISSING__"
-    everywhere := marker
-    exclusions := marker
-    try everywhere := IniRead(IniPath, "Controller", "EnableDesktopAutoMouseMode", marker)
-    try exclusions := IniRead(IniPath, "Controller", "DesktopAutoMouseExcludeExeList", marker)
-    if (everywhere = marker && exclusions = marker)
-        return
-    try {
-        if (everywhere != marker)
-            IniDelete(IniPath, "Controller", "EnableDesktopAutoMouseMode")
-        if (exclusions != marker)
-            IniDelete(IniPath, "Controller", "DesktopAutoMouseExcludeExeList")
-        LogLine("Settings migration: retired EnableDesktopAutoMouseMode and "
-            . "DesktopAutoMouseExcludeExeList. Automatic mouse mode now applies "
-            . "only in the applications on AutoMouseExeList.")
-    } catch as err {
-        ; Both keys are already ignored by the poll loop, so a read-only portable
-        ; INI leaves dead configuration behind rather than a broken companion.
-        LogLine("Settings migration: could not remove the retired automatic-mouse"
-            . " keys (" err.Message ").", "Warning")
-    }
-}
-
-; Schema 12 puts the settings XFE shares with standalone into the sections
-; standalone puts them in.
-;
-; Nothing about behaviour changes. The point is discoverability: someone who has
-; configured one product should find the same setting in the same place in the
-; other. The automatic-mouse master switch was in [Controller] here and
-; [Features] there; the launcher-cleanup tuning was in [Assist] here and
-; [LauncherCleanup] there.
-;
-; ONLY settings that exist in both trees under the SAME name moved. A setting
-; XFE names differently -- TickIntervalMs against standalone's CheckIntervalMs,
-; CpuThresholdPercent against GameCPUThresholdPercent -- would not become easier
-; to find by moving it into a shared section, and renaming it as well would
-; change what it means: XFE's assist features are deliberately reduced versions,
-; which is what the "Lite" in their switch names records.
-;
-; Runs BEFORE DefaultSettings fills in missing keys. The other order writes the
-; default into the new location first, and the user's own value is then stranded
-; in the old one where nothing reads it.
-MigrateSectionsToStandaloneLayout() {
-    global IniPath
-    static moves := [
-        ["Controller", "EnableAutoMouseMode", "Features", "EnableAutoMouseMode"],
-        ["Assist", "CooldownSec", "LauncherCleanup", "CooldownSec"],
-        ["Assist", "GracefulCloseMs", "LauncherCleanup", "GracefulCloseMs"],
-        ["Assist", "HardKill", "LauncherCleanup", "HardKill"],
-        ["Assist", "RequireNoGame", "LauncherCleanup", "RequireNoGame"],
-        ["Assist", "LauncherProcesses", "LauncherCleanup", "LauncherProcesses"],
-        ; Schema 13. Cursor auto-hide and pointer parking exist in both products
-        ; and did the same thing under different names -- this tree's ParkYPercent
-        ; and standalone's MouseParkYPercent even carried word-for-word the same
-        ; explanation. The table already carried a destination KEY as well as a
-        ; destination section, so a rename needed no new machinery.
-        ;
-        ; ParkOnGameStart, ParkOnSteamReturn and ForegroundPollMs stay in
-        ; [Cursor]: standalone has no equivalent, and its
-        ; EnableMouseParkOnFocusChange is a different rule (any focus change it
-        ; causes) rather than a differently-named version of ParkOnSteamReturn
-        ; (specifically Steam returning to the front).
-        ["Cursor", "EnableAutoHide", "Features", "EnableAutoHideCursor"],
-        ["Cursor", "ParkOnStartup", "Features", "EnableMouseParkOnBoot"],
-        ["Cursor", "HideDelayMs", "Timing", "MouseHideDelay"],
-        ["Cursor", "ParkEdge", "MousePark", "MouseParkEdge"],
-        ["Cursor", "ParkYPercent", "MousePark", "MouseParkYPercent"]]
-    marker := "__STEAMSHELL_XFE_MISSING__"
-    moved := 0
-    for _, move in moves {
-        oldValue := marker
-        try oldValue := IniRead(IniPath, move[1], move[2], marker)
-        if (oldValue = marker)
-            continue
-        ; A value already at the destination wins, which covers both a migration
-        ; that was interrupted and anyone who edited the new location by hand.
-        newValue := marker
-        try newValue := IniRead(IniPath, move[3], move[4], marker)
-        try {
-            if (newValue = marker)
-                IniWrite(oldValue, IniPath, move[3], move[4])
-            IniDelete(IniPath, move[1], move[2])
-            moved += 1
-        } catch as err {
-            ; A read-only portable INI leaves the value readable in its old
-            ; place, which is stale configuration rather than a broken companion.
-            LogLine("Settings migration: could not move [" move[1] "] " move[2]
-                . " to [" move[3] "] (" err.Message ").", "Warning")
-        }
-    }
-    if moved
-        LogLine("Settings migration: moved " moved " setting(s) into the sections"
-            . " standalone SteamShell uses for them.")
-}
-
-; Which section a schema-12 setting is actually in right now.
-;
-; Normally the new one. But MigrateSectionsToStandaloneLayout cannot write to a
-; read-only INI, and a MOVE is not a RETIREMENT: a retired key means nothing any
-; more and can be ignored where it lies, while a moved one still means exactly
-; what it did and has to keep being honoured wherever it still is.
-;
-; Without this, a read-only portable install silently reverts all six moved
-; settings to their defaults on upgrade -- and for EnableAutoMouseMode the
-; default is ON, so a user who had deliberately turned automatic mouse mode off
-; would find it back on with nothing in the log to explain it. The reader cannot
-; tell "absent" from "present" on its own; it returns the default for both.
-MovedSettingSection(newSection, oldSection, key) {
-    global IniPath
-    marker := "__STEAMSHELL_XFE_MISSING__"
-    value := marker
-    try value := IniRead(IniPath, newSection, key, marker)
-    return value != marker ? newSection : oldSection
-}
-
 ; Schema 6 retires XFE's presentation-only startup curtain. AnyFSE starts the
 ; companion after Steam, so the cover could only appear over an already-visible
 ; client. Preserve one copy of the pre-migration INI before removing the stale
@@ -875,11 +548,59 @@ RetireStartupSplashSettings() {
     }
 }
 
+ClampInt(v, lo, hi) {
+    if (v < lo)
+        return lo
+    if (v > hi)
+        return hi
+    return v
+}
+
+ClampFloat(v, lo, hi) {
+    if (v < lo)
+        return lo
+    if (v > hi)
+        return hi
+    return v
+}
+
+ReadBool(section, key, fallback) {
+    global IniPath
+    value := ""
+    try value := IniRead(IniPath, section, key, fallback ? "true" : "false")
+    value := StrLower(Trim(value))
+    return value = "1" || value = "true" || value = "yes" || value = "on"
+}
+
+ReadInt(section, key, fallback, minimum, maximum) {
+    global IniPath
+    value := fallback
+    try value := Round(IniRead(IniPath, section, key, fallback))
+    catch
+        value := fallback
+    return ClampInt(value, minimum, maximum)
+}
+
+ReadNumber(section, key, fallback, minimum, maximum) {
+    global IniPath
+    value := fallback
+    try value := IniRead(IniPath, section, key, fallback) + 0
+    catch
+        value := fallback
+    return ClampFloat(value, minimum, maximum)
+}
+
+ReadText(section, key, fallback := "") {
+    global IniPath
+    value := fallback
+    try value := IniRead(IniPath, section, key, fallback)
+    return Trim(value)
+}
+
 LoadSettings() {
     global HeartbeatSeconds, EnableQuickMenu, QuickMenuChordHoldMs
     global LogRotateMaxKB, LogRotateBackups
     global EnableControllerMouseMode, EnablePersistentMouseMode, ControllerIndex, ControllerPollIntervalMs
-    global EnableAutoMouseMode, AutoMouseExeListRaw, AutoMouseExeSet
     global ControllerDeadzone, ControllerMouseSpeed, ControllerMouseFastMultiplier
     global ControllerScrollIntervalMs, ControllerScrollStep, ControllerChordHoldMs
     global ControllerBackend, EnableControllerDiagnostics, EnableRawInputProbe
@@ -903,8 +624,6 @@ LoadSettings() {
     global RtssOverlayToggleShortcut, RtssOverlayOnShortcut, RtssOverlayOffShortcut
     global RtssFrameLimiterControlMode, RtssPresetFrameCap, RtssCustomFrameCap
     global RtssCustomFrameCapShortcut, RtssFrameLimiterOnShortcut, RtssFrameLimiterOffShortcut
-    global RtssRestoreFrameLimitOnStartup, RtssLastFrameCapMode, RtssLastFrameCapFps
-    global RtssElevatedFrameCapWrites, RtssFrameCapWriteBlocked
 
     ; Floor of 5s rather than 15s: during a short diagnostic run inside Xbox FSE
     ; the heartbeat is the only proof the process is still alive, and a 60s gap
@@ -922,11 +641,6 @@ LoadSettings() {
     EnableControllerMouseMode := ReadBool("Controller", "EnableControllerMouseMode", true)
     EnablePersistentMouseMode := ReadBool(
         "Controller", "EnablePersistentMouseMode", false)
-    ; Automatic mouse mode. Both gates must pass: the toggle allows the feature,
-    ; the list decides where it applies.
-    EnableAutoMouseMode := ReadBool(MovedSettingSection("Features", "Controller", "EnableAutoMouseMode"), "EnableAutoMouseMode", true)
-    AutoMouseExeListRaw := ReadText("Controller", "AutoMouseExeList", "explorer.exe")
-    AutoMouseExeSet := ProcessNameSetFromList(AutoMouseExeListRaw)
     ControllerBackend := StrLower(ReadText("Controller", "Backend", "auto"))
     if (ControllerBackend != "xinput" && ControllerBackend != "gameinput"
         && ControllerBackend != "rawinput" && ControllerBackend != "auto") {
@@ -965,45 +679,26 @@ LoadSettings() {
     EnableLauncherCleanupLite := ReadBool("Assist", "EnableLauncherCleanupLite", true)
     AssistTickIntervalMs := ReadInt("Assist", "TickIntervalMs", 2000, 500, 30000)
     AssistCpuThresholdPercent := ReadInt("Assist", "CpuThresholdPercent", 12, 0, 100)
-    ; Recorded before the drift check reads it back, so a fresh install writes
-    ; the truth once rather than reporting itself as moved forever.
-    RecordXfeInstallationPaths()
-    EnableGameScoreLogging := ReadBool("Logging", "EnableGameScoreLogging", false)
-    GameLogMode := ReadText("Logging", "GameLogMode", "OFF")
-    GameLogTopN := ReadInt("Logging", "GameLogTopN", 3, 1, 10)
-    GameLogIntervalMs := ReadInt("Logging", "GameLogIntervalMs", 3000, 250, 60000)
-    GameLogIncludeTitles := ReadBool("Logging", "GameLogIncludeTitles", true)
-    AssistScoreFullscreen := ReadInt("Assist", "ScoreFullscreen", 70, 0, 300)
-    AssistScoreBorderlessLarge := ReadInt("Assist", "ScoreBorderlessLarge", 45, 0, 300)
-    AssistScoreTitleBonus := ReadInt("Assist", "ScoreTitleBonus", 10, 0, 300)
-    AssistScoreCpuAboveThreshold := ReadInt("Assist", "ScoreCpuAboveThreshold", 20, 0, 300)
-    AssistScoreCpuNonZeroBonus := ReadInt("Assist", "ScoreCpuNonZeroBonus", 15, 0, 300)
-    AssistScoreAudioActive := ReadInt("Assist", "ScoreAudioActive", 30, 0, 200)
-    AssistFullscreenTolerance := ReadNumber("Assist", "FullscreenTolerance", 0.98, 0.50, 1.00)
-    AssistFullscreenPosTolerancePx := ReadInt("Assist", "FullscreenPosTolerancePx", 2, 0, 200)
-    AssistAllowZeroCpuAsCandidate := ReadBool("Assist", "AllowZeroCpuAsCandidate", true)
-    EnableAudioAssist := ReadBool("Assist", "EnableAudioAssist", true)
-    AudioPeakThreshold := ReadNumber("Assist", "AudioPeakThreshold", 0.02, 0.0, 1.0)
     AssistForegroundStableSec := ReadInt("Assist", "ForegroundStableSec", 30, 5, 600)
-    AssistCooldownSec := ReadInt(MovedSettingSection("LauncherCleanup", "Assist", "CooldownSec"), "CooldownSec", 300, 30, 7200)
-    AssistGracefulCloseMs := ReadInt(MovedSettingSection("LauncherCleanup", "Assist", "GracefulCloseMs"), "GracefulCloseMs", 4000, 500, 30000)
-    AssistHardKill := ReadBool(MovedSettingSection("LauncherCleanup", "Assist", "HardKill"), "HardKill", true)
-    AssistRequireNoGame := ReadBool(MovedSettingSection("LauncherCleanup", "Assist", "RequireNoGame"), "RequireNoGame", true)
-    AssistLauncherProcesses := ReadText(MovedSettingSection("LauncherCleanup", "Assist", "LauncherProcesses"), "LauncherProcesses", AssistLauncherProcesses)
+    AssistCooldownSec := ReadInt("Assist", "CooldownSec", 300, 30, 7200)
+    AssistGracefulCloseMs := ReadInt("Assist", "GracefulCloseMs", 4000, 500, 30000)
+    AssistHardKill := ReadBool("Assist", "HardKill", true)
+    AssistRequireNoGame := ReadBool("Assist", "RequireNoGame", true)
+    AssistLauncherProcesses := ReadText("Assist", "LauncherProcesses", AssistLauncherProcesses)
     AssistProtectedProcesses := ReadText("Assist", "ProtectedProcesses", AssistProtectedProcesses)
     AssistIgnoreForegroundProcesses := ReadText("Assist", "IgnoreForegroundProcesses",
         AssistIgnoreForegroundProcesses)
     AssistSuspendOnShellOverlay := ReadBool("Assist", "SuspendOnShellOverlay", true)
     AssistShellOverlayProcesses := ReadText("Assist", "ShellOverlayProcesses",
         AssistShellOverlayProcesses)
-    EnableAutoHideCursor := ReadBool(MovedSettingSection("Features", "Cursor", "EnableAutoHideCursor"), "EnableAutoHideCursor", true)
-    MouseHideDelayMs := ReadInt(MovedSettingSection("Timing", "Cursor", "MouseHideDelay"), "MouseHideDelay", 1000, 250, 10000)
-    ParkOnStartup := ReadBool(MovedSettingSection("Features", "Cursor", "EnableMouseParkOnBoot"), "EnableMouseParkOnBoot", true)
+    EnableAutoHideCursor := ReadBool("Cursor", "EnableAutoHide", true)
+    MouseHideDelayMs := ReadInt("Cursor", "HideDelayMs", 1000, 250, 10000)
+    ParkOnStartup := ReadBool("Cursor", "ParkOnStartup", true)
     ParkOnGameStart := ReadBool("Cursor", "ParkOnGameStart", true)
     ParkOnSteamReturn := ReadBool("Cursor", "ParkOnSteamReturn", true)
-    ParkEdge := StrLower(Trim(ReadText(MovedSettingSection("MousePark", "Cursor", "MouseParkEdge"), "MouseParkEdge", "right"))) = "left"
+    ParkEdge := StrLower(Trim(ReadText("Cursor", "ParkEdge", "right"))) = "left"
         ? "left" : "right"
-    ParkYPercent := ReadNumber(MovedSettingSection("MousePark", "Cursor", "MouseParkYPercent"), "MouseParkYPercent", 0.50, 0.05, 0.95)
+    ParkYPercent := ReadNumber("Cursor", "ParkYPercent", 0.50, 0.05, 0.95)
     ForegroundPollMs := ReadInt("Cursor", "ForegroundPollMs", 500, 250, 5000)
     EnableAudioQuickControls := ReadBool("Audio", "EnableQuickControls", true)
     EnableDisplayQuickControls := ReadBool("Display", "EnableQuickControls", true)
@@ -1019,25 +714,6 @@ LoadSettings() {
     RtssFrameLimiterControlMode := StrLower(ReadText("RTSS", "FrameLimiterControlMode", "separate"))
     RtssPresetFrameCap := ReadInt("RTSS", "PresetFrameCap", 158, 0, 1000)
     RtssCustomFrameCap := ReadInt("RTSS", "CustomFrameCap", 158, 10, 1000)
-    RtssRestoreFrameLimitOnStartup := ReadBool("RTSS", "RestoreFrameLimitOnStartup", true)
-    ; DEFAULT FALSE, and that default is the feature. XFE is chosen because
-    ; nothing about it is elevated; this is the user deciding otherwise for the
-    ; one thing that cannot work any other way. See StartElevatedRtssHelper.
-    RtssElevatedFrameCapWrites := ReadBool(
-        "RTSS", "EnableElevatedFrameCapWrites", false)
-    ; Reloading settings re-arms the frame cap.
-    ;
-    ; RtssFrameCapWriteBlocked latches on the first failed write so the row
-    ; stops accepting presses it cannot honour. That is right during a session
-    ; and wrong across a settings change: turning the elevated write on, or
-    ; correcting [RTSS] Path, would otherwise leave the row read-only until the
-    ; next sign-in with no way to tell why. The latch costs one failed write to
-    ; re-establish, so clearing it here is cheap.
-    RtssFrameCapWriteBlocked := false
-    RtssLastFrameCapMode := StrLower(Trim(ReadText("RTSS", "LastFrameCapMode", "")))
-    if !RtssFrameCapModeIsKnown(RtssLastFrameCapMode)
-        RtssLastFrameCapMode := ""
-    RtssLastFrameCapFps := ReadInt("RTSS", "LastFrameCapFps", 0, 0, 1000)
     RtssCustomFrameCapShortcut := ReadText("RTSS", "CustomFrameCapShortcut", "^+f")
     RtssFrameLimiterOnShortcut := ReadText("RTSS", "FrameLimiterOnShortcut", "^+5")
     RtssFrameLimiterOffShortcut := ReadText("RTSS", "FrameLimiterOffShortcut", "^+6")
@@ -1120,44 +796,17 @@ SetCompanionHotkeysEnabled(enabled) {
     }
 }
 
-; Seam for SteamShell-Shared.ahk. The entries this product offers, in order;
-; anything that is not a Map is a separator.
-;
-; Built fresh on every refresh rather than renamed in place. The old code created
-; the menu once and mutated it -- Rename("Disable","Enable"), Enable/Disable on
-; the Quick Menu entry -- which worked for a label that only ever changed text
-; and made a conditional entry impossible. The moved-installation entry below is
-; the first thing that needed one.
-ProductTrayItems() {
+RefreshTrayMenuState() {
     global CompanionDisabled
-    items := []
-    if (InstallationRecordAlert(A_ScriptDir, A_ScriptDir, "Portable") != "") {
-        ; The companion is not the installer, so this opens its own Settings
-        ; rather than a Setup Assistant it does not have. SteamShell.exe is what
-        ; re-records the install.
-        items.Push(Map(
-            "label", "Installation moved — open Settings",
-            "handler", TrayOpenSettings))
-        items.Push("")
+    if CompanionDisabled {
+        try A_TrayMenu.Rename("Disable", "Enable")
+        try A_TrayMenu.Disable("Open Quick Menu")
+        A_IconTip := "SteamShell XFE — Disabled"
+    } else {
+        try A_TrayMenu.Rename("Enable", "Disable")
+        try A_TrayMenu.Enable("Open Quick Menu")
+        A_IconTip := "SteamShell XFE"
     }
-    items.Push(Map(
-        "label", "Open Quick Menu", "handler", TrayOpenQuickMenu,
-        "disabled", CompanionDisabled))
-    items.Push(Map("label", "Open Settings", "handler", TrayOpenSettings))
-    items.Push("")
-    items.Push(Map(
-        "label", CompanionDisabled ? "Enable" : "Disable",
-        "handler", ToggleCompanionDisabled))
-    items.Push(Map("label", "Exit", "handler", ExitCompanion))
-    return items
-}
-
-ProductTrayBaseTip() {
-    global CompanionDisabled
-    return "SteamShell XFE"
-        . (CompanionDisabled ? " — Disabled" : "")
-        . (InstallationRecordAlert(A_ScriptDir, A_ScriptDir, "Portable") != ""
-            ? " — installation moved" : "")
 }
 
 SetCompanionDisabled(disabled) {
@@ -1201,7 +850,7 @@ SetCompanionDisabled(disabled) {
         ApplyRuntimeTimers()
         LogLine("Companion enabled from the notification-area menu.")
     }
-    BuildProductTrayMenu()
+    RefreshTrayMenuState()
 }
 
 ToggleCompanionDisabled(*) {
@@ -1225,6 +874,19 @@ TrayOpenSettings(*) {
     ShowSettings()
 }
 
+InitializeTrayMenu() {
+    iconPath := A_ScriptDir "\assets\SteamShell-XFE.ico"
+    if FileExist(iconPath)
+        try TraySetIcon(iconPath)
+    A_TrayMenu.Delete()
+    A_TrayMenu.Add("Open Quick Menu", TrayOpenQuickMenu)
+    A_TrayMenu.Add("Open Settings", TrayOpenSettings)
+    A_TrayMenu.Add()
+    A_TrayMenu.Add("Disable", ToggleCompanionDisabled)
+    A_TrayMenu.Add("Exit", ExitCompanion)
+    A_TrayMenu.Default := "Open Quick Menu"
+    RefreshTrayMenuState()
+}
 
 ReloadSettings(*) {
     global QuickMenuVisible, SettingsVisible, GameInputFailed, GameInputReady
@@ -1235,14 +897,68 @@ ReloadSettings(*) {
     if !GameInputReady
         GameInputFailed := false
     ApplyRuntimeTimers()
-    ; Both directions, immediately. An elevated process the user has just asked
-    ; to stop, which keeps running until the next sign-in, is not a control.
-    SyncElevatedRtssHelperWithSettings()
     if QuickMenuVisible
         QuickMenuBuildGui()
     if SettingsVisible
         SettingsPopulate()
     SetStatus("Settings reloaded", "Info")
+}
+
+; pendingBytes is the size of the line the caller is about to append.
+;
+; The companion had no rotation at all: every line was appended to a log beside
+; the EXE that nothing ever truncated. That is fine for a handful of lifecycle
+; lines and not fine for the controller diagnostics, which emit a line per
+; button edge, so a long session could grow the file without bound and
+; ExportDiagnosticBundle reads the whole thing into memory before slicing it.
+;
+; The running estimate exists so the common case costs no filesystem call at
+; all; the real size is always confirmed before anything is deleted or moved.
+RotateLogIfNeeded(pendingBytes := 0) {
+    global LogPath, LogRotateMaxKB, LogRotateBackups
+    static estimatedSize := -1
+    if (LogRotateBackups <= 0)
+        return
+    if !FileExist(LogPath) {
+        estimatedSize := 0
+        return
+    }
+
+    threshold := LogRotateMaxKB * 1024
+    if (estimatedSize < 0) {
+        ; First call of the session, or a measurement that previously failed.
+        try estimatedSize := FileGetSize(LogPath)
+        catch {
+            estimatedSize := -1
+            return
+        }
+    }
+    estimatedSize += pendingBytes
+    if (estimatedSize <= threshold)
+        return
+
+    ; The estimate says we are over. Confirm against the real size before doing
+    ; anything destructive -- the file may have been truncated or replaced.
+    try estimatedSize := FileGetSize(LogPath)
+    catch
+        return
+    if (estimatedSize <= threshold)
+        return
+    estimatedSize := 0
+
+    Loop LogRotateBackups {
+        index := LogRotateBackups - A_Index + 1
+        source := LogPath "." index
+        destination := LogPath "." (index + 1)
+        if (index = LogRotateBackups) {
+            if FileExist(source)
+                try FileDelete(source)
+        } else {
+            if FileExist(source)
+                try FileMove(source, destination, 1)
+        }
+    }
+    try FileMove(LogPath, LogPath ".1", 1)
 }
 
 LogLine(message, level := "Info") {
@@ -1254,10 +970,19 @@ LogLine(message, level := "Info") {
     try FileAppend(line, LogPath, "UTF-8")
 }
 
-; Alias for SharedNotify, which holds the implementation. Kept so this tree's
-; call sites read naturally.
 SetStatus(message, level := "Info") {
-    SharedNotify(message, level)
+    global LastStatusText, LastStatusLevel, QuickMenuVisible
+    global LastStatusTick, StatusVisibleMs
+    LastStatusText := message
+    LastStatusLevel := level
+    LastStatusTick := A_TickCount
+    LogLine(message, level)
+    if QuickMenuVisible {
+        try QuickMenuRefresh()
+        ; Re-render once the message expires so it clears itself instead of
+        ; sitting there until the next time the menu happens to redraw.
+        SetTimer(QuickMenuRefresh, -(StatusVisibleMs + 100))
+    }
 }
 
 Heartbeat() {
@@ -1303,7 +1028,6 @@ RearmControllerInput(*) {
 }
 
 OnCompanionExit(exitReason, exitCode) {
-    ReleaseControllerMouseButtons()
     global DisplayPendingOldMode, DisplayPendingOldScale, AssistPendingHardKillPids
     SetTimer(PollController, 0)
     SetTimer(MouseWatch, 0)
@@ -1326,6 +1050,15 @@ OnCompanionExit(exitReason, exitCode) {
 
 ExitCompanion(*) {
     ExitApp()
+}
+
+SendChordSafe(keys) {
+    global CompanionDisabled
+    if CompanionDisabled
+        return false
+    try SendInput("{Ctrl up}{Alt up}{Shift up}{LWin up}{RWin up}")
+    try SendInput(keys)
+    return true
 }
 
 NormalizePath(path) {
@@ -1425,6 +1158,41 @@ GetMonitorWorkAreaForPoint(x, y, &left, &top, &right, &bottom) {
     return 1
 }
 
+; Takes the foreground for one of our own windows.
+;
+; Windows only permits the process that already owns the foreground to call
+; SetForegroundWindow. A background companion therefore shows its window --
+; visible, because it is always-on-top -- while the previous application quietly
+; keeps focus, and keeps receiving controller input. Attaching to the current
+; foreground thread's input queue lifts that restriction for the duration of the
+; call.
+;
+; This is only ever used on windows this process owns, in direct response to the
+; user opening them. It is not focus management of other applications, which
+; remains Xbox FSE's job.
+ForceForegroundWindow(hwnd) {
+    if !hwnd
+        return false
+    try {
+        if (DllCall("GetForegroundWindow", "Ptr") = hwnd)
+            return true
+        currentForeground := DllCall("GetForegroundWindow", "Ptr")
+        ourThread := DllCall("GetCurrentThreadId", "UInt")
+        foreThread := currentForeground
+            ? DllCall("GetWindowThreadProcessId", "Ptr", currentForeground, "Ptr", 0, "UInt")
+            : 0
+        attached := false
+        if (foreThread && foreThread != ourThread)
+            attached := DllCall("AttachThreadInput", "UInt", ourThread,
+                "UInt", foreThread, "Int", 1) != 0
+        DllCall("BringWindowToTop", "Ptr", hwnd)
+        DllCall("SetForegroundWindow", "Ptr", hwnd)
+        if attached
+            DllCall("AttachThreadInput", "UInt", ourThread, "UInt", foreThread, "Int", 0)
+        return DllCall("GetForegroundWindow", "Ptr") = hwnd
+    }
+    return false
+}
 
 GetMonitorIndexForWindow(hwnd) {
     if hwnd {
@@ -1472,6 +1240,28 @@ RecenterVisibleGuiOnMonitorActual(guiObj, monitorIndex) {
     return MoveWindowPhysical(guiObj.Hwnd, correctedX, correctedY)
 }
 
+; Moves, and optionally resizes, a window in PHYSICAL pixels.
+;
+; Gui.Show scales the coordinates and sizes it is handed by the DPI factor. That
+; is correct for a layout written in logical units and wrong for a position
+; computed from WinGetPos, which reports real device pixels. SetWindowPos takes
+; device pixels and scales nothing, so the two units never have to be reconciled.
+;
+; It also moves and resizes in ONE operation, so there is no frame in which the
+; window already has its new size at its old position.
+MoveWindowPhysical(hwnd, x, y, w := 0, h := 0) {
+    static SWP_NOSIZE := 0x0001
+    static SWP_NOZORDER := 0x0004
+    static SWP_NOACTIVATE := 0x0010
+    flags := SWP_NOZORDER | SWP_NOACTIVATE
+    if (w <= 0 || h <= 0)
+        flags |= SWP_NOSIZE
+    result := 0
+    try result := DllCall("SetWindowPos", "Ptr", hwnd, "Ptr", 0,
+        "Int", x, "Int", y, "Int", w, "Int", h, "UInt", flags, "Int")
+    return result != 0
+}
+
 ; Makes visible a window that PositionGuiCentered was asked to leave hidden.
 ;
 ; ShowWindow rather than Gui.Show, because Gui.Show with no coordinates
@@ -1482,6 +1272,22 @@ RevealWindow(guiObj, noActivate := false) {
     static SW_SHOW := 5
     try DllCall("ShowWindow", "Ptr", guiObj.Hwnd, "Int",
         noActivate ? SW_SHOWNOACTIVATE : SW_SHOW)
+}
+
+; Centres a window of the given physical size inside a work area, clamping only
+; when it genuinely does not fit so that a window which fits keeps its centred
+; position untouched.
+CenteredPosition(left, top, right, bottom, windowWidth, windowHeight, &x, &y) {
+    x := left + Floor(((right - left) - windowWidth) / 2)
+    y := top + Floor(((bottom - top) - windowHeight) / 2)
+    if (windowWidth < right - left)
+        x := ClampInt(x, left, right - windowWidth)
+    else
+        x := left
+    if (windowHeight < bottom - top)
+        y := ClampInt(y, top, bottom - windowHeight)
+    else
+        y := top
 }
 
 ; Sizes and centres a window, never showing it at an intermediate position.
@@ -1612,6 +1418,25 @@ PositionGuiCentered(guiObj, left, top, right, bottom, width, height,
             . (deferred ? " (show deferred)" : ""))
     }
     return deferred
+}
+
+; ==============================================================================
+; Cursor hiding and sleep-safe parking
+; ==============================================================================
+SystemCursor(mode := "Show") {
+    static AndM := Buffer(128, 0xFF)
+    static XorM := Buffer(128, 0)
+    static Cursors := [32512,32513,32514,32515,32516,32640,32641,32642,
+        32643,32644,32645,32646,32648,32649,32650,32651]
+    if (mode = "Hide") {
+        for _, id in Cursors {
+            hCur := DllCall("CreateCursor", "Ptr", 0, "Int", 0, "Int", 0,
+                "Int", 32, "Int", 32, "Ptr", AndM, "Ptr", XorM, "Ptr")
+            DllCall("SetSystemCursor", "Ptr", hCur, "Int", id)
+        }
+    } else {
+        DllCall("SystemParametersInfo", "UInt", 0x57, "UInt", 0, "Ptr", 0, "UInt", 0)
+    }
 }
 
 MouseWatch() {
@@ -2089,7 +1914,52 @@ SetActiveBackend(backend) {
     LogLine("Controller backend is now " backend ".")
 }
 
+; ==============================================================================
+; XInput and controller mappings
+; ==============================================================================
+InitXInput() {
+    global XInputDll
+    if (XInputDll != "")
+        return true
+    for _, dll in ["xinput1_4.dll", "xinput1_3.dll", "xinput9_1_0.dll"] {
+        try {
+            if (DllCall("GetModuleHandle", "Str", dll, "Ptr")
+                || DllCall("LoadLibrary", "Str", dll, "Ptr")) {
+                XInputDll := dll
+                return true
+            }
+        }
+    }
+    XInputDll := ""
+    return false
+}
 
+XInputGetState(index, &state) {
+    global XInputDll
+    if (XInputDll = "" && !InitXInput())
+        return 1167
+    if !IsObject(state)
+        state := Buffer(16, 0)
+    try {
+        rc := DllCall(XInputDll "\XInputGetState", "UInt", index, "Ptr", state, "UInt")
+        if (rc = 0) {
+            try {
+                extended := Buffer(16, 0)
+                if (DllCall(XInputDll "\100", "UInt", index, "Ptr", extended, "UInt") = 0) {
+                    exButtons := NumGet(extended, 4, "UShort")
+                    if (exButtons & 0x0400) {
+                        buttons := NumGet(state, 4, "UShort")
+                        NumPut("UShort", buttons | 0x0400, state, 4)
+                    }
+                }
+            }
+        }
+        return rc
+    } catch {
+        XInputDll := ""
+        return 1
+    }
+}
 
 ; ==============================================================================
 ; RawInput probe
@@ -2597,31 +2467,15 @@ RawInputDeviceKey(hDevice, refresh := false) {
     descriptorResult := "not tried"
     name := ""
     size := 0
-    nameError := ""
-    ; NOT named "buffer", and the catch is not optional.
-    ;
-    ; AutoHotkey identifiers are case-insensitive, so a local called buffer IS
-    ; the Buffer class: the constructor on the right resolved to the unassigned
-    ; local and threw before it ever ran. Inside the bare try that used to be
-    ; here that throw was swallowed, so RIDI_DEVICENAME appeared to fail on every
-    ; device on every machine -- which silently removed the &MI_/&Col suffixes
-    ; below, collapsing every collection of a composite gamepad onto one profile
-    ; key, and made the DEV_ checksum fallback unreachable. The failure is
-    ; carried to the once-per-device diagnostic at the end of this function
-    ; rather than logged here, because this runs from WM_INPUT above 100 Hz.
-    ;
-    ; ElevatedRtssFinalPath in SteamShell-Helper.ahk carries the same note.
     try {
         DllCall("GetRawInputDeviceInfoW", "Ptr", hDevice, "UInt", RIDI_DEVICENAME,
             "Ptr", 0, "UInt*", &size)
         if size {
-            nameBuffer := Buffer(size * 2 + 2, 0)
+            buffer := Buffer(size * 2 + 2, 0)
             if (DllCall("GetRawInputDeviceInfoW", "Ptr", hDevice, "UInt", RIDI_DEVICENAME,
-                "Ptr", nameBuffer, "UInt*", &size, "UInt") != 0xFFFFFFFF)
-                name := StrGet(nameBuffer, "UTF-16")
+                "Ptr", buffer, "UInt*", &size, "UInt") != 0xFFFFFFFF)
+                name := StrGet(buffer, "UTF-16")
         }
-    } catch as err {
-        nameError := err.Message
     }
     key := ""
     if RegExMatch(name, "i)VID_([0-9A-F]{4})&PID_([0-9A-F]{4})", &match) {
@@ -2698,10 +2552,6 @@ RawInputDeviceKey(hDevice, refresh := false) {
         LogLine("RawInput identity: device 0x" Format("{:X}", hDevice)
             . " unidentifiable. RIDI_DEVICENAME chars=" size
             . " path='" (name != "" ? name : "(none)") "'"
-            ; Without this, a throw inside the path lookup was indistinguishable
-            ; from the HID stack returning a size and no path, and pointed the
-            ; diagnosis at the driver instead of at this function.
-            . (nameError != "" ? " pathError='" nameError "'" : "")
             . ", RIDI_DEVICEINFO vid=0x" Format("{:04X}", infoVid)
             . " pid=0x" Format("{:04X}", infoPid) " rc=" infoResult
             . ", RIDI_PREPARSEDDATA bytes=" descriptorBytes
@@ -2717,11 +2567,6 @@ RawInputDeviceKey(hDevice, refresh := false) {
     return key
 }
 
-; The human-readable device path, recorded beside a learned profile so the INI
-; can be read by a person. Called once per Save, not on the input path.
-;
-; NOT named "buffer" -- see the note in RawInputDeviceKey. This copy had the
-; same defect, so every profile ever saved recorded an empty Name.
 RawInputDeviceName(hDevice) {
     static RIDI_DEVICENAME := 0x20000007
     name := ""
@@ -2730,14 +2575,11 @@ RawInputDeviceName(hDevice) {
         DllCall("GetRawInputDeviceInfoW", "Ptr", hDevice, "UInt", RIDI_DEVICENAME,
             "Ptr", 0, "UInt*", &size)
         if size {
-            nameBuffer := Buffer(size * 2 + 2, 0)
+            buffer := Buffer(size * 2 + 2, 0)
             if (DllCall("GetRawInputDeviceInfoW", "Ptr", hDevice, "UInt", RIDI_DEVICENAME,
-                "Ptr", nameBuffer, "UInt*", &size, "UInt") != 0xFFFFFFFF)
-                name := StrGet(nameBuffer, "UTF-16")
+                "Ptr", buffer, "UInt*", &size, "UInt") != 0xFFFFFFFF)
+                name := StrGet(buffer, "UTF-16")
         }
-    } catch as err {
-        LogLine("RawInput: the device path for 0x" Format("{:X}", hDevice)
-            . " could not be read: " err.Message, "Warning")
     }
     return name
 }
@@ -2887,6 +2729,7 @@ LoadControllerProfile(key, refresh := false) {
     cache[key] := profile
     return profile
 }
+
 
 ; Reads one axis field out of a report.
 ControllerProfileAxisRaw(data, base, axis) {
@@ -4763,6 +4606,20 @@ XInputResolveController(&state) {
     return false
 }
 
+HasLongBinding(buttonName) {
+    global ControllerMap
+    value := ""
+    try value := ControllerMap[buttonName ".Long"]
+    return value != "" && value != "Builtin:None"
+}
+
+GetBindingValue(key) {
+    global ControllerMap
+    value := ""
+    try value := ControllerMap[key]
+    return value
+}
+
 ExecuteControllerBinding(key) {
     value := GetBindingValue(key)
     if (value = "" || value = "Builtin:None")
@@ -4814,6 +4671,24 @@ ExecuteControllerBinding(key) {
     }
 }
 
+; Formats a Send string for display.
+;
+; The modifier prefix is consumed character by character rather than by
+; substitution. Replacing "^" with "Ctrl+" first inserts a "+" that a later
+; "+" -> "Shift+" pass then rewrites, which is how "^1" was being displayed as
+; "CtrlShift+1".
+SendToPretty(shortcut) {
+    static MODIFIERS := Map("#", "Win+", "^", "Ctrl+", "!", "Alt+", "+", "Shift+")
+    text := Trim(shortcut)
+    prefix := ""
+    while (text != "" && MODIFIERS.Has(SubStr(text, 1, 1))) {
+        prefix .= MODIFIERS[SubStr(text, 1, 1)]
+        text := SubStr(text, 2)
+    }
+    ; Key names arrive braced, e.g. {Tab}; the braces are noise on screen.
+    text := StrReplace(StrReplace(text, "{", ""), "}", "")
+    return prefix text
+}
 
 ControllerBindingPretty(key) {
     global ControllerMapDisplay
@@ -4821,13 +4696,8 @@ ControllerBindingPretty(key) {
     if (value = "")
         return "None"
     if (SubStr(value, 1, 5) = "Send:") {
-        ; The stored display text only wins if there IS some. `try return` falls
-        ; through on a THROW, so an entry that exists and is empty returned a
-        ; blank label rather than the shortcut -- the row simply went nameless.
-        ; Standalone tests the value; this now does too.
-        display := ""
-        try display := ControllerMapDisplay[key]
-        return display != "" ? display : SendToPretty(SubStr(value, 6))
+        try return ControllerMapDisplay[key]
+        return SendToPretty(SubStr(value, 6))
     }
     if (SubStr(value, 1, 8) = "Builtin:") {
         action := SubStr(value, 9)
@@ -4845,6 +4715,89 @@ ControllerBindingPretty(key) {
     return value
 }
 
+; ==============================================================================
+; Touch keyboard
+; ==============================================================================
+TryInvokeTouchKeyboard() {
+    static clsidText := "{4CE576FA-83DC-4F88-951C-9D0782B4E376}"
+    static iidText := "{37C994E7-432B-4834-A2F7-DCE1F13B834B}"
+    clsid := Buffer(16, 0)
+    iid := Buffer(16, 0)
+    tip := 0
+    if (DllCall("Ole32\CLSIDFromString", "WStr", clsidText, "Ptr", clsid.Ptr, "Int") != 0
+        || DllCall("Ole32\CLSIDFromString", "WStr", iidText, "Ptr", iid.Ptr, "Int") != 0)
+        return false
+    hr := DllCall("Ole32\CoCreateInstance", "Ptr", clsid.Ptr, "Ptr", 0,
+        "UInt", 0x5, "Ptr", iid.Ptr, "Ptr*", &tip, "Int")
+    if (hr < 0 || !tip)
+        return false
+    succeeded := false
+    try {
+        vtable := NumGet(tip, 0, "Ptr")
+        method := NumGet(vtable, 3 * A_PtrSize, "Ptr")
+        desktop := DllCall("User32\GetDesktopWindow", "Ptr")
+        succeeded := DllCall(method, "Ptr", tip, "Ptr", desktop, "Int") >= 0
+    } finally {
+        try {
+            vtable := NumGet(tip, 0, "Ptr")
+            release := NumGet(vtable, 2 * A_PtrSize, "Ptr")
+            DllCall(release, "Ptr", tip, "UInt")
+        }
+    }
+    return succeeded
+}
+
+RunViaDesktopShell(filePath, arguments := "", directory := "", show := 1) {
+    static VT_UI4 := 0x13
+    static SWC_DESKTOP := ComValue(VT_UI4, 0x8)
+    try {
+        ComObject("Shell.Application").Windows.Item(SWC_DESKTOP).Document.Application
+            .ShellExecute(filePath, arguments, directory, "open", show)
+        return true
+    } catch {
+        return false
+    }
+}
+
+OpenTouchKeyboard() {
+    if WinExist("ahk_class IPTip_Main_Window") {
+        try WinShow("ahk_class IPTip_Main_Window")
+        try WinActivate("ahk_class IPTip_Main_Window")
+        return
+    }
+    if TryInvokeTouchKeyboard()
+        return
+    paths := [A_ProgramFiles "\Common Files\microsoft shared\ink\TabTip.exe"]
+    try {
+        pf86 := EnvGet("ProgramFiles(x86)")
+        if (pf86 != "")
+            paths.Push(pf86 "\Common Files\microsoft shared\ink\TabTip.exe")
+    }
+    tabTip := ""
+    for _, path in paths {
+        if FileExist(path) {
+            tabTip := path
+            break
+        }
+    }
+    if (tabTip = "") {
+        OpenOSK()
+        return
+    }
+    SplitPath(tabTip, , &directory)
+    if !ProcessExist("TabTip.exe") {
+        if !RunViaDesktopShell(tabTip, "", directory) {
+            OpenOSK()
+            return
+        }
+    }
+    Sleep 250
+    if !TryInvokeTouchKeyboard() {
+        if !RunViaDesktopShell(tabTip, "/SeekDesktop", directory)
+            OpenOSK()
+    }
+}
+
 OpenWindowsSettings() {
     if RunViaDesktopShell("ms-settings:")
         return
@@ -4856,10 +4809,797 @@ OpenOSK() {
     try Run("osk.exe")
 }
 
+; ==============================================================================
+; Audio, display, HDR, and RTSS
+; ==============================================================================
+GetActiveAudioOutputDevices() {
+    devices := []
+    iidDevice := "{D666063F-1587-4E43-81F1-B948E807363F}"
+    Loop 32 {
+        index := A_Index
+        try name := SoundGetName(, index)
+        catch
+            break
+        if (name = "")
+            continue
+        try {
+            device := SoundGetInterface(iidDevice, , index)
+            idPtr := 0
+            ComCall(5, device, "Ptr*", &idPtr)
+            id := idPtr ? StrGet(idPtr, "UTF-16") : ""
+            if idPtr
+                DllCall("Ole32\CoTaskMemFree", "Ptr", idPtr)
+            if (id != "")
+                devices.Push(Map("name", name, "id", id))
+        }
+    }
+    return devices
+}
+
+SetDefaultAudioEndpointId(endpointId) {
+    if (endpointId = "")
+        return false
+    ; Windows exposes default-endpoint selection through the PolicyConfig COM
+    ; interface used by the Sound control panel. Try the modern interface first,
+    ; then the Vista-compatible interface retained by current Windows versions.
+    policy := 0
+    try policy := ComObject(
+        "{870AF99C-171D-4F9E-AF0D-E63DF40C2BC9}",
+        "{F8679F50-850A-41CF-9C72-430F290290C8}")
+    catch {
+        try policy := ComObject(
+            "{294935CE-F637-4E7C-A41B-AB255460B862}",
+            "{568B9108-44BF-40B4-9006-86AFE5B5A620}")
+    }
+    if !IsObject(policy)
+        return false
+
+    try {
+        ; Apply to console, multimedia, and communications roles.
+        ComCall(13, policy, "WStr", endpointId, "Int", 0)
+        ComCall(13, policy, "WStr", endpointId, "Int", 1)
+        ComCall(13, policy, "WStr", endpointId, "Int", 2)
+        return true
+    } catch {
+        return false
+    }
+}
+
+CycleDefaultAudioOutput(direction) {
+    global QuickMenuAudioDevices
+    QuickMenuAudioDevices := GetActiveAudioOutputDevices()
+    if (QuickMenuAudioDevices.Length = 0) {
+        SetStatus("No active audio outputs were found", "Warning")
+        return
+    }
+    currentName := ""
+    try currentName := SoundGetName()
+    currentIndex := 1
+    for index, device in QuickMenuAudioDevices {
+        if (device["name"] = currentName) {
+            currentIndex := index
+            break
+        }
+    }
+    nextIndex := currentIndex + direction
+    if (nextIndex < 1)
+        nextIndex := QuickMenuAudioDevices.Length
+    if (nextIndex > QuickMenuAudioDevices.Length)
+        nextIndex := 1
+    target := QuickMenuAudioDevices[nextIndex]
+    if SetDefaultAudioEndpointId(target["id"])
+        SetStatus("Audio output: " target["name"])
+    else
+        SetStatus("Windows could not switch the audio output", "Warning")
+}
+
+GetPrimaryDisplayMode() {
+    dm := Buffer(220, 0)
+    NumPut("UShort", 220, dm, 68)
+    try {
+        if !DllCall("User32\EnumDisplaySettingsW", "Ptr", 0, "Int", -1, "Ptr", dm, "Int")
+            return 0
+    } catch {
+        return 0
+    }
+    return Map(
+        "width", NumGet(dm, 172, "UInt"),
+        "height", NumGet(dm, 176, "UInt"),
+        "frequency", NumGet(dm, 184, "UInt")
+    )
+}
+
+GetPrimaryDisplayModes() {
+    modes := []
+    seen := Map()
+    modeIndex := 0
+    ; Modern TV/GPU drivers can expose more than 512 resolution/refresh
+    ; combinations, usually with low resolutions first. EnumDisplaySettings
+    ; returns zero at the real end, so do not truncate the list before 4K.
+    Loop {
+        dm := Buffer(220, 0)
+        NumPut("UShort", 220, dm, 68)
+        ok := false
+        try ok := DllCall("User32\EnumDisplaySettingsW", "Ptr", 0,
+            "UInt", modeIndex, "Ptr", dm, "Int")
+        if !ok
+            break
+        modeIndex += 1
+        width := NumGet(dm, 172, "UInt")
+        height := NumGet(dm, 176, "UInt")
+        frequency := NumGet(dm, 184, "UInt")
+        bpp := NumGet(dm, 168, "UInt")
+        if (width < 640 || height < 480 || frequency < 24 || bpp < 24)
+            continue
+        key := width "x" height "@" frequency
+        if seen.Has(key)
+            continue
+        seen[key] := true
+        modes.Push(Map("width", width, "height", height, "frequency", frequency))
+    }
+    LogLine("Display modes: Windows reported " modeIndex
+        . " entries; SteamShell XFE retained " modes.Length " compatible combinations.")
+    sorted := []
+    for _, mode in modes {
+        insertAt := sorted.Length + 1
+        for pos, existing in sorted {
+            lhs := mode["width"] * mode["height"]
+            rhs := existing["width"] * existing["height"]
+            if (lhs < rhs || (lhs = rhs && mode["frequency"] < existing["frequency"])) {
+                insertAt := pos
+                break
+            }
+        }
+        sorted.InsertAt(insertAt, mode)
+    }
+    return sorted
+}
+
+ApplyPrimaryDisplayMode(mode) {
+    if !IsObject(mode)
+        return false
+    dm := Buffer(220, 0)
+    NumPut("UShort", 220, dm, 68)
+    NumPut("UInt", 0x580000, dm, 72)
+    NumPut("UInt", mode["width"], dm, 172)
+    NumPut("UInt", mode["height"], dm, 176)
+    NumPut("UInt", mode["frequency"], dm, 184)
+    try {
+        result := DllCall("User32\ChangeDisplaySettingsExW", "Ptr", 0,
+            "Ptr", dm, "Ptr", 0, "UInt", 0, "Ptr", 0, "Int")
+        return result = 0
+    } catch {
+        return false
+    }
+}
+
+; Returns the GDI name Windows assigns to the primary display (normally
+; \\.\DISPLAY1). Resolution already targets this display by passing NULL to
+; EnumDisplaySettings; the scale path resolves the same display explicitly.
+GetPrimaryDisplayDeviceName() {
+    Loop 16 {
+        device := Buffer(840, 0)
+        NumPut("UInt", 840, device, 0)
+        ok := false
+        try ok := DllCall("User32\EnumDisplayDevicesW", "Ptr", 0,
+            "UInt", A_Index - 1, "Ptr", device, "UInt", 0, "Int")
+        if !ok
+            break
+        stateFlags := NumGet(device, 324, "UInt")
+        if (stateFlags & 0x4)
+            return StrGet(device.Ptr + 4, 32, "UTF-16")
+    }
+    return ""
+}
+
+; Resolves the primary GDI display to its active DisplayConfig source. The
+; source adapter LUID and id are required by the per-display scale packets.
+GetPrimaryDisplayConfigSource() {
+    primaryName := GetPrimaryDisplayDeviceName()
+    if (primaryName = "")
+        return 0
+    flags := 0x2 ; QDC_ONLY_ACTIVE_PATHS
+    Loop 3 {
+        pathCount := 0
+        modeCount := 0
+        result := -1
+        try result := DllCall("User32\GetDisplayConfigBufferSizes",
+            "UInt", flags, "UInt*", &pathCount, "UInt*", &modeCount, "Int")
+        if (result != 0 || pathCount < 1)
+            return 0
+        ; DISPLAYCONFIG_PATH_INFO is 72 bytes and DISPLAYCONFIG_MODE_INFO is 64
+        ; bytes in this required 64-bit build.
+        paths := Buffer(pathCount * 72, 0)
+        modes := Buffer(Max(1, modeCount) * 64, 0)
+        try result := DllCall("User32\QueryDisplayConfig",
+            "UInt", flags, "UInt*", &pathCount, "Ptr", paths,
+            "UInt*", &modeCount, "Ptr", modes, "Ptr", 0, "Int")
+        if (result = 122) ; ERROR_INSUFFICIENT_BUFFER: topology changed; retry.
+            continue
+        if (result != 0)
+            return 0
+        Loop pathCount {
+            pathOffset := (A_Index - 1) * 72
+            adapterLow := NumGet(paths, pathOffset, "UInt")
+            adapterHigh := NumGet(paths, pathOffset + 4, "Int")
+            sourceId := NumGet(paths, pathOffset + 8, "UInt")
+            ; DISPLAYCONFIG_SOURCE_DEVICE_NAME: 20-byte header + WCHAR[32].
+            sourceName := Buffer(84, 0)
+            NumPut("UInt", 1, sourceName, 0) ; GET_SOURCE_NAME
+            NumPut("UInt", 84, sourceName, 4)
+            NumPut("UInt", adapterLow, sourceName, 8)
+            NumPut("Int", adapterHigh, sourceName, 12)
+            NumPut("UInt", sourceId, sourceName, 16)
+            getResult := -1
+            try getResult := DllCall("User32\DisplayConfigGetDeviceInfo",
+                "Ptr", sourceName, "Int")
+            if (getResult != 0)
+                continue
+            gdiName := StrGet(sourceName.Ptr + 20, 32, "UTF-16")
+            if (StrLower(gdiName) = StrLower(primaryName)) {
+                return Map(
+                    "adapterLow", adapterLow,
+                    "adapterHigh", adapterHigh,
+                    "sourceId", sourceId,
+                    "targetAdapterLow", NumGet(paths, pathOffset + 20, "UInt"),
+                    "targetAdapterHigh", NumGet(paths, pathOffset + 24, "Int"),
+                    "targetId", NumGet(paths, pathOffset + 28, "UInt"),
+                    "name", gdiName
+                )
+            }
+        }
+        return 0
+    }
+    return 0
+}
+
+DisplayScaleLevels() {
+    ; Windows' fixed scale ladder. The source DPI packet reports min/current/max
+    ; as positions relative to the recommended step; min therefore anchors the
+    ; first supported entry in this list.
+    return [100, 125, 150, 175, 200, 225, 250, 300, 350, 400, 450, 500]
+}
+
+; Reads the scale range used by Windows Settings for the primary display.
+;
+; The CCD header and DisplayConfig calls are public, but Windows does not publish
+; the GET_DPI_SCALE (-3) and SET_DPI_SCALE (-4) packet definitions in the SDK.
+; They are used defensively here: any unsupported/error response simply removes
+; the Scale row and leaves resolution/refresh controls working as before.
+GetPrimaryDisplayScale() {
+    static warned := false
+    source := GetPrimaryDisplayConfigSource()
+    if !IsObject(source) {
+        if !warned {
+            warned := true
+            LogLine("Display scale: primary DisplayConfig source is unavailable.",
+                "Warning")
+        }
+        return 0
+    }
+    packet := Buffer(32, 0)
+    NumPut("UInt", 0xFFFFFFFD, packet, 0) ; DISPLAYCONFIG_DEVICE_INFO_GET_DPI_SCALE
+    NumPut("UInt", 32, packet, 4)
+    NumPut("UInt", source["adapterLow"], packet, 8)
+    NumPut("Int", source["adapterHigh"], packet, 12)
+    NumPut("UInt", source["sourceId"], packet, 16)
+    result := -1
+    try result := DllCall("User32\DisplayConfigGetDeviceInfo",
+        "Ptr", packet, "Int")
+    if (result != 0) {
+        if !warned {
+            warned := true
+            LogLine("Display scale: Windows rejected GET_DPI_SCALE (error "
+                . result ").", "Warning")
+        }
+        return 0
+    }
+    minimum := NumGet(packet, 20, "Int")
+    current := NumGet(packet, 24, "Int")
+    maximum := NumGet(packet, 28, "Int")
+    levels := DisplayScaleLevels()
+    count := maximum - minimum + 1
+    currentIndex := current - minimum + 1
+    if (count < 1 || count > levels.Length
+        || currentIndex < 1 || currentIndex > count) {
+        if !warned {
+            warned := true
+            LogLine("Display scale: Windows returned an unsupported range "
+                . minimum ".." maximum " with current " current ".", "Warning")
+        }
+        return 0
+    }
+    warned := false
+    options := []
+    Loop count
+        options.Push(levels[A_Index])
+    return Map(
+        "percent", options[currentIndex],
+        "options", options,
+        "minimum", minimum,
+        "current", current,
+        "maximum", maximum
+    )
+}
+
+ApplyPrimaryDisplayScale(percent) {
+    info := GetPrimaryDisplayScale()
+    if !IsObject(info)
+        return false
+    selectedIndex := 0
+    for index, option in info["options"] {
+        if (option = percent) {
+            selectedIndex := index
+            break
+        }
+    }
+    if !selectedIndex
+        return false
+    source := GetPrimaryDisplayConfigSource()
+    if !IsObject(source)
+        return false
+    packet := Buffer(24, 0)
+    NumPut("UInt", 0xFFFFFFFC, packet, 0) ; DISPLAYCONFIG_DEVICE_INFO_SET_DPI_SCALE
+    NumPut("UInt", 24, packet, 4)
+    NumPut("UInt", source["adapterLow"], packet, 8)
+    NumPut("Int", source["adapterHigh"], packet, 12)
+    NumPut("UInt", source["sourceId"], packet, 16)
+    NumPut("Int", info["minimum"] + selectedIndex - 1, packet, 20)
+    result := -1
+    try result := DllCall("User32\DisplayConfigSetDeviceInfo",
+        "Ptr", packet, "Int")
+    if (result = 0)
+        LogLine("Display scale: primary display set to " percent "%.")
+    else
+        LogLine("Display scale: SET_DPI_SCALE failed with error " result ".",
+            "Warning")
+    return result = 0
+}
+
+; Reads the primary target's documented Advanced Color state. On Windows 10/11,
+; advancedColorSupported identifies an HDR-capable path and
+; advancedColorEnabled is the live "Use HDR" state.
+GetPrimaryHdrState() {
+    static warned := false
+    path := GetPrimaryDisplayConfigSource()
+    if !IsObject(path)
+        return 0
+    ; DISPLAYCONFIG_GET_ADVANCED_COLOR_INFO:
+    ; 20-byte header, 4-byte flags, color encoding, bits per color channel.
+    packet := Buffer(32, 0)
+    NumPut("UInt", 9, packet, 0) ; GET_ADVANCED_COLOR_INFO
+    NumPut("UInt", 32, packet, 4)
+    NumPut("UInt", path["targetAdapterLow"], packet, 8)
+    NumPut("Int", path["targetAdapterHigh"], packet, 12)
+    NumPut("UInt", path["targetId"], packet, 16)
+    result := -1
+    try result := DllCall("User32\DisplayConfigGetDeviceInfo",
+        "Ptr", packet, "Int")
+    if (result != 0) {
+        if !warned {
+            warned := true
+            LogLine("HDR: GET_ADVANCED_COLOR_INFO failed with error "
+                . result ".", "Warning")
+        }
+        return 0
+    }
+    warned := false
+    flags := NumGet(packet, 20, "UInt")
+    return Map(
+        "supported", (flags & 0x1) != 0,
+        "enabled", (flags & 0x2) != 0,
+        "wideColorEnforced", (flags & 0x4) != 0,
+        "forceDisabled", (flags & 0x8) != 0
+    )
+}
+
+ApplyPrimaryHdrState(enabled) {
+    path := GetPrimaryDisplayConfigSource()
+    if !IsObject(path)
+        return false
+    ; DISPLAYCONFIG_SET_ADVANCED_COLOR_STATE:
+    ; 20-byte header followed by the enableAdvancedColor bit.
+    packet := Buffer(24, 0)
+    NumPut("UInt", 10, packet, 0) ; SET_ADVANCED_COLOR_STATE
+    NumPut("UInt", 24, packet, 4)
+    NumPut("UInt", path["targetAdapterLow"], packet, 8)
+    NumPut("Int", path["targetAdapterHigh"], packet, 12)
+    NumPut("UInt", path["targetId"], packet, 16)
+    NumPut("UInt", enabled ? 1 : 0, packet, 20)
+    result := -1
+    try result := DllCall("User32\DisplayConfigSetDeviceInfo",
+        "Ptr", packet, "Int")
+    if (result = 0)
+        LogLine("HDR: primary display turned " (enabled ? "on." : "off."))
+    else
+        LogLine("HDR: SET_ADVANCED_COLOR_STATE failed with error "
+            . result ".", "Warning")
+    return result = 0
+}
+
+; No Win+Alt+B fallback here, deliberately. Validate-SteamShell-XFE.ps1 asserts
+; that the chord appears nowhere in this tree, so do not reintroduce it.
+;
+; This is a divergence from standalone, not a gap. XFE 0.1.9 drove this row with
+; nothing but the chord and no live state at all; 0.1.14 replaced it with
+; DisplayConfig and added the assertion in the same release. The README states
+; the resulting rule: read the primary display's Advanced Color state "rather
+; than assuming what the Win+Alt+B shortcut did", and on an unreadable
+; driver/API state show Unavailable "without sending a blind toggle".
+;
+; So an unreadable state is reported, not guessed at. The August 2026 audit read
+; standalone's fallback as a missing feature here and ported it; the assertion
+; caught that on the first build.
+SetQuickMenuHdrState(enabled) {
+    current := GetPrimaryHdrState()
+    if !IsObject(current) {
+        SetStatus("Windows HDR state is unavailable", "Warning")
+        return
+    }
+    if !current["supported"] {
+        SetStatus("The primary display does not report HDR support", "Warning")
+        return
+    }
+    if current["forceDisabled"] {
+        SetStatus("HDR is disabled by Windows or the display driver", "Warning")
+        return
+    }
+    if (current["enabled"] = enabled) {
+        SetStatus("HDR is already " (enabled ? "on" : "off"))
+        return
+    }
+    if ApplyPrimaryHdrState(enabled) {
+        SetStatus("HDR turned " (enabled ? "on" : "off"))
+        ; The display can blank briefly and Windows updates the reported state
+        ; asynchronously. Reuse the display reflow timer to refresh the row from
+        ; the authoritative state after that transition.
+        QueueQuickMenuDisplayReflow()
+    } else {
+        SetStatus("Windows could not turn HDR " (enabled ? "on" : "off"),
+            "Warning")
+    }
+}
+
+ToggleQuickMenuHdrState() {
+    current := GetPrimaryHdrState()
+    if !IsObject(current) {
+        SetStatus("Windows HDR state is unavailable", "Warning")
+        return
+    }
+    SetQuickMenuHdrState(!current["enabled"])
+}
 
 ; ==============================================================================
 ; Display selection (resolution, refresh rate, and scale chosen independently)
 ; ==============================================================================
+; Nothing here changes the display. The chosen values are only applied when the
+; Apply row is activated, so cycling through options is free and the existing
+; 15-second revert guards the single transaction.
+DistinctDisplayResolutions() {
+    global QuickMenuDisplayModes
+    seen := Map()
+    list := []
+    for _, mode in QuickMenuDisplayModes {
+        key := mode["width"] "x" mode["height"]
+        if seen.Has(key)
+            continue
+        seen[key] := true
+        list.Push(Map("width", mode["width"], "height", mode["height"]))
+    }
+    return list
+}
+
+FrequenciesForResolution(width, height) {
+    global QuickMenuDisplayModes
+    list := []
+    for _, mode in QuickMenuDisplayModes {
+        if (mode["width"] = width && mode["height"] = height)
+            list.Push(mode["frequency"])
+    }
+    return list
+}
+
+; Seeds the pending selection from the mode currently in use, and keeps the
+; refresh rate valid whenever the resolution changes.
+EnsureDisplaySelection() {
+    global DisplaySelectedWidth, DisplaySelectedHeight, DisplaySelectedFrequency
+    if (!DisplaySelectedWidth || !DisplaySelectedHeight) {
+        current := GetPrimaryDisplayMode()
+        if IsObject(current) {
+            DisplaySelectedWidth := current["width"]
+            DisplaySelectedHeight := current["height"]
+            DisplaySelectedFrequency := current["frequency"]
+        } else {
+            resolutions := DistinctDisplayResolutions()
+            if (resolutions.Length = 0)
+                return
+            DisplaySelectedWidth := resolutions[1]["width"]
+            DisplaySelectedHeight := resolutions[1]["height"]
+            DisplaySelectedFrequency := 0
+        }
+    }
+    frequencies := FrequenciesForResolution(DisplaySelectedWidth, DisplaySelectedHeight)
+    if (frequencies.Length = 0)
+        return
+    for _, frequency in frequencies {
+        if (frequency = DisplaySelectedFrequency)
+            return
+    }
+    ; The chosen rate is not offered at this resolution; fall back to the
+    ; highest one that is.
+    best := frequencies[1]
+    for _, frequency in frequencies
+        if (frequency > best)
+            best := frequency
+    DisplaySelectedFrequency := best
+}
+
+CycleDisplayResolution(direction) {
+    global DisplaySelectedWidth, DisplaySelectedHeight
+    resolutions := DistinctDisplayResolutions()
+    if (resolutions.Length = 0)
+        return
+    index := 1
+    for position, item in resolutions {
+        if (item["width"] = DisplaySelectedWidth
+            && item["height"] = DisplaySelectedHeight) {
+            index := position
+            break
+        }
+    }
+    index += direction
+    if (index < 1)
+        index := resolutions.Length
+    if (index > resolutions.Length)
+        index := 1
+    DisplaySelectedWidth := resolutions[index]["width"]
+    DisplaySelectedHeight := resolutions[index]["height"]
+    EnsureDisplaySelection()
+}
+
+CycleDisplayFrequency(direction) {
+    global DisplaySelectedWidth, DisplaySelectedHeight, DisplaySelectedFrequency
+    frequencies := FrequenciesForResolution(DisplaySelectedWidth, DisplaySelectedHeight)
+    if (frequencies.Length = 0)
+        return
+    index := 1
+    for position, frequency in frequencies {
+        if (frequency = DisplaySelectedFrequency) {
+            index := position
+            break
+        }
+    }
+    index += direction
+    if (index < 1)
+        index := frequencies.Length
+    if (index > frequencies.Length)
+        index := 1
+    DisplaySelectedFrequency := frequencies[index]
+}
+
+EnsureDisplayScaleSelection() {
+    global DisplaySelectedScalePercent
+    info := GetPrimaryDisplayScale()
+    if !IsObject(info) {
+        DisplaySelectedScalePercent := 0
+        return 0
+    }
+    if DisplaySelectedScalePercent {
+        for _, option in info["options"] {
+            if (option = DisplaySelectedScalePercent)
+                return info
+        }
+    }
+    DisplaySelectedScalePercent := info["percent"]
+    return info
+}
+
+CycleDisplayScale(direction) {
+    global DisplaySelectedScalePercent
+    info := EnsureDisplayScaleSelection()
+    if !IsObject(info)
+        return
+    options := info["options"]
+    index := 1
+    for position, option in options {
+        if (option = DisplaySelectedScalePercent) {
+            index := position
+            break
+        }
+    }
+    index += direction
+    if (index < 1)
+        index := options.Length
+    if (index > options.Length)
+        index := 1
+    DisplaySelectedScalePercent := options[index]
+}
+
+; Windows applies a new DPI asynchronously. Refreshing the row text in the same
+; thread is too early: the Quick Menu is still measured and centred in the old
+; coordinate space, so it lands off-centre until a page change runs the full
+; layout pass. Queue that same pass after the display has settled, while keeping
+; the current page and selection (especially the Apply row needed to confirm).
+QueueQuickMenuDisplayReflow() {
+    SetTimer(QuickMenuDisplayReflow, -350)
+}
+
+QuickMenuDisplayReflow() {
+    global QuickMenuVisible
+    if QuickMenuVisible
+        QuickMenuBuildGui()
+}
+
+GetDisplayApplyValue() {
+    global DisplaySelectedWidth, DisplaySelectedHeight, DisplaySelectedFrequency
+    global DisplaySelectedScalePercent
+    global DisplayPendingOldMode, DisplayPendingUntilTick
+    ; During the revert window this row is the only instruction the user has, so
+    ; it counts down rather than just saying something is pending.
+    if IsObject(DisplayPendingOldMode) {
+        remaining := Max(0, Ceil((DisplayPendingUntilTick - A_TickCount) / 1000))
+        return "Select to KEEP (" remaining "s)"
+    }
+    current := GetPrimaryDisplayMode()
+    scale := GetPrimaryDisplayScale()
+    scaleSame := !DisplaySelectedScalePercent
+        || (IsObject(scale) && scale["percent"] = DisplaySelectedScalePercent)
+    if (IsObject(current) && scaleSame
+        && current["width"] = DisplaySelectedWidth
+        && current["height"] = DisplaySelectedHeight
+        && current["frequency"] = DisplaySelectedFrequency)
+        return "CURRENT"
+    return "Select to apply"
+}
+
+; Applies the pending selection, reusing the existing timed-revert protection.
+ApplyDisplaySelection() {
+    global QuickMenuDisplayModes
+    global DisplaySelectedWidth, DisplaySelectedHeight, DisplaySelectedFrequency
+    global DisplaySelectedScalePercent
+    global DisplayPendingOldMode, DisplayPendingOldScale, DisplayPendingUntilTick
+    candidate := 0
+    for _, mode in QuickMenuDisplayModes {
+        if (mode["width"] = DisplaySelectedWidth
+            && mode["height"] = DisplaySelectedHeight
+            && mode["frequency"] = DisplaySelectedFrequency) {
+            candidate := mode
+            break
+        }
+    }
+    if !IsObject(candidate) {
+        SetStatus("That display mode is no longer offered", "Warning")
+        return
+    }
+    currentMode := GetPrimaryDisplayMode()
+    if !IsObject(currentMode) {
+        SetStatus("Current display mode is unavailable", "Warning")
+        return
+    }
+    currentScale := GetPrimaryDisplayScale()
+    modeSame := candidate["width"] = currentMode["width"]
+        && candidate["height"] = currentMode["height"]
+        && candidate["frequency"] = currentMode["frequency"]
+    scaleSame := !DisplaySelectedScalePercent
+        || (IsObject(currentScale)
+            && currentScale["percent"] = DisplaySelectedScalePercent)
+
+    if IsObject(DisplayPendingOldMode) {
+        if (modeSame && scaleSame)
+            ConfirmPrimaryDisplayMode()
+        else
+            SetStatus("Keep or revert the pending display change first", "Warning")
+        return
+    }
+    if (modeSame && scaleSame)
+        return
+    if (DisplaySelectedScalePercent && !IsObject(currentScale)) {
+        SetStatus("Windows display scaling is unavailable", "Warning")
+        return
+    }
+
+    modeChanged := false
+    if !modeSame {
+        if !ApplyPrimaryDisplayMode(candidate) {
+            SetStatus("Windows rejected that display mode", "Warning")
+            return
+        }
+        modeChanged := true
+    }
+    if !scaleSame && !ApplyPrimaryDisplayScale(DisplaySelectedScalePercent) {
+        modeRestored := !modeChanged || ApplyPrimaryDisplayMode(currentMode)
+        scaleRestored := !IsObject(currentScale)
+            || ApplyPrimaryDisplayScale(currentScale["percent"])
+        QueueQuickMenuDisplayReflow()
+        SetStatus(modeRestored && scaleRestored
+            ? "Windows rejected that display scale; the old settings were restored"
+            : "Windows rejected that display scale; not all old settings restored",
+            "Warning")
+        return
+    }
+    DisplayPendingOldMode := currentMode
+    DisplayPendingOldScale := currentScale
+    DisplayPendingUntilTick := A_TickCount + 15000
+    SetTimer(DisplayChangeSafetyTick, 500)
+    QueueQuickMenuDisplayReflow()
+    SetStatus("Display changed. Select CURRENT again within 15 seconds to keep it.",
+        "Warning")
+}
+
+ConfirmPrimaryDisplayMode() {
+    global DisplayPendingOldMode, DisplayPendingOldScale, DisplayPendingUntilTick
+    if !IsObject(DisplayPendingOldMode)
+        return
+    DisplayPendingOldMode := 0
+    DisplayPendingOldScale := 0
+    DisplayPendingUntilTick := 0
+    SetTimer(DisplayChangeSafetyTick, 0)
+    SetStatus("Display settings kept")
+}
+
+DisplayChangeSafetyTick() {
+    global DisplayPendingOldMode, DisplayPendingOldScale
+    global DisplayPendingUntilTick, QuickMenuVisible
+    if !IsObject(DisplayPendingOldMode) {
+        SetTimer(DisplayChangeSafetyTick, 0)
+        return
+    }
+    if (A_TickCount >= DisplayPendingUntilTick) {
+        oldMode := DisplayPendingOldMode
+        oldScale := DisplayPendingOldScale
+        DisplayPendingOldMode := 0
+        DisplayPendingOldScale := 0
+        DisplayPendingUntilTick := 0
+        SetTimer(DisplayChangeSafetyTick, 0)
+        modeRestored := ApplyPrimaryDisplayMode(oldMode)
+        scaleRestored := !IsObject(oldScale)
+            || ApplyPrimaryDisplayScale(oldScale["percent"])
+        QueueQuickMenuDisplayReflow()
+        if (modeRestored && scaleRestored)
+            SetStatus("Display settings reverted for safety", "Warning")
+        else
+            SetStatus("Unable to restore all previous display settings", "Warning")
+    }
+    if QuickMenuVisible
+        QuickMenuRefresh()
+}
+
+ResolveRtssExecutablePath() {
+    global RtssPath
+    path := NormalizePath(RtssPath)
+    attributes := path != "" ? FileExist(path) : ""
+    ; Fall back to the stock install location before giving up. Without this a
+    ; user with an ordinary RTSS install and no [RTSS] Path set gets "RTSS was
+    ; not found at the configured path" on every row, even though RTSS is
+    ; sitting exactly where its installer put it. The discovered path is adopted
+    ; so the rest of the session, and the DLL lookup beside RTSS.exe, use it.
+    if (attributes = "" || InStr(attributes, "D")) {
+        programFilesX86 := ""
+        try programFilesX86 := EnvGet("ProgramFiles(x86)")
+        defaultPath := programFilesX86 "\RivaTuner Statistics Server\RTSS.exe"
+        if (programFilesX86 != "" && FileExist(defaultPath)) {
+            path := defaultPath
+            RtssPath := defaultPath
+            attributes := FileExist(defaultPath)
+            LogLine("RTSS: adopted the default install path " defaultPath ".")
+        }
+    }
+    return (attributes != "" && !InStr(attributes, "D")) ? path : ""
+}
+
+EnsureRtssRunning() {
+    path := ResolveRtssExecutablePath()
+    if ProcessExist("RTSS.exe")
+        return true
+    if (path = "")
+        return false
+    try {
+        Run('"' path '"', , "Min")
+        return ProcessWait("RTSS.exe", 3) != 0
+    } catch {
+        return false
+    }
+}
 
 StartRtssFromQuickMenu() {
     global EnableRTSSIntegration
@@ -4889,6 +5629,313 @@ RefreshQuickMenuAfterRtssStart() {
     global QuickMenuVisible, QuickMenuPage
     if (QuickMenuVisible && QuickMenuPage = "RTSS")
         QuickMenuBuildGui()
+}
+
+ShutdownRtssHooksApi() {
+    global RtssHooksModule, RtssHooksDllPath
+    global RtssGetFlagsProc, RtssSetFlagsProc
+    global RtssLoadProfileProc, RtssGetProfilePropertyProc
+    global RtssSetProfilePropertyProc, RtssSaveProfileProc, RtssUpdateProfilesProc
+    if RtssHooksModule
+        try DllCall("Kernel32\FreeLibrary", "Ptr", RtssHooksModule, "Int")
+    RtssHooksModule := 0
+    RtssHooksDllPath := ""
+    RtssGetFlagsProc := 0
+    RtssSetFlagsProc := 0
+    RtssLoadProfileProc := 0
+    RtssGetProfilePropertyProc := 0
+    RtssSetProfilePropertyProc := 0
+    RtssSaveProfileProc := 0
+    RtssUpdateProfilesProc := 0
+}
+
+; Loads the two global-flag exports published by RTSSHooks64.dll. This companion
+; is explicitly 64-bit, so it must use the 64-bit hooks DLL beside RTSS.exe.
+; Returning false is deliberately non-fatal: older/unusual RTSS installations
+; retain the configured shortcut controls as a compatibility fallback.
+GetRtssHooksApi() {
+    global RtssPath, RtssHooksModule, RtssHooksDllPath
+    global RtssGetFlagsProc, RtssSetFlagsProc, RtssHooksLastFailure
+    global RtssLoadProfileProc, RtssGetProfilePropertyProc
+    global RtssSetProfilePropertyProc, RtssSaveProfileProc, RtssUpdateProfilesProc
+    global RtssUseDllIntegration
+    if !RtssUseDllIntegration
+        return 0
+    rtssExe := ResolveRtssExecutablePath()
+    installDir := ""
+    if (rtssExe != "")
+        SplitPath(rtssExe, , &installDir)
+    dllPath := installDir != "" ? installDir "\RTSSHooks64.dll" : ""
+    if (RtssHooksModule && RtssHooksDllPath = dllPath
+        && RtssGetFlagsProc && RtssSetFlagsProc) {
+        return Map(
+            "get", RtssGetFlagsProc,
+            "set", RtssSetFlagsProc,
+            "loadProfile", RtssLoadProfileProc,
+            "getProfileProperty", RtssGetProfilePropertyProc,
+            "setProfileProperty", RtssSetProfilePropertyProc,
+            "saveProfile", RtssSaveProfileProc,
+            "updateProfiles", RtssUpdateProfilesProc
+        )
+    }
+    if RtssHooksModule
+        ShutdownRtssHooksApi()
+    if (dllPath = "" || !FileExist(dllPath)) {
+        if (RtssHooksLastFailure != dllPath) {
+            RtssHooksLastFailure := dllPath
+            LogLine("RTSS state: RTSSHooks64.dll was not found beside RTSS.exe; "
+                . "shortcut fallback remains available.", "Warning")
+        }
+        return 0
+    }
+    module := 0
+    getProc := 0
+    setProc := 0
+    loadProfileProc := 0
+    getProfilePropertyProc := 0
+    setProfilePropertyProc := 0
+    saveProfileProc := 0
+    updateProfilesProc := 0
+    try module := DllCall("Kernel32\LoadLibraryW", "WStr", dllPath, "Ptr")
+    if module {
+        try getProc := DllCall("Kernel32\GetProcAddress",
+            "Ptr", module, "AStr", "GetFlags", "Ptr")
+        try setProc := DllCall("Kernel32\GetProcAddress",
+            "Ptr", module, "AStr", "SetFlags", "Ptr")
+        try loadProfileProc := DllCall("Kernel32\GetProcAddress",
+            "Ptr", module, "AStr", "LoadProfile", "Ptr")
+        try getProfilePropertyProc := DllCall("Kernel32\GetProcAddress",
+            "Ptr", module, "AStr", "GetProfileProperty", "Ptr")
+        ; Write path. Deliberately optional: an RTSS build without these still
+        ; drives the overlay and limiter flags, and the frame-cap row degrades
+        ; to read-only rather than taking the whole integration down with it.
+        try setProfilePropertyProc := DllCall("Kernel32\GetProcAddress",
+            "Ptr", module, "AStr", "SetProfileProperty", "Ptr")
+        try saveProfileProc := DllCall("Kernel32\GetProcAddress",
+            "Ptr", module, "AStr", "SaveProfile", "Ptr")
+        try updateProfilesProc := DllCall("Kernel32\GetProcAddress",
+            "Ptr", module, "AStr", "UpdateProfiles", "Ptr")
+    }
+    if (!module || !getProc || !setProc) {
+        if module
+            try DllCall("Kernel32\FreeLibrary", "Ptr", module, "Int")
+        if (RtssHooksLastFailure != dllPath) {
+            RtssHooksLastFailure := dllPath
+            LogLine("RTSS state: GetFlags/SetFlags exports are unavailable in "
+                . dllPath "; shortcut fallback remains available.", "Warning")
+        }
+        return 0
+    }
+    RtssHooksModule := module
+    RtssHooksDllPath := dllPath
+    RtssGetFlagsProc := getProc
+    RtssSetFlagsProc := setProc
+    RtssLoadProfileProc := loadProfileProc
+    RtssGetProfilePropertyProc := getProfilePropertyProc
+    RtssSetProfilePropertyProc := setProfilePropertyProc
+    RtssSaveProfileProc := saveProfileProc
+    RtssUpdateProfilesProc := updateProfilesProc
+    RtssHooksLastFailure := ""
+    LogLine("RTSS state: connected to RTSSHooks64.dll global flags"
+        . (RtssFrameCapWritable() ? " (frame cap writable)." : "; frame cap is read-only."))
+    return Map(
+        "get", getProc,
+        "set", setProc,
+        "loadProfile", loadProfileProc,
+        "getProfileProperty", getProfilePropertyProc,
+        "setProfileProperty", setProfilePropertyProc,
+        "saveProfile", saveProfileProc,
+        "updateProfiles", updateProfilesProc
+    )
+}
+
+; These are RTSS-wide switches. Overlay means global OSD visibility; limiter
+; means the global disable override is clear. It does not prove that a game's
+; profile has OSD support or a non-zero frame cap configured.
+GetRtssGlobalState() {
+    global EnableRTSSIntegration, RtssUseDllIntegration
+    if (!EnableRTSSIntegration || !RtssUseDllIntegration
+        || !ProcessExist("RTSS.exe"))
+        return 0
+    api := GetRtssHooksApi()
+    if !IsObject(api)
+        return 0
+    flags := 0
+    try flags := DllCall(api["get"], "UInt")
+    catch as err {
+        LogLine("RTSS state: GetFlags failed: " err.Message, "Warning")
+        return 0
+    }
+    return Map(
+        "overlay", (flags & 0x1) != 0,       ; RTSSHOOKSFLAG_OSD_VISIBLE
+        "limiter", (flags & 0x4) = 0,        ; RTSSHOOKSFLAG_LIMITER_DISABLED
+        "flags", flags
+    )
+}
+
+; Reads the cap from the profile applicable to the executable that owned the
+; foreground before the Quick Menu opened. RTSS's LoadProfile contract falls
+; back to the global profile when that application-specific profile is absent.
+; An empty executable explicitly selects the global profile.
+GetRtssFrameLimit(profileExe := "") {
+    global EnableRTSSIntegration, RtssUseDllIntegration
+    if (!EnableRTSSIntegration || !RtssUseDllIntegration
+        || !ProcessExist("RTSS.exe"))
+        return 0
+    api := GetRtssHooksApi()
+    if (!IsObject(api) || !api["loadProfile"] || !api["getProfileProperty"])
+        return 0
+    profileName := Trim(profileExe)
+    if (profileName != "") {
+        fileName := ""
+        SplitPath(profileName, &fileName)
+        if (fileName != "")
+            profileName := fileName
+    }
+    value := Buffer(4, 0)
+    try {
+        DllCall(api["loadProfile"], "AStr", profileName)
+        ok := DllCall(api["getProfileProperty"],
+            "AStr", "FramerateLimit", "Ptr", value, "UInt", value.Size, "Int")
+        if !ok
+            return 0
+        return Map(
+            "fps", NumGet(value, 0, "UInt"),
+            "profile", profileName != "" ? profileName : "Global"
+        )
+    } catch as err {
+        LogLine("RTSS state: FramerateLimit query failed: " err.Message,
+            "Warning")
+        return 0
+    }
+}
+
+NotifyRtssSettingsChanged() {
+    hwnd := 0
+    try hwnd := DllCall("User32\FindWindowW", "Ptr", 0, "WStr", "RTSS", "Ptr")
+    if !hwnd
+        try hwnd := DllCall("User32\FindWindowW", "Ptr", 0,
+            "WStr", "RivaTuner Statistics Server", "Ptr")
+    if hwnd
+        try DllCall("User32\PostMessageW", "Ptr", hwnd,
+            "UInt", 0x8064, "UPtr", 0, "Ptr", 0, "Int") ; WM_APP + 100
+}
+
+ApplyRtssGlobalState(feature, enabled) {
+    if !EnsureRtssRunning() {
+        SetStatus("RTSS was not found at the configured path", "Warning")
+        return false
+    }
+    api := GetRtssHooksApi()
+    if !IsObject(api)
+        return false
+    if (feature = "overlay") {
+        andMask := 0xFFFFFFFE
+        xorMask := enabled ? 0x1 : 0
+        label := "overlay"
+    } else {
+        andMask := 0xFFFFFFFB
+        xorMask := enabled ? 0 : 0x4
+        label := "frame limiter"
+    }
+    try {
+        DllCall(api["set"], "UInt", andMask, "UInt", xorMask, "UInt")
+        NotifyRtssSettingsChanged()
+        state := GetRtssGlobalState()
+        if (IsObject(state) && state[feature] = enabled) {
+            SetStatus("RTSS " label " " (enabled ? "enabled" : "disabled"))
+            return true
+        }
+    } catch as err {
+        LogLine("RTSS state: SetFlags failed: " err.Message, "Warning")
+    }
+    SetStatus("RTSS did not confirm the " label " change", "Warning")
+    return false
+}
+
+SendRtssShortcut(shortcut, description) {
+    global EnableRTSSIntegration
+    if !EnableRTSSIntegration {
+        SetStatus("Enable RTSS integration in Settings first", "Warning")
+        return false
+    }
+    if (shortcut = "") {
+        SetStatus("Configure the RTSS shortcut in Settings first", "Warning")
+        return false
+    }
+    if !EnsureRtssRunning() {
+        SetStatus("RTSS was not found at the configured path", "Warning")
+        return false
+    }
+    SendChordSafe(shortcut)
+    SetStatus(description)
+    return true
+}
+
+ToggleRtssOverlay() {
+    global RtssOverlayToggleShortcut
+    state := GetRtssGlobalState()
+    if IsObject(state) {
+        ApplyRtssGlobalState("overlay", !state["overlay"])
+        return
+    }
+    SendRtssShortcut(RtssOverlayToggleShortcut, "RTSS overlay toggled")
+}
+
+SetRtssOverlayState(enabled) {
+    global RtssOverlayOnShortcut, RtssOverlayOffShortcut
+    state := GetRtssGlobalState()
+    if IsObject(state) {
+        if (state["overlay"] = enabled) {
+            SetStatus("RTSS overlay is already " (enabled ? "on" : "off"))
+            return
+        }
+        ApplyRtssGlobalState("overlay", enabled)
+        return
+    }
+    shortcut := enabled ? RtssOverlayOnShortcut : RtssOverlayOffShortcut
+    SendRtssShortcut(shortcut, enabled ? "RTSS overlay enabled" : "RTSS overlay disabled")
+}
+
+ToggleRtssFrameLimiter() {
+    global RtssCustomFrameCapShortcut
+    state := GetRtssGlobalState()
+    if IsObject(state) {
+        ApplyRtssGlobalState("limiter", !state["limiter"])
+        return
+    }
+    SendRtssShortcut(RtssCustomFrameCapShortcut, "RTSS frame limiter toggled")
+}
+
+SetRtssFrameLimiterState(enabled) {
+    global RtssFrameLimiterOnShortcut, RtssFrameLimiterOffShortcut
+    state := GetRtssGlobalState()
+    if IsObject(state) {
+        if (state["limiter"] = enabled) {
+            SetStatus("RTSS frame limiter is already " (enabled ? "on" : "off"))
+            return
+        }
+        ApplyRtssGlobalState("limiter", enabled)
+        return
+    }
+    shortcut := enabled ? RtssFrameLimiterOnShortcut : RtssFrameLimiterOffShortcut
+    SendRtssShortcut(shortcut,
+        enabled ? "RTSS frame limiter enabled" : "RTSS frame limiter disabled")
+}
+
+; ==============================================================================
+; Steam context actions
+; ==============================================================================
+; Steam's menu bindings only reach Steam when Steam owns the foreground. While a
+; game is in front the equivalent is the in-game overlay, so the same action has
+; to send a different shortcut depending on what is actually in front.
+;
+; The foreground must be sampled BEFORE the Quick Menu appears -- once it is up,
+; the companion itself owns the foreground and every window would look like a
+; game. ShowQuickMenu records it for that reason.
+IsSteamProcess(exe) {
+    exe := StrLower(Trim(exe))
+    return exe = "steam.exe" || exe = "steamwebhelper.exe"
 }
 
 ; Foreground process name right now, ignoring our own windows so that the Quick
@@ -4962,6 +6009,38 @@ SendSteamMenu(steamInFront) {
     return shortcut
 }
 
+; Steam's in-game overlay hook can miss SendInput's effectively instantaneous
+; Shift+Tab pulse even though ordinary desktop applications accept it. SendEvent
+; honours SetKeyDelay's press duration, giving Steam a real modifier-down window
+; in which to observe the second key. The configured shortcut is still used, so
+; this is not hard-coded to Shift+Tab.
+SendSteamOverlayChord() {
+    global SteamOverlayShortcut, CompanionDisabled
+    if CompanionDisabled
+        return false
+    foregroundHwnd := 0
+    foregroundExe := ""
+    try foregroundHwnd := WinExist("A")
+    if foregroundHwnd
+        try foregroundExe := WinGetProcessName("ahk_id " foregroundHwnd)
+    LogLine("Steam overlay send: " SendToPretty(SteamOverlayShortcut)
+        . ", foreground=" (foregroundExe != "" ? foregroundExe : "unknown")
+        . ", hwnd=" foregroundHwnd ".")
+    sent := false
+    try {
+        SendEvent("{Ctrl up}{Alt up}{Shift up}{LWin up}{RWin up}")
+        ; Delay between events, then how long each key stays down.
+        SetKeyDelay(35, 80)
+        SendEvent(SteamOverlayShortcut)
+        sent := true
+    } catch as err {
+        LogLine("Steam overlay send failed: " err.Message, "Warning")
+    }
+    ; Also runs after a partial failure so a modifier can never remain stuck.
+    try SendEvent("{Ctrl up}{Alt up}{Shift up}{LWin up}{RWin up}")
+    return sent
+}
+
 SendSteamQuickAccess(steamInFront) {
     global SteamQuickAccessShortcut
     SetStatus("Steam Quick Access: " SendToPretty(SteamQuickAccessShortcut))
@@ -4988,11 +6067,8 @@ SendSteamQuickAccess(steamInFront) {
 ; A Scheduled Task is still used rather than an elevated manifest, because the
 ; companion must never relaunch itself elevated -- that would raise a UAC prompt
 ; on every boot, since a non-elevated parent starts it.
-; The task name now lives in SteamShell-Common.ahk, because Setup Assistant
-; registers the same task and the two used to disagree. Kept as a wrapper so the
-; six call sites below read the same as before.
 LogonTaskName() {
-    return XfeLogonTaskName()
+    return "SteamShell-XFE"
 }
 
 LogonTaskTarget() {
@@ -5013,6 +6089,13 @@ LogonTaskAccount() {
     if (domain = "")
         domain := A_ComputerName
     return domain "\" A_UserName
+}
+
+XmlEscape(text) {
+    text := StrReplace(text, "&", "&amp;")
+    text := StrReplace(text, "<", "&lt;")
+    text := StrReplace(text, ">", "&gt;")
+    return StrReplace(text, '"', "&quot;")
 }
 
 ; The registration XML for the logon task.
@@ -5038,24 +6121,70 @@ LogonTaskAccount() {
 ;
 ; The Delay gives the shell and Xbox FSE time to come up first; launching into a
 ; half-initialised session is how a startup app ends up behind everything.
-; Resolves the account as a SID where possible -- it survives a user rename,
-; where DOMAIN\User does not -- and falls back to the domain form only if the
-; SID cannot be read. Setup Assistant already used the SID; this is the
-; companion adopting the more robust half.
-LogonTaskAccountForXml() {
-    sidText := ""
-    if GetCurrentProcessUserSid(&sidText, &sidError)
-        return sidText
-    LogLine("Logon task: falling back to DOMAIN\\User; the SID could not be read ("
-        . sidError ").", "Warning")
-    return LogonTaskAccount()
-}
-
 LogonTaskXml() {
-    if A_IsCompiled
-        return XfeLogonTaskXml(LogonTaskAccountForXml(), A_ScriptFullPath, "", A_ScriptDir)
-    return XfeLogonTaskXml(LogonTaskAccountForXml(), A_AhkPath,
-        '"' A_ScriptFullPath '"', A_ScriptDir)
+    account := XmlEscape(LogonTaskAccount())
+    if A_IsCompiled {
+        command := XmlEscape(A_ScriptFullPath)
+        arguments := ""
+    } else {
+        command := XmlEscape(A_AhkPath)
+        arguments := "<Arguments>" XmlEscape('"' A_ScriptFullPath '"') "</Arguments>`r`n      "
+    }
+    workingDir := XmlEscape(A_ScriptDir)
+    return ""
+        . "<?xml version=" Chr(34) "1.0" Chr(34) " encoding=" Chr(34) "UTF-16" Chr(34) "?>`r`n"
+        . "<Task version=" Chr(34) "1.2" Chr(34)
+            . " xmlns=" Chr(34) "http://schemas.microsoft.com/windows/2004/02/mit/task" Chr(34) ">`r`n"
+        . "  <RegistrationInfo>`r`n"
+        . "    <Description>Starts the SteamShell XFE controller companion at logon.</Description>`r`n"
+        . "  </RegistrationInfo>`r`n"
+        . "  <Triggers>`r`n"
+        . "    <LogonTrigger>`r`n"
+        . "      <Enabled>true</Enabled>`r`n"
+        . "      <UserId>" account "</UserId>`r`n"
+        . "      <Delay>PT10S</Delay>`r`n"
+        . "    </LogonTrigger>`r`n"
+        . "  </Triggers>`r`n"
+        . "  <Principals>`r`n"
+        . "    <Principal id=" Chr(34) "Author" Chr(34) ">`r`n"
+        . "      <UserId>" account "</UserId>`r`n"
+        . "      <LogonType>InteractiveToken</LogonType>`r`n"
+        . "      <RunLevel>LeastPrivilege</RunLevel>`r`n"
+        . "    </Principal>`r`n"
+        . "  </Principals>`r`n"
+        ; Element order matches what Task Scheduler itself emits when exporting a
+        ; task. The schema is order-sensitive and rejects the whole file with an
+        ; unhelpful "task XML is malformed" if elements are rearranged, so this
+        ; sequence is copied from a known-good export rather than chosen.
+        . "  <Settings>`r`n"
+        . "    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>`r`n"
+        ; The two settings this whole XML exists for.
+        . "    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>`r`n"
+        . "    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>`r`n"
+        . "    <AllowHardTerminate>false</AllowHardTerminate>`r`n"
+        . "    <StartWhenAvailable>false</StartWhenAvailable>`r`n"
+        . "    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>`r`n"
+        . "    <IdleSettings>`r`n"
+        . "      <StopOnIdleEnd>false</StopOnIdleEnd>`r`n"
+        . "      <RestartOnIdle>false</RestartOnIdle>`r`n"
+        . "    </IdleSettings>`r`n"
+        . "    <AllowStartOnDemand>true</AllowStartOnDemand>`r`n"
+        . "    <Enabled>true</Enabled>`r`n"
+        . "    <Hidden>false</Hidden>`r`n"
+        . "    <RunOnlyIfIdle>false</RunOnlyIfIdle>`r`n"
+        . "    <WakeToRun>false</WakeToRun>`r`n"
+        ; PT0S is "no limit". The default is 72 hours, which would terminate the
+        ; companion mid-session on a machine that stays logged in.
+        . "    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>`r`n"
+        . "    <Priority>7</Priority>`r`n"
+        . "  </Settings>`r`n"
+        . "  <Actions Context=" Chr(34) "Author" Chr(34) ">`r`n"
+        . "    <Exec>`r`n"
+        . "      <Command>" command "</Command>`r`n"
+        . "      " arguments "<WorkingDirectory>" workingDir "</WorkingDirectory>`r`n"
+        . "    </Exec>`r`n"
+        . "  </Actions>`r`n"
+        . "</Task>`r`n"
 }
 
 ; Dumps the registered task's full definition to the log.
@@ -5131,9 +6260,6 @@ CreateLogonTask(*) {
             . " (" err.Message ").", "Warning")
         return
     }
-    ; Remove the name this companion used to register under, so a machine that
-    ; has been through both routes ends up with one task rather than two.
-    RunSchTasks('/delete /f /tn "' XfeLogonTaskLegacyName() '"')
     exitCode := RunSchTasks('/create /f /tn "' LogonTaskName() '" /xml "' xmlPath '"')
     try FileDelete(xmlPath)
     if (exitCode = 0) {
@@ -5166,7 +6292,6 @@ RemoveLogonTask(*) {
     SettingsDialogActive := false
     if (answer != "OK")
         return
-    RunSchTasks('/delete /f /tn "' XfeLogonTaskLegacyName() '"')
     exitCode := RunSchTasks('/delete /f /tn "' LogonTaskName() '"')
     if (exitCode = 0) {
         SetStatus("Logon task removed")
@@ -5266,20 +6391,11 @@ LaunchStartupProgram(path) {
     global StartupLaunchDeElevated, StartupWindowMode, CompanionDisabled
     if CompanionDisabled
         return false
-    ; Arguments are supported now. The old code treated the whole entry as a
-    ; path, so "app.exe --flag" failed FileExist and was silently skipped -- the
-    ; shell had always handled it.
-    target := "", params := ""
-    if !SplitStartupCommandLine(path, &target, &params) {
-        LogLine("Startup program entry could not be parsed: " path, "Warning")
+    path := NormalizePath(path)
+    if (path = "" || !FileExist(path)) {
+        LogLine("Startup program not found: " path, "Warning")
         return false
     }
-    target := NormalizeMediaPath(target)
-    if (target = "" || !FileExist(target)) {
-        LogLine("Startup program not found: " target, "Warning")
-        return false
-    }
-    path := target
     SplitPath(path, &fileName, &directory)
     if (fileName != "" && ProcessExist(fileName)) {
         LogLine("Startup program already running, skipped: " fileName)
@@ -5294,9 +6410,9 @@ LaunchStartupProgram(path) {
     viaShell := StartupLaunchDeElevated && A_IsAdmin
     try {
         if viaShell
-            Run('explorer.exe "' path '"' (params != "" ? " " params : ""), directory)
+            Run('explorer.exe "' path '"', directory)
         else
-            Run('"' path '"' (params != "" ? " " params : ""), directory, runOptions)
+            Run('"' path '"', directory, runOptions)
         LogLine("Started " fileName
             . (viaShell ? " (as normal user)" : "")
             . (mode != "normal" ? " [" WindowModeLabel(mode) "]" : "") ".")
@@ -5323,16 +6439,30 @@ LaunchStartupProgram(path) {
 ;
 ; Running for a fixed window and then stopping is deliberate. A permanent sweep
 ; would fight the user the moment they deliberately opened the program later.
-; Thin wrapper over the shared sweep, so the two programs cannot drift on what
-; "Minimized" means or how long they keep trying.
 ApplyStartupWindowMode(fileName, mode, startedTick) {
     global CompanionDisabled
+    static WINDOW_MS := 6000
+    static SWEEP_MS := 400
     if CompanionDisabled
         return
-    if !ApplyStartupWindowModeOnce(
-        fileName, NormalizeStartupWindowMode(mode), startedTick + 6000)
+    if (A_TickCount - startedTick > WINDOW_MS)
         return
-    SetTimer(() => ApplyStartupWindowMode(fileName, mode, startedTick), -400)
+    windows := []
+    try windows := WinGetList("ahk_exe " fileName)
+    for _, hwnd in windows {
+        ; Never touch a window that is already in the requested state, and never
+        ; touch one of ours -- the companion's own windows share no process name
+        ; with a startup program, but the check costs nothing and documents it.
+        if IsOurWindow(hwnd)
+            continue
+        try {
+            if (mode = "hidden")
+                WinHide(hwnd)
+            else if !DllCall("IsIconic", "Ptr", hwnd, "Int")
+                WinMinimize(hwnd)
+        }
+    }
+    SetTimer(ApplyStartupWindowMode.Bind(fileName, mode, startedTick), -SWEEP_MS)
 }
 
 RunStartupPrograms() {
@@ -5405,35 +6535,12 @@ AssistInventoryBuild() {
             WinGetPos(&posX, &posY, &posW, &posH, "ahk_id " hwnd)
             x := posX, y := posY, w := posW, h := posH
         }
-        ; A minimized window reports off-screen coordinates rather than nothing,
-        ; so this guard is about genuinely degenerate rectangles and must not be
-        ; widened to exclude them -- WinGetMinMax below is what identifies them.
         if (w <= 0 || h <= 0)
             continue
-        minMax := 0
-        try minMax := WinGetMinMax("ahk_id " hwnd)
-        style := 0
-        try style := WinGetStyle("ahk_id " hwnd)
-        ; The extra fields exist for the shared legacy/minimized-game detectors in
-        ; SteamShell-Common.ahk. They are additive: the assist features read the
-        ; keys they always read and are unaffected.
-        ;
-        ; "proc" and "scriptOwned" duplicate "exe" and "ours" under the names the
-        ; shell's inventory uses, because the detectors were written against that
-        ; inventory and aliasing two keys is cheaper than forking them.
         items.Push(Map(
             "hwnd", hwnd, "title", title, "class", cls, "exe", exeLower,
             "pid", pid, "x", x, "y", y, "w", w, "h", h,
-            "ours", IsOurWindow(hwnd),
-            "proc", exeLower,
-            "scriptOwned", IsOurWindow(hwnd),
-            "desktop", SHELL_CLASSES.Has(cls),
-            "steam", IsSteamProcess(exeLower),
-            "style", style,
-            "exStyle", exStyle,
-            "owner", DllCall("User32\GetWindow", "Ptr", hwnd, "UInt", 4, "Ptr"), ; GW_OWNER
-            "minMax", minMax,
-            "area", Max(0, w) * Max(0, h)))
+            "ours", IsOurWindow(hwnd)))
     }
     return items
 }
@@ -5509,150 +6616,6 @@ AssistPruneCpuSamples(inventory) {
 ; A window is game-like when it belongs to no known shell, launcher or browser
 ; and covers most of the monitor it sits on. Deliberately conservative: a false
 ; positive here only suppresses cleanup, which is the safe direction.
-; borderlessRatio is the shell's inline 0.90, carried over unchanged rather than
-; adopting AssistWindowLooksLikeGame's 0.85/0.80. Those two numbers belong to the
-; cheap shape test that still drives the assist features; the scorer is a
-; different question and must agree with the shell, not with its neighbour.
-XfeGameScoreWeights() {
-    global AssistFullscreenTolerance, AssistFullscreenPosTolerancePx
-    global AssistScoreFullscreen, AssistScoreBorderlessLarge, AssistScoreTitleBonus
-    global AssistCpuThresholdPercent, AssistScoreCpuAboveThreshold
-    global AssistScoreCpuNonZeroBonus, AssistAllowZeroCpuAsCandidate
-    global AssistScoreAudioActive
-    return Map(
-        "fullscreenTolerance", AssistFullscreenTolerance,
-        "positionTolerancePx", AssistFullscreenPosTolerancePx,
-        "borderlessRatio", 0.90,
-        "fullscreen", AssistScoreFullscreen,
-        "borderlessLarge", AssistScoreBorderlessLarge,
-        "titleBonus", AssistScoreTitleBonus,
-        "cpuThresholdPercent", AssistCpuThresholdPercent,
-        "cpuAboveThreshold", AssistScoreCpuAboveThreshold,
-        "cpuNonZeroBonus", AssistScoreCpuNonZeroBonus,
-        "allowZeroCpu", AssistAllowZeroCpuAsCandidate,
-        "audioActive", AssistScoreAudioActive)
-}
-
-
-; The scored answer to "which window is the game", using the same arbiter as the
-; shell through SteamShell-Common.ahk.
-;
-; AssistWindowLooksLikeGame stays as it is and keeps driving the assist features:
-; it is a cheap shape test, it has behaved well for Game Focus and Launcher
-; Cleanup, and changing it would change three behaviours to fix one.
-;
-; What needed a better answer is the per-game RTSS frame cap. That is keyed on an
-; executable NAME, so picking the wrong window does not degrade gracefully -- it
-; writes the cap to another program's profile and reports success. Shape alone
-; cannot separate a game from a fullscreen launcher, a video player or a browser;
-; CPU and audio can, and this companion already samples both.
-;
-; Still no geometry, focus or activation. This reads the inventory it already
-; builds and returns a name.
-XfeBestGameWindow() {
-    global AssistCpuThresholdPercent, AssistProtectedProcesses
-    global AssistLauncherProcesses, EnableAudioAssist, AudioPeakThreshold
-    protectedSet := ProcessNameSetFromList(AssistProtectedProcesses)
-    launcherSet := ProcessNameSetFromList(AssistLauncherProcesses)
-    weights := XfeGameScoreWeights()
-    candidates := []
-    audioMap := ""
-    for _, item in AssistInventoryGet() {
-        if (item["ours"] || item["title"] = "" || item["exe"] = "")
-            continue
-        if (protectedSet.Has(item["exe"]) || launcherSet.Has(item["exe"]))
-            continue
-        ; Per MONITOR, not the primary screen. The shell can assume the game is
-        ; on A_Screen*; a companion under Xbox FSE cannot, and the inventory
-        ; already carries the handle needed to ask.
-        ; An exclusive-fullscreen game that minimized itself when Steam took
-        ; focus. Its geometry is meaningless, so the shape test is bypassed
-        ; entirely -- GameWindowShapeVerdict treats minimizedLegacy as nearFS --
-        ; and the monitor lookup below would be answering about coordinates that
-        ; are off-screen by design.
-        minimizedLegacy := WindowEngineIsMinimizedLegacyGameSurface(item)
-        left := 0, top := 0, screenW := A_ScreenWidth, screenH := A_ScreenHeight
-        if !minimizedLegacy {
-            monitorIndex := GetMonitorIndexForWindow(item["hwnd"])
-            try MonitorGet(monitorIndex, &left, &top, &right, &bottom)
-            catch
-                continue
-            screenW := right - left
-            screenH := bottom - top
-            if (screenW <= 0 || screenH <= 0)
-                continue
-        }
-        shapeVerdict := GameWindowShapeVerdict(
-            Map("w", item["w"], "h", item["h"],
-                "x", item["x"] - left, "y", item["y"] - top,
-                "screenW", screenW, "screenH", screenH,
-                "titleLength", StrLen(item["title"]),
-                "minimizedLegacy", minimizedLegacy),
-            weights)
-        if (!shapeVerdict["accepted"])
-            continue
-        ; Sampled only after the shape passes, and audio only after CPU passes.
-        ; Both are measurements with a cost, and the shell orders them the same
-        ; way for the same reason.
-        cpu := 0.0
-        cpuKnown := false
-        if item["pid"] {
-            sample := AssistProcessCpuSample(item["pid"])
-            if IsObject(sample) {
-                cpu := sample["usage"]
-                cpuKnown := sample["known"]
-            }
-        }
-        cpuVerdict := GameWindowCpuVerdict(
-            shapeVerdict["score"], cpu, cpuKnown, weights)
-        if (!cpuVerdict["accepted"])
-            continue
-        score := cpuVerdict["score"]
-        audioActive := false
-        if (EnableAudioAssist && item["pid"]) {
-            if (!IsObject(audioMap))
-                audioMap := GetActiveAudioPidPeaksCached()
-            if (audioMap.Has(item["pid"]) && audioMap[item["pid"]] > AudioPeakThreshold) {
-                score += weights["audioActive"]
-                audioActive := true
-            }
-        }
-        candidate := Map()
-        for key, value in item
-            candidate[key] := value
-        candidate["score"] := score
-        ; The columns LogGameCandidateTable renders. "proc" duplicates "exe":
-        ; the shell's inventory calls it proc and the table was written against
-        ; that, and one aliased key is cheaper than a second table format.
-        candidate["proc"] := item["exe"]
-        candidate["cpu"] := cpu
-        candidate["cpuKnown"] := cpuKnown
-        candidate["audio"] := audioActive
-        candidate["nearFS"] := shapeVerdict["nearFS"]
-        candidates.Push(candidate)
-    }
-    if (candidates.Length > 1)
-        SortCandidatesByScoreAreaDesc(candidates)
-    LogGameCandidateTable(candidates, [], "best-candidate")
-    if (candidates.Length = 0)
-        return ""
-    ; No score floor, matching the shell, which sets LastBestCandidateProc from
-    ; the best candidate unconditionally.
-    ;
-    ; A floor was worse than none here. The shell's GameMinScoreToActivate is
-    ; named for ACTIVATION -- the confidence needed to pull focus back to a game,
-    ; which is a disruptive act. Naming a profile is not that. Worse, falling
-    ; below the floor sent this back to LastObservedGameExe, the foreground-only
-    ; observation the scorer exists to replace, so a low score discarded a scored
-    ; answer in favour of an unscored one.
-    ;
-    ; Everything not plausibly a game is already gone before a score exists:
-    ; protected processes, launchers, our own windows and anything that fails the
-    ; shape test never become candidates, and IsUsableProfileExe rejects Steam,
-    ; Explorer and this executable afterwards.
-    return candidates[1]["exe"]
-}
-
 AssistWindowLooksLikeGame(item) {
     global AssistProtectedProcesses, AssistLauncherProcesses
     if (item["ours"] || item["title"] = "")
@@ -6210,33 +7173,15 @@ GetSwitchableWindows() {
             continue
         if !DllCall("IsWindowVisible", "Ptr", hwnd, "Int")
             continue
+        ; Cloaked windows are the invisible UWP shells Windows keeps around.
+        ; Without this the list fills with entries that cannot be switched to.
+        if IsCloakedWindow(hwnd)
+            continue
         title := "", cls := "", exe := ""
         try title := WinGetTitle("ahk_id " hwnd)
         try cls := WinGetClass("ahk_id " hwnd)
         try exe := WinGetProcessName("ahk_id " hwnd)
-        ; Steam is resolved FIRST, because every gate below it had to be waived
-        ; for Steam and only one of them ever was.
-        ;
-        ; Steam Big Picture vanished from the switcher under Xbox FSE. There was
-        ; already an exception for the tool-window rule -- Steam publishes a
-        ; titled, full-sized window as WS_EX_TOOLWINDOW without WS_EX_APPWINDOW
-        ; -- but it sat at the END of the chain, and three earlier gates rejected
-        ; Steam before it was ever reached:
-        ;
-        ;   cloaked      Windows cloaks Steam while Xbox FSE owns the screen,
-        ;                which is exactly when the user wants to switch to it.
-        ;   empty title  a cloaked window frequently reports none.
-        ;   size         and frequently reports no usable size either.
-        ;
-        ; The shell tree never hit this because Xbox FSE is not running there, so
-        ; Steam is never cloaked. Same rule, different world -- which is why the
-        ; fix belongs here and the shell's own filter is left alone.
-        isSteamWindow := IsSteamProcess(exe)
-        if (!isSteamWindow && IsCloakedWindow(hwnd))
-            continue
-        if (SHELL_CLASSES.Has(cls))
-            continue
-        if (title = "" && !isSteamWindow)
+        if (title = "" || SHELL_CLASSES.Has(cls))
             continue
         exStyle := 0
         try exStyle := WinGetExStyle("ahk_id " hwnd)
@@ -6249,6 +7194,7 @@ GetSwitchableWindows() {
         ; made Steam disappear from the switcher entirely. Keep the exception
         ; process-specific; relaxing the rule globally would bring back every
         ; overlay, popup and helper palette.
+        isSteamWindow := IsSteamProcess(exe)
         if ((exStyle & WS_EX_TOOLWINDOW) && !(exStyle & WS_EX_APPWINDOW)
             && !isSteamWindow)
             continue
@@ -6257,12 +7203,8 @@ GetSwitchableWindows() {
             WinGetPos(, , &posW, &posH, "ahk_id " hwnd)
             w := posW, h := posH
         }
-        if ((w < 120 || h < 80) && !isSteamWindow)
+        if (w < 120 || h < 80)
             continue
-        ; A cloaked Steam window reports no title, so give the row something the
-        ; user can read rather than a blank entry.
-        if (title = "")
-            title := exe " (Steam)"
         windows.Push(Map("hwnd", hwnd, "title", title, "exe", exe))
     }
     return windows
@@ -6340,6 +7282,13 @@ QuickMenuCloseSelected() {
     QuickMenuConfirmAction := confirmId
     QuickMenuConfirmUntilTick := A_TickCount + 5000
     SetStatus("Closing " ShortenText(title, 26) " — press X again to force", "Warning")
+}
+
+ShortenText(text, maxChars) {
+    text := Trim(text)
+    if (StrLen(text) <= maxChars)
+        return text
+    return SubStr(text, 1, Max(1, maxChars - 1)) "…"
 }
 
 ; ==============================================================================
@@ -6436,7 +7385,7 @@ QuickMenuGetRows() {
                     !hdr["forceDisabled"]))
             } else {
                 rows.Push(MenuRow("hdrUnavailable", "HDR",
-                    IsObject(hdr) ? "Not Supported" : "Unavailable", "none"))
+                    IsObject(hdr) ? "Unsupported" : "Unavailable", "none"))
             }
             if (QuickMenuDisplayModes.Length = 0)
                 QuickMenuDisplayModes := GetPrimaryDisplayModes()
@@ -6794,352 +7743,388 @@ GetRtssSummary() {
     return ResolveRtssExecutablePath() != "" ? "RTSS Ready" : "RTSS Not Found"
 }
 
-; ==============================================================================
-; OPT-IN ELEVATED RTSS HELPER
-; ==============================================================================
-; What this is, and what it deliberately is not.
-;
-; XFE runs at medium integrity by design. Two consequences follow, and only one
-; of them is fixed here.
-;
-;   1. UIPI blocks XFE's synthetic input from an elevated foreground window,
-;      exactly as it blocked standalone's before 1.9.9. NOT FIXED, on purpose.
-;      The remedy in SteamShell-Helper.ahk is XInput, and XFE exists precisely
-;      because XInput is not enough for its users -- a controller in DirectInput
-;      mode is not an XInput device at all. Elevated input would therefore have
-;      worked only for the people who did not need XFE in the first place, while
-;      costing every XFE user a permanently resident elevated process that polls
-;      a controller. There is also a workaround: reach the window another way.
-;
-;   2. RTSSHooks64.dll is loaded into the CALLING process, so SaveProfile runs
-;      with XFE's token, and RTSS installs under Program Files. An unelevated
-;      XFE can read the cap and toggle the limiter flag -- shared memory, no
-;      file -- but cannot set the FPS value or save a per-game profile. FIXED
-;      here, because there is no workaround at all: the Frame Limit row reports
-;      itself read-only and the feature does not function.
-;
-; The runtime posture is the real cost of any elevated helper, and this is the
-; narrowest shape that answers (2): one High-integrity process that services a
-; bounded request and does no input, no window management, and no UI. It is
-; still OFF by default. The payload is deployed by Setup Assistant in XFE mode
-; so the setting can be turned on later without re-running an installer, but a
-; binary on disk is not an elevated process, and nothing starts it until the
-; user asks.
-;
-; XFE never deploys, hardens, or extracts the helper: it has no embedded payload
-; and no administrator rights. It verifies and launches, or it explains why it
-; would not, and points at Setup.
-
-; Fixed, and deliberately NOT inside XFE's own install directory.
-;
-; Setup grants the signed-in user write access to that directory -- XFE keeps
-; its INI, learned controller profiles and log beside its executable -- and a
-; user-writable parent can be deleted and recreated whole, which is exactly the
-; reason standalone refuses to give its Custom and Portable layouts an
-; independently invokable helper task. Program Files has the protected ancestor
-; chain that makes the payload's own ACL mean something.
-;
-; A_ProgramFiles expands an environment variable this process inherited from
-; whoever started it, so it is not evidence of anything on its own. It does not
-; have to be: ElevatedHelperLocationIsProtected checks the owner and DACL of the
-; path this resolves to, and a redirected value pointing somewhere the user can
-; write fails that check and the helper is not launched.
-XfeElevatedHelperPath() {
-    return A_ProgramFiles "\SteamShell-XFE\bin\SteamShell-Helper.exe"
+GetRtssAvailability() {
+    global EnableRTSSIntegration, RtssPath
+    if !EnableRTSSIntegration
+        return "Setup Required"
+    if ProcessExist("RTSS.exe")
+        return "Running"
+    return ResolveRtssExecutablePath() != "" ? "Ready To Start" : "Not Found"
 }
 
-; Recorded once, from this process's own token.
-XfeInitializeInteractiveIdentity() {
-    global ExpectedInteractiveUserSid, ExpectedInteractiveSessionId
-    if !GetCurrentProcessUserSid(&sidText, &sidError) {
-        ExpectedInteractiveUserSid := ""
-        LogLine("The companion's own user SID could not be read (" sidError
-            . "); the elevated RTSS helper cannot be verified.", "Warning")
-    } else {
-        ExpectedInteractiveUserSid := sidText
-    }
-    if !GetCurrentProcessSessionId(&sessionId)
-        sessionId := -1
-    ExpectedInteractiveSessionId := sessionId
-}
-
-; Per-tree seam for the shared request channel. XFE keeps its data beside its
-; executable, so the request file goes there rather than in a ProgramData
-; directory the companion does not have.
-;
-; Deliberately not the settings file. This is a request, not a setting: it has
-; no meaning once serviced, and keeping it separate means the whole of what
-; crosses into the elevated process is two integers and a name in a file that
-; contains nothing else.
-ElevatedRtssRequestPath() {
-    return A_ScriptDir "\rtss-request.ini"
-}
-
-; Explicit UAC, always. Standalone has a protected on-demand scheduled task for
-; its Standard installation mode, which avoids a prompt; XFE does not get one
-; and should not. A task registered at HighestAvailable can be invoked with
-; schtasks /run without asking this process to re-check anything, so it is only
-; safe where the whole path sits below a protected ancestor chain that Setup
-; established. XFE's own directory is user-writable by design, and giving it an
-; independently invokable auto-elevation task would reintroduce exactly the
-; bypass standalone removed for its Custom mode.
-;
-; The prompt is therefore part of the feature rather than a wart on it: turning
-; this on means seeing UAC when the companion starts, which is an honest
-; representation of what was turned on.
-; The companion's helper is started through a protected on-demand task when one
-; can be registered, and by explicit UAC otherwise.
-;
-; A UAC prompt runs on the SECURE DESKTOP, where no process can inject input --
-; not the companion, not the helper. On a handheld with only a controller that
-; is not an annoyance, it is a dead end: the user has to find a keyboard. The
-; task removes the prompt, and is only safe because the helper lives under
-; %ProgramFiles%\SteamShell-XFE\bin where the interactive user cannot replace it.
-;
-; Registered lazily, the first time the opt-in is actually used, rather than at
-; install: someone who never enables elevated frame-cap writes should never have
-; a HighestAvailable task on their machine.
-XfeElevatedHelperTaskName() {
-    return "SteamShell XFE Elevated RTSS Helper"
-}
-
-EnsureXfeElevatedHelperTask(helperPath, &failureReason) {
-    failureReason := ""
-    if !ElevatedHelperLocationIsProtected(helperPath, &protectionError) {
-        failureReason := "The helper location is not administrator-protected ("
-            . protectionError ")."
-        return false
-    }
-    if (RunSchTasks('/query /tn "' XfeElevatedHelperTaskName() '"') = 0)
-        return true
-    SplitPath(helperPath, , &helperDirectory)
-    account := LogonTaskAccountForXml()
-    xml := ElevatedHelperTaskXml(account, helperPath,
-        "--product=xfe --main-path=" '"' A_ScriptFullPath '"', helperDirectory)
-    xmlPath := A_Temp "\SteamShell-XFE-helper-task.xml"
-    try FileDelete(xmlPath)
-    try FileAppend(xml, xmlPath, "UTF-16")
-    catch as err {
-        failureReason := "The task definition could not be written (" err.Message ")."
-        return false
-    }
-    exitCode := RunSchTasks(
-        '/create /f /tn "' XfeElevatedHelperTaskName() '" /xml "' xmlPath '"')
-    try FileDelete(xmlPath)
-    if (exitCode != 0) {
-        failureReason := "schtasks /create returned " exitCode "."
-        return false
-    }
-    LogLine("Registered the protected on-demand task '"
-        . XfeElevatedHelperTaskName() "' so the elevated RTSS helper starts "
-        . "without a UAC prompt.")
-    return true
-}
-
-StartElevatedRtssHelper() {
-    global RtssElevatedFrameCapWrites, ElevatedHelperPath, ElevatedHelperPid
-    global ElevatedHelperAvailable, ElevatedHelperLastError
-    global ElevatedHelperExpectedVersion, IniPath, ScriptPid
-
-    ElevatedHelperAvailable := false
-    ElevatedHelperPid := 0
-    if !RtssElevatedFrameCapWrites {
-        ElevatedHelperLastError := "Disabled in Settings."
-        return false
-    }
-    ; An elevated companion writes RTSS profiles with its own token already, so
-    ; a second elevated process would buy nothing and cost a UAC prompt.
-    if A_IsAdmin {
-        ElevatedHelperLastError :=
-            "The companion is already running elevated; the helper is unnecessary."
-        LogLine("Elevated RTSS helper: " ElevatedHelperLastError)
-        return false
-    }
-    ElevatedHelperPath := XfeElevatedHelperPath()
-    installedVersion := ""
-    try installedVersion := FileGetVersion(ElevatedHelperPath)
-    if (installedVersion != ElevatedHelperExpectedVersion) {
-        ; XFE has no embedded payload and no way to write into an
-        ; administrator-only directory, so there is nothing to retry here. Name
-        ; the actual remedy rather than reporting a bare file error.
-        ElevatedHelperLastError := installedVersion = ""
-            ? "The elevated helper is not installed, or cannot be read by this "
-                . "account. Run SteamShell.exe Setup as administrator to install it."
-            : "The installed helper is version " installedVersion "; this build "
-                . "expects " ElevatedHelperExpectedVersion ". Run SteamShell.exe "
-                . "Setup as administrator to replace it."
-        LogLine("Elevated RTSS helper: " ElevatedHelperLastError, "Warning")
-        return false
-    }
-    ; Fail closed. A helper whose directory or binary the interactive user can
-    ; write is a local privilege escalation dressed up as a feature, and this is
-    ; the only gate standing between a writable path and a High-integrity token.
-    if !ElevatedHelperLocationIsProtected(ElevatedHelperPath, &protectionError) {
-        ElevatedHelperLastError :=
-            "The installed helper is not administrator-protected, so it was not elevated. "
-            . protectionError
-            . " Run SteamShell.exe Setup as administrator again to re-secure it."
-        LogLine("Elevated RTSS helper: " ElevatedHelperLastError, "Warning")
-        return false
-    }
-    ; Beside the helper rather than beside XFE's own log: an elevated process
-    ; appending to a path the interactive user controls invites a reparse-point
-    ; redirection onto a file it should never have touched.
-    SplitPath(ElevatedHelperPath, , &helperDirectory)
-    helperLog := helperDirectory "\SteamShell-Helper.log"
-    ; The protected on-demand task first, because a UAC prompt runs on the secure
-    ; desktop where a controller cannot answer it. Registered lazily here rather
-    ; than at install, so a machine that never enables this never carries a
-    ; HighestAvailable task.
-    if EnsureXfeElevatedHelperTask(ElevatedHelperPath, &taskSetupError) {
-        existingPids := CaptureExecutablePidSet(ElevatedHelperPath)
-        if (RunSchTasks('/run /tn "' XfeElevatedHelperTaskName() '"') = 0) {
-            taskPid := WaitForNewExecutablePid(ElevatedHelperPath, existingPids, 5000)
-            if (taskPid && WaitForVerifiedElevatedHelper(
-                taskPid, &taskVerifyError, 2500)) {
-                ElevatedHelperPid := taskPid
-                ElevatedHelperAvailable := true
-                ElevatedHelperLastError := "Running as PID " taskPid
-                    . " through the protected scheduled task."
-                LogLine("Elevated RTSS helper: " ElevatedHelperLastError)
-                return true
-            }
-            ; A task process that did not verify is usually one Windows started
-            ; with a normal token. Close it rather than leaving it behind while
-            ; the direct route starts a second helper.
-            if (taskPid && ProcessExist(taskPid))
-                try ProcessClose(taskPid)
-        }
-        LogLine("Elevated RTSS helper: the scheduled task did not produce a "
-            . "verified helper; requesting UAC directly.", "Warning")
-    } else if (taskSetupError != "") {
-        LogLine("Elevated RTSS helper: no scheduled task (" taskSetupError
-            . "); elevation will prompt.", "Warning")
-    }
-    commandLine := "*RunAs " QuoteWindowsCommandLineArg(ElevatedHelperPath)
-        . " --product=xfe"
-        . " --parent-pid=" ScriptPid
-        . " --settings=" QuoteWindowsCommandLineArg(IniPath)
-        . " --log=" QuoteWindowsCommandLineArg(helperLog)
-    try {
-        Run(commandLine, A_ScriptDir, , &ElevatedHelperPid)
-        ElevatedHelperAvailable := WaitForVerifiedElevatedHelper(
-            ElevatedHelperPid, &verificationError, 2500)
-        ElevatedHelperLastError := ElevatedHelperAvailable
-            ? "Running as PID " ElevatedHelperPid "."
-            : "The elevated helper could not be verified: " verificationError
-        LogLine("Elevated RTSS helper: " ElevatedHelperLastError,
-            ElevatedHelperAvailable ? "Info" : "Warning")
-        return ElevatedHelperAvailable
-    } catch as err {
-        ElevatedHelperLastError := "Elevation was cancelled or failed: " err.Message
-        LogLine("Elevated RTSS helper unavailable: " ElevatedHelperLastError,
-            "Warning")
-        return false
-    }
-}
-
-; Turning the setting off must take effect now, not at the next sign-in.
-;
-; This is the same rule standalone learned the hard way: an elevated process the
-; user has just asked to stop, which keeps running for the rest of the session
-; while Health Check reports it as fine, is not a control. Called from
-; ReloadSettings, so Save & Apply both starts and stops it.
-; The helper is a separate process the user can end from Task Manager, and
-; nothing in XFE watches it. Without this, a dead helper would cost every
-; frame-cap press the full three-second request timeout before failing, and the
-; row would look broken rather than unelevated.
-;
-; Checked at the point of use rather than on a timer, because this is the only
-; place the answer matters and a timer would be one more thing running for a
-; feature that is off by default.
-EnsureElevatedRtssHelperAlive() {
-    global ElevatedHelperAvailable, ElevatedHelperPid, ElevatedHelperLastError
-    if !ElevatedHelperAvailable
-        return false
-    if (ElevatedHelperPid && ProcessExist(ElevatedHelperPid))
-        return true
-    ElevatedHelperAvailable := false
-    ElevatedHelperLastError := "The helper process exited."
-    LogLine("Elevated RTSS helper: " ElevatedHelperLastError, "Warning")
-    return false
-}
-
-SyncElevatedRtssHelperWithSettings() {
-    global RtssElevatedFrameCapWrites, ElevatedHelperAvailable, ElevatedHelperPid
-    global ElevatedHelperLastError
-    if !RtssElevatedFrameCapWrites {
-        if (ElevatedHelperPid || ElevatedHelperAvailable)
-            return StopElevatedHelper("disabled in Settings")
-        ElevatedHelperLastError := "Disabled in Settings."
-        return true
-    }
-    if A_IsAdmin
-        return false
-    if (ElevatedHelperAvailable && ElevatedHelperPid
-        && ProcessExist(ElevatedHelperPid))
-        return true
-    return StartElevatedRtssHelper()
+GetFrameCapLabel() {
+    global RtssPresetFrameCap
+    return RtssPresetFrameCap > 0 ? RtssPresetFrameCap " FPS Preset" : "RTSS Preset"
 }
 
 ; ------------------------------------------------------------------------------
 ; Quick Menu frame cap
 ; ------------------------------------------------------------------------------
-
-
-
-
-
-
-; The notification half of the shared seam. See the standalone tree: shared code
-; calls SharedNotify, and each program routes it to its own surface. The
-; companion has a status line rather than a toast.
-
-; Per-tree seam required by SteamShell-Shared.ahk.
+; RTSS exposes two independent mechanisms and the Quick Menu presents them as one
+; row, because two rows that can each mean "no limiting" is a menu that fights
+; itself:
 ;
-; Takes an array of Map("section", "key", "value"). XFE is an ordinary companion
-; started from an existing desktop, so direct writes are appropriate. Standalone
-; implements the same name transactionally, because it is the Windows shell.
-; Shared code calls this and does not have to know which.
-SharedPersistSettings(changes) {
-    global IniPath
-    for _, item in changes {
-        try IniWrite(item["value"], IniPath, item["section"], item["key"])
-        catch as err {
-            LogLine(
-                "Setting " item["section"] "/" item["key"]
-                . " could not be saved: " err.Message, "Warning")
+;   limiter flag (global, bit 0x4 = DISABLED)  master on/off
+;   FramerateLimit (per profile, DWORD)        the target, 0 = uncapped
+;
+; "Off" therefore maps to the FLAG and never to the value. Writing 0 would
+; destroy the user's number, so turning the cap off and back on would silently
+; forget 72 and come back uncapped. Clearing the flag leaves 72 in the profile
+; and restores it on the way back.
+;
+; Everything here targets the GLOBAL profile only. Per-game profiles are the
+; user's own tuning and are deliberately never written: a quick menu that edits
+; whichever profile happens to be in the foreground is a menu that can silently
+; change a game's configuration.
+RtssFrameCapWritable() {
+    global RtssSetProfilePropertyProc, RtssSaveProfileProc, RtssLoadProfileProc
+    return RtssLoadProfileProc && RtssSetProfilePropertyProc && RtssSaveProfileProc
+}
+
+RtssGlobalFrameLimit() {
+    global RtssFrameLimitCacheFps, RtssFrameLimitCacheTick
+    static CACHE_MS := 400
+    if (RtssFrameLimitCacheTick
+        && A_TickCount - RtssFrameLimitCacheTick < CACHE_MS)
+        return RtssFrameLimitCacheFps
+    limit := GetRtssFrameLimit("")
+    RtssFrameLimitCacheFps := IsObject(limit) ? limit["fps"] : 0
+    RtssFrameLimitCacheTick := A_TickCount
+    return RtssFrameLimitCacheFps
+}
+
+IsRtssFrameCapPreset(fps) {
+    global RtssFrameCapPresets
+    for _, preset in RtssFrameCapPresets {
+        if (fps = preset)
+            return true
+    }
+    return false
+}
+
+; Resolves the flag and the value into the single state the row displays:
+;   "off"         limiter flag cleared, or flag set with no target
+;   "preset"      a value from RtssFrameCapPresets
+;   "configured"  the separately configured Preset value
+;   "custom"      any other non-zero value, or the user cycling to Custom
+GetRtssFrameCapState() {
+    global RtssPresetFrameCap, RtssFrameCapCustomMode
+    state := GetRtssGlobalState()
+    if !IsObject(state)
+        return 0
+    fps := RtssGlobalFrameLimit()
+    if (!state["limiter"] || fps <= 0)
+        return Map("mode", "off", "fps", fps, "limiter", state["limiter"])
+    if RtssFrameCapCustomMode
+        return Map("mode", "custom", "fps", fps, "limiter", true)
+    if IsRtssFrameCapPreset(fps)
+        return Map("mode", "preset", "fps", fps, "limiter", true)
+    ; A configured Preset that duplicates a standard cap is deliberately shown
+    ; as that standard cap. RTSS stores only the number, so treating identical
+    ; values as two distinct entries would make the next cycle jump over every
+    ; standard cap between them.
+    if (RtssPresetFrameCap > 0 && fps = RtssPresetFrameCap)
+        return Map("mode", "configured", "fps", fps, "limiter", true)
+    return Map("mode", "custom", "fps", fps, "limiter", true)
+}
+
+RtssFrameCapValueText() {
+    state := GetRtssFrameCapState()
+    if !IsObject(state)
+        return "Unavailable"
+    if !RtssFrameCapWritable()
+        return state["mode"] = "off" ? "OFF (read-only)" : state["fps"] " FPS (read-only)"
+    switch state["mode"] {
+        case "off":
+            return "‹ OFF ›"
+        case "configured":
+            return "‹ PRESET · " state["fps"] " FPS ›"
+        case "custom":
+            return "‹ CUSTOM ›"
+    }
+    return "‹ " state["fps"] " FPS ›"
+}
+
+; Writes FramerateLimit into the global profile. SaveProfile persists it to
+; RTSS's own configuration, so this is a real edit the user will see in RTSS --
+; intended, but worth a log line rather than happening silently.
+SetRtssGlobalFrameLimit(fps) {
+    global RtssFrameLimitCacheTick
+    if !EnsureRtssRunning()
+        return false
+    api := GetRtssHooksApi()
+    if (!IsObject(api) || !RtssFrameCapWritable()) {
+        SetStatus("This RTSS build cannot set the frame cap directly", "Warning")
+        return false
+    }
+    fps := ClampInt(fps, 0, 1000)
+    value := Buffer(4, 0)
+    NumPut("UInt", fps, value, 0)
+    try {
+        DllCall(api["loadProfile"], "AStr", "")
+        ok := DllCall(api["setProfileProperty"],
+            "AStr", "FramerateLimit", "Ptr", value, "UInt", value.Size, "Int")
+        if !ok {
+            LogLine("RTSS FramerateLimit write was rejected.", "Warning")
+            SetStatus("RTSS did not accept the frame cap", "Warning")
             return false
         }
+        DllCall(api["saveProfile"], "AStr", "")
+        if api["updateProfiles"]
+            DllCall(api["updateProfiles"])
+        NotifyRtssSettingsChanged()
+        RtssFrameLimitCacheTick := 0
+        LogLine("RTSS global FramerateLimit set to " fps ".")
+        return true
+    } catch as err {
+        LogLine("RTSS FramerateLimit write failed: " err.Message, "Warning")
+        SetStatus("RTSS did not accept the frame cap", "Warning")
+        return false
     }
-    return true
 }
 
-; Per-tree seam required by SteamShell-Shared.ahk. See the header above
-; VerifyElevatedHelperProcess there for why this exists.
+; Left/Right on the Frame Limit row. QuickMenuRender rebuilds the row list on
+; every refresh here, so the Custom row appears and disappears on its own.
+CycleRtssFrameCap(direction) {
+    global RtssFrameCapPresets, RtssPresetFrameCap, RtssCustomFrameCap
+    global RtssFrameCapCustomMode
+    state := GetRtssFrameCapState()
+    if !IsObject(state) {
+        SetStatus("RTSS live state is unavailable", "Warning")
+        return
+    }
+    if !RtssFrameCapWritable() {
+        SetStatus("This RTSS build cannot set the frame cap directly", "Warning")
+        return
+    }
+
+    ; Coming off "Off" restores the number the profile still holds instead of
+    ; jumping to the first preset. This is the payoff for never writing 0: the
+    ; user's 72 survives an off/on round trip untouched. Only applies when the
+    ; flag is what turned it off; a flag that is on with no target has nothing
+    ; to restore and falls through to the list below.
+    if (direction > 0 && state["mode"] = "off"
+        && !state["limiter"] && state["fps"] > 0) {
+        RtssFrameCapCustomMode := false
+        ApplyRtssGlobalState("limiter", true)
+        return
+    }
+
+    ; Anything still being dialled in on the Custom row must not land after this.
+    CancelPendingRtssFrameCap()
+
+    ; One ordered list: Off, standard caps, the user-configured Preset, then
+    ; the separately retained Custom value.
+    entries := ["off"]
+    for _, preset in RtssFrameCapPresets
+        entries.Push(preset)
+    if (RtssPresetFrameCap > 0 && !IsRtssFrameCapPreset(RtssPresetFrameCap))
+        entries.Push("configured")
+    entries.Push("custom")
+
+    index := 1
+    switch state["mode"] {
+        case "custom":
+            index := entries.Length
+        case "configured":
+            for entryIndex, entry in entries {
+                if (entry = "configured") {
+                    index := entryIndex
+                    break
+                }
+            }
+        case "preset":
+            for entryIndex, entry in entries {
+                if (entry = state["fps"]) {
+                    index := entryIndex
+                    break
+                }
+            }
+    }
+    index := ClampInt(index + direction, 1, entries.Length)
+    target := entries[index]
+
+    if (target = "off") {
+        RtssFrameCapCustomMode := false
+        ; Value untouched on purpose -- see the header comment.
+        ;
+        ; Only written when the flag actually has to change. Left clamps to
+        ; this entry at the end of the list, so without the guard every further
+        ; press re-issued the SetFlags call and re-showed its notification.
+        if state["limiter"]
+            ApplyRtssGlobalState("limiter", false)
+        return
+    }
+    if (target = "custom") {
+        ; Restore the last Custom value instead of inheriting whichever preset
+        ; happened to be selected immediately before it.
+        customFps := ClampInt(RtssCustomFrameCap, 10, 1000)
+        if !SetRtssGlobalFrameLimit(customFps)
+            return
+        RtssFrameCapCustomMode := true
+        if !state["limiter"]
+            ApplyRtssGlobalState("limiter", true)
+        return
+    }
+    if (target = "configured") {
+        RtssFrameCapCustomMode := false
+        if !SetRtssGlobalFrameLimit(RtssPresetFrameCap)
+            return
+        if !state["limiter"]
+            ApplyRtssGlobalState("limiter", true)
+        return
+    }
+    RtssFrameCapCustomMode := false
+    SetRtssGlobalFrameLimit(target)
+    if !state["limiter"]
+        ApplyRtssGlobalState("limiter", true)
+}
+
+; The one place a per-game profile is written, and only ever on an explicit,
+; confirmed request. Returns the executable this would target, or "" when there
+; is nothing valid to save to.
 ;
-; "the companion" rather than "SteamShell XFE" in messages on purpose: the text
-; it lands in reads "...does not match the companion", which is the name the
-; user sees this program called throughout its own UI and logs.
-; A click on a Quick Menu row ACTIVATES it here; standalone selects it. See the
-; note beside standalone's QuickMenuMouseChoose.
-QuickMenuMouseChoose(index) {
-    QuickMenuMouseActivate(index)
+; The name comes from QuickMenuPreviousExe -- what owned the screen BEFORE the
+; menu opened; asking now would always answer SteamShell-XFE. Steam's own
+; surfaces are excluded because a profile named steam.exe or steamwebhelper.exe
+; caps the client rather than a game, which is never what this row means.
+; A profile named steam.exe caps the Steam client rather than a game, and one
+; named after the companion or Explorer is meaningless.
+IsUsableProfileExe(exeName) {
+    exeName := StrLower(Trim(exeName))
+    if (exeName = "" || IsSteamProcess(exeName))
+        return false
+    return exeName != "steamshell-xfe.exe" && exeName != "explorer.exe"
 }
 
-ProductIdentity() {
-    static identity := Map(
-        "name", "the companion",
-        "exe", "steamshell-xfe.exe",
-        "dirToken", "XFE_DIR",
-        "helperLabel", "Elevated RTSS helper",
-        ; Shown at the top of the Quick Menu. Separate from "name", which is
-        ; prose used inside sentences.
-        "title", "SteamShell XFE",
-        ; Tray icon filename under assets\. Read by the shared
-        ; ApplyTrayIconImage so the icon lifecycle has no per-tree copy.
-        "icon", "SteamShell-XFE.ico")
-    return identity
+; Two sources, in order of directness.
+;
+; What owned the screen before the menu opened is the best answer when it is
+; usable. It is not always: a borderless game can sit behind a Steam surface, and
+; Xbox FSE can return to Steam on its own -- in both cases the captured exe is
+; steam.exe, which is excluded, and the row reads "No game in foreground" while a
+; game is plainly running.
+;
+; So fall back to the last foreground that looked game-like, which the foreground
+; observer already tracks and which survives Steam coming forward afterwards.
+RtssProfileTargetExe() {
+    global QuickMenuPreviousExe, LastObservedGameExe
+    exeName := Trim(QuickMenuPreviousExe)
+    if IsUsableProfileExe(exeName)
+        return exeName
+    exeName := Trim(LastObservedGameExe)
+    if IsUsableProfileExe(exeName)
+        return exeName
+    return ""
+}
+
+; Names what it actually saw rather than reporting a bare negative. "Steam is in
+; front and no game was detected" and "nothing is running" are different
+; problems, and the row is the only place the difference is visible.
+RtssSaveProfileValueText() {
+    global QuickMenuPreviousExe
+    if !RtssFrameCapWritable()
+        return "Unavailable"
+    exeName := RtssProfileTargetExe()
+    if (exeName != "")
+        return exeName
+    previous := Trim(QuickMenuPreviousExe)
+    if (previous != "" && IsSteamProcess(previous))
+        return "Steam In Front, No Game Detected"
+    return "No Game In Foreground"
+}
+
+; Copies the current global frame cap into the foreground executable's own RTSS
+; profile.
+;
+; Deliberately surgical: the target profile is loaded FIRST so that whatever
+; else the user has tuned for that game survives, and only FramerateLimit is
+; replaced. Cloning the global profile wholesale would be one call shorter and
+; would silently overwrite that game's overlay and hotkey settings.
+;
+; RTSS applies a per-game profile automatically whenever that executable runs,
+; so this is a persistent change the user will not see again until it surprises
+; them. Hence the confirmation at the call site and the log line here.
+SaveRtssFrameLimitToProfile() {
+    global RtssFrameLimitCacheTick, QuickMenuPreviousExe, LastObservedGameExe
+    exeName := RtssProfileTargetExe()
+    if (exeName = "") {
+        SetStatus("No foreground game to save a profile for", "Warning")
+        return false
+    }
+    if !RtssFrameCapWritable() {
+        SetStatus("This RTSS build cannot write profiles directly", "Warning")
+        return false
+    }
+    if !EnsureRtssRunning()
+        return false
+    api := GetRtssHooksApi()
+    if !IsObject(api)
+        return false
+
+    ; Flush anything still pending so the profile gets the value on screen.
+    CommitRtssPendingFrameCap()
+    fps := RtssGlobalFrameLimit()
+    value := Buffer(4, 0)
+    NumPut("UInt", fps, value, 0)
+    try {
+        ; Load the game's existing profile so unrelated properties are preserved.
+        DllCall(api["loadProfile"], "AStr", exeName)
+        ok := DllCall(api["setProfileProperty"],
+            "AStr", "FramerateLimit", "Ptr", value, "UInt", value.Size, "Int")
+        if !ok {
+            LogLine("RTSS profile write was rejected for " exeName ".", "Warning")
+            SetStatus("RTSS did not accept the profile write", "Warning")
+            return false
+        }
+        DllCall(api["saveProfile"], "AStr", exeName)
+        if api["updateProfiles"]
+            DllCall(api["updateProfiles"])
+        NotifyRtssSettingsChanged()
+        ; The global profile was displaced by the LoadProfile above; restore it
+        ; so the Frame Limit row keeps reading the value it is supposed to show.
+        try DllCall(api["loadProfile"], "AStr", "")
+        RtssFrameLimitCacheTick := 0
+        LogLine("RTSS profile " exeName " saved with FramerateLimit " fps
+            . " (foreground was '" QuickMenuPreviousExe "', last game '"
+            . LastObservedGameExe "').")
+        SetStatus(exeName ": " (fps > 0 ? fps " FPS" : "uncapped") " saved")
+        return true
+    } catch as err {
+        LogLine("RTSS profile write failed for " exeName ": " err.Message, "Warning")
+        SetStatus("RTSS did not accept the profile write", "Warning")
+        try DllCall(api["loadProfile"], "AStr", "")
+        RtssFrameLimitCacheTick := 0
+        return false
+    }
+}
+
+; Left/Right on the Custom FPS row.
+;
+; Quick Menu navigation is edge-triggered -- the poll loop reports
+; `buttons & ~prevButtons` and nothing in the menu auto-repeats -- so a fixed
+; step of 1 would need sixty presses to get from 60 to 120. Consecutive presses
+; in the same direction therefore escalate 1 -> 5 -> 10, and any pause or
+; reversal drops back to 1 so a single press is still a single frame.
+; Cancels a value that was being dialled in but must not land.
+;
+; Needed because the commit is deferred: cycling from Custom to a preset while a
+; pending value is still in flight would otherwise let the timer fire afterwards
+; and overwrite the preset the user just chose.
+CancelPendingRtssFrameCap() {
+    global RtssPendingFrameCap
+    RtssPendingFrameCap := 0
+    SetTimer(CommitRtssPendingFrameCap, 0)
+}
+
+CommitRtssPendingFrameCap() {
+    global RtssPendingFrameCap
+    if (RtssPendingFrameCap <= 0)
+        return
+    value := RtssPendingFrameCap
+    RtssPendingFrameCap := 0
+    if SetRtssGlobalFrameLimit(value)
+        PersistRtssCustomFrameCap(value)
 }
 
 PersistRtssCustomFrameCap(value) {
@@ -7152,11 +8137,38 @@ PersistRtssCustomFrameCap(value) {
         return false
     }
     RtssCustomFrameCap := value
-    ; Committing a Custom value is also a selection of Custom at that value.
-    ; Recorded here rather than in the caller: CommitRtssPendingFrameCap is
-    ; shared, so it cannot carry a tree-specific call.
-    PersistRtssFrameCapSelection("custom", value)
     return true
+}
+
+; Left/Right on the Custom FPS row.
+;
+; Two things make naive stepping unpleasant, and they are separate problems.
+;
+; 1. WRITING ON EVERY PRESS. SetRtssGlobalFrameLimit is a LoadProfile plus a
+;    SetProfileProperty plus a SaveProfile -- a disk write -- plus UpdateProfiles.
+;    Doing that per press means the limiter is genuinely reconfigured a dozen
+;    times while the user scrolls, and the frame rate chases the number. So the
+;    value is held pending, the row shows it immediately, and RTSS is written
+;    once the user stops.
+;
+; 2. ESCALATING OFF-GRID. Quick Menu navigation is edge-triggered with no
+;    auto-repeat, so a fixed step of 1 needs sixty presses to cross 60->120 and
+;    the step has to grow. But growing it from an arbitrary value lands on
+;    arbitrary values: 63 stepping by 5 gives 68, 73, 78, and 60 or 90 become
+;    unreachable without slowing down and creeping. Coarse steps therefore snap
+;    to their own grid -- 63 by 5 goes to 65, then 70 -- so fast stepping lands
+;    on round numbers and fine stepping still moves by exactly 1.
+AdjustRtssCustomFrameCap(direction) {
+    global RtssPendingFrameCap, RtssCustomFrameCap
+    static COMMIT_DELAY_MS := 400
+
+    if !RtssFrameCapWritable() {
+        SetStatus("This RTSS build cannot set the frame cap directly", "Warning")
+        return
+    }
+    current := RtssPendingFrameCap > 0 ? RtssPendingFrameCap : RtssCustomFrameCap
+    RtssPendingFrameCap := ClampInt(current + direction, 10, 1000)
+    SetTimer(CommitRtssPendingFrameCap, -COMMIT_DELAY_MS)
 }
 
 ToggleQuickMenu(*) {
@@ -7206,6 +8218,18 @@ ShowQuickMenu(*) {
         . ", previous=" (QuickMenuPreviousExe != "" ? QuickMenuPreviousExe : "unknown") ".")
 }
 
+; Hides the Quick Menu, then sends a shell shortcut once focus has settled.
+;
+; Sending immediately after Hide() delivers the keystroke while our window is
+; still tearing down and focus is mid-transfer, which is why Game Bar could
+; appear and be dismissed again straight away. The short delay lets the
+; foreground application take focus back first so the shortcut lands on a
+; stable target.
+QuickMenuHideThenSend(keys, delayMs := 150) {
+    HideQuickMenu()
+    SetTimer(() => SendChordSafe(keys), -delayMs)
+}
+
 QuickMenuHideThenSteamMenu(steamInFront) {
     shortcut := SendSteamMenu(steamInFront)
     HideQuickMenu()
@@ -7252,6 +8276,51 @@ HideQuickMenu(*) {
     }
 }
 
+; Detach the Static's bitmap before destroying its parent. The script owns the
+; HBITMAP returned by STM_SETIMAGE, so DestroyWindow alone would leak it.
+; Controls remain persistent while a menu session is open; a later open builds
+; a fresh HWND and fresh controls so DWM cannot resurrect a stale hidden menu.
+QuickMenuDestroyWindow() {
+    global QuickMenuGui, QuickMenuTitleCtrl, QuickMenuStatusCtrl
+    global QuickMenuRowsCtrl, QuickMenuRowsBitmap, QuickMenuRedrawSuspended
+
+    detachedBitmap := 0
+    if (IsSet(QuickMenuRowsCtrl) && IsObject(QuickMenuRowsCtrl)) {
+        try detachedBitmap := SendMessage(0x0172, 0, 0, QuickMenuRowsCtrl)
+    }
+    if IsSet(QuickMenuGui) {
+        try QuickMenuGui.Destroy()
+        QuickMenuGui := unset
+    }
+    if detachedBitmap
+        try DllCall("DeleteObject", "Ptr", detachedBitmap)
+    if (QuickMenuRowsBitmap && QuickMenuRowsBitmap != detachedBitmap)
+        try DllCall("DeleteObject", "Ptr", QuickMenuRowsBitmap)
+    QuickMenuRowsBitmap := 0
+    QuickMenuTitleCtrl := 0
+    QuickMenuRowsCtrl := 0
+    QuickMenuStatusCtrl := 0
+    QuickMenuRedrawSuspended := false
+    ShutdownGdiPlus()
+}
+
+; Breadcrumb, so the current page is always identifiable rather than the title
+; simply being replaced.
+QuickMenuTitle() {
+    global QuickMenuPage
+    titles := Map(
+        "AUDIO", "Audio",
+        "DISPLAY", "Display & HDR",
+        "RTSS", "RTSS & Performance",
+        "LAYOUT", "Controller Mappings",
+        "TASKS", "Task Switcher",
+        "SETTINGS", "Settings",
+        "SYSTEM", "System"
+    )
+    if !titles.Has(QuickMenuPage)
+        return "SteamShell XFE"
+    return "SteamShell XFE  ›  " titles[QuickMenuPage]
+}
 
 ; ---------------------------------------------------------------------------
 ; Quick Menu accent resolution.
@@ -7263,9 +8332,196 @@ HideQuickMenu(*) {
 ; re-derivation.
 ; ---------------------------------------------------------------------------
 
+QuickMenuAccentPresetNames() {
+    global QM_ACCENT_PRESETS
+    names := []
+    for _, pair in QM_ACCENT_PRESETS
+        names.Push(pair[1])
+    return names
+}
+
+QuickMenuAccentPresetHex(name) {
+    global QM_ACCENT_PRESETS
+    wanted := StrLower(Trim(name))
+    for _, pair in QM_ACCENT_PRESETS {
+        if (StrLower(pair[1]) = wanted)
+            return pair[2]
+    }
+    return ""
+}
+
+; Accepts "RRGGBB", "#RRGGBB" or "0xRRGGBB" and returns a bare uppercase
+; "RRGGBB", or "" if the value is not a color. Returning "" rather than a
+; guessed color is what lets the caller fall back visibly instead of painting
+; the menu an unreadable shade.
+NormalizeHexColor(value) {
+    text := Trim(value)
+    if (SubStr(text, 1, 1) = "#")
+        text := SubStr(text, 2)
+    else if (StrLower(SubStr(text, 1, 2)) = "0x")
+        text := SubStr(text, 3)
+    if !RegExMatch(text, "^[0-9A-Fa-f]{6}$")
+        return ""
+    return StrUpper(text)
+}
+
+HexColorChannel(hex, index) {
+    return Integer("0x" SubStr(hex, (index * 2) - 1, 2))
+}
+
+; Linear per-channel blend. Not gamma-correct, which is the right call here:
+; the original QM_ROW_SELECTED was picked by eye in sRGB, so matching it means
+; blending the same way it was chosen.
+BlendHexColor(baseHex, mixHex, ratio) {
+    out := ""
+    Loop 3 {
+        base := HexColorChannel(baseHex, A_Index)
+        mix := HexColorChannel(mixHex, A_Index)
+        value := Round(base + ((mix - base) * ratio))
+        out .= Format("{:02X}", ClampInt(value, 0, 255))
+    }
+    return out
+}
+
+; Custom shows the hex actually in use, so a malformed value is visible as the
+; Purple fallback rather than silently looking like it applied.
+QuickMenuAccentValueText() {
+    global QuickMenuAccentName, QM_ACCENT
+    return (StrLower(QuickMenuAccentName) = "custom")
+        ? "Custom · " QM_ACCENT
+        : QuickMenuAccentName
+}
+
+; Resolves the configured accent into the live palette. Safe to call repeatedly;
+; the Quick Menu calls it whenever the setting changes so the change is visible
+; without a restart.
+QuickMenuApplyAccent(presetName, customHex) {
+    global QM_ACCENT, QM_ROW_SELECTED, QM_BG, QM_ACCENT_BLEND
+    global QuickMenuAccentName, QuickMenuAccentCustomHex
+    name := Trim(presetName)
+    custom := NormalizeHexColor(customHex)
+    hex := (StrLower(name) = "custom")
+        ? custom
+        : NormalizeHexColor(QuickMenuAccentPresetHex(name))
+    if (hex = "") {
+        ; An unknown preset or a malformed custom hex falls back to the default
+        ; rather than leaving the menu unreadable. The configured name is kept as
+        ; the user wrote it so Settings still shows what they chose.
+        hex := QuickMenuAccentPresetHex("Purple")
+    }
+    QuickMenuAccentName := (name != "") ? name : "Purple"
+    QuickMenuAccentCustomHex := (custom != "") ? custom : "107C10"
+    QM_ACCENT := hex
+    QM_ROW_SELECTED := BlendHexColor(QM_BG, hex, QM_ACCENT_BLEND)
+}
+
+EnsureGdiPlus() {
+    global GdiPlusToken, GdiPlusModule
+    if (GdiPlusToken)
+        return true
+    ; The handle is kept so ShutdownGdiPlus can release it. The Quick Menu starts
+    ; and shuts GDI+ down once per open/close cycle, so a LoadLibrary with no
+    ; matching FreeLibrary added one module reference every time the menu was
+    ; opened.
+    if !GdiPlusModule
+        GdiPlusModule := DllCall("LoadLibrary", "Str", "gdiplus", "Ptr")
+    if !GdiPlusModule
+        return false
+    ; GdiplusStartupInput: version, then a pointer and two BOOLs.
+    input := Buffer(A_PtrSize = 8 ? 24 : 16, 0)
+    NumPut("UInt", 1, input, 0)
+    token := 0
+    if (DllCall("gdiplus\GdiplusStartup", "Ptr*", &token, "Ptr", input, "Ptr", 0, "UInt") != 0)
+        return false
+    GdiPlusToken := token
+    return true
+}
+
+ShutdownGdiPlus() {
+    global GdiPlusToken, GdiPlusModule
+    if GdiPlusToken {
+        try DllCall("gdiplus\GdiplusShutdown", "Ptr", GdiPlusToken)
+        GdiPlusToken := 0
+    }
+    if GdiPlusModule {
+        try DllCall("FreeLibrary", "Ptr", GdiPlusModule)
+        GdiPlusModule := 0
+    }
+}
+
 ; Exit cleanup uses the same ownership-safe teardown as an ordinary close.
 ReleaseQuickMenuPaintResources() {
     QuickMenuDestroyWindow()
+}
+
+QuickMenuArgb(hex, alpha := 255) {
+    return (alpha << 24) | Integer("0x" hex)
+}
+
+; Four arcs and a close. GDI+ has no rounded-rectangle primitive.
+QuickMenuAddRoundedPath(path, x, y, w, h, radius) {
+    radius := Min(radius, Min(w, h) / 2)
+    if (radius <= 0) {
+        DllCall("gdiplus\GdipAddPathRectangle", "Ptr", path
+            , "Float", x, "Float", y, "Float", w, "Float", h)
+        return
+    }
+    d := radius * 2
+    DllCall("gdiplus\GdipAddPathArc", "Ptr", path, "Float", x, "Float", y
+        , "Float", d, "Float", d, "Float", 180, "Float", 90)
+    DllCall("gdiplus\GdipAddPathArc", "Ptr", path, "Float", x + w - d, "Float", y
+        , "Float", d, "Float", d, "Float", 270, "Float", 90)
+    DllCall("gdiplus\GdipAddPathArc", "Ptr", path, "Float", x + w - d, "Float", y + h - d
+        , "Float", d, "Float", d, "Float", 0, "Float", 90)
+    DllCall("gdiplus\GdipAddPathArc", "Ptr", path, "Float", x, "Float", y + h - d
+        , "Float", d, "Float", d, "Float", 90, "Float", 90)
+    DllCall("gdiplus\GdipClosePathFigure", "Ptr", path)
+}
+
+QuickMenuFillRounded(graphics, x, y, w, h, radius, argb) {
+    path := 0
+    DllCall("gdiplus\GdipCreatePath", "Int", 0, "Ptr*", &path)
+    if !path
+        return
+    QuickMenuAddRoundedPath(path, x, y, w, h, radius)
+    brush := 0
+    DllCall("gdiplus\GdipCreateSolidFill", "UInt", argb, "Ptr*", &brush)
+    if brush {
+        DllCall("gdiplus\GdipFillPath", "Ptr", graphics, "Ptr", brush, "Ptr", path)
+        DllCall("gdiplus\GdipDeleteBrush", "Ptr", brush)
+    }
+    DllCall("gdiplus\GdipDeletePath", "Ptr", path)
+}
+
+QuickMenuStrokeRounded(graphics, x, y, w, h, radius, argb, width) {
+    path := 0
+    DllCall("gdiplus\GdipCreatePath", "Int", 0, "Ptr*", &path)
+    if !path
+        return
+    QuickMenuAddRoundedPath(path, x, y, w, h, radius)
+    pen := 0
+    DllCall("gdiplus\GdipCreatePen1", "UInt", argb, "Float", width, "Int", 2, "Ptr*", &pen)
+    if pen {
+        DllCall("gdiplus\GdipDrawPath", "Ptr", graphics, "Ptr", pen, "Ptr", path)
+        DllCall("gdiplus\GdipDeletePen", "Ptr", pen)
+    }
+    DllCall("gdiplus\GdipDeletePath", "Ptr", path)
+}
+
+; GDI+ has no blur. The glow is concentric strokes stepping outward with
+; falling alpha, which is cheap, needs no second surface, and at these radii is
+; visually indistinguishable from a real one.
+QuickMenuDrawGlow(graphics, x, y, w, h, radius, hex, steps, maxAlpha, scale) {
+    Loop steps {
+        spread := A_Index * scale
+        fade := (steps - A_Index + 1) / steps
+        alpha := Round(maxAlpha * fade * fade)
+        if (alpha < 2)
+            continue
+        QuickMenuStrokeRounded(graphics
+            , x - spread, y - spread, w + (spread * 2), h + (spread * 2)
+            , radius + spread, QuickMenuArgb(hex, alpha), 2.2 * scale)
+    }
 }
 
 ; The one line of the painter that differs between the two trees, isolated so
@@ -7273,6 +8529,213 @@ ReleaseQuickMenuPaintResources() {
 ; rebuilds its whole row list per repaint and already carries it.
 QuickMenuRowValueText(row) {
     return row["value"]
+}
+
+QuickMenuMakeFont(pixelSize, bold) {
+    family := 0
+    DllCall("gdiplus\GdipCreateFontFamilyFromName", "Str", "Segoe UI", "Ptr", 0, "Ptr*", &family)
+    if !family
+        return 0
+    font := 0
+    DllCall("gdiplus\GdipCreateFont", "Ptr", family, "Float", pixelSize
+        , "Int", bold ? 1 : 0, "Int", 2, "Ptr*", &font)
+    DllCall("gdiplus\GdipDeleteFontFamily", "Ptr", family)
+    return font
+}
+
+; align: 0 near, 1 centre, 2 far. Vertically centred and never wrapped, with an
+; ellipsis when a value is too long -- the old Static controls clipped instead,
+; which read as a rendering fault rather than as truncation.
+QuickMenuDrawText(graphics, text, font, argb, x, y, w, h, align) {
+    if (text = "" || !font)
+        return
+    layout := Buffer(16, 0)
+    NumPut("Float", x, layout, 0)
+    NumPut("Float", y, layout, 4)
+    NumPut("Float", w, layout, 8)
+    NumPut("Float", h, layout, 12)
+    format := 0
+    DllCall("gdiplus\GdipCreateStringFormat", "Int", 0, "Int", 0, "Ptr*", &format)
+    if !format
+        return
+    DllCall("gdiplus\GdipSetStringFormatAlign", "Ptr", format, "Int", align)
+    DllCall("gdiplus\GdipSetStringFormatLineAlign", "Ptr", format, "Int", 1)
+    DllCall("gdiplus\GdipSetStringFormatTrimming", "Ptr", format, "Int", 3)
+    DllCall("gdiplus\GdipSetStringFormatFlags", "Ptr", format, "Int", 0x1000)
+    brush := 0
+    DllCall("gdiplus\GdipCreateSolidFill", "UInt", argb, "Ptr*", &brush)
+    if brush {
+        DllCall("gdiplus\GdipDrawString", "Ptr", graphics, "Str", text, "Int", -1
+            , "Ptr", font, "Ptr", layout, "Ptr", format, "Ptr", brush)
+        DllCall("gdiplus\GdipDeleteBrush", "Ptr", brush)
+    }
+    DllCall("gdiplus\GdipDeleteStringFormat", "Ptr", format)
+}
+
+; Paints every row into one bitmap and hands it to the row control. Called on
+; each refresh; there is no partial repaint, because composing the whole band is
+; already well under a frame and a partial one would have to reason about which
+; neighbours a glow spills onto.
+QuickMenuPaintRows() {
+    global QuickMenuRowsCtrl, QuickMenuRowsBitmap, QuickMenuRows, QuickMenuSelected
+    global QuickMenuRedrawSuspended
+    global QM_BG, QM_ROW_SELECTED, QM_ACCENT, QM_LABEL, QM_LABEL_SELECTED, QM_VALUE
+    static warnedNoBitmap := false
+    if (!IsSet(QuickMenuRowsCtrl) || !QuickMenuRowsCtrl)
+        return
+    if !EnsureGdiPlus()
+        return
+
+    ; Physical pixels. AutoHotkey scales the control from logical units, so asking
+    ; the control itself is the only way to match the surface to the screen.
+    clientRect := Buffer(16, 0)
+    if !DllCall("GetClientRect", "Ptr", QuickMenuRowsCtrl.Hwnd, "Ptr", clientRect)
+        return
+    width := NumGet(clientRect, 8, "Int")
+    height := NumGet(clientRect, 12, "Int")
+    if (width < 1 || height < 1)
+        return
+    rowCount := QuickMenuRows.Length
+    if (rowCount < 1)
+        return
+
+    ; One scale factor derived from the control itself, so every measurement below
+    ; is in logical units and DPI is handled in exactly one place.
+    scale := width / QuickMenuWidth()
+    px(value) => value * scale
+
+    screenDC := DllCall("GetDC", "Ptr", 0, "Ptr")
+    memDC := DllCall("CreateCompatibleDC", "Ptr", screenDC, "Ptr")
+    header := Buffer(40, 0)
+    NumPut("UInt", 40, header, 0)
+    NumPut("Int", width, header, 4)
+    NumPut("Int", -height, header, 8) ; top-down, so y grows downward as drawn
+    NumPut("UShort", 1, header, 12)
+    NumPut("UShort", 32, header, 14)
+    bits := 0
+    bitmap := DllCall("CreateDIBSection", "Ptr", memDC, "Ptr", header, "UInt", 0
+        , "Ptr*", &bits, "Ptr", 0, "UInt", 0, "Ptr")
+    ; Without this the painter carries on into the DC's default 1x1 monochrome
+    ; bitmap and then hands the control a null image, which blanks the rows with
+    ; no error anywhere. An empty menu reads as a rendering fault rather than as
+    ; the GDI handle exhaustion it actually is.
+    if !bitmap {
+        if !warnedNoBitmap {
+            warnedNoBitmap := true
+            LogLine("Quick Menu: CreateDIBSection failed for a "
+                . width "x" height " row surface; the page cannot be painted. "
+                . "This usually means GDI handle exhaustion.", "Warning")
+        }
+        DllCall("DeleteDC", "Ptr", memDC)
+        DllCall("ReleaseDC", "Ptr", 0, "Ptr", screenDC)
+        return
+    }
+    previous := DllCall("SelectObject", "Ptr", memDC, "Ptr", bitmap, "Ptr")
+    graphics := 0
+    DllCall("gdiplus\GdipCreateFromHDC", "Ptr", memDC, "Ptr*", &graphics)
+    if graphics {
+        DllCall("gdiplus\GdipSetSmoothingMode", "Ptr", graphics, "Int", 4)
+        ; The surface is opaque, so ClearType is available and text quality does
+        ; not regress against the Static controls this replaced.
+        DllCall("gdiplus\GdipSetTextRenderingHint", "Ptr", graphics, "Int", 5)
+        QuickMenuFillRounded(graphics, 0, 0, width, height, 0, QuickMenuArgb(QM_BG))
+
+        labelFont := QuickMenuMakeFont(px(16), false)
+        labelFontBold := QuickMenuMakeFont(px(16), true)
+        valueFont := QuickMenuMakeFont(px(14.7), false)
+        rowHeight := QuickMenuRowHeight()
+        glowPad := QuickMenuGlowPadding()
+        inset := QuickMenuRowInset()
+        rowWidth := QuickMenuWidth() - (inset * 2)
+        radius := px(10)
+        textPad := px(16)
+        barWidth := px(4)
+
+        boxHeight := px(rowHeight - 6)
+        left := px(inset)
+        boxWidth := px(rowWidth)
+        ; Paint selection decoration before any text. The stronger glow extends
+        ; into neighbouring slots; drawing it inside the row loop would haze text
+        ; belonging to an earlier row whenever a middle/lower row was selected.
+        if (QuickMenuSelected >= 1 && QuickMenuSelected <= QuickMenuRows.Length) {
+            selectedTop := px(glowPad + ((QuickMenuSelected - 1) * rowHeight) + 3)
+            QuickMenuDrawGlow(graphics, left, selectedTop, boxWidth, boxHeight, radius
+                , QM_ACCENT, 8, 120, px(1))
+            QuickMenuFillRounded(graphics, left, selectedTop, boxWidth, boxHeight, radius
+                , QuickMenuArgb(QM_ROW_SELECTED))
+            QuickMenuStrokeRounded(graphics, left, selectedTop, boxWidth, boxHeight, radius
+                , QuickMenuArgb(QM_ACCENT), px(2))
+            QuickMenuFillRounded(graphics
+                , left + px(6), selectedTop + px(7), barWidth, boxHeight - px(14)
+                , barWidth / 2, QuickMenuArgb(QM_ACCENT))
+        }
+
+        for index, row in QuickMenuRows {
+            selected := (index = QuickMenuSelected)
+            top := px(glowPad + ((index - 1) * rowHeight) + 3)
+            labelLeft := left + textPad + (selected ? px(10) : 0)
+            labelWidth := (boxWidth * 0.52) - textPad
+            QuickMenuDrawText(graphics, row["label"]
+                , selected ? labelFontBold : labelFont
+                , QuickMenuArgb(selected ? QM_LABEL_SELECTED : QM_LABEL)
+                , labelLeft, top, labelWidth, boxHeight, 0)
+            valueLeft := left + (boxWidth * 0.52)
+            QuickMenuDrawText(graphics, QuickMenuRowValueText(row), valueFont
+                , QuickMenuArgb(selected ? QM_ACCENT : QM_VALUE)
+                , valueLeft, top, (boxWidth * 0.48) - textPad, boxHeight, 2)
+        }
+
+        if labelFont
+            DllCall("gdiplus\GdipDeleteFont", "Ptr", labelFont)
+        if labelFontBold
+            DllCall("gdiplus\GdipDeleteFont", "Ptr", labelFontBold)
+        if valueFont
+            DllCall("gdiplus\GdipDeleteFont", "Ptr", valueFont)
+        DllCall("gdiplus\GdipDeleteGraphics", "Ptr", graphics)
+    }
+
+    DllCall("SelectObject", "Ptr", memDC, "Ptr", previous)
+    DllCall("DeleteDC", "Ptr", memDC)
+    DllCall("ReleaseDC", "Ptr", 0, "Ptr", screenDC)
+
+    ; Suppress the Static control's erase/paint between images. STM_SETIMAGE
+    ; invalidates the control; without this atomic swap Windows briefly exposes its
+    ; background before drawing the new bitmap, which reads as a flash on each move.
+    replaced := 0
+    try DllCall("User32\SendMessageW", "Ptr", QuickMenuRowsCtrl.Hwnd
+        , "UInt", 0x000B, "Ptr", 0, "Ptr", 0)
+    try {
+        replaced := SendMessage(0x0172, 0, bitmap, QuickMenuRowsCtrl)
+    } finally {
+        try DllCall("User32\SendMessageW", "Ptr", QuickMenuRowsCtrl.Hwnd
+            , "UInt", 0x000B, "Ptr", 1, "Ptr", 0)
+        if !QuickMenuRedrawSuspended {
+            ; RDW_INVALIDATE | RDW_NOERASE | RDW_UPDATENOW
+            try DllCall("User32\RedrawWindow", "Ptr", QuickMenuRowsCtrl.Hwnd
+                , "Ptr", 0, "Ptr", 0, "UInt", 0x0121)
+        }
+    }
+    ; STM_SETIMAGE returns the bitmap it replaced. Not deleting it leaks one
+    ; bitmap per repaint, and the menu repaints on every keypress.
+    if (replaced && replaced != bitmap)
+        try DllCall("DeleteObject", "Ptr", replaced)
+    if (QuickMenuRowsBitmap && QuickMenuRowsBitmap != bitmap && QuickMenuRowsBitmap != replaced)
+        try DllCall("DeleteObject", "Ptr", QuickMenuRowsBitmap)
+    QuickMenuRowsBitmap := bitmap
+}
+
+QuickMenuSetRedraw(enabled) {
+    global QuickMenuGui, QuickMenuRedrawSuspended
+    QuickMenuRedrawSuspended := !enabled
+    if !IsSet(QuickMenuGui)
+        return
+    try DllCall("User32\SendMessageW", "Ptr", QuickMenuGui.Hwnd
+        , "UInt", 0x000B, "Ptr", enabled ? 1 : 0, "Ptr", 0)
+    if enabled {
+        ; RDW_INVALIDATE | RDW_NOERASE | RDW_ALLCHILDREN | RDW_UPDATENOW
+        try DllCall("User32\RedrawWindow", "Ptr", QuickMenuGui.Hwnd
+            , "Ptr", 0, "Ptr", 0, "UInt", 0x01A1)
+    }
 }
 
 QuickMenuBuildGui() {
@@ -7316,40 +8779,23 @@ QuickMenuBuildGui() {
     QuickMenuSetRedraw(false)
     try {
         QuickMenuRender()
-        QuickMenuResizeToRows()
+        ; Derive the height from the same figures that lay the content out, so the
+        ; window finishes just below the status line. The previous constant left a
+        ; fixed 53px of empty space under everything, which reads as a large unused
+        ; margin now that the status line is usually blank.
+        height := Min(QuickMenuStatusY(QuickMenuRows.Length) + QuickMenuStatusHeight()
+            + QuickMenuBottomMargin(), 820)
+        deferred := CenterGuiOnMonitorActual(QuickMenuGui, QuickMenuMonitorIndex,
+            width, height, false, true)
+        ; Reveal first, then measure and shape; redraw remains suspended until the
+        ; page, final size and corner state are all ready.
+        if deferred
+            RevealWindow(QuickMenuGui)
+        QuickMenuEnsureContentFits()
+        ApplyRoundedCorners(QuickMenuGui, 30)
     } finally {
         QuickMenuSetRedraw(true)
     }
-}
-
-; Sizes the window to the rows currently on the page and re-centres it.
-;
-; Split out of QuickMenuBuildGui because QuickMenuRefresh re-derives the row
-; list as well, and until this was reachable from there a refresh that changed
-; the row count left the window at its old height with the new rows painted
-; below its bottom edge. The RTSS page is where that showed: its rows are
-; composed from live RTSS state, so RTSS starting while the page was open took
-; it from two rows to four and cut the bottom two off. Intermittent by nature,
-; because it needed RTSS to change state during the seconds the page was up.
-QuickMenuResizeToRows() {
-    global QuickMenuGui, QuickMenuMonitorIndex, QuickMenuRows, QuickMenuSizedRowCount
-    if (!IsSet(QuickMenuGui) || QuickMenuRows.Length = 0)
-        return
-    QuickMenuSizedRowCount := QuickMenuRows.Length
-    ; Derive the height from the same figures that lay the content out, so the
-    ; window finishes just below the status line. The previous constant left a
-    ; fixed 53px of empty space under everything, which reads as a large unused
-    ; margin now that the status line is usually blank.
-    height := Min(QuickMenuStatusY(QuickMenuRows.Length) + QuickMenuStatusHeight()
-        + QuickMenuBottomMargin(), 820)
-    deferred := CenterGuiOnMonitorActual(QuickMenuGui, QuickMenuMonitorIndex,
-        QuickMenuWidth(), height, false, true)
-    ; Reveal first, then measure and shape; redraw remains suspended until the
-    ; page, final size and corner state are all ready.
-    if deferred
-        RevealWindow(QuickMenuGui)
-    QuickMenuEnsureContentFits()
-    ApplyRoundedCorners(QuickMenuGui, 30)
 }
 
 ; Grows the Quick Menu if its content does not fit, and re-centres it.
@@ -7405,6 +8851,99 @@ QuickMenuEnsureContentFits() {
         "Warning")
 }
 
+; Rounds the window corners. Applied after the window is sized and shown,
+; because the region is expressed in real window pixels and the layout is
+; specified in DPI-scaled units. It must be reapplied on every resize, so this
+; runs on each page change rather than only at creation.
+ApplyRoundedCorners(guiObj, radius) {
+    ; Never shape a hidden window.
+    ;
+    ; WinSetRegion CLIPS the window to the region, and a window that is not yet on
+    ; screen can report a size that is wrong -- the same hazard the centering path
+    ; already compensates for. Measured on a 4K television: the region came out at
+    ; the logical height while the window was at the scaled height, so the menu was
+    ; cut off with a clean rounded edge straight through a row. That is why every
+    ; page change afterwards looked right: those measure a real, visible window.
+    visible := false
+    try visible := DllCall("IsWindowVisible", "Ptr", guiObj.Hwnd, "Int") != 0
+    if !visible
+        return
+    ; Windows 11 rounds the window itself, antialiased and composited by DWM.
+    ; DWMWA_WINDOW_CORNER_PREFERENCE is 33, DWMWCP_ROUND is 2. The region path
+    ; below is a 1-bit mask with visibly stepped corners, so it is now only the
+    ; Windows 10 fallback rather than what everyone sees.
+    try {
+        ; DWMWA_BORDER_COLOR (34) with DWMWA_COLOR_NONE suppresses the thin
+        ; system-drawn frame while retaining DWM's antialiased rounded corners.
+        borderColor := Buffer(4, 0)
+        NumPut("UInt", 0xFFFFFFFE, borderColor, 0)
+        DllCall("dwmapi\DwmSetWindowAttribute", "Ptr", guiObj.Hwnd
+            , "UInt", 34, "Ptr", borderColor, "UInt", 4, "UInt")
+        preference := Buffer(4, 0)
+        NumPut("Int", 2, preference, 0)
+        if (DllCall("dwmapi\DwmSetWindowAttribute", "Ptr", guiObj.Hwnd
+            , "UInt", 33, "Ptr", preference, "UInt", 4, "UInt") = 0) {
+            ; A region set by an earlier call would clip the rounded corners DWM
+            ; is now drawing, so it has to be cleared.
+            try WinSetRegion("", "ahk_id " guiObj.Hwnd)
+            return
+        }
+    }
+    try {
+        ; Windows 10 has no border-color attribute. Remove the native border before
+        ; applying its region fallback; on Windows 11 we retain the structural
+        ; frame and suppress only its drawing so DWM can still round the window.
+        try guiObj.Opt("-Border")
+        WinGetPos(, , &realWidth, &realHeight, "ahk_id " guiObj.Hwnd)
+        if (realWidth > 0 && realHeight > 0) {
+            scaled := Round(radius * (A_ScreenDPI / 96.0))
+            WinSetRegion("0-0 w" realWidth " h" realHeight
+                . " R" scaled "-" scaled, "ahk_id " guiObj.Hwnd)
+        }
+    }
+}
+
+; Layout figures shared by the renderer and the height calculation. Keeping them
+; in one place stops the window size and the content position drifting apart.
+; Quick Menu geometry. Every position and the window height derive from these,
+; so the layout cannot drift out of step with the window size.
+QuickMenuWidth() {
+    return 620
+}
+
+QuickMenuRowTop() {
+    return 74
+}
+
+QuickMenuRowHeight() {
+    return 40
+}
+
+; Space around the row band for the selected-row glow. Without this, the first
+; and last rows clip the effect at the Static control's bitmap boundary.
+QuickMenuGlowPadding() {
+    return 8
+}
+
+; The highlight is inset from the window edge, and the row text is inset again
+; inside the highlight, so the selected bar reads as a panel rather than a strip
+; running edge to edge.
+QuickMenuRowInset() {
+    return 20
+}
+
+QuickMenuStatusY(rowCount) {
+    return QuickMenuRowTop() + 8 + (rowCount * QuickMenuRowHeight())
+}
+
+QuickMenuStatusHeight() {
+    return 36
+}
+
+QuickMenuBottomMargin() {
+    return 16
+}
+
 QuickMenuRender() {
     global QuickMenuRows, QuickMenuSelected, QuickMenuTitleCtrl, QuickMenuStatusCtrl
     global QuickMenuRowsCtrl
@@ -7416,7 +8955,7 @@ QuickMenuRender() {
     if (QuickMenuRows.Length = 0)
         return
     QuickMenuSelected := ClampInt(QuickMenuSelected, 1, QuickMenuRows.Length)
-    QuickMenuTitleCtrl.Text := GuiSafeLabel(QuickMenuTitleText())
+    QuickMenuTitleCtrl.Text := GuiSafeLabel(QuickMenuTitle())
     ; The painted band is sized to the rows actually on this page, so a short
     ; page leaves no dead surface for a glow to spill onto.
     QuickMenuRowsCtrl.Move(0, QuickMenuRowTop() - QuickMenuGlowPadding(), QuickMenuWidth(),
@@ -7455,16 +8994,12 @@ QuickMenuHint() {
 }
 
 QuickMenuRefresh() {
-    global QuickMenuVisible, QuickMenuRows, QuickMenuSizedRowCount
+    global QuickMenuVisible
     if !QuickMenuVisible
         return
     QuickMenuSetRedraw(false)
     try {
         QuickMenuRender()
-        ; Only when the count actually moved. A repaint is the common case and
-        ; must not re-centre the window under the user for a value change.
-        if (QuickMenuRows.Length != QuickMenuSizedRowCount)
-            QuickMenuResizeToRows()
     } finally {
         QuickMenuSetRedraw(true)
     }
@@ -7489,12 +9024,64 @@ QuickMenuStatusText() {
     return A_TickCount - LastStatusTick <= StatusVisibleMs ? LastStatusText : ""
 }
 
+; Maps a click on the painted band back to a row. The Static controls used to
+; carry their own index; with one surface the index has to be recovered from
+; where the pointer actually is.
+QuickMenuRowsClick(*) {
+    global QuickMenuRowsCtrl, QuickMenuRows
+    if (!IsSet(QuickMenuRowsCtrl) || !QuickMenuRowsCtrl || QuickMenuRows.Length = 0)
+        return
+    point := Buffer(8, 0)
+    if !DllCall("GetCursorPos", "Ptr", point)
+        return
+    if !DllCall("ScreenToClient", "Ptr", QuickMenuRowsCtrl.Hwnd, "Ptr", point)
+        return
+    clientRect := Buffer(16, 0)
+    if !DllCall("GetClientRect", "Ptr", QuickMenuRowsCtrl.Hwnd, "Ptr", clientRect)
+        return
+    height := NumGet(clientRect, 12, "Int")
+    if (height < 1)
+        return
+    y := NumGet(point, 4, "Int")
+    scale := NumGet(clientRect, 8, "Int") / QuickMenuWidth()
+    glowPad := Round(QuickMenuGlowPadding() * scale)
+    rowBandHeight := height - (2 * glowPad)
+    y -= glowPad
+    if (rowBandHeight < 1 || y < 0 || y >= rowBandHeight)
+        return
+    index := Floor((y / rowBandHeight) * QuickMenuRows.Length) + 1
+    QuickMenuMouseActivate(ClampInt(index, 1, QuickMenuRows.Length))
+}
+
 QuickMenuMouseActivate(index, *) {
     global QuickMenuSelected, QuickMenuRows
     if (index < 1 || index > QuickMenuRows.Length)
         return
     QuickMenuSelected := index
     QuickMenuActivateSelected()
+}
+
+QuickMenuGoBack() {
+    global QuickMenuPage, QuickMenuSelected
+    if (QuickMenuPage = "MAIN") {
+        HideQuickMenu()
+        return
+    }
+    QuickMenuPage := "MAIN"
+    QuickMenuSelected := 1
+    QuickMenuBuildGui()
+}
+
+QuickMenuConfirm(id, description) {
+    global QuickMenuConfirmAction, QuickMenuConfirmUntilTick
+    if (QuickMenuConfirmAction = id && A_TickCount < QuickMenuConfirmUntilTick) {
+        QuickMenuConfirmAction := ""
+        return true
+    }
+    QuickMenuConfirmAction := id
+    QuickMenuConfirmUntilTick := A_TickCount + 5000
+    SetStatus("Select again within 5 seconds to confirm " description, "Warning")
+    return false
 }
 
 QuickMenuActivateSelected() {
@@ -7559,9 +9146,7 @@ QuickMenuActivateSelected() {
         case "limiterToggle":
             ToggleRtssFrameLimiter()
         case "rtssFrameLimit":
-            ; Wraps: A is the only control on this row for a user who never
-            ; discovers Left/Right, so it has to be able to reach every entry.
-            CycleRtssFrameCap(1, true)
+            CycleRtssFrameCap(1)
         case "rtssFrameLimitCustom":
             AdjustRtssCustomFrameCap(1)
         case "rtssSaveProfile":
@@ -7679,20 +9264,70 @@ QuickMenuAdjustSelected(direction) {
 
 ; Moves the selection, wrapping at both ends. Shared by the controller and the
 ; keyboard so the two can never drift apart.
-; Rows that only report state and cannot be acted on, which this tree already
-; marks with action "none". Standalone answers the same question from a list of
-; row ids, because its rows carry no action field; the two sets are deliberately
-; the same six rows.
-; Per-tree seam for SteamShell-Shared.ahk's QuickMenuMoveSelection. This tree
-; WRAPS around the ends; standalone clamps.
-QuickMenuNormalizeSelection() {
+QuickMenuMoveSelection(delta) {
     global QuickMenuRows, QuickMenuSelected
+    if (QuickMenuRows.Length = 0)
+        return
+    QuickMenuSelected += delta
     if (QuickMenuSelected < 1)
         QuickMenuSelected := QuickMenuRows.Length
     if (QuickMenuSelected > QuickMenuRows.Length)
         QuickMenuSelected := 1
+    QuickMenuRefresh()
 }
 
+; Keyboard equivalents for the Quick Menu.
+;
+; The menu has no focusable controls -- every row is a Text control -- so arrow
+; keys never reach it as ordinary input. They are registered as hotkeys that are
+; live only while the menu is both visible and focused, and they call the same
+; action functions the controller does rather than duplicating any behaviour.
+QuickMenuKeyboardActive(*) {
+    global QuickMenuVisible, QuickMenuGui
+    if (!QuickMenuVisible || !IsSet(QuickMenuGui))
+        return false
+    try return WinActive("ahk_id " QuickMenuGui.Hwnd) != 0
+    return false
+}
+
+RegisterQuickMenuKeys() {
+    HotIf QuickMenuKeyboardActive
+    Hotkey("Up", (*) => QuickMenuMoveSelection(-1))
+    Hotkey("Down", (*) => QuickMenuMoveSelection(1))
+    Hotkey("Left", (*) => QuickMenuAdjustSelected(-1))
+    Hotkey("Right", (*) => QuickMenuAdjustSelected(1))
+    Hotkey("Enter", (*) => QuickMenuActivateSelected())
+    Hotkey("NumpadEnter", (*) => QuickMenuActivateSelected())
+    Hotkey("Space", (*) => QuickMenuActivateSelected())
+    Hotkey("Backspace", (*) => QuickMenuGoBack())
+    Hotkey("Delete", (*) => QuickMenuCloseSelected())
+    Hotkey("Home", (*) => QuickMenuSelectFirst())
+    Hotkey("End", (*) => QuickMenuSelectLast())
+    HotIf
+}
+
+QuickMenuSelectFirst() {
+    global QuickMenuSelected
+    QuickMenuSelected := 1
+    QuickMenuRefresh()
+}
+
+QuickMenuSelectLast() {
+    global QuickMenuSelected, QuickMenuRows
+    QuickMenuSelected := Max(1, QuickMenuRows.Length)
+    QuickMenuRefresh()
+}
+
+; Rows whose value is a number the user dials, rather than a list they step
+; through. Only these accept hold-to-repeat.
+QuickMenuRowAcceptsRepeat() {
+    global QuickMenuRows, QuickMenuSelected
+    static ids := Map("rtssFrameLimitCustom", true, "volume", true)
+    if (QuickMenuRows.Length = 0
+        || QuickMenuSelected < 1 || QuickMenuSelected > QuickMenuRows.Length)
+        return false
+    return ids.Has(QuickMenuRows[QuickMenuSelected]["action"])
+}
 
 QuickMenuHandleController(pressed, lx, ly, buttons := 0) {
     global QuickMenuRows, QuickMenuSelected
@@ -7855,7 +9490,6 @@ ShowSettings(*) {
     global SettingsCategoryTitleCtrl, SettingsCategoryDescriptionCtrl
     global SettingsCurrentCategory, MouseHidden, IniPath, LogPath
     global StartupProgramsList, LogonTaskStatusCtrl
-    global SettingsControlPositions, SettingsCategoryOffsets, SettingsScrollBar
     LogLine("Settings window requested.")
     if SettingsVisible {
         try SettingsGui.Show()
@@ -7868,11 +9502,6 @@ ShowSettings(*) {
     }
     SettingsFields := Map()
     SettingsCategoryControls := Map()
-    ; Cleared with the controls they describe. CloseSettings destroys the window,
-    ; so a stale HWND from the previous session would otherwise be looked up
-    ; against a control that no longer exists.
-    SettingsControlPositions := Map()
-    SettingsCategoryOffsets := Map()
     for _, name in SettingsCategoryNames()
         SettingsCategoryControls[name] := []
     SettingsDirty := false
@@ -7898,7 +9527,7 @@ ShowSettings(*) {
         "x24 y96 w225 h500 Choose1",
         SettingsCategoryNames())
     SettingsCategoryList.OnEvent("Change", SettingsCategoryChanged)
-    settings.AddText("x264 y96 w1 h504 +0x10")
+    settings.AddText("x264 y96 w1 h455 +0x10")
     settings.SetFont("s16 Bold", "Segoe UI")
     SettingsCategoryTitleCtrl := settings.AddText("x286 y96 w610 h32", "General")
     settings.SetFont("s9 Norm", "Segoe UI")
@@ -7906,271 +9535,286 @@ ShowSettings(*) {
         "x286 y132 w610 h42 +Wrap",
         "Quick Menu, heartbeat, and the controls shown in the living-room interface.")
 
-    ; --------------------------------------------------------------------------
-    ; Pages
-    ; --------------------------------------------------------------------------
-    ; Every row places itself from the page cursor, so adding one costs a line
-    ; and the rest re-flows. Pages may run past the bottom of the window; the
-    ; viewport scrolls.
-    ;
-    ; The four categories that carry the same name as a standalone category --
-    ; General, Controller & Cursor, RTSS & Performance, Startup Programs -- now
-    ; present the settings that exist in BOTH in standalone's order and wording.
-    ; Settings that exist only here follow them. The other three pages have no
-    ; standalone counterpart and are ordered for their own sake, which is
-    ; correct: standalone's Startup & Splash, Focus & Windows and Launcher
-    ; Cleanup do jobs XFE deliberately leaves to Xbox FSE.
-    settings.SetFont("s10", "Segoe UI")
-
     ; General
-    category := "General"
-    y := SettingsFirstRowY()
-    SettingsAddCheckboxRow(settings, category, "QuickMenu.Enable",
-        "Enable the controller-first Quick Menu", &y)
-    SettingsAddCheckboxRow(settings, category, "Audio.EnableQuickControls",
-        "Show Audio controls in the Quick Menu", &y)
-    SettingsAddCheckboxRow(settings, category, "Display.EnableQuickControls",
-        "Show Display and HDR controls in the Quick Menu", &y)
-    SettingsAddChoiceRow(settings, category, "QuickMenu.AccentColor",
-        "Quick Menu accent color", QuickMenuAccentPresetNames(), &y)
-    SettingsAddEditRow(settings, category, "QuickMenu.AccentColorCustom",
-        "Custom accent (RRGGBB, used when accent is Custom)", &y)
-    SettingsAddEditRow(settings, category, "QuickMenu.ChordHoldMs",
-        "Quick Menu L3+R3 hold time (ms)", &y, true)
-    ; XFE only from here: the companion has to prove it is still responsive
-    ; while Xbox FSE is in front, which the shell never needs to do.
-    SettingsAddEditRow(settings, category, "Companion.HeartbeatSeconds",
-        "Heartbeat log interval (seconds)", &y, true)
-    ; Startup is no longer something to configure here. Setup Assistant inside
-    ; SteamShell.exe registers a per-user logon task when it installs XFE, so the
-    ; old advice to add SteamShell-XFE.exe as an AnyFSE startup application now
-    ; starts the companion twice. What is left is the part Setup cannot do,
-    ; because it belongs to AnyFSE's own configuration.
-    SettingsAddNoteRow(settings, category,
-        "Integration: configure AnyFSE to launch Steam Big Picture as the Home "
-        . "app, and leave “Exit FSE when Home app exits” off. Setup Assistant "
-        . "already starts this companion at sign-in — do not also add it to "
-        . "AnyFSE's startup applications.", &y, 60)
+    settings.SetFont("s10", "Segoe UI")
+    control := settings.AddCheckbox("x300 y190 w550 h26", "Enable controller Quick Menu")
+    SettingsRegisterField("General", "QuickMenu.Enable", control, "Click")
+    SettingsAddEditRow(settings, "General", "QuickMenu.ChordHoldMs",
+        "Quick Menu L3 + R3 hold (ms)", 230, true)
+    SettingsAddEditRow(settings, "General", "Companion.HeartbeatSeconds",
+        "Heartbeat log interval (seconds)", 270, true)
+    control := settings.AddCheckbox("x300 y320 w550 h26", "Show audio controls")
+    SettingsRegisterField("General", "Audio.EnableQuickControls", control, "Click")
+    control := settings.AddCheckbox("x300 y356 w550 h26", "Show display and HDR controls")
+    SettingsRegisterField("General", "Display.EnableQuickControls", control, "Click")
+    SettingsAddChoiceRow(settings, "General", "QuickMenu.AccentColor",
+        "Quick Menu accent color", QuickMenuAccentPresetNames(), 396)
+    SettingsAddEditRow(settings, "General", "QuickMenu.AccentColorCustom",
+        "Custom accent (RRGGBB)", 430)
+    control := settings.AddText("x300 y474 w570 h76 +Wrap",
+        "Integration: configure AnyFSE to launch Steam Big Picture as the Home app, "
+        . "add SteamShell-XFE.exe as a startup app, and leave “Exit FSE when Home app exits” off.")
+    SettingsTrackControl("General", control)
 
     ; Controller & Cursor
-    category := "Controller & Cursor"
-    y := SettingsFirstRowY()
-    SettingsAddCheckboxRow(settings, category,
-        "Controller.EnableControllerMouseMode",
-        "Enable controller mouse mode while holding View/Back", &y)
-    ; XFE only. Standalone reads XInput and has no backend to choose.
-    SettingsAddChoiceRow(settings, category, "Controller.Backend",
-        "Input backend", ["Auto", "XInput", "GameInput", "RawInput"], &y, 150)
-    SettingsAddNoteRow(settings, category,
-        "Auto is recommended: RawInput works inside Xbox FSE, XInput on the desktop.",
-        &y)
-    SettingsAddEditRow(settings, category, "Controller.ControllerIndex",
-        "Controller index (0–3)", &y, true)
-    SettingsAddEditRow(settings, category, "Controller.ControllerMouseSpeed",
-        "Controller mouse speed", &y, true)
-    SettingsAddEditRow(settings, category, "Controller.ControllerDeadzone",
-        "Stick deadzone", &y, true)
-    SettingsAddEditRow(settings, category, "Controller.ControllerChordHoldMs",
-        "Mapping long-press threshold (ms)", &y, true)
-    SettingsAddCheckboxRow(settings, category, "Cursor.EnableAutoHide",
-        "Automatically hide an idle mouse cursor", &y)
-    SettingsAddEditRow(settings, category, "Cursor.HideDelayMs",
-        "Cursor hide delay (ms)", &y, true)
-    SettingsAddCheckboxRow(settings, category, "Cursor.ParkOnStartup",
-        "Park the mouse at the display edge once during startup", &y)
-    SettingsAddCheckboxRow(settings, category, "Cursor.ParkOnGameStart",
-        "Park when a game enters fullscreen", &y)
-    SettingsAddCheckboxRow(settings, category, "Cursor.ParkOnSteamReturn",
-        "Park after returning to Steam", &y)
-    SettingsAddChoiceRow(settings, category, "Cursor.ParkEdge",
-        "Mouse parking edge", ["Right edge", "Left edge"], &y, 150)
-    ; In the left column and in standalone's position, and now the same two rows
-    ; standalone shows: a master switch and the allowlist it consults.
-    SettingsAddCheckboxRow(settings, category, "Controller.EnableAutoMouseMode",
-        "Enable automatic mouse mode (master switch)", &y)
-    SettingsAddEditRow(settings, category, "Controller.AutoMouseExeList",
-        "Automatic mouse applications (pipe-separated)", &y, false, 300)
-    SettingsAddNoteRow(settings, category,
-        "The controller acts as a mouse in these applications without holding "
-        . "View/Back. Leave Xbox FSE off the list: it is controller-driven and "
-        . "a pointer inside it gets in the way.", &y, 40)
-    SettingsAddButtonRow(settings, category, [
-        ["Controller Mappings...", ShowMappingEditor],
-        ["Learn Controller...", ShowControllerLearner],
-        ["Delete Learned Profile", DeleteControllerProfileForActiveDevice]], &y)
+    control := settings.AddCheckbox(
+        "x300 y190 w570 h26", "Enable View/Back controller mappings and mouse mode")
+    SettingsRegisterField(
+        "Controller & Cursor", "Controller.EnableControllerMouseMode", control, "Click")
+    ; The backend row uses the same label/control columns as the edit rows
+    ; below it so the page reads as one aligned list.
+    label := settings.AddText("x300 y222 w250 h24 +0x200", "Input backend")
+    SettingsTrackControl("Controller & Cursor", label)
+    backendDrop := settings.AddDropDownList("x570 y220 w150",
+        ["Auto", "XInput", "GameInput", "RawInput"])
+    SettingsRegisterField("Controller & Cursor", "Controller.Backend", backendDrop, "Change")
+    control := settings.AddText("x300 y250 w570 h20",
+        "Auto is recommended: RawInput works inside Xbox FSE, XInput on the desktop.")
+    SettingsTrackControl("Controller & Cursor", control)
+    SettingsAddEditRow(settings, "Controller & Cursor", "Controller.ControllerIndex",
+        "Controller index (0–3)", 278, true)
+    SettingsAddEditRow(settings, "Controller & Cursor", "Controller.ControllerDeadzone",
+        "Stick deadzone", 312, true)
+    SettingsAddEditRow(settings, "Controller & Cursor", "Controller.ControllerMouseSpeed",
+        "Pointer speed", 346, true)
+    SettingsAddEditRow(settings, "Controller & Cursor", "Controller.ControllerChordHoldMs",
+        "Long-press threshold (ms)", 380, true)
+    control := settings.AddCheckbox("x300 y414 w570 h26", "Hide the cursor after inactivity")
+    SettingsRegisterField("Controller & Cursor", "Cursor.EnableAutoHide", control, "Click")
+    SettingsAddEditRow(settings, "Controller & Cursor", "Cursor.HideDelayMs",
+        "Cursor hide delay (ms)", 448, true)
+    control := settings.AddCheckbox("x300 y482 w320 h26", "Park the cursor at startup")
+    SettingsRegisterField("Controller & Cursor", "Cursor.ParkOnStartup", control, "Click")
+    control := settings.AddCheckbox("x300 y510 w320 h26", "Park when a game enters fullscreen")
+    SettingsRegisterField("Controller & Cursor", "Cursor.ParkOnGameStart", control, "Click")
+    control := settings.AddCheckbox("x300 y538 w320 h26", "Park after returning to Steam")
+    SettingsRegisterField("Controller & Cursor", "Cursor.ParkOnSteamReturn", control, "Click")
+    ; Kept left of x650: the button column starts there, and this row shares a
+    ; band with "Delete Learned Profile".
+    label := settings.AddText("x300 y570 w170 h24 +0x200", "Park the cursor at")
+    SettingsTrackControl("Controller & Cursor", label)
+    parkEdgeDrop := settings.AddDropDownList("x480 y568 w150",
+        ["Right edge", "Left edge"])
+    SettingsRegisterField("Controller & Cursor", "Cursor.ParkEdge", parkEdgeDrop, "Change")
+    mapButton := settings.AddButton("x650 y480 w220 h34", "Controller Mappings...")
+    mapButton.OnEvent("Click", ShowMappingEditor)
+    SettingsTrackControl("Controller & Cursor", mapButton)
+    learnButton := settings.AddButton("x650 y518 w220 h34", "Learn Controller...")
+    learnButton.OnEvent("Click", ShowControllerLearner)
+    SettingsTrackControl("Controller & Cursor", learnButton)
+    ; Its own row in the button column. At x430 it overlapped the "Park after
+    ; returning to Steam" checkbox, which spans x300 to x620.
+    deleteProfileButton := settings.AddButton("x650 y556 w220 h34",
+        "Delete Learned Profile")
+    deleteProfileButton.OnEvent("Click", DeleteControllerProfileForActiveDevice)
+    SettingsTrackControl("Controller & Cursor", deleteProfileButton)
 
-    ; Steam — no standalone counterpart. Standalone keeps its three Steam
-    ; shortcuts in General; here they belong to a page that also owns the View
-    ; button behaviour, which standalone does not have.
-    category := "Steam"
-    y := SettingsFirstRowY()
-    SettingsAddNoteRow(settings, category,
+    ; Steam
+    control := settings.AddText("x300 y180 w570 h48 +Wrap",
         "These shortcuts must match the bindings configured inside Steam itself. "
-        . "The menu shortcuts only reach Steam while Steam owns the foreground.",
-        &y, 40)
-    SettingsAddShortcutRow(settings, category, "Steam.MenuShortcut",
-        "Steam Menu shortcut", &y)
-    SettingsAddShortcutRow(settings, category, "Steam.QuickAccessShortcut",
-        "Steam Quick Access shortcut", &y)
-    SettingsAddShortcutRow(settings, category, "Steam.OverlayShortcut",
-        "In-game Steam overlay shortcut", &y)
-    SettingsAddSectionRow(settings, category, "View button", &y)
-    SettingsAddCheckboxRow(settings, category, "Steam.EnableViewButtonActions",
-        "Enable View button Steam actions", &y)
+        . "The menu shortcuts only reach Steam while Steam owns the foreground.")
+    SettingsTrackControl("Steam", control)
+    SettingsAddShortcutAt(settings, "Steam", "Steam.MenuShortcut",
+        "Menu", 300, 240, 400)
+    SettingsAddShortcutAt(settings, "Steam", "Steam.QuickAccessShortcut",
+        "Access", 300, 278, 400)
+    SettingsAddShortcutAt(settings, "Steam", "Steam.OverlayShortcut",
+        "Overlay", 300, 316, 400)
+    viewGroup := settings.AddGroupBox("x290 y356 w595 h214", "View button")
+    SettingsTrackControl("Steam", viewGroup)
+    control := settings.AddCheckbox("x305 y386 w565 h24",
+        "Enable View button Steam actions")
+    SettingsRegisterField("Steam", "Steam.EnableViewButtonActions", control, "Click")
     ; Tap and hold are separate switches because they misfire differently: the
     ; hold is the one a game's own use of View can trigger by accident.
-    SettingsAddCheckboxRow(settings, category, "Steam.EnableViewTapAction",
-        "Tap — Steam menu when Steam is in front, nothing in a game", &y)
-    SettingsAddCheckboxRow(settings, category, "Steam.EnableViewHoldAction",
-        "Hold — Steam Quick Access, or the overlay in a game", &y)
-    SettingsAddEditRow(settings, category, "Steam.ViewHoldMs",
-        "Hold, Steam in front (ms)", &y, true)
-    SettingsAddEditRow(settings, category, "Steam.ViewHoldInGameMs",
-        "Hold, in a game (ms)", &y, true)
-    SettingsAddNoteRow(settings, category,
-        "Longer in a game: View is often the scoreboard button and gets held.",
-        &y)
+    control := settings.AddCheckbox("x325 y416 w545 h24",
+        "Tap — Steam menu when Steam is in front, nothing in a game")
+    SettingsRegisterField("Steam", "Steam.EnableViewTapAction", control, "Click")
+    control := settings.AddCheckbox("x325 y444 w545 h24",
+        "Hold — Steam Quick Access, or the overlay in a game")
+    SettingsRegisterField("Steam", "Steam.EnableViewHoldAction", control, "Click")
+    label := settings.AddText("x325 y478 w250 h24 +0x200", "Hold, Steam in front (ms)")
+    SettingsTrackControl("Steam", label)
+    edit := settings.AddEdit("x595 y476 w150 h26 Number")
+    SettingsRegisterField("Steam", "Steam.ViewHoldMs", edit, "Change")
+    label := settings.AddText("x325 y508 w250 h24 +0x200", "Hold, in a game (ms)")
+    SettingsTrackControl("Steam", label)
+    edit := settings.AddEdit("x595 y506 w150 h26 Number")
+    SettingsRegisterField("Steam", "Steam.ViewHoldInGameMs", edit, "Change")
+    control := settings.AddText("x325 y538 w545 h24 +Wrap",
+        "Longer in a game: View is often the scoreboard button and gets held.")
+    SettingsTrackControl("Steam", control)
 
     ; RTSS & Performance
-    category := "RTSS & Performance"
-    y := SettingsFirstRowY()
-    SettingsAddCheckboxRow(settings, category, "RTSS.EnableIntegration",
-        "Enable RTSS integration in the Quick Menu", &y)
-    SettingsAddPathRow(settings, category, "RTSS.Path", "RTSS executable",
-        SettingsBrowseRtss, &y)
-    SettingsAddCheckboxRow(settings, category, "RTSS.UseDllIntegration",
-        "Use RTSSHooks64.dll for live state and direct control (recommended)", &y)
-    SettingsAddNoteRow(settings, category,
+    control := settings.AddCheckbox("x300 y180 w570 h26", "Enable RTSS integration")
+    SettingsRegisterField("RTSS & Performance", "RTSS.EnableIntegration", control, "Click")
+    label := settings.AddText("x300 y220 w125 h24 +0x200", "RTSS executable")
+    SettingsTrackControl("RTSS & Performance", label)
+    pathEdit := settings.AddEdit("x430 y218 w350 h26")
+    SettingsRegisterField("RTSS & Performance", "RTSS.Path", pathEdit, "Change")
+    browse := settings.AddButton("x790 y217 w90 h28", "Browse...")
+    browse.OnEvent("Click", SettingsBrowseRtss)
+    SettingsTrackControl("RTSS & Performance", browse)
+    control := settings.AddCheckbox("x300 y254 w570 h24",
+        "Use RTSSHooks64.dll for live state and direct control (recommended)")
+    SettingsRegisterField("RTSS & Performance", "RTSS.UseDllIntegration",
+        control, "Click")
+    control := settings.AddText("x300 y280 w570 h38 +Wrap",
         "Loaded beside the configured RTSS.exe. Disable this to force the "
-        . "shortcut controls and configured FPS cap label.", &y, 40)
-    ; The two group boxes this replaces could not flow: a group box needs its
-    ; height before the rows inside it exist, which is what forced the whole
-    ; page into two hand-placed columns.
-    SettingsAddSectionRow(settings, category, "Overlay", &y)
-    SettingsAddChoiceRow(settings, category, "RTSS.OverlayControlMode",
-        "Overlay control mode", ["Separate On / Off", "Toggle"], &y)
-    SettingsAddShortcutRow(settings, category, "RTSS.OverlayToggleShortcut",
-        "Overlay toggle shortcut", &y)
-    SettingsAddShortcutRow(settings, category, "RTSS.OverlayOnShortcut",
-        "Overlay on shortcut", &y)
-    SettingsAddShortcutRow(settings, category, "RTSS.OverlayOffShortcut",
-        "Overlay off shortcut", &y)
-    SettingsAddSectionRow(settings, category, "Frame Limiter", &y)
-    SettingsAddChoiceRow(settings, category, "RTSS.FrameLimiterControlMode",
-        "Frame limiter control mode", ["Separate On / Off", "Toggle"], &y)
-    SettingsAddEditRow(settings, category, "RTSS.PresetFrameCap",
-        "Preset Frame Cap (FPS)", &y, true)
-    SettingsAddCheckboxRow(settings, category,
-        "RTSS.RestoreFrameLimitOnStartup",
-        "Restore the last Frame Limit selection when RTSS starts", &y)
-    ; OFF by default here, unlike standalone. The label leads with what it costs,
-    ; because the cost is what a user who chose XFE cares about: XFE is chosen
-    ; precisely because nothing in it is elevated. See README-XFE.md.
-    SettingsAddCheckboxRow(settings, category,
-        "RTSS.EnableElevatedFrameCapWrites",
-        "Use an elevated helper to set the Frame Limit — needed when RTSS is in "
-        . "Program Files, and asks for UAC at startup", &y, 44)
-    SettingsAddShortcutRow(settings, category, "RTSS.CustomFrameCapShortcut",
-        "Frame limiter toggle shortcut", &y)
-    SettingsAddShortcutRow(settings, category, "RTSS.FrameLimiterOnShortcut",
-        "Frame limiter on shortcut", &y)
-    SettingsAddShortcutRow(settings, category, "RTSS.FrameLimiterOffShortcut",
-        "Frame limiter off shortcut", &y)
+        . "shortcut controls and configured FPS cap label.")
+    SettingsTrackControl("RTSS & Performance", control)
+    overlayGroup := settings.AddGroupBox("x290 y325 w285 h270", "Overlay")
+    SettingsTrackControl("RTSS & Performance", overlayGroup)
+    label := settings.AddText("x305 y358 w75 h24 +0x200", "Mode")
+    SettingsTrackControl("RTSS & Performance", label)
+    overlayMode := settings.AddDropDownList(
+        "x385 y356 w170 Choose1", ["Separate On / Off", "Toggle"])
+    SettingsRegisterField(
+        "RTSS & Performance", "RTSS.OverlayControlMode", overlayMode, "Change")
+    SettingsAddShortcutAt(settings, "RTSS & Performance",
+        "RTSS.OverlayOnShortcut", "On", 305, 400, 250)
+    SettingsAddShortcutAt(settings, "RTSS & Performance",
+        "RTSS.OverlayOffShortcut", "Off", 305, 446, 250)
+    SettingsAddShortcutAt(settings, "RTSS & Performance",
+        "RTSS.OverlayToggleShortcut", "Toggle", 305, 492, 250)
+
+    limiterGroup := settings.AddGroupBox("x590 y325 w305 h270", "Frame Limiter")
+    SettingsTrackControl("RTSS & Performance", limiterGroup)
+    label := settings.AddText("x605 y358 w75 h24 +0x200", "Mode")
+    SettingsTrackControl("RTSS & Performance", label)
+    limiterMode := settings.AddDropDownList(
+        "x685 y356 w190 Choose1", ["Separate On / Off", "Toggle"])
+    SettingsRegisterField(
+        "RTSS & Performance", "RTSS.FrameLimiterControlMode", limiterMode, "Change")
+    label := settings.AddText("x605 y396 w140 h24 +0x200", "Preset Cap (FPS)")
+    SettingsTrackControl("RTSS & Performance", label)
+    capEdit := settings.AddEdit("x755 y394 w90 h26 Number")
+    SettingsRegisterField("RTSS & Performance", "RTSS.PresetFrameCap", capEdit, "Change")
+    SettingsAddShortcutAt(settings, "RTSS & Performance",
+        "RTSS.FrameLimiterOnShortcut", "On", 605, 436, 270)
+    SettingsAddShortcutAt(settings, "RTSS & Performance",
+        "RTSS.FrameLimiterOffShortcut", "Off", 605, 482, 270)
+    SettingsAddShortcutAt(settings, "RTSS & Performance",
+        "RTSS.CustomFrameCapShortcut", "Toggle", 605, 528, 270)
 
     ; Startup Programs
-    category := "Startup Programs"
-    y := SettingsFirstRowY()
-    SettingsAddCheckboxRow(settings, category, "StartupPrograms.Enable",
-        "Launch configured startup programs with the companion", &y)
-    SettingsAddEditRow(settings, category, "StartupPrograms.DelayMs",
-        "Launch delay (ms)", &y, true)
-    ; XFE only: standalone launches its startup programs as one batch.
-    SettingsAddEditRow(settings, category, "StartupPrograms.StaggerMs",
-        "Gap between launches (ms)", &y, true)
-    SettingsAddChoiceRow(settings, category, "StartupPrograms.WindowMode",
-        "Launch window mode", ["Normal", "Minimized", "Hidden"], &y, 150)
-    StartupProgramsList := settings.AddListBox(
-        "x300 y" y " w570 h180")
-    SettingsTrackControl(category, StartupProgramsList)
-    y += 190
-    SettingsAddButtonRow(settings, category, [
-        ["Add Program...", SettingsAddStartupProgram],
-        ["Remove Selected", SettingsRemoveStartupProgram]], &y)
-    SettingsAddNoteRow(settings, category,
-        "Hidden suits background helpers that should never draw over Xbox FSE.",
-        &y)
-    SettingsAddCheckboxRow(settings, category,
-        "StartupPrograms.LaunchDeElevated",
-        "Start them as the normal user when the companion is elevated", &y)
+    control := settings.AddCheckbox("x300 y182 w570 h26",
+        "Launch these programs shortly after the companion starts")
+    SettingsRegisterField("Startup Programs", "StartupPrograms.Enable", control, "Click")
+    StartupProgramsList := settings.AddListBox("x300 y216 w570 h190")
+    SettingsTrackControl("Startup Programs", StartupProgramsList)
+    addButton := settings.AddButton("x300 y416 w150 h32", "Add Program...")
+    addButton.OnEvent("Click", SettingsAddStartupProgram)
+    SettingsTrackControl("Startup Programs", addButton)
+    removeButton := settings.AddButton("x460 y416 w150 h32", "Remove Selected")
+    removeButton.OnEvent("Click", SettingsRemoveStartupProgram)
+    SettingsTrackControl("Startup Programs", removeButton)
+    SettingsAddEditRow(settings, "Startup Programs", "StartupPrograms.DelayMs",
+        "Delay before first launch (ms)", 462, true)
+    SettingsAddEditRow(settings, "Startup Programs", "StartupPrograms.StaggerMs",
+        "Gap between launches (ms)", 496, true)
+    label := settings.AddText("x300 y532 w250 h24 +0x200", "Launch window mode")
+    SettingsTrackControl("Startup Programs", label)
+    windowModeDrop := settings.AddDropDownList("x570 y530 w150",
+        ["Normal", "Minimized", "Hidden"])
+    SettingsRegisterField("Startup Programs", "StartupPrograms.WindowMode",
+        windowModeDrop, "Change")
+    control := settings.AddText("x300 y562 w570 h20",
+        "Hidden suits background helpers that should never draw over Xbox FSE.")
+    SettingsTrackControl("Startup Programs", control)
+    control := settings.AddCheckbox("x300 y588 w570 h22",
+        "Start them as the normal user when the companion is elevated")
+    SettingsRegisterField("Startup Programs", "StartupPrograms.LaunchDeElevated",
+        control, "Click")
 
-    ; Assist — no standalone counterpart. Standalone has a coordinated Window
-    ; Engine and a full Launcher Cleanup; these are the deliberately smaller
-    ; versions that never touch presentation.
-    category := "Assist"
-    y := SettingsFirstRowY()
-    SettingsAddNoteRow(settings, category,
+    ; Assist
+    control := settings.AddText("x300 y180 w570 h32 +Wrap",
         "Automatic help from the shared default profile. None of these ever resize, "
-        . "centre or maximise anything — Xbox FSE keeps control of presentation.",
-        &y, 40)
-    SettingsAddCheckboxRow(settings, category, "Assist.EnableGameFocusLite",
-        "Game Focus Lite — return a game to the foreground if something steals it",
-        &y)
-    SettingsAddCheckboxRow(settings, category, "Assist.EnableSteamAssistLite",
-        "Steam Assist Lite — return to Steam when no game is running", &y)
-    SettingsAddCheckboxRow(settings, category,
-        "Assist.EnableLauncherCleanupLite",
-        "Launcher Cleanup Lite — close game launchers once nothing is playing", &y)
-    SettingsAddCheckboxRow(settings, category, "Assist.SuspendOnShellOverlay",
-        "Pause while the Xbox FSE switcher or another shell overlay is on screen",
-        &y)
-    SettingsAddEditRow(settings, category, "Assist.TickIntervalMs",
-        "Check interval (ms)", &y, true)
-    SettingsAddEditRow(settings, category, "Assist.CpuThresholdPercent",
-        "Game CPU threshold (%, 0 = window shape only)", &y, true)
-    SettingsAddEditRow(settings, category, "Assist.ForegroundStableSec",
-        "Settle time before cleanup (s)", &y, true)
-    SettingsAddEditRow(settings, category, "Assist.CooldownSec",
-        "Minimum time between cleanups (s)", &y, true)
-    SettingsAddCheckboxRow(settings, category, "Assist.HardKill",
-        "Force close launchers that ignore a polite close request", &y)
-    SettingsAddNoteRow(settings, category,
+        . "centre or maximise anything — Xbox FSE keeps control of presentation.")
+    SettingsTrackControl("Assist", control)
+    control := settings.AddCheckbox("x300 y218 w570 h26",
+        "Game Focus Lite — return a game to the foreground if something steals it")
+    SettingsRegisterField("Assist", "Assist.EnableGameFocusLite", control, "Click")
+    control := settings.AddCheckbox("x300 y248 w570 h26",
+        "Steam Assist Lite — return to Steam when no game is running")
+    SettingsRegisterField("Assist", "Assist.EnableSteamAssistLite", control, "Click")
+    control := settings.AddCheckbox("x300 y278 w570 h26",
+        "Launcher Cleanup Lite — close game launchers once nothing is playing")
+    SettingsRegisterField("Assist", "Assist.EnableLauncherCleanupLite", control, "Click")
+    control := settings.AddCheckbox("x300 y308 w570 h26",
+        "Pause while the Xbox FSE switcher or another shell overlay is on screen")
+    SettingsRegisterField("Assist", "Assist.SuspendOnShellOverlay", control, "Click")
+    SettingsAddEditRow(settings, "Assist", "Assist.TickIntervalMs",
+        "Check interval (ms)", 344, true)
+    SettingsAddEditRow(settings, "Assist", "Assist.CpuThresholdPercent",
+        "Game CPU threshold (%, 0 = window shape only)", 378, true)
+    SettingsAddEditRow(settings, "Assist", "Assist.ForegroundStableSec",
+        "Settle time before cleanup (s)", 412, true)
+    SettingsAddEditRow(settings, "Assist", "Assist.CooldownSec",
+        "Minimum time between cleanups (s)", 446, true)
+    control := settings.AddCheckbox("x300 y480 w570 h26",
+        "Force close launchers that ignore a polite close request")
+    SettingsRegisterField("Assist", "Assist.HardKill", control, "Click")
+    control := settings.AddText("x300 y512 w570 h40 +Wrap",
         "Process lists are edited in the INI under [Assist]. Assistance always "
         . "pauses while any SteamShell XFE window is in front. Use Quick Menu → "
-        . "All Settings → Advanced → Probe Screen to identify an overlay that is "
-        . "not being caught.", &y, 52)
+        . "All Settings → Advanced → Probe Screen to identify an overlay that is not being caught.")
+    SettingsTrackControl("Assist", control)
 
     ; Advanced
-    category := "Advanced"
-    y := SettingsFirstRowY()
-    SettingsAddNoteRow(settings, category,
+    control := settings.AddText("x300 y182 w570 h44 +Wrap",
         "This companion contains no shell registration, Explorer control, taskbar "
-        . "hiding, or window sizing. Xbox FSE keeps control of presentation.",
-        &y, 40)
-    SettingsAddButtonRow(settings, category, [
-        ["Open INI", (*) => Run(IniPath)],
-        ["Open Log", (*) => Run(LogPath)],
-        ["Health Check", ShowHealthCheck],
-        ["Reload INI", ReloadSettings],
-        ["Park Cursor Now", ParkCursor],
-        ["Exit Companion", ExitCompanion],
-        ["Diagnostic ZIP", ExportDiagnosticBundle],
-        ["Create Logon Task", CreateLogonTask],
-        ["Remove Logon Task", RemoveLogonTask],
-        ["Probe Screen", SettingsProbeScreen],
-        ["Check Logon Task", SettingsCheckLogonTask],
-        ["Re-arm Controller", RearmControllerInput]], &y)
-    LogonTaskStatusCtrl := settings.AddText("x300 y" y " w570 h20 +Wrap", "")
-    SettingsTrackControl(category, LogonTaskStatusCtrl)
-    y += 28
-    SettingsAddCheckboxRow(settings, category, "Controller.DiagnosticLogging",
-        "Log all XInput slots and GameInput on every change (diagnostic)", &y)
-    SettingsAddCheckboxRow(settings, category, "Controller.RawInputProbe",
-        "Log raw background HID gamepad reports (RawInput probe)", &y)
-    SettingsAddNoteRow(settings, category,
-        "The heartbeat log proves whether the companion remains responsive while "
-        . "Xbox FSE is active. Diagnostic logging compares every controller slot "
-        . "against GameInput and records the foreground process, which reveals a "
-        . "virtualised pad forwarding only some buttons.", &y, 60)
+        . "hiding, or window sizing. Xbox FSE keeps control of presentation.")
+    SettingsTrackControl("Advanced", control)
+    openIni := settings.AddButton("x300 y236 w175 h34", "Open INI")
+    openIni.OnEvent("Click", (*) => Run(IniPath))
+    SettingsTrackControl("Advanced", openIni)
+    openLog := settings.AddButton("x490 y236 w175 h34", "Open Log")
+    openLog.OnEvent("Click", (*) => Run(LogPath))
+    SettingsTrackControl("Advanced", openLog)
+    health := settings.AddButton("x680 y236 w175 h34", "Health Check")
+    health.OnEvent("Click", ShowHealthCheck)
+    SettingsTrackControl("Advanced", health)
+    reloadButton := settings.AddButton("x300 y280 w175 h34", "Reload INI")
+    reloadButton.OnEvent("Click", ReloadSettings)
+    SettingsTrackControl("Advanced", reloadButton)
+    parkButton := settings.AddButton("x490 y280 w175 h34", "Park Cursor Now")
+    parkButton.OnEvent("Click", ParkCursor)
+    SettingsTrackControl("Advanced", parkButton)
+    exitButton := settings.AddButton("x680 y280 w175 h34", "Exit Companion")
+    exitButton.OnEvent("Click", ExitCompanion)
+    SettingsTrackControl("Advanced", exitButton)
+    exportButton := settings.AddButton("x300 y324 w175 h34", "Diagnostic ZIP")
+    exportButton.OnEvent("Click", ExportDiagnosticBundle)
+    SettingsTrackControl("Advanced", exportButton)
+    createTaskButton := settings.AddButton("x490 y324 w175 h34", "Create Logon Task")
+    createTaskButton.OnEvent("Click", CreateLogonTask)
+    SettingsTrackControl("Advanced", createTaskButton)
+    removeTaskButton := settings.AddButton("x680 y324 w175 h34", "Remove Logon Task")
+    removeTaskButton.OnEvent("Click", RemoveLogonTask)
+    SettingsTrackControl("Advanced", removeTaskButton)
+    probeButton := settings.AddButton("x300 y368 w175 h34", "Probe Screen")
+    probeButton.OnEvent("Click", SettingsProbeScreen)
+    SettingsTrackControl("Advanced", probeButton)
+    checkTaskButton := settings.AddButton("x490 y368 w175 h34", "Check Logon Task")
+    checkTaskButton.OnEvent("Click", SettingsCheckLogonTask)
+    SettingsTrackControl("Advanced", checkTaskButton)
+    rearmButton := settings.AddButton("x680 y368 w175 h34", "Re-arm Controller")
+    rearmButton.OnEvent("Click", RearmControllerInput)
+    SettingsTrackControl("Advanced", rearmButton)
+    LogonTaskStatusCtrl := settings.AddText("x300 y410 w570 h20 +Wrap", "")
+    SettingsTrackControl("Advanced", LogonTaskStatusCtrl)
+    control := settings.AddCheckbox("x300 y432 w570 h24",
+        "Log all XInput slots and GameInput on every change (diagnostic)")
+    SettingsRegisterField("Advanced", "Controller.DiagnosticLogging", control, "Click")
+    control := settings.AddCheckbox("x300 y458 w570 h24",
+        "Log raw background HID gamepad reports (RawInput probe)")
+    SettingsRegisterField("Advanced", "Controller.RawInputProbe", control, "Click")
+    control := settings.AddText("x300 y488 w570 h72 +Wrap",
+        "The heartbeat log proves whether the companion remains responsive while Xbox FSE is active. "
+        . "Diagnostic logging compares every controller slot against GameInput and records the "
+        . "foreground process, which reveals a virtualised pad forwarding only some buttons.")
+    SettingsTrackControl("Advanced", control)
 
     settings.AddText("x24 y616 w430 h26 vSettingsStatus", "All changes saved")
     saveButton := settings.AddButton("x620 y610 w135 h34 Default", "Save && Apply")
@@ -8179,24 +9823,8 @@ ShowSettings(*) {
     closeButton.OnEvent("Click", CloseSettings)
     settings.OnEvent("Close", CloseSettings)
     settings.OnEvent("Escape", CloseSettings)
-
-    ; Added last, so it sits above the page content in z-order, and sized to the
-    ; viewport rather than the window: it scrolls the page, not the frame.
-    layout := SettingsLayout()
-    SettingsScrollBar := settings.Add("Custom",
-        "ClassScrollBar x" layout["scrollBarX"] " y" layout["contentTop"]
-        . " w" layout["scrollBarWidth"]
-        . " h" (layout["contentBottom"] - layout["contentTop"]) " 0x1")
-    ; Re-registering the same callback is a no-op, so this is safe on every open.
-    OnMessage(0x020A, SettingsMouseWheel) ; WM_MOUSEWHEEL
-    OnMessage(0x0115, SettingsVerticalScroll) ; WM_VSCROLL
-
     SettingsGui := settings
     SettingsVisible := true
-    ; Audited on the real controls, before anything is shown. Font and DPI decide
-    ; the actual size of a row, so an overlap that no source-level check can see
-    ; is only visible here.
-    SettingsReportLayoutAudit()
     SettingsPopulate()
     SettingsShowCategory(1)
     foreground := 0
@@ -8242,307 +9870,9 @@ SettingsForegroundRetry(attempt) {
     SetTimer(() => SettingsForegroundRetry(attempt + 1), -DELAYS[attempt + 1])
 }
 
-; ==============================================================================
-; SETTINGS LAYOUT AND SCROLLING
-; ==============================================================================
-; One place for the page geometry. Every builder below reads it, so a row cannot
-; be half-ported: changing a column here moves every row that uses it.
-;
-; The content viewport is everything between the page description and the footer.
-; A page may be taller than that; what does not fit scrolls.
-SettingsLayout() {
-    static layout := Map(
-        "labelX", 300, "labelWidth", 250,
-        "controlX", 570, "controlWidth", 200,
-        "contentX", 300, "contentWidth", 570,
-        "contentRight", 870,
-        "contentTop", 190, "contentBottom", 600,
-        "scrollBarX", 878, "scrollBarWidth", 16)
-    return layout
-}
-
-SettingsFirstRowY() {
-    return SettingsLayout()["contentTop"]
-}
-
-; Records the control against its category AND its original geometry.
-;
-; Every control reaches this function -- SettingsRegisterField calls it too -- so
-; it is the one choke point where positions can be captured without a builder
-; being able to forget. "scrollable" separates page content from the fixed frame
-; (title, description, category list, footer), which must never move.
 SettingsTrackControl(category, control) {
-    global SettingsCategoryControls, SettingsControlPositions
-    global SettingsCategoryOffsets
+    global SettingsCategoryControls
     SettingsCategoryControls[category].Push(control)
-    if !SettingsCategoryOffsets.Has(category)
-        SettingsCategoryOffsets[category] := 0
-    try {
-        control.GetPos(&ctrlX, &ctrlY, &ctrlW, &ctrlH)
-        SettingsControlPositions[control.Hwnd] := Map(
-            "category", category,
-            "x", ctrlX, "y", ctrlY, "w", ctrlW, "h", ctrlH,
-            "scrollable", ctrlY >= SettingsLayout()["contentTop"])
-    }
-    return control
-}
-
-; How far this category can scroll, measured from what it actually built rather
-; than from a number someone has to remember to update.
-SettingsGetMaxScroll(category) {
-    global SettingsCategoryControls, SettingsControlPositions
-    bottom := SettingsLayout()["contentBottom"]
-    maxBottom := bottom
-    if !SettingsCategoryControls.Has(category)
-        return 0
-    for _, control in SettingsCategoryControls[category] {
-        if !SettingsControlPositions.Has(control.Hwnd)
-            continue
-        pos := SettingsControlPositions[control.Hwnd]
-        if pos["scrollable"]
-            maxBottom := Max(maxBottom, pos["y"] + pos["h"])
-    }
-    return Max(0, maxBottom - bottom)
-}
-
-SettingsSetRedraw(enabled) {
-    global SettingsGui
-    if (!IsSet(SettingsGui) || !IsObject(SettingsGui))
-        return
-    try DllCall("User32\SendMessageW",
-        "Ptr", SettingsGui.Hwnd,
-        "UInt", 0x000B, ; WM_SETREDRAW
-        "Ptr", enabled ? 1 : 0,
-        "Ptr", 0,
-        "Ptr")
-}
-
-SettingsRepaint() {
-    global SettingsGui
-    if (!IsSet(SettingsGui) || !IsObject(SettingsGui))
-        return
-    ; RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW
-    try DllCall("User32\RedrawWindow",
-        "Ptr", SettingsGui.Hwnd,
-        "Ptr", 0,
-        "Ptr", 0,
-        "UInt", 0x0185,
-        "Int")
-}
-
-; Shows one category at its current scroll offset and hides every other.
-;
-; Redraw is suspended for the whole pass. Without it Windows repaints between the
-; Move and the Visible change during thumb tracking, which leaves trails and
-; half-drawn controls -- the same reason the Quick Menu composes its pages with
-; redraw suspended.
-SettingsApplyCategoryLayout(activeCategory) {
-    global SettingsCategoryControls, SettingsControlPositions
-    global SettingsCategoryOffsets
-    layout := SettingsLayout()
-    contentTop := layout["contentTop"]
-    contentBottom := layout["contentBottom"]
-    SettingsSetRedraw(false)
-    try {
-        offset := SettingsCategoryOffsets.Has(activeCategory)
-            ? SettingsCategoryOffsets[activeCategory] : 0
-        maxOffset := SettingsGetMaxScroll(activeCategory)
-        offset := ClampInt(offset, 0, maxOffset)
-        SettingsCategoryOffsets[activeCategory] := offset
-        for category, controls in SettingsCategoryControls {
-            isActive := category = activeCategory
-            for _, control in controls {
-                if !isActive {
-                    try control.Visible := false
-                    continue
-                }
-                if !SettingsControlPositions.Has(control.Hwnd) {
-                    try control.Visible := true
-                    continue
-                }
-                pos := SettingsControlPositions[control.Hwnd]
-                if !pos["scrollable"] {
-                    try control.Move(pos["x"], pos["y"], pos["w"], pos["h"])
-                    try control.Visible := true
-                    continue
-                }
-                newY := pos["y"] - offset
-                ; Hidden rather than clipped, because a control moved above the
-                ; viewport would otherwise draw over the page title and the
-                ; category list.
-                inside := newY >= contentTop && newY + pos["h"] <= contentBottom
-                try control.Move(pos["x"], newY, pos["w"], pos["h"])
-                try control.Visible := inside
-            }
-        }
-        SettingsUpdateScrollBar(offset, maxOffset)
-    } finally {
-        SettingsSetRedraw(true)
-        SettingsRepaint()
-    }
-}
-
-
-SettingsGetScrollTrackPosition() {
-    global SettingsScrollBar
-    if !IsObject(SettingsScrollBar)
-        return 0
-    scrollInfo := Buffer(28, 0)
-    NumPut("UInt", 28, scrollInfo, 0)
-    NumPut("UInt", 0x10, scrollInfo, 4) ; SIF_TRACKPOS
-    try {
-        if DllCall("User32\GetScrollInfo",
-            "Ptr", SettingsScrollBar.Hwnd,
-            "Int", 2, ; SB_CTL
-            "Ptr", scrollInfo)
-            return NumGet(scrollInfo, 24, "Int")
-    }
-    return 0
-}
-
-SettingsActiveCategoryName() {
-    global SettingsCurrentCategory
-    return SettingsCategoryMeta(SettingsCurrentCategory)[1]
-}
-
-SettingsScroll(direction, *) {
-    global SettingsCategoryOffsets, SettingsVisible
-    if !SettingsVisible
-        return
-    category := SettingsActiveCategoryName()
-    current := SettingsCategoryOffsets.Has(category)
-        ? SettingsCategoryOffsets[category] : 0
-    maxOffset := SettingsGetMaxScroll(category)
-    SettingsCategoryOffsets[category] :=
-        ClampInt(current + (direction * 68), 0, maxOffset)
-    SettingsApplyCategoryLayout(category)
-}
-
-SettingsVerticalScroll(wParam, lParam, msg, hwnd) {
-    global SettingsGui, SettingsScrollBar, SettingsCategoryOffsets, SettingsVisible
-    if (!IsSet(SettingsGui) || !SettingsVisible || !IsObject(SettingsScrollBar))
-        return
-    if (lParam != SettingsScrollBar.Hwnd)
-        return
-    layout := SettingsLayout()
-    category := SettingsActiveCategoryName()
-    current := SettingsCategoryOffsets.Has(category)
-        ? SettingsCategoryOffsets[category] : 0
-    maxOffset := SettingsGetMaxScroll(category)
-    scrollCode := wParam & 0xFFFF
-    lineStep := 34
-    pageStep := Max(68, layout["contentBottom"] - layout["contentTop"] - 34)
-    switch scrollCode {
-        case 0: ; SB_LINEUP
-            newOffset := current - lineStep
-        case 1: ; SB_LINEDOWN
-            newOffset := current + lineStep
-        case 2: ; SB_PAGEUP
-            newOffset := current - pageStep
-        case 3: ; SB_PAGEDOWN
-            newOffset := current + pageStep
-        case 4, 5: ; SB_THUMBPOSITION / SB_THUMBTRACK
-            newOffset := SettingsGetScrollTrackPosition()
-        case 6: ; SB_TOP
-            newOffset := 0
-        case 7: ; SB_BOTTOM
-            newOffset := maxOffset
-        default:
-            return 0
-    }
-    SettingsCategoryOffsets[category] := ClampInt(newOffset, 0, maxOffset)
-    SettingsApplyCategoryLayout(category)
-    return 0
-}
-
-; The wheel is also how the CONTROLLER scrolls: the left stick already sends
-; WheelUp/WheelDown while a Settings surface is active, so pointing with the
-; right stick and scrolling with the left works without a new binding.
-SettingsMouseWheel(wParam, lParam, msg, hwnd) {
-    global SettingsGui, SettingsVisible
-    if (!IsSet(SettingsGui) || !SettingsVisible)
-        return
-    rootHwnd := DllCall("GetAncestor", "Ptr", hwnd, "UInt", 2, "Ptr")
-    if (rootHwnd != SettingsGui.Hwnd)
-        return
-    ; A list box owns its own wheel: scrolling the page out from under the
-    ; startup-program list while the user is picking a row is not helpful.
-    controlClass := ""
-    try controlClass := WinGetClass("ahk_id " hwnd)
-    if (controlClass = "ListBox" || controlClass = "SysListView32")
-        return
-    delta := (wParam >> 16) & 0xFFFF
-    if (delta & 0x8000)
-        delta -= 0x10000
-    if (delta != 0)
-        SettingsScroll(delta > 0 ? -1 : 1)
-    return 0
-}
-
-; Audits the ORIGINAL, unscrolled geometry of every page.
-;
-; This runs once, on the real native controls, so it catches what a source regex
-; cannot: DPI- and font-dependent control sizes, two rows accidentally given the
-; same cursor value, content crossing into the category list, and controls
-; running under the scrollbar. It reports rather than blocking Settings, because
-; Settings is also the recovery surface.
-SettingsAuditLayout() {
-    global SettingsCategoryControls, SettingsControlPositions
-    layout := SettingsLayout()
-    contentLeft := 286
-    contentRight := layout["scrollBarX"]
-    issues := []
-    for _, name in SettingsCategoryNames() {
-        if (!SettingsCategoryControls.Has(name)
-            || SettingsCategoryControls[name].Length = 0) {
-            issues.Push(name ": page has no controls.")
-            continue
-        }
-        positioned := []
-        for _, control in SettingsCategoryControls[name] {
-            if !SettingsControlPositions.Has(control.Hwnd) {
-                issues.Push(name ": a control has no recorded position.")
-                continue
-            }
-            pos := SettingsControlPositions[control.Hwnd]
-            if (pos["w"] <= 0 || pos["h"] <= 0) {
-                issues.Push(name ": a control has invalid dimensions.")
-                continue
-            }
-            if (pos["scrollable"]
-                && (pos["x"] < contentLeft
-                    || pos["x"] + pos["w"] > contentRight)) {
-                issues.Push(name ": a control crosses the content boundary.")
-            }
-            for _, previous in positioned {
-                other := previous["pos"]
-                overlaps := pos["x"] < other["x"] + other["w"]
-                    && pos["x"] + pos["w"] > other["x"]
-                    && pos["y"] < other["y"] + other["h"]
-                    && pos["y"] + pos["h"] > other["y"]
-                if overlaps
-                    issues.Push(name ": two controls overlap at "
-                        . pos["x"] "," pos["y"] ".")
-            }
-            positioned.Push(Map("pos", pos))
-        }
-    }
-    return issues
-}
-
-SettingsReportLayoutAudit() {
-    issues := SettingsAuditLayout()
-    if (issues.Length = 0) {
-        LogLine("Settings layout audit passed for all categories.")
-        return true
-    }
-    summary := ""
-    for _, issue in issues
-        summary .= (summary = "" ? "" : " | ") issue
-    LogLine("Settings layout audit found " issues.Length " issue(s): " summary,
-        "Warning")
-    SettingsUpdateStatus("Layout warning recorded in the log")
-    return false
 }
 
 SettingsRegisterField(category, key, control, eventName := "Change") {
@@ -8552,78 +9882,16 @@ SettingsRegisterField(category, key, control, eventName := "Change") {
     control.OnEvent(eventName, SettingsMarkDirty)
 }
 
-; ------------------------------------------------------------------------------
-; Flowing row builders
-; ------------------------------------------------------------------------------
-; Every builder takes the page cursor by reference and advances it, so a row
-; places itself and adding one costs a line. Before this, each control carried a
-; literal y and inserting a row meant re-flowing the whole page by hand -- which
-; is why two pages grew sideways into a hand-placed second column instead.
-;
-; Rows may run past the bottom of the window; the viewport scrolls.
-
 ; A choice row stores its value as text, not as the DropDownList's 1-based
 ; index, so the INI keeps a readable preset name. GetFieldValue/SetFieldValue
 ; both work in .Value, which for a DropDownList is that index -- hence the
 ; separate text accessors below rather than a change to the generic pair, which
 ; every other field type depends on.
-;
-; The CHOICE ORDER of each list is load-bearing where the value is derived from
-; the index (SetDropDownMode, WindowModeChoiceToValue, ParkEdge). Reordering a
-; list to match standalone's would invert the setting, so the lists keep XFE's
-; order and only the labels were aligned.
-SettingsAddChoiceRow(guiObj, category, key, labelText, choices, &y, width := 200) {
-    layout := SettingsLayout()
-    label := guiObj.AddText("x" layout["labelX"] " y" (y + 3)
-        . " w" layout["labelWidth"] " h22 +0x200", labelText)
+SettingsAddChoiceRow(guiObj, category, key, labelText, choices, y) {
+    label := guiObj.AddText("x300 y" y " w250 h24 +0x200", labelText)
     SettingsTrackControl(category, label)
-    list := guiObj.AddDropDownList("x" layout["controlX"] " y" y
-        . " w" width " h300", choices)
+    list := guiObj.AddDropDownList("x570 y" (y - 2) " w200 h300", choices)
     SettingsRegisterField(category, key, list, "Change")
-    y += 34
-    return list
-}
-
-SettingsAddCheckboxRow(guiObj, category, key, labelText, &y, height := 26) {
-    layout := SettingsLayout()
-    options := "x" layout["contentX"] " y" y " w" layout["contentWidth"]
-        . " h" height
-    if (height > 26)
-        options .= " +Wrap"
-    control := guiObj.AddCheckbox(options, labelText)
-    SettingsRegisterField(category, key, control, "Click")
-    y += height + 6
-    return control
-}
-
-; A caption, not a field. Used where a page needs a sentence of context and for
-; the section breaks that replaced the two side-by-side group boxes on the RTSS
-; page -- group boxes cannot flow, because their height has to be known before
-; the rows inside them exist.
-SettingsAddNoteRow(guiObj, category, text, &y, height := 22) {
-    layout := SettingsLayout()
-    control := guiObj.AddText("x" layout["contentX"] " y" y
-        . " w" layout["contentWidth"] " h" height " +Wrap", text)
-    SettingsTrackControl(category, control)
-    y += height + 8
-    return control
-}
-
-SettingsAddSectionRow(guiObj, category, title, &y) {
-    layout := SettingsLayout()
-    ; One advance, not two. A lead-in written as a second `y +=` would be a
-    ; second number for the layout simulation in Test-ControllerProfiles.py to
-    ; find, and it would find the first one.
-    top := y + 10
-    control := guiObj.AddText("x" layout["contentX"] " y" top
-        . " w" layout["contentWidth"] " h22", title)
-    control.SetFont("s10 Bold", "Segoe UI")
-    SettingsTrackControl(category, control)
-    ; Restored immediately: AddText inherits the GUI font, so leaving it bold
-    ; would silently embolden every row built after this one.
-    guiObj.SetFont("s10 Norm", "Segoe UI")
-    y += 38
-    return control
 }
 
 GetFieldText(key, fallback := "") {
@@ -8640,70 +9908,28 @@ SetFieldText(key, value) {
         try SettingsFields[key].Text := value
 }
 
-SettingsAddEditRow(guiObj, category, key, labelText, &y, numeric := false, width := 150) {
-    layout := SettingsLayout()
-    label := guiObj.AddText("x" layout["labelX"] " y" (y + 3)
-        . " w" layout["labelWidth"] " h22 +0x200", labelText)
+SettingsAddEditRow(guiObj, category, key, labelText, y, numeric := false) {
+    label := guiObj.AddText("x300 y" y " w250 h24 +0x200", labelText)
     SettingsTrackControl(category, label)
-    options := "x" layout["controlX"] " y" y " w" width " h26"
+    options := "x570 y" (y - 2) " w150 h26"
     if numeric
         options .= " Number"
     edit := guiObj.AddEdit(options)
     SettingsRegisterField(category, key, edit, "Change")
-    y += 34
-    return edit
 }
 
-SettingsAddShortcutRow(guiObj, category, key, labelText, &y) {
-    layout := SettingsLayout()
-    label := guiObj.AddText("x" layout["labelX"] " y" (y + 3)
-        . " w" layout["labelWidth"] " h22 +0x200", labelText)
+SettingsAddShortcutAt(guiObj, category, key, labelText, x, y, totalWidth) {
+    global SettingsFields
+    label := guiObj.AddText("x" x " y" y " w55 h24 +0x200", labelText)
     SettingsTrackControl(category, label)
-    edit := guiObj.AddEdit("x" layout["controlX"] " y" y " w200 h26")
+    editX := x + 58
+    editWidth := totalWidth - 145
+    edit := guiObj.AddEdit("x" editX " y" (y - 2) " w" editWidth " h26")
     SettingsRegisterField(category, key, edit, "Change")
-    button := guiObj.AddButton("x778 y" (y - 1) " w92 h28", "Record...")
+    buttonX := editX + editWidth + 6
+    button := guiObj.AddButton("x" buttonX " y" (y - 3) " w78 h28", "Record...")
     button.OnEvent("Click", SettingsRecordShortcut.Bind(key))
     SettingsTrackControl(category, button)
-    y += 34
-    return edit
-}
-
-; A text field with a Browse button, for a path. Wider than a plain edit row
-; because a path is unreadable in 150 pixels.
-SettingsAddPathRow(guiObj, category, key, labelText, browseCallback, &y) {
-    layout := SettingsLayout()
-    label := guiObj.AddText("x" layout["labelX"] " y" (y + 3) " w160 h22 +0x200",
-        labelText)
-    SettingsTrackControl(category, label)
-    edit := guiObj.AddEdit("x466 y" y " w300 h26")
-    SettingsRegisterField(category, key, edit, "Change")
-    button := guiObj.AddButton("x774 y" (y - 1) " w96 h28", "Browse...")
-    button.OnEvent("Click", browseCallback)
-    SettingsTrackControl(category, button)
-    y += 34
-    return edit
-}
-
-; Up to three buttons on one flowing line. entries is an array of
-; [label, callback] pairs; more than three wraps onto the next line.
-SettingsAddButtonRow(guiObj, category, entries, &y) {
-    static COLUMNS := [300, 496, 692]
-    static BUTTON_WIDTH := 178
-    static LINE_HEIGHT := 42
-    index := 0
-    for _, entry in entries {
-        column := Mod(index, COLUMNS.Length)
-        if (column = 0 && index > 0)
-            y += LINE_HEIGHT
-        button := guiObj.AddButton(
-            "x" COLUMNS[column + 1] " y" y " w" BUTTON_WIDTH " h34", entry[1])
-        button.OnEvent("Click", entry[2])
-        SettingsTrackControl(category, button)
-        index += 1
-    }
-    if (index > 0)
-        y += LINE_HEIGHT
-    return y
 }
 
 ; Runs the screen probe from the Settings window. Settings itself is hidden for
@@ -8826,10 +10052,11 @@ SettingsShowCategory(index) {
     try SettingsCategoryList.Choose(index)
     SettingsCategoryTitleCtrl.Text := GuiSafeLabel(meta[1])
     SettingsCategoryDescriptionCtrl.Text := GuiSafeLabel(meta[2])
-    ; Shows the page at its own remembered scroll position and hides every other,
-    ; which is the only place control visibility is decided now that pages can be
-    ; taller than the viewport.
-    SettingsApplyCategoryLayout(meta[1])
+    for category, controls in SettingsCategoryControls {
+        visible := category = meta[1]
+        for _, control in controls
+            try control.Visible := visible
+    }
 }
 
 ; LT/RT category switching. The wrap point is read from the category table
@@ -8866,10 +10093,6 @@ SettingsPopulate() {
     SetFieldValue("Display.EnableQuickControls", ReadBool("Display", "EnableQuickControls", true))
     SetFieldValue("Controller.EnableControllerMouseMode",
         ReadBool("Controller", "EnableControllerMouseMode", true))
-    SetFieldValue("Controller.EnableAutoMouseMode",
-        ReadBool(MovedSettingSection("Features", "Controller", "EnableAutoMouseMode"), "EnableAutoMouseMode", true))
-    SetFieldValue("Controller.AutoMouseExeList",
-        ReadText("Controller", "AutoMouseExeList", "explorer.exe"))
     SetBackendChoice("Controller.Backend", ReadText("Controller", "Backend", "xinput"))
     SetFieldValue("Controller.DiagnosticLogging",
         ReadBool("Controller", "DiagnosticLogging", false))
@@ -8912,8 +10135,8 @@ SettingsPopulate() {
     SetFieldValue("Assist.ForegroundStableSec",
         ReadInt("Assist", "ForegroundStableSec", 30, 5, 600))
     SetFieldValue("Assist.CooldownSec",
-        ReadInt(MovedSettingSection("LauncherCleanup", "Assist", "CooldownSec"), "CooldownSec", 300, 30, 7200))
-    SetFieldValue("Assist.HardKill", ReadBool(MovedSettingSection("LauncherCleanup", "Assist", "HardKill"), "HardKill", true))
+        ReadInt("Assist", "CooldownSec", 300, 30, 7200))
+    SetFieldValue("Assist.HardKill", ReadBool("Assist", "HardKill", true))
     SetFieldValue("Controller.ControllerIndex",
         ReadInt("Controller", "ControllerIndex", 0, 0, 3))
     SetFieldValue("Controller.ControllerDeadzone",
@@ -8922,12 +10145,12 @@ SettingsPopulate() {
         ReadInt("Controller", "ControllerMouseSpeed", 100, 10, 300))
     SetFieldValue("Controller.ControllerChordHoldMs",
         ReadInt("Controller", "ControllerChordHoldMs", 500, 200, 3000))
-    SetFieldValue("Cursor.EnableAutoHide", ReadBool(MovedSettingSection("Features", "Cursor", "EnableAutoHideCursor"), "EnableAutoHideCursor", true))
-    SetFieldValue("Cursor.HideDelayMs", ReadInt(MovedSettingSection("Timing", "Cursor", "MouseHideDelay"), "MouseHideDelay", 1000, 250, 10000))
-    SetFieldValue("Cursor.ParkOnStartup", ReadBool(MovedSettingSection("Features", "Cursor", "EnableMouseParkOnBoot"), "EnableMouseParkOnBoot", true))
+    SetFieldValue("Cursor.EnableAutoHide", ReadBool("Cursor", "EnableAutoHide", true))
+    SetFieldValue("Cursor.HideDelayMs", ReadInt("Cursor", "HideDelayMs", 1000, 250, 10000))
+    SetFieldValue("Cursor.ParkOnStartup", ReadBool("Cursor", "ParkOnStartup", true))
     SetFieldValue("Cursor.ParkOnGameStart", ReadBool("Cursor", "ParkOnGameStart", true))
     SetFieldValue("Cursor.ParkOnSteamReturn", ReadBool("Cursor", "ParkOnSteamReturn", true))
-    SetParkEdgeChoice("Cursor.ParkEdge", ReadText(MovedSettingSection("MousePark", "Cursor", "MouseParkEdge"), "MouseParkEdge", "right"))
+    SetParkEdgeChoice("Cursor.ParkEdge", ReadText("Cursor", "ParkEdge", "right"))
     SetFieldValue("RTSS.EnableIntegration", ReadBool("RTSS", "EnableIntegration", true))
     SetFieldValue("RTSS.Path", ReadText("RTSS", "Path", RtssPath))
     SetFieldValue("RTSS.UseDllIntegration",
@@ -8946,14 +10169,6 @@ SettingsPopulate() {
         ReadText("RTSS", "FrameLimiterOffShortcut", "^+6"))
     SetFieldValue("RTSS.CustomFrameCapShortcut",
         ReadText("RTSS", "CustomFrameCapShortcut", "^+f"))
-    ; RestoreFrameLimitOnStartup was a dead control: the checkbox existed and was
-    ; registered as a field, but nothing populated it and nothing saved it, so it
-    ; always drew unchecked and clearing it did nothing. Found while adding the
-    ; checkbox beside it; fixed here and in SaveSettings.
-    SetFieldValue("RTSS.RestoreFrameLimitOnStartup",
-        ReadBool("RTSS", "RestoreFrameLimitOnStartup", true))
-    SetFieldValue("RTSS.EnableElevatedFrameCapWrites",
-        ReadBool("RTSS", "EnableElevatedFrameCapWrites", false))
     SettingsDirty := false
     SettingsUpdateStatus()
 }
@@ -9056,10 +10271,6 @@ SaveSettings(*) {
             GetFieldValue("Display.EnableQuickControls") ? "true" : "false"],
         ["Controller", "EnableControllerMouseMode",
             GetFieldValue("Controller.EnableControllerMouseMode") ? "true" : "false"],
-        ["Features", "EnableAutoMouseMode",
-            GetFieldValue("Controller.EnableAutoMouseMode") ? "true" : "false"],
-        ["Controller", "AutoMouseExeList",
-            GetFieldText("Controller.AutoMouseExeList", "explorer.exe")],
         ["Controller", "Backend",
             BackendChoiceToValue(GetFieldValue("Controller.Backend", 1))],
         ["Controller", "DiagnosticLogging",
@@ -9083,8 +10294,8 @@ SaveSettings(*) {
         ["Assist", "TickIntervalMs", GetFieldValue("Assist.TickIntervalMs", 2000)],
         ["Assist", "CpuThresholdPercent", GetFieldValue("Assist.CpuThresholdPercent", 12)],
         ["Assist", "ForegroundStableSec", GetFieldValue("Assist.ForegroundStableSec", 30)],
-        ["LauncherCleanup", "CooldownSec", GetFieldValue("Assist.CooldownSec", 300)],
-        ["LauncherCleanup", "HardKill", GetFieldValue("Assist.HardKill") ? "true" : "false"],
+        ["Assist", "CooldownSec", GetFieldValue("Assist.CooldownSec", 300)],
+        ["Assist", "HardKill", GetFieldValue("Assist.HardKill") ? "true" : "false"],
         ["Assist", "SuspendOnShellOverlay",
             GetFieldValue("Assist.SuspendOnShellOverlay") ? "true" : "false"],
         ["Steam", "MenuShortcut", GetFieldValue("Steam.MenuShortcut")],
@@ -9103,16 +10314,16 @@ SaveSettings(*) {
         ["Controller", "ControllerMouseSpeed", GetFieldValue("Controller.ControllerMouseSpeed", 100)],
         ["Controller", "ControllerChordHoldMs",
             GetFieldValue("Controller.ControllerChordHoldMs", 500)],
-        ["Features", "EnableAutoHideCursor",
+        ["Cursor", "EnableAutoHide",
             GetFieldValue("Cursor.EnableAutoHide") ? "true" : "false"],
-        ["Timing", "MouseHideDelay", GetFieldValue("Cursor.HideDelayMs", 1000)],
-        ["Features", "EnableMouseParkOnBoot",
+        ["Cursor", "HideDelayMs", GetFieldValue("Cursor.HideDelayMs", 1000)],
+        ["Cursor", "ParkOnStartup",
             GetFieldValue("Cursor.ParkOnStartup") ? "true" : "false"],
         ["Cursor", "ParkOnGameStart",
             GetFieldValue("Cursor.ParkOnGameStart") ? "true" : "false"],
         ["Cursor", "ParkOnSteamReturn",
             GetFieldValue("Cursor.ParkOnSteamReturn") ? "true" : "false"],
-        ["MousePark", "MouseParkEdge",
+        ["Cursor", "ParkEdge",
             GetFieldValue("Cursor.ParkEdge", 1) = 2 ? "left" : "right"],
         ["RTSS", "EnableIntegration",
             GetFieldValue("RTSS.EnableIntegration") ? "true" : "false"],
@@ -9129,11 +10340,7 @@ SaveSettings(*) {
         ["RTSS", "PresetFrameCap", GetFieldValue("RTSS.PresetFrameCap", 158)],
         ["RTSS", "FrameLimiterOnShortcut", GetFieldValue("RTSS.FrameLimiterOnShortcut")],
         ["RTSS", "FrameLimiterOffShortcut", GetFieldValue("RTSS.FrameLimiterOffShortcut")],
-        ["RTSS", "CustomFrameCapShortcut", GetFieldValue("RTSS.CustomFrameCapShortcut")],
-        ["RTSS", "RestoreFrameLimitOnStartup",
-            GetFieldValue("RTSS.RestoreFrameLimitOnStartup") ? "true" : "false"],
-        ["RTSS", "EnableElevatedFrameCapWrites",
-            GetFieldValue("RTSS.EnableElevatedFrameCapWrites") ? "true" : "false"]
+        ["RTSS", "CustomFrameCapShortcut", GetFieldValue("RTSS.CustomFrameCapShortcut")]
     ]
     try {
         for _, pair in pairs
@@ -9145,9 +10352,6 @@ SaveSettings(*) {
         SettingsDirty := false
         LoadSettings()
         ApplyRuntimeTimers()
-        ; Save & Apply is the path this setting is actually toggled from, so the
-        ; helper has to start or stop here as well as on Reload.
-        SyncElevatedRtssHelperWithSettings()
         SettingsUpdateStatus("Saved and applied")
         SetStatus("Settings saved and applied")
     } catch as err {
@@ -9247,27 +10451,13 @@ ShowMappingEditor(*) {
     editor.Show("AutoSize Center")
 }
 
-; A .Long key whose matching .Short is Left click can never fire: that button is
-; press-and-hold, and Short is resolved on RELEASE. The editor shows it as
-; reserved and refuses to set it, rather than accepting a binding that would
-; silently do nothing.
-MappingKeyIsReservedForMouse(key) {
-    global ControllerMap
-    if (StrLower(SubStr(key, -5)) != ".long")
-        return false
-    shortKey := SubStr(key, 1, StrLen(key) - 5) ".Short"
-    return ControllerBindingHoldsMouseButton(GetBindingValue(shortKey))
-}
-
 RefreshMappingList() {
     global MappingList
     if !IsObject(MappingList)
         return
     MappingList.Delete()
     for _, key in ControllerMappingKeys()
-        MappingList.Add("", key, MappingKeyIsReservedForMouse(key)
-            ? "Reserved for mouse (hold to drag)"
-            : ControllerBindingPretty(key))
+        MappingList.Add("", key, ControllerBindingPretty(key))
 }
 
 SelectedMappingKey() {
@@ -9309,11 +10499,6 @@ MappingSetBuiltin(dropDown, *) {
         SetStatus("Select a controller mapping first", "Warning")
         return
     }
-    if MappingKeyIsReservedForMouse(key) {
-        SetStatus(key " is reserved: that button is held to drag the mouse",
-            "Warning")
-        return
-    }
     value := MappingBuiltinValue(dropDown.Text)
     ControllerMap[key] := value
     if ControllerMapDisplay.Has(key)
@@ -9329,11 +10514,6 @@ MappingRecordShortcut(*) {
     key := SelectedMappingKey()
     if (key = "") {
         SetStatus("Select a controller mapping first", "Warning")
-        return
-    }
-    if MappingKeyIsReservedForMouse(key) {
-        SetStatus(key " is reserved: that button is held to drag the mouse",
-            "Warning")
         return
     }
     SettingsDialogActive := true
@@ -9374,6 +10554,84 @@ CloseMappingEditor(*) {
     MappingGui := unset
     MappingList := 0
     SettingsDialogActive := false
+}
+
+; ==============================================================================
+; Shortcut recorder
+; ==============================================================================
+GetPhysicalModsMap() {
+    return Map(
+        "Ctrl", GetKeyState("Ctrl", "P") || GetKeyState("LControl", "P")
+            || GetKeyState("RControl", "P"),
+        "Alt", GetKeyState("Alt", "P") || GetKeyState("LAlt", "P")
+            || GetKeyState("RAlt", "P"),
+        "Shift", GetKeyState("Shift", "P") || GetKeyState("LShift", "P")
+            || GetKeyState("RShift", "P"),
+        "Win", GetKeyState("LWin", "P") || GetKeyState("RWin", "P")
+    )
+}
+
+RecordShortcutChord() {
+    global _ShortcutCap
+    result := Map("ok", false, "send", "", "display", "")
+    capture := Gui("+AlwaysOnTop -MinimizeBox +ToolWindow", "Record Shortcut")
+    capture.SetFont("s10", "Segoe UI")
+    capture.AddText("xm", "Press one shortcut chord, then choose OK.")
+    capture.SetFont("s12 Bold", "Consolas")
+    preview := capture.AddText("xm y+10 w420 h30", "(none)")
+    capture.SetFont("s10 Norm", "Segoe UI")
+    okButton := capture.AddButton("xm y+10 w90 Default", "OK")
+    cancelButton := capture.AddButton("x+10 yp w90", "Cancel")
+    _ShortcutCap := Map(
+        "gui", capture,
+        "preview", preview,
+        "input", 0,
+        "mainKey", "",
+        "liveMods", Map("Ctrl", false, "Alt", false, "Shift", false, "Win", false),
+        "snapMods", Map("Ctrl", false, "Alt", false, "Shift", false, "Win", false),
+        "done", false,
+        "cancelled", false
+    )
+    okButton.OnEvent("Click", RecordShortcutAccept)
+    cancelButton.OnEvent("Click", RecordShortcutCancel)
+    capture.OnEvent("Close", RecordShortcutCancel)
+    capture.OnEvent("Escape", RecordShortcutCancel)
+    input := InputHook()
+    input.NotifyNonText := true
+    input.KeyOpt("{All}", "NS")
+    input.OnKeyDown := RecordShortcutKeyDown
+    input.OnKeyUp := RecordShortcutKeyUp
+    _ShortcutCap["input"] := input
+    capture.Show("AutoSize Center")
+    input.Start()
+    while IsObject(_ShortcutCap) && !_ShortcutCap["done"]
+        Sleep 30
+    if !IsObject(_ShortcutCap)
+        return result
+    cancelled := _ShortcutCap["cancelled"]
+    mainKey := _ShortcutCap["mainKey"]
+    mods := _ShortcutCap["snapMods"]
+    try _ShortcutCap["input"].Stop()
+    try _ShortcutCap["gui"].Destroy()
+    _ShortcutCap := ""
+    if (cancelled || mainKey = "")
+        return result
+    shortcut := ""
+    display := ""
+    if mods["Ctrl"]
+        shortcut .= "^", display .= "Ctrl+"
+    if mods["Alt"]
+        shortcut .= "!", display .= "Alt+"
+    if mods["Shift"]
+        shortcut .= "+", display .= "Shift+"
+    if mods["Win"]
+        shortcut .= "#", display .= "Win+"
+    shortcut .= NormalizeKeyForSend(mainKey)
+    display .= NormalizeKeyForDisplay(mainKey)
+    result["ok"] := true
+    result["send"] := shortcut
+    result["display"] := display
+    return result
 }
 
 RecordShortcutKeyDown(inputObj, vk, sc) {
@@ -9472,6 +10730,64 @@ RecordShortcutAccept(*) {
         _ShortcutCap["done"] := true
 }
 
+RecordShortcutCancel(*) {
+    global _ShortcutCap
+    if !IsObject(_ShortcutCap)
+        return
+    _ShortcutCap["cancelled"] := true
+    try _ShortcutCap["input"].Stop()
+    _ShortcutCap["done"] := true
+}
+
+NormalizeKeyForSend(keyName) {
+    key := keyName
+    if (key = "Escape")
+        key := "Esc"
+    if (key = "Return")
+        key := "Enter"
+    return StrLen(key) > 1 ? "{" key "}" : key
+}
+
+NormalizeKeyForDisplay(keyName) {
+    if (keyName = "Escape")
+        return "Esc"
+    if (keyName = "Return")
+        return "Enter"
+    return keyName
+}
+
+; ==============================================================================
+; Diagnostics
+; ==============================================================================
+; Replaces absolute paths with environment placeholders. A diagnostic bundle is
+; meant to be handed to someone else, and the log and INI both contain the full
+; profile path.
+SanitizeDiagnosticText(text) {
+    userProfile := EnvGet("USERPROFILE")
+    localAppData := EnvGet("LOCALAPPDATA")
+    if (userProfile != "")
+        text := StrReplace(text, userProfile, "%USERPROFILE%", false)
+    if (localAppData != "")
+        text := StrReplace(text, localAppData, "%LOCALAPPDATA%", false)
+    text := StrReplace(text, A_ScriptDir, "%XFE_DIR%", false)
+    return text
+}
+
+GetLastLines(text, maxLines) {
+    if (maxLines <= 0)
+        return ""
+    normalized := StrReplace(StrReplace(text, "`r`n", "`n"), "`r", "`n")
+    lines := StrSplit(normalized, "`n")
+    start := Max(1, lines.Length - maxLines + 1)
+    out := ""
+    index := start
+    while (index <= lines.Length) {
+        out .= lines[index] "`r`n"
+        index += 1
+    }
+    return out
+}
+
 ; Bundles the log tail, settings and environment into one zip.
 ;
 ; The log records the input backend, the decoded controller reports and the
@@ -9564,156 +10880,111 @@ ExportDiagnosticBundle(*) {
     }
 }
 
-; Seam for SteamShell-Shared.ahk: this companion's own checks. The window, the
-; list, the report text, Copy and Refresh all live in the shared harness now.
-;
-; These were flat "PASS - text" strings assembled into a read-only edit box, so
-; there was no way to copy the report, no way to refresh it without reopening,
-; and the export bundle rebuilt the same text separately. Splitting status from
-; name from detail is what the shared list needs, and it is the same shape the
-; shell has always used.
-ProductHealthResults() {
+ShowHealthCheck(*) {
     global AppVersion, IniPath, LogPath, ControllerIndex, ActiveControllerIndex, RtssPath
     global EnableRTSSIntegration, RtssUseDllIntegration
-    global RtssElevatedFrameCapWrites, ElevatedHelperAvailable, ElevatedHelperPid
-    global ElevatedHelperLastError, ElevatedHelperPath
     global ControllerBackend, ActiveInputBackend
     global GameInputReady, GameInputFailed
     global RawInputProbeActive, RawInputLastReportTick
-    results := []
-
-    HealthResult(results,
-        FileExist(IniPath) ? "PASS" : "FAIL", "Settings file",
-        FileExist(IniPath) ? IniPath : IniPath " is missing.")
-
-    AddInstallationRecordHealthRow(results, A_ScriptDir, A_ScriptDir, "Portable")
-
     controller := Buffer(16, 0)
-    if ControllerReadState(&controller) {
-        HealthResult(results, "PASS", "Controller",
-            ActiveInputBackend = "rawinput"
-                ? "Reading through RawInput, which works inside Xbox FSE."
-                : (ActiveInputBackend = "gameinput"
-                    ? "Reading through GameInput."
-                    : "Detected at XInput slot " ActiveControllerIndex "."))
-    } else {
-        HealthResult(results, "WARN", "Controller",
-            "No controller detected on any backend.")
-    }
-    HealthResult(results, "INFO", "Input backend",
-        "Setting: " ControllerBackend ". Active: " ActiveInputBackend ".")
-    HealthResult(results,
-        !RawInputProbeActive ? "INFO" : (RawInputLastReportTick ? "PASS" : "INFO"),
-        "RawInput",
-        !RawInputProbeActive
-            ? "Not registered."
-            : (RawInputLastReportTick
-                ? "Registered and receiving HID reports."
-                : "Registered, no reports yet. Expected outside Xbox FSE."))
-    HealthResult(results,
-        GameInputReady ? "PASS" : (GameInputFailed ? "WARN" : "INFO"),
-        "GameInput",
-        GameInputReady
-            ? "Initialised."
-            : (GameInputFailed ? "Unavailable; fallback in use." : "Not requested."))
-
+    controllerText := ControllerReadState(&controller)
+        ? (ActiveInputBackend = "rawinput"
+            ? "PASS — controller reading through RawInput (works inside Xbox FSE)"
+            : (ActiveInputBackend = "gameinput"
+                ? "PASS — controller reading through GameInput"
+                : "PASS — controller detected at XInput slot " ActiveControllerIndex))
+        : "WARN — no controller detected on any backend"
+    backendText := "INFO — backend setting: " ControllerBackend
+        . ", active: " ActiveInputBackend
+    rawInputText := !RawInputProbeActive
+        ? "INFO — RawInput not registered"
+        : (RawInputLastReportTick
+            ? "PASS — RawInput registered and receiving HID reports"
+            : "INFO — RawInput registered, no reports yet (expected outside Xbox FSE)")
+    gameInputText := GameInputReady
+        ? "PASS — GameInput initialised"
+        : (GameInputFailed
+            ? "WARN — GameInput unavailable; fallback in use"
+            : "INFO — GameInput not requested")
     if !EnableRTSSIntegration {
-        HealthResult(results, "INFO", "RTSS", "Integration is disabled.")
-    } else if (ResolveRtssExecutablePath() = "") {
-        HealthResult(results, "WARN", "RTSS", "Executable not found.")
+        rtssText := "INFO — RTSS integration disabled"
+    } else if ResolveRtssExecutablePath() = "" {
+        rtssText := "WARN — RTSS executable not found"
     } else if !ProcessExist("RTSS.exe") {
-        HealthResult(results, "INFO", "RTSS", "Installed but not running.")
+        rtssText := "INFO — RTSS installed but not running"
     } else if !RtssUseDllIntegration {
-        HealthResult(results, "INFO", "RTSS",
-            "Running. DLL integration disabled, shortcut mode active.")
+        rtssText := "INFO — RTSS running; DLL integration disabled, shortcut mode active"
     } else {
         rtssState := GetRtssGlobalState()
-        if IsObject(rtssState) {
-            HealthResult(results, "PASS", "RTSS",
-                "State readable. Overlay " (rtssState["overlay"] ? "on" : "off")
-                . ", limiter " (rtssState["limiter"] ? "on" : "off") ".")
-        } else {
-            HealthResult(results, "WARN", "RTSS",
-                "Running but global state is unavailable; shortcut fallback active.")
-        }
+        rtssText := IsObject(rtssState)
+            ? "PASS — RTSS state readable; overlay "
+                . (rtssState["overlay"] ? "on" : "off") ", limiter "
+                . (rtssState["limiter"] ? "on" : "off")
+            : "WARN — RTSS running but global state is unavailable; shortcut fallback active"
     }
-
-    ; Two separate rows, because "you did not turn it on" and "you turned it on
-    ; and it is not running" are different situations with different remedies,
-    ; and the second is the whole reason a frame cap row can still report itself
-    ; read-only after opting in.
-    if !RtssElevatedFrameCapWrites {
-        HealthResult(results, "INFO", "Elevated RTSS helper",
-            "Disabled (default). The frame cap is read-only where RTSS needs "
-            . "administrator rights.")
-    } else if A_IsAdmin {
-        HealthResult(results, "INFO", "Elevated RTSS helper",
-            "The companion is elevated, so RTSS profile writes already work "
-            . "without a helper.")
-    } else if (ElevatedHelperAvailable && ElevatedHelperPid
-        && VerifyElevatedHelperProcess(ElevatedHelperPid, &helperVerifyError)) {
-        HealthResult(results, "PASS", "Elevated RTSS helper",
-            "Running as PID " ElevatedHelperPid ".")
-    } else {
-        HealthResult(results, "WARN", "Elevated RTSS helper",
-            "Enabled but unavailable: " ElevatedHelperLastError)
-    }
-
-    ; Reported whenever the option is on, whether or not the process started:
-    ; "protected" is what decides whether it may be launched at all, and a
-    ; failure here is the most likely reason the row above says WARN.
-    checkedPath := ElevatedHelperPath != ""
-        ? ElevatedHelperPath : XfeElevatedHelperPath()
-    if !RtssElevatedFrameCapWrites {
-        HealthResult(results, "INFO", "Elevated helper protection",
-            "Not checked; the helper is disabled.")
-    } else if ElevatedHelperLocationIsProtected(checkedPath, &helperProtectionError) {
-        HealthResult(results, "PASS", "Elevated helper protection",
-            checkedPath " is administrator-owned and readable.")
-    } else {
-        HealthResult(results, "WARN", "Elevated helper protection",
-            helperProtectionError)
-    }
-
     displayScale := GetPrimaryDisplayScale()
-    HealthResult(results, IsObject(displayScale) ? "PASS" : "WARN", "Display scale",
-        IsObject(displayScale)
-            ? "Primary display at " displayScale["percent"] "%."
-            : "Primary display scale control unavailable.")
+    displayScaleText := IsObject(displayScale)
+        ? "PASS — primary display scale " displayScale["percent"] "%"
+        : "WARN — primary display scale control unavailable"
     hdr := GetPrimaryHdrState()
-    if !IsObject(hdr) {
-        HealthResult(results, "WARN", "Display HDR", "State unavailable.")
-    } else if !hdr["supported"] {
-        HealthResult(results, "INFO", "Display HDR",
-            "The primary display does not support HDR.")
-    } else {
-        HealthResult(results, "PASS", "Display HDR",
-            "Primary display HDR is " (hdr["enabled"] ? "on" : "off") ".")
+    hdrStateText := !IsObject(hdr)
+        ? "WARN — primary display HDR state unavailable"
+        : (!hdr["supported"]
+            ? "INFO — primary display does not support HDR"
+            : "PASS — primary display HDR " (hdr["enabled"] ? "on" : "off"))
+    anyFseText := ProcessExist("AnyFSE.exe")
+        ? "PASS — AnyFSE process detected"
+        : "INFO — AnyFSE process not detected"
+    lines := [
+        "SteamShell XFE Companion " AppVersion,
+        "",
+        FileExist(IniPath) ? "PASS — settings file available" : "FAIL — settings file missing",
+        controllerText,
+        backendText,
+        rawInputText,
+        gameInputText,
+        rtssText,
+        displayScaleText,
+        hdrStateText,
+        anyFseText,
+        ProcessExist("steam.exe") ? "PASS — Steam process detected" : "INFO — Steam not running",
+        "",
+        "Architecture: " (A_PtrSize = 8 ? "64-bit" : "32-bit"),
+        "Administrator: " (A_IsAdmin ? "Yes" : "No (recommended)"),
+        "Log: " LogPath,
+        "",
+        "The companion does not modify Winlogon Shell or manage Explorer/taskbar."
+    ]
+    message := ""
+    for _, line in lines
+        message .= line "`r`n"
+    health := Gui("+AlwaysOnTop +ToolWindow", "SteamShell XFE Health Check")
+    health.SetFont("s10", "Segoe UI")
+    health.AddEdit("xm ym w650 h360 ReadOnly -Wrap", message)
+    close := health.AddButton("xm y+10 w120 h32 Default", "Close")
+    close.OnEvent("Click", (*) => health.Destroy())
+    exportButton := health.AddButton("x+8 yp w190 h32", "Export Diagnostic ZIP")
+    exportButton.OnEvent("Click", ExportDiagnosticBundle)
+    health.OnEvent("Escape", (*) => health.Destroy())
+    health.Show("AutoSize Center")
+    SetStatus("Health check completed")
+}
+
+; ==============================================================================
+; Controller poll loop
+; ==============================================================================
+ResetControllerHoldState(downTick, longFired, triggerDown, buttonDefinitions) {
+    for definition in buttonDefinitions {
+        name := definition[1]
+        downTick[name] := 0
+        longFired[name] := false
     }
-
-    HealthResult(results, ProcessExist("AnyFSE.exe") ? "PASS" : "INFO", "AnyFSE",
-        ProcessExist("AnyFSE.exe") ? "Process detected." : "Process not detected.")
-    HealthResult(results, ProcessExist("steam.exe") ? "PASS" : "INFO", "Steam",
-        ProcessExist("steam.exe") ? "Process detected." : "Not running.")
-
-    HealthResult(results, "INFO", "Runtime",
-        (A_PtrSize = 8 ? "64-bit" : "32-bit")
-        . ". Administrator: " (A_IsAdmin ? "Yes" : "No, which is the recommendation")
-        . ". Log: " LogPath)
-    HealthResult(results, "INFO", "Scope",
-        "The companion does not modify the Winlogon Shell value and does not "
-        . "manage Explorer or the taskbar.")
-    return results
-}
-
-; Seams for the shared health harness.
-ProductVersionText() {
-    global AppVersion
-    return AppVersion
-}
-
-ProductCenterGui(guiObj) {
-    CenterGuiOnMonitorActual(guiObj, GetMonitorIndexForWindow(WinExist("A")), 900, 560)
+    downTick["LT"] := 0
+    downTick["RT"] := 0
+    longFired["LT"] := false
+    longFired["RT"] := false
+    triggerDown["LT"] := false
+    triggerDown["RT"] := false
 }
 
 PollController() {
@@ -9774,7 +11045,7 @@ PollController() {
             longFired["RT"] := false
 
         if CompanionDisabled {
-            ResetControllerEdgeState(downTick, longFired, triggerDown,
+            ResetControllerHoldState(downTick, longFired, triggerDown,
                 buttonDefinitions)
             previousButtons := 0
             previousViewDown := false
@@ -9794,7 +11065,7 @@ PollController() {
             ; Establish a fresh baseline without firing edges for buttons that
             ; happen to be held at the instant the companion is enabled.
             if ControllerReadState(&state) {
-                ResetControllerEdgeState(downTick, longFired, triggerDown,
+                ResetControllerHoldState(downTick, longFired, triggerDown,
                     buttonDefinitions)
                 previousButtons := NumGet(state, 4, "UShort")
                 previousViewDown := (previousButtons & 0x0020) != 0
@@ -9824,7 +11095,7 @@ PollController() {
             viewWasDown := false
             quickChordSince := 0
             quickChordFired := false
-            ResetControllerEdgeState(downTick, longFired, triggerDown, buttonDefinitions)
+            ResetControllerHoldState(downTick, longFired, triggerDown, buttonDefinitions)
             return
         }
 
@@ -9834,7 +11105,7 @@ PollController() {
             viewWasDown := false
             quickChordSince := 0
             quickChordFired := false
-            ResetControllerEdgeState(downTick, longFired, triggerDown, buttonDefinitions)
+            ResetControllerHoldState(downTick, longFired, triggerDown, buttonDefinitions)
             return
         }
 
@@ -9943,14 +11214,15 @@ PollController() {
                 SystemCursor("Show")
                 MouseHidden := false
             }
-            ; No fast modifier here: the triggers change Settings category, so
-            ; RT is not free to mean "move faster" on this surface.
-            ApplyControllerMouseMove(rx, ry, ControllerMouseSpeed)
+            if (rx != 0 || ry != 0) {
+                dx := Round((rx / 32767.0) * ControllerMouseSpeed)
+                dy := Round((-ry / 32767.0) * ControllerMouseSpeed)
+                if (dx != 0 || dy != 0)
+                    try MouseMove(dx, dy, 0, "R")
+            }
             if (ly != 0 && now - lastScroll >= ControllerScrollIntervalMs) {
                 lastScroll := now
-                ; One notch per tick, not ControllerScrollStep: a Settings list
-                ; is short and the multiplied step overshoots it.
-                ApplyControllerMouseScroll(ly, 1)
+                try Send(ly > 0 ? "{WheelUp}" : "{WheelDown}")
             }
             ; Clicking and basic navigation must keep working while a dialog is
             ; up: a file picker or message box is exactly when the controller is
@@ -9992,7 +11264,7 @@ PollController() {
             }
             previousViewDown := false
             viewWasDown := false
-            ResetControllerEdgeState(downTick, longFired, triggerDown, buttonDefinitions)
+            ResetControllerHoldState(downTick, longFired, triggerDown, buttonDefinitions)
             return
         }
         settingsLtDown := false
@@ -10022,30 +11294,15 @@ PollController() {
         if !EnableControllerMouseMode {
             previousViewDown := false
             viewWasDown := false
-            ResetControllerEdgeState(downTick, longFired, triggerDown, buttonDefinitions)
+            ResetControllerHoldState(downTick, longFired, triggerDown, buttonDefinitions)
             return
         }
 
-        ; Automatic mouse mode is expressed as a virtual View/Back hold, so every
-        ; branch below is reached identically whether the user is holding the
-        ; button or the foreground application qualifies on its own.
-        ;
-        ; Deliberately evaluated AFTER the Quick Menu and Settings chords above,
-        ; which test the real button state. That is what keeps a misconfigured
-        ; list recoverable: exclude the wrong thing and the controller becomes a
-        ; mouse where it should not be, but the chords still open the Quick Menu
-        ; and Settings, so the list can be corrected without a keyboard.
-        autoMouse := AutoMouseModeActive()
-        if (autoMouse && MouseHidden) {
-            ; Moving a pointer that cannot be seen is not a usable mode.
-            try SystemCursor("Show")
-            MouseHidden := false
-        }
-        mappingActive := viewDown || autoMouse
+        mappingActive := viewDown || EnablePersistentMouseMode
         if !mappingActive {
             previousViewDown := false
             viewWasDown := false
-            ResetControllerEdgeState(downTick, longFired, triggerDown, buttonDefinitions)
+            ResetControllerHoldState(downTick, longFired, triggerDown, buttonDefinitions)
             return
         }
 
@@ -10065,29 +11322,24 @@ PollController() {
         }
         previousViewDown := true
 
-        ApplyControllerMouseMove(rx, ry,
-            rt > 30 ? Round(ControllerMouseSpeed * ControllerMouseFastMultiplier)
-                    : ControllerMouseSpeed)
+        if (rx != 0 || ry != 0) {
+            speed := rt > 30
+                ? Round(ControllerMouseSpeed * ControllerMouseFastMultiplier)
+                : ControllerMouseSpeed
+            dx := Round((rx / 32767.0) * speed)
+            dy := Round((-ry / 32767.0) * speed)
+            if (dx != 0 || dy != 0)
+                try MouseMove(dx, dy, 0, "R")
+        }
         if (ly != 0 && now - lastScroll >= ControllerScrollIntervalMs) {
             lastScroll := now
-            ApplyControllerMouseScroll(ly, ControllerScrollStep)
+            Loop ControllerScrollStep
+                try Send(ly > 0 ? "{WheelUp}" : "{WheelDown}")
         }
 
         for definition in buttonDefinitions {
             name := definition[1]
             mask := definition[2]
-            ; Left click is press-and-hold, so it can drag. Down on press, up on
-            ; release, and no Short/Long for that button: Short fires on release,
-            ; by which time a drag has already happened. The mapping editor shows
-            ; the Long slot as reserved.
-            if ControllerBindingHoldsMouseButton(GetBindingValue(name ".Short")) {
-                if (pressed & mask)
-                    HoldControllerMouseButton("LButton")
-                if (released & mask)
-                    ReleaseControllerMouseButtons()
-                downTick[name] := 0, longFired[name] := false
-                continue
-            }
             if (pressed & mask)
                 downTick[name] := now, longFired[name] := false
             if ((buttons & mask) && !longFired[name] && downTick[name]
@@ -10109,15 +11361,6 @@ PollController() {
             justPressed := isDown && !triggerDown[triggerName]
             justReleased := !isDown && triggerDown[triggerName]
             triggerDown[triggerName] := isDown
-            if ControllerBindingHoldsMouseButton(
-                GetBindingValue(triggerName ".Short")) {
-                if justPressed
-                    HoldControllerMouseButton("LButton")
-                if justReleased
-                    ReleaseControllerMouseButtons()
-                downTick[triggerName] := 0, longFired[triggerName] := false
-                continue
-            }
             if justPressed
                 downTick[triggerName] := now, longFired[triggerName] := false
             if (isDown && !longFired[triggerName] && downTick[triggerName]
@@ -10153,14 +11396,8 @@ PollController() {
 ; Startup
 ; ==============================================================================
 OnExit(OnCompanionExit)
-
-OnError(HandleUncaughtError)
-; Armed once and never disarmed -- deliberately not beside the poll timer, which
-; is cancelled whenever the companion is disabled.
-SetTimer(ControllerMouseSafetyTick, 5000)
 EnsureSettingsFile()
 LoadSettings()
-CheckXfeInstallationRecord()
 ; Echo the settings file actually in use and the values that came out of it.
 ; The INI is resolved beside the executable, so editing a copy in another folder
 ; silently has no effect -- exactly the failure that made a disabled RawInput
@@ -10171,22 +11408,12 @@ LogLine("Resolved: Backend=" ControllerBackend
     . ", RawInputProbe=" (EnableRawInputProbe ? "true" : "false")
     . ", HeartbeatSeconds=" HeartbeatSeconds ".")
 ApplyRuntimeTimers()
-; Recorded before anything can ask whether the helper process matches it.
-XfeInitializeInteractiveIdentity()
-; No-op unless the user opted in. When they have, this is where the UAC prompt
-; appears -- once, at startup, and never again for the session.
-SyncElevatedRtssHelperWithSettings()
 LogLine("Started SteamShell XFE Companion " AppVersion
     . " (PID " ScriptPid ", " (A_IsAdmin ? "administrator" : "standard user") ").")
 if ParkOnStartup
     SetTimer(ParkCursor, -1000)
 if EnableStartupPrograms
     SetTimer(RunStartupPrograms, -StartupProgramDelayMs)
-
-; Armed after the startup entries that usually bring RTSS up. The tick polls for
-; RTSS rather than launching it, and stops on the first successful restore or at
-; its own deadline. Shared with standalone; see SteamShell-Shared.ahk.
-SetTimer(RestoreRtssFrameLimitTick, 2000)
 
 Hotkey("^!+q", ToggleQuickMenu)
 Hotkey("^!+s", ShowSettings)
@@ -10204,131 +11431,3 @@ Hotkey("^!+d", DeleteControllerProfileForActiveDevice)
 Hotkey("^!+x", ExitCompanion)
 RegisterQuickMenuKeys()
 InitializeTrayMenu()
-
-; Seam for SteamShell-Shared.ahk. The scored answer first; the foreground
-; observation is retained below it for the case where nothing clears the score
-; threshold -- a windowed game, or one whose CPU has not been sampled yet.
-ProductBestGameExe() {
-    ; No LastObservedGameExe fallback any more. It existed because the scorer
-    ; could not see a minimized game, so a game that minimized itself scored
-    ; nothing and the last foreground executable was the only answer left. The
-    ; scorer sees them now, and that fallback answered from a stored name that
-    ; survives the process it names -- which is how a per-game frame cap ended up
-    ; written to a profile for a game that had already exited.
-    ;
-    ; The shell returns its best candidate here and nothing else; so does this.
-    return XfeBestGameWindow()
-}
-
-; The companion keeps its settings beside its own executable, so both directories
-; are A_ScriptDir. Written only when absent or wrong, so an ordinary start does
-; no file writes at all.
-RecordXfeInstallationPaths() {
-    global IniPath
-    recorded := SteamShellSetupRecord()
-    if (recorded["installDir"] = "" || recorded["dataDir"] = "") {
-        try {
-            IniWrite(A_ScriptDir, IniPath, "Setup", "InstallDirectory")
-            IniWrite(A_ScriptDir, IniPath, "Setup", "DataDirectory")
-        }
-    }
-}
-
-; Called after settings load. Advisory only -- see LogSteamShellSetupRecordDrift.
-CheckXfeInstallationRecord() {
-    LogSteamShellSetupRecordDrift(A_ScriptDir, A_ScriptDir, "Portable")
-    ; SetStatus, not a dialog. This runs during startup and the companion starts
-    ; alongside Steam under Xbox FSE -- a modal here would land on top of a
-    ; session the user is in the middle of entering. The Quick Menu shows it when
-    ; opened, the tray tip carries it meanwhile, and Health Check has the detail.
-    alert := InstallationRecordAlert(A_ScriptDir, A_ScriptDir, "Portable")
-    if (alert != "")
-        SetStatus(alert, "Warning")
-}
-
-; Seam for SteamShell-Shared.ahk. ProcessExist plus clearing the stale flag;
-; the shell re-verifies identity as well, which is the stronger check.
-ProductElevatedHelperAlive() {
-    return EnsureElevatedRtssHelperAlive()
-}
-
-; Seams for the shared settings scrollbar. Bounds come from SettingsLayout()
-; here; the shell keeps them in two globals.
-ProductSettingsScrollBar() {
-    global SettingsScrollBar
-    return IsObject(SettingsScrollBar) ? SettingsScrollBar : ""
-}
-
-ProductSettingsViewportHeight() {
-    layout := SettingsLayout()
-    return Max(1, layout["contentBottom"] - layout["contentTop"])
-}
-
-
-RunViaDesktopShell(filePath, arguments := "", directory := "", show := 1) {
-    static VT_UI4 := 0x13
-    static SWC_DESKTOP := ComValue(VT_UI4, 0x8)
-    try {
-        ComObject("Shell.Application").Windows.Item(SWC_DESKTOP).Document.Application
-            .ShellExecute(filePath, arguments, directory, "open", show)
-        return true
-    } catch {
-        return false
-    }
-}
-
-
-OpenTouchKeyboard() {
-    if WinExist("ahk_class IPTip_Main_Window") {
-        try WinShow("ahk_class IPTip_Main_Window")
-        try WinActivate("ahk_class IPTip_Main_Window")
-        return
-    }
-    if TryInvokeTouchKeyboard()
-        return
-    paths := [A_ProgramFiles "\Common Files\microsoft shared\ink\TabTip.exe"]
-    try {
-        pf86 := EnvGet("ProgramFiles(x86)")
-        if (pf86 != "")
-            paths.Push(pf86 "\Common Files\microsoft shared\ink\TabTip.exe")
-    }
-    tabTip := ""
-    for _, path in paths {
-        if FileExist(path) {
-            tabTip := path
-            break
-        }
-    }
-    if (tabTip = "") {
-        OpenOSK()
-        return
-    }
-    SplitPath(tabTip, , &directory)
-    if !ProcessExist("TabTip.exe") {
-        if !RunViaDesktopShell(tabTip, "", directory) {
-            OpenOSK()
-            return
-        }
-    }
-    Sleep 250
-    if !TryInvokeTouchKeyboard() {
-        if !RunViaDesktopShell(tabTip, "/SeekDesktop", directory)
-            OpenOSK()
-    }
-}
-
-
-EnsureRtssRunning() {
-    global RtssPath
-    if ProcessExist("RTSS.exe")
-        return true
-    path := NormalizePath(RtssPath)
-    if (path = "" || !FileExist(path))
-        return false
-    try {
-        Run('"' path '"', , "Min")
-        return ProcessWait("RTSS.exe", 3) != 0
-    } catch {
-        return false
-    }
-}

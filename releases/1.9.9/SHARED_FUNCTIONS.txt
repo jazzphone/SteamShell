@@ -1,0 +1,90 @@
+# Functions that MUST be byte-identical in SteamShell.ahk and SteamShell-XFE.ahk.
+#
+# The two trees are parallel, not one reference and one copy: changes that belong
+# to both are designed once and applied to both in the same pass. This file is
+# what makes that verifiable instead of merely intended. Validate-SharedParity.ps1
+# fails the build if any name below differs between the trees.
+#
+# A function differing here is not automatically a bug -- it may mean the two
+# genuinely diverged on purpose. In that case remove it from this list in the
+# same commit, so the divergence is a recorded decision rather than a surprise.
+#
+# The checker also reports functions that have BECOME identical and are not yet
+# listed. Adding them is how this list grows.
+#
+# Generated from the August 2026 cross-tree audit. Blank lines and # comments are
+# ignored; one function name per line.
+#
+# ---------------------------------------------------------------------------
+# Deliberately NOT listed, so the reason is on the record:
+#
+#   ToggleQuickMenuHdrState
+#       Standalone falls back to the Win+Alt+B chord when DisplayConfig cannot
+#       report Advanced Color state; XFE reports Unavailable instead, and its
+#       validator forbids that chord anywhere in its tree.
+#
+#       This is deliberate and well evidenced: XFE 0.1.9 drove the HDR row with
+#       only the chord and no live state; 0.1.14 replaced it with DisplayConfig
+#       and added the assertion in the same release; and the XFE README states
+#       the rule in user-facing terms -- read the real state "rather than
+#       assuming what the Win+Alt+B shortcut did", and show Unavailable
+#       "without sending a blind toggle".
+#
+#       The August 2026 audit misread this as a parity gap and ported the
+#       fallback in. XFE's own assertion caught it on the first build.
+#       Leave them different.
+#
+#   OpenOSK / OpenWindowsSettings
+#       Standalone runs elevated for high-integrity controller input, so both
+#       must cross its verified standard-user launch boundary. XFE deliberately
+#       runs at normal integrity and can launch them directly. Their privilege
+#       architectures now require different implementations.
+# ---------------------------------------------------------------------------
+
+ApplyRoundedCorners
+BlendHexColor
+CancelPendingRtssFrameCap
+CenteredPosition
+ClampFloat
+ClampInt
+CommitRtssPendingFrameCap
+DisplayScaleLevels
+EnsureDisplayScaleSelection
+EnsureGdiPlus
+GetPrimaryDisplayDeviceName
+GetPrimaryDisplayMode
+HexColorChannel
+IsRtssFrameCapPreset
+NormalizeHexColor
+QueueQuickMenuDisplayReflow
+QuickMenuAccentPresetHex
+QuickMenuAccentPresetNames
+QuickMenuAccentValueText
+QuickMenuAddRoundedPath
+QuickMenuApplyAccent
+QuickMenuArgb
+QuickMenuBottomMargin
+QuickMenuDisplayReflow
+QuickMenuDrawGlow
+QuickMenuDrawText
+QuickMenuFillRounded
+QuickMenuGlowPadding
+QuickMenuKeyboardActive
+QuickMenuMakeFont
+QuickMenuPaintRows
+QuickMenuRowHeight
+QuickMenuRowInset
+QuickMenuRowTop
+QuickMenuSelectFirst
+QuickMenuSelectLast
+QuickMenuStatusHeight
+QuickMenuStatusY
+QuickMenuStrokeRounded
+QuickMenuWidth
+RegisterQuickMenuKeys
+RtssFrameCapValueText
+RtssFrameCapWritable
+RtssGlobalFrameLimit
+SetDefaultAudioEndpointId
+ShutdownGdiPlus
+ShutdownRtssHooksApi
