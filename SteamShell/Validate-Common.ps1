@@ -605,13 +605,44 @@ function Assert-SharedParity {
             foreach ($k in $definitionsBy[$file].Keys) { $reachable[$k] = $true }
             $callText += ($definitionsBy[$file].Values -join "`n") + "`n"
         }
+        # Comments and string bodies removed. Tolerable while only `Name(` was
+        # matched; not tolerable once a bare name counts, because every comment
+        # that MENTIONS a function would be reported as a missing callback.
+        $callCode = (($callText -split "`n") |
+            ForEach-Object { $_ -replace '"(?:[^"`]|`.)*"', '""' } |
+            ForEach-Object { $_ -replace '(?<!`);.*$', '' }) -join "`n"
         foreach ($file in $definitionsBy.Keys) {
             if ($included -contains $file) { continue }
             foreach ($name in $definitionsBy[$file].Keys) {
                 if ($reachable.ContainsKey($name)) { continue }
-                if ($callText -match ('(?<![.\w])' + [regex]::Escape($name) + '\s*\(')) {
+                if ($callCode -match ('(?<![.\w])' + [regex]::Escape($name) + '\s*\(')) {
                     $crossTreeLeaks +=
                         "$program calls '$name', which is defined only in $file and is not compiled into it"
+                }
+                # A callback is passed by NAME, with no parentheses:
+                #
+                #   btnOk.OnEvent("Click", RecordShortcutChord_Accept)
+                #
+                # The pattern above cannot see that, so a shared function naming
+                # standalone's handler shipped into the companion, where
+                # AutoHotkey read the name as a local that is never assigned and
+                # wired the OK button to nothing. That is worse than a missing
+                # call: nothing fails to load, and one control silently does not
+                # work.
+                #
+                # Skipped when the name is ASSIGNED anywhere in the compiled set,
+                # because then it is an ordinary variable that happens to share a
+                # name with a function in the other tree -- AutoHotkey
+                # identifiers are case-insensitive, and standalone's local
+                # `settingsPrimaryActive` collides with the companion's
+                # SettingsPrimaryActive(). A callback is never assigned to.
+                elseif (($callCode -match
+                            ('(?<![.\w$])' + [regex]::Escape($name) + '(?![\w(])')) -and
+                        -not ($callCode -match
+                            ('(?<![.\w])' + [regex]::Escape($name) + '\s*(?::=|\+=|-=|\.=)'))) {
+                    $crossTreeLeaks +=
+                        "$program references '$name' as a callback, and it is defined only " +
+                        "in $file, so the handler is silently never wired up"
                 }
             }
         }

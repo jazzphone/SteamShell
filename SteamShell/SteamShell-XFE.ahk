@@ -10344,3 +10344,67 @@ EnsureRtssRunning() {
         return false
     }
 }
+
+
+RecordShortcutChord() {
+    global _ShortcutCap
+    result := Map("ok", false, "send", "", "display", "")
+    capture := Gui("+AlwaysOnTop -MinimizeBox +ToolWindow", "Record Shortcut")
+    capture.SetFont("s10", "Segoe UI")
+    capture.AddText("xm", "Press one shortcut chord, then choose OK.")
+    capture.SetFont("s12 Bold", "Consolas")
+    preview := capture.AddText("xm y+10 w420 h30", "(none)")
+    capture.SetFont("s10 Norm", "Segoe UI")
+    okButton := capture.AddButton("xm y+10 w90 Default", "OK")
+    cancelButton := capture.AddButton("x+10 yp w90", "Cancel")
+    _ShortcutCap := Map(
+        "gui", capture,
+        "preview", preview,
+        "input", 0,
+        "mainKey", "",
+        "liveMods", Map("Ctrl", false, "Alt", false, "Shift", false, "Win", false),
+        "snapMods", Map("Ctrl", false, "Alt", false, "Shift", false, "Win", false),
+        "done", false,
+        "cancelled", false
+    )
+    okButton.OnEvent("Click", RecordShortcutAccept)
+    cancelButton.OnEvent("Click", RecordShortcutCancel)
+    capture.OnEvent("Close", RecordShortcutCancel)
+    capture.OnEvent("Escape", RecordShortcutCancel)
+    input := InputHook()
+    input.NotifyNonText := true
+    input.KeyOpt("{All}", "NS")
+    input.OnKeyDown := RecordShortcutKeyDown
+    input.OnKeyUp := RecordShortcutKeyUp
+    _ShortcutCap["input"] := input
+    capture.Show("AutoSize Center")
+    input.Start()
+    while IsObject(_ShortcutCap) && !_ShortcutCap["done"]
+        Sleep 30
+    if !IsObject(_ShortcutCap)
+        return result
+    cancelled := _ShortcutCap["cancelled"]
+    mainKey := _ShortcutCap["mainKey"]
+    mods := _ShortcutCap["snapMods"]
+    try _ShortcutCap["input"].Stop()
+    try _ShortcutCap["gui"].Destroy()
+    _ShortcutCap := ""
+    if (cancelled || mainKey = "")
+        return result
+    shortcut := ""
+    display := ""
+    if mods["Ctrl"]
+        shortcut .= "^", display .= "Ctrl+"
+    if mods["Alt"]
+        shortcut .= "!", display .= "Alt+"
+    if mods["Shift"]
+        shortcut .= "+", display .= "Shift+"
+    if mods["Win"]
+        shortcut .= "#", display .= "Win+"
+    shortcut .= NormalizeKeyForSend(mainKey)
+    display .= NormalizeKeyForDisplay(mainKey)
+    result["ok"] := true
+    result["send"] := shortcut
+    result["display"] := display
+    return result
+}

@@ -168,7 +168,6 @@ ReadNumber
 ReadText
 ReassertTrayIcon
 RecordShortcutCancel
-RecordShortcutChord
 RefreshHealthCheck
 RegisterQuickMenuKeys
 RegisterTaskbarCreatedListener

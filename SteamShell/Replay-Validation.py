@@ -397,6 +397,30 @@ def main():
                 if re.search(r"(?<![.\w])" + re.escape(name) + r"\s*\(", call_text, re.I):
                     fail(f"{program} calls '{name}', defined only in {f} and not compiled "
                          "into it. AutoHotkey resolves that at LOAD time.")
+                # A callback is passed by NAME, with no parentheses:
+                #   btnOk.OnEvent("Click", RecordShortcutChord_Accept)
+                #   SetTimer(PollController, 16)
+                # The pattern above cannot see those, and neither could the
+                # PowerShell check it mirrors. That is how a shared function
+                # referencing standalone's handler name shipped into the
+                # companion, where AutoHotkey read the name as a local variable
+                # that is never assigned and warned at load. A callback that
+                # silently resolves to nothing is worse than a missing call: the
+                # program starts, and one button does nothing.
+                elif (re.search(r"(?<![.\w$])" + re.escape(name) + r"(?![\w(])",
+                                call_text, re.I)
+                      # ...unless it is ASSIGNED somewhere in the compiled set, in
+                      # which case it is an ordinary local that happens to share a
+                      # name with a function in the other tree. AutoHotkey
+                      # identifiers are case-insensitive, so standalone's local
+                      # `settingsPrimaryActive` collides with the companion's
+                      # SettingsPrimaryActive(). A callback reference is never
+                      # assigned to; that is what tells the two apart.
+                      and not re.search(r"(?<![.\w])" + re.escape(name)
+                                        + r"\s*(?::=|\+=|-=|\.=)", call_text, re.I)):
+                    fail(f"{program} references '{name}' as a callback, and it is defined "
+                         f"only in {f}. AutoHotkey reads the name as an unassigned local, "
+                         "so the handler is silently never wired up.")
 
     # ---- the Shared seam, kept in step with the PowerShell allowlist ------
     #

@@ -107,3 +107,33 @@ MouseWatch: the gates genuinely differ -- standalone suppresses hiding while Exp
 ExecuteControllerBinding: the builtin ACTION SET is per-product, the same divergence recorded for ControllerBindingPretty -- the companion has TaskView, WindowsDesktop and Settings, standalone has ControlPanel and launches Explorer through its de-elevation path. Phase 4a's table should absorb both.
 SendChordSafe: three-line wrapper over SendChordReleasingModifiers in SteamShell-Common.ahk; the shared copy also declines while the companion is disabled, which the helper has no concept of
 
+# ------------------------------------------------------------------------------
+# PERMANENT -- parallel handler families under different names
+# ------------------------------------------------------------------------------
+# THE CASE THAT SHOWED THE GATE HAS A BLIND SPOT, and the reason the reachability
+# check now looks for bare references as well as calls.
+#
+# Each tree owns a family of shortcut-capture handlers named its own way:
+#
+#   standalone                            companion
+#   RecordShortcutChord_OnKeyDown         RecordShortcutKeyDown
+#   RecordShortcutChord_OnKeyUp           RecordShortcutKeyUp
+#   RecordShortcutChord_TrySetMod         RecordShortcutSetModifier
+#   RecordShortcutChord_GetLiveMods       RecordShortcutGetLiveMods
+#   RecordShortcutChord_UpdatePreview     RecordShortcutUpdatePreview
+#   RecordShortcutChord_Accept            RecordShortcutAccept
+#
+# RecordShortcutChord wires those up, so its body can only name one set. The
+# fingerprint scored the pair 1.00 and it was shared on that evidence -- because
+# every one of those names is passed as a CALLBACK, with no parentheses, and the
+# call-sequence comparison only sees calls. The single thing that differed was
+# the single thing the measurement could not see.
+#
+# In the companion the result was not a crash. AutoHotkey read the missing name
+# as a local that is never assigned, warned at load, and wired the OK button to
+# nothing. Renaming one family would merge these, but that is six renames in a
+# tree that works, for one function; the entry is cheaper and the reason is now
+# on the record.
+
+RecordShortcutChord: each tree wires up its own handler family, named its own way, and the body can only name one set -- see the table above
+
