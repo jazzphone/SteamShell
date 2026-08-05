@@ -7614,67 +7614,51 @@ prevViewDown := true
     }
 
     ; Triggers (analog) as configurable Short/Long while holding View/Back
-    ; LT
-    ltIsDown := (lt > 30)
-    ltPressedEdge := (ltIsDown && !prevTrigDown["LT"])
-    ltReleasedEdge := (!ltIsDown && prevTrigDown["LT"])
-    prevTrigDown["LT"] := ltIsDown
+    ; Triggers (analog) as configurable Short/Long while holding View/Back.
+    ;
+    ; One loop rather than the LT and RT blocks written out twice. The two were
+    ; identical bar the axis they read, and the companion has expressed the same
+    ; thing as a loop since it was written; this converges on the shape that has
+    ; already been run on hardware.
+    ;
+    ; Deliberately still INLINE in the poll loop, and deliberately not lifted
+    ; into a shared helper alongside the button loop above. Hold-to-drag is
+    ; decided here on purpose: ExecuteControllerBinding has press-only callers --
+    ; the Settings pointer fires RB.Short on press with nothing that will ever
+    ; see the release -- so a button-down issued from a callee would never be
+    ; lifted, inside the one window where the user has no other pointer.
+    for _, triggerName in ["LT", "RT"] {
+    isDown := (triggerName = "LT" ? lt : rt) > 30
+    pressedEdge := (isDown && !prevTrigDown[triggerName])
+    releasedEdge := (!isDown && prevTrigDown[triggerName])
+    prevTrigDown[triggerName] := isDown
 
-    if ControllerBindingHoldsMouseButton(GetBindingValue("LT.Short")) {
-    if (ltPressedEdge)
+    if ControllerBindingHoldsMouseButton(GetBindingValue(triggerName ".Short")) {
+    if (pressedEdge)
     HoldControllerMouseButton("LButton")
-    if (ltReleasedEdge)
+    if (releasedEdge)
     ReleaseControllerMouseButtons()
-    downTick["LT"] := 0
-    longFired["LT"] := false
-    } else {
-    if (ltPressedEdge) {
-    downTick["LT"] := now
-    longFired["LT"] := false
-    }
-    if (ltIsDown && !longFired["LT"] && downTick["LT"] && (now - downTick["LT"]) >= ControllerChordHoldMs) {
-    if HasLongBinding("LT") {
-    longFired["LT"] := true
-    ExecuteControllerBinding("LT.Long")
-    }
-    }
-    if (ltReleasedEdge && downTick["LT"]) {
-    if (!longFired["LT"])
-    ExecuteControllerBinding("LT.Short")
-    downTick["LT"] := 0
-    longFired["LT"] := false
-    }
+    downTick[triggerName] := 0
+    longFired[triggerName] := false
+    continue
     }
 
-    ; RT
-    rtIsDown := (rt > 30)
-    rtPressedEdge := (rtIsDown && !prevTrigDown["RT"])
-    rtReleasedEdge := (!rtIsDown && prevTrigDown["RT"])
-    prevTrigDown["RT"] := rtIsDown
-
-    if ControllerBindingHoldsMouseButton(GetBindingValue("RT.Short")) {
-    if (rtPressedEdge)
-    HoldControllerMouseButton("LButton")
-    if (rtReleasedEdge)
-    ReleaseControllerMouseButtons()
-    downTick["RT"] := 0
-    longFired["RT"] := false
-    } else {
-    if (rtPressedEdge) {
-    downTick["RT"] := now
-    longFired["RT"] := false
+    if (pressedEdge) {
+    downTick[triggerName] := now
+    longFired[triggerName] := false
     }
-    if (rtIsDown && !longFired["RT"] && downTick["RT"] && (now - downTick["RT"]) >= ControllerChordHoldMs) {
-    if HasLongBinding("RT") {
-    longFired["RT"] := true
-    ExecuteControllerBinding("RT.Long")
+    if (isDown && !longFired[triggerName] && downTick[triggerName]
+    && (now - downTick[triggerName]) >= ControllerChordHoldMs) {
+    if HasLongBinding(triggerName) {
+    longFired[triggerName] := true
+    ExecuteControllerBinding(triggerName ".Long")
     }
     }
-    if (rtReleasedEdge && downTick["RT"]) {
-    if (!longFired["RT"])
-    ExecuteControllerBinding("RT.Short")
-    downTick["RT"] := 0
-    longFired["RT"] := false
+    if (releasedEdge && downTick[triggerName]) {
+    if (!longFired[triggerName])
+    ExecuteControllerBinding(triggerName ".Short")
+    downTick[triggerName] := 0
+    longFired[triggerName] := false
     }
     }
 
