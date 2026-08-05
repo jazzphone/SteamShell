@@ -206,22 +206,25 @@ def top_level_globals(text):
     visible for read AND write inside every function without redeclaration. The
     in-function `global` lines are documentation, not requirement -- which is
     exactly why they are allowed to go stale, and why Phase 3 asserts them."""
-    names = set()
-    for line in text.split("\n"):
-        m = re.match(r"^global\s+(.*)", line)
-        if not m:
-            continue
-        for decl in m.group(1).split(","):
-            n = re.match(r"\s*([A-Za-z_]\w*)", decl)
-            if n:
-                names.add(n.group(1).lower())
-    return names
+    return _declared_names(text, r"^global\s+(.*)")
 
 
 def in_function_globals(text):
+    return _declared_names(text, r"^\s+global\s+(.*)")
+
+
+def _declared_names(text, pattern):
+    """Comments stripped BEFORE splitting on commas.
+
+    Splitting first meant a trailing comment that happened to contain a comma
+    contributed its words as declared globals -- `global X := 80 ; min ms, per
+    tick` yielded a global named `tick`. Harmless in the cross-tree check, which
+    only asks whether a name is declared SOMEWHERE, and not harmless at all in
+    the completeness check, which asks whether a block lists everything it
+    touches and would have demanded three names that do not exist."""
     names = set()
     for line in text.split("\n"):
-        m = re.match(r"^\s+global\s+(.*)", line)
+        m = re.match(pattern, strip_comments(line))
         if not m:
             continue
         for decl in m.group(1).split(","):
@@ -402,6 +405,35 @@ def main():
         for missing in sorted(shared_globals - declared):
             fail(f"SteamShell-Shared.ahk references global '{missing}', which {tree} never "
                  "declares. Reading it before assignment throws at run time.")
+
+    # ---- global declaration blocks must be complete ----------------------
+    #
+    # Every name here is a SUPER-GLOBAL -- declared at depth zero, which makes it
+    # readable and writable inside every function with no declaration at all. The
+    # ~1,100 in-function `global` lines are therefore documentation, not a
+    # requirement, and nothing checked them, so they were free to lie. They did:
+    # WindowEngineScoreWeights declared nine and read a tenth.
+    #
+    # The choice was to delete them or to make them true. They are kept, because
+    # they are the only statement of what state a function touches in a codebase
+    # with 600-odd of them -- but an unchecked 1,100-line claim is worth less than
+    # no claim, so this is what makes it worth keeping.
+    for tree in ("SteamShell.ahk", "SteamShell-XFE.ahk"):
+        supers = top_level_globals(sources[tree])
+        for name, line, body in function_list(sources[tree]):
+            declared = _declared_names("\n".join(body), r"^\s+global\s+(.*)")
+            if not declared:
+                continue
+            used = set()
+            for l in body[1:]:
+                for m in re.finditer(r"\b([A-Za-z_]\w*)\b", strip_comments(l)):
+                    if m.group(1).lower() in supers:
+                        used.add(m.group(1).lower())
+            missing = sorted(used - declared)
+            if missing:
+                fail(f"{tree}:{line} {name}() declares a global block that omits "
+                     f"{', '.join(missing)}. The block is the only record of what "
+                     "state the function touches; an incomplete one is worse than none.")
 
     # ---- the fingerprint gate --------------------------------------------
     divergent = read_divergent()

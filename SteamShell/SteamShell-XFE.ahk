@@ -905,6 +905,17 @@ LoadSettings() {
     global RtssCustomFrameCapShortcut, RtssFrameLimiterOnShortcut, RtssFrameLimiterOffShortcut
     global RtssRestoreFrameLimitOnStartup, RtssLastFrameCapMode, RtssLastFrameCapFps
     global RtssElevatedFrameCapWrites, RtssFrameCapWriteBlocked
+    ; The game-score and Assist weighting keys. Every one of these is read a few
+    ; dozen lines below and none was declared, which was survivable only because
+    ; they are super-globals -- the assignment reached the right variable anyway.
+    ; The block, not the behaviour, was wrong.
+    global EnableGameScoreLogging, GameLogMode, GameLogTopN, GameLogIntervalMs
+    global GameLogIncludeTitles
+    global AssistScoreFullscreen, AssistScoreBorderlessLarge, AssistScoreTitleBonus
+    global AssistScoreCpuAboveThreshold, AssistScoreCpuNonZeroBonus
+    global AssistScoreAudioActive, AssistFullscreenTolerance
+    global AssistFullscreenPosTolerancePx, AssistAllowZeroCpuAsCandidate
+    global EnableAudioAssist, AudioPeakThreshold
 
     ; Floor of 5s rather than 15s: during a short diagnostic run inside Xbox FSE
     ; the heartbeat is the only proof the process is still alive, and a 60s gap
@@ -6365,6 +6376,7 @@ QuickMenuGetRows() {
     global DisplaySelectedWidth, DisplaySelectedHeight, DisplaySelectedFrequency
     global DisplaySelectedScalePercent
     global EnablePersistentMouseMode
+    global RtssPendingFrameCap
     rows := []
     switch QuickMenuPage {
         case "MAIN":

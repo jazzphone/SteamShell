@@ -3910,6 +3910,7 @@ ShowSplash() {
 
 StartSplashVideo_MPV(vp) {
     global SplashMpvPath, SplashMpvPid, SplashVideoMute, SplashTopmostGuardMs, SplashVideoPlayFull, SplashFailReason
+    global SplashForceSDR, SplashMpvHwnd
 
     mpv := NormalizeMediaPath(SplashMpvPath)
     if (mpv = "" || !FileExist(mpv)) {
@@ -9017,6 +9018,9 @@ WindowEngineScoreWeights() {
     global ScoreFullscreen, ScoreBorderlessLarge, ScoreTitleBonus
     global GameCPUThresholdPercent, ScoreCpuAboveThreshold, ScoreCpuNonZeroBonus
     global GameAllowZeroCpuAsCandidate
+    ; Carried in the weights map for parity with the companion; the evaluate
+    ; loop adds this bonus itself, once a candidate has survived the CPU verdict.
+    global ScoreAudioActive
     return Map(
         "fullscreenTolerance", FullscreenTolerance,
         "positionTolerancePx", FullscreenPosTolerancePx,
@@ -16847,6 +16851,7 @@ XfeElevatedHelperDirectory() {
 ; [RTSS] EnableElevatedFrameCapWrites is turned on, and that is off by default.
 DeploySteamShellXfe(targetDirectory, registerStartup := true, showResult := true) {
     global SteamShellRegKey, ScriptPid, IntentionalExitMode, SteamShellProduct
+    global ShellRegKey
 
     if !A_IsCompiled {
         if showResult

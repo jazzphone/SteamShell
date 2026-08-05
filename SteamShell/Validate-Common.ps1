@@ -879,6 +879,66 @@ function Assert-SharedParity {
             "product forgot it.")
     }
 
+    # In-function global blocks must list everything they touch.
+    #
+    # Every one of these names is a SUPER-GLOBAL -- declared at depth zero, which
+    # AutoHotkey makes readable and writable inside every function with no
+    # declaration at all. The ~1,100 in-function `global` lines are therefore
+    # documentation rather than a requirement, and nothing checked them, so they
+    # were free to be wrong. They were: WindowEngineScoreWeights declared nine
+    # and read a tenth, and the companion's LoadSettings omitted sixteen.
+    #
+    # Deleting them was the other option. They are kept because they are the only
+    # statement of what state a function touches in a tree with 600 of them, and
+    # this is what makes keeping them worth anything.
+    $blockFailures = @()
+    foreach ($pair in @(
+        @{ Name = "SteamShell.ahk"; Path = $standalonePath },
+        @{ Name = "SteamShell-XFE.ahk"; Path = $companionPath })) {
+        $treeText = Get-Content -LiteralPath $pair.Path -Raw
+        $supers = @{}
+        foreach ($m in [regex]::Matches($treeText, '(?m)^global\s+([^\r\n]+)')) {
+            $bare = $m.Groups[1].Value -replace '(?<!`);.*$', ''
+            foreach ($piece in ($bare -split ',')) {
+                if ($piece -match '^\s*([A-Za-z_]\w*)') {
+                    $supers[$Matches[1].ToLowerInvariant()] = $true
+                }
+            }
+        }
+        foreach ($fn in (Get-AhkFunctionMap -Text $treeText)) {
+            $declared = @{}
+            foreach ($m in [regex]::Matches($fn.Body, '(?m)^\s+global\s+([^\r\n]+)')) {
+                $bare = $m.Groups[1].Value -replace '(?<!`);.*$', ''
+                foreach ($piece in ($bare -split ',')) {
+                    if ($piece -match '^\s*([A-Za-z_]\w*)') {
+                        $declared[$Matches[1].ToLowerInvariant()] = $true
+                    }
+                }
+            }
+            if ($declared.Count -eq 0) { continue }
+            $used = @{}
+            $bodyLines = $fn.Body -split "`n"
+            for ($i = 1; $i -lt $bodyLines.Count; $i++) {
+                $clean = $bodyLines[$i] -replace '"(?:[^"`]|`.)*"', '""'
+                $clean = $clean -replace '(?<!`);.*$', ''
+                foreach ($m in [regex]::Matches($clean, '\b([A-Za-z_]\w*)\b')) {
+                    $key = $m.Groups[1].Value.ToLowerInvariant()
+                    if ($supers.ContainsKey($key)) { $used[$key] = $true }
+                }
+            }
+            $omitted = @($used.Keys | Where-Object { -not $declared.ContainsKey($_) } | Sort-Object)
+            if ($omitted.Count -gt 0) {
+                $blockFailures +=
+                    "$($pair.Name):$($fn.Line) $($fn.Name)() omits " + ($omitted -join ", ")
+            }
+        }
+    }
+    Assert-True ($blockFailures.Count -eq 0) (
+        "Functions declare a global block that does not list every super-global " +
+        "they touch: " + ($blockFailures -join "; ") +
+        ". The block is the only record of what state a function reaches; an " +
+        "incomplete one is worse than none.")
+
     # THE FINGERPRINT GATE.
     #
     # This replaced an advisory that compared bodies with -ceq and reported
