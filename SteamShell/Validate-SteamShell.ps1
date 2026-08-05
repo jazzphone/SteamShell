@@ -933,11 +933,18 @@ Assert-True (
     "The RTSS shortcut fallback must run integration, shortcut, then EnsureRtssRunning, from one helper.")
 # Selecting a state RTSS is already in must SAY so. Doing nothing silently is
 # indistinguishable from being broken on a couch UI with no keyboard.
+#
+# Reads $source, not $rawSource. Both functions now live in
+# SteamShell-Shared.ahk -- they differed only by ShowNotification against
+# SetStatus, and both of those were already one-line aliases for SharedNotify.
+# $rawSource exists so a -notmatch can be scoped to the tree; using it for a
+# -match asserted something the rule never claimed, that the behaviour lives in
+# this file rather than that it exists at all.
 Assert-True (
-    $rawSource -match
+    $source -match
         '(?sm)^SetRtssOverlayState\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?' +
         'is already " \((?:showOverlay|enabled) \? "on" : "off"\)' -and
-    $rawSource -match
+    $source -match
         '(?sm)^SetRtssFrameLimiterState\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?' +
         'is already " \((?:enableLimiter|enabled) \? "on" : "off"\)') (
     "Setting RTSS overlay or limiter to the state it already holds must report it.")

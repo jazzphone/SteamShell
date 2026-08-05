@@ -1044,8 +1044,29 @@ function Assert-SharedParity {
 
     # A stale entry fails too, so the allowlist cannot quietly become a list
     # nobody reads. Deleting the entry is part of merging the two copies.
+    # An entry also earns its place by covering a Helper/Shared name collision,
+    # which the gate above never sees: it compares the two TREES only.
+    #
+    # SteamShell-Helper.ahk cannot #Include SteamShell-Shared.ahk, so ReadBool,
+    # ReadInt, InitXInput, HasLongBinding and SendChordSafe necessarily exist in
+    # both. They are no longer two implementations -- each is a three-line
+    # wrapper binding its own global to one definition in
+    # SteamShell-Common.ahk -- but the NAME is still duplicated, and that is what
+    # the entry records.
+    #
+    # This exemption existed in Replay-Validation.py and not here, so the two
+    # harnesses disagreed: clean on the development machine, five failures on
+    # Windows. That is the exact hazard the header of that file warns about, and
+    # the reason both sides implement the fingerprint identically.
+    $helperWrappers = @{}
+    foreach ($name in $helper.Keys) {
+        if ($shared.ContainsKey($name)) { $helperWrappers[$name.ToLowerInvariant()] = $true }
+    }
     $staleDivergent = @(
-        $divergent.Keys | Where-Object { -not $flagged.ContainsKey($_) } | Sort-Object)
+        $divergent.Keys |
+            Where-Object {
+                -not $flagged.ContainsKey($_) -and -not $helperWrappers.ContainsKey($_) } |
+            Sort-Object)
     Assert-True ($staleDivergent.Count -eq 0) (
         "DIVERGENT_FUNCTIONS.txt lists functions whose two copies no longer " +
         "diverge, or which are no longer defined in both trees: " +

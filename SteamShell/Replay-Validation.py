@@ -12,7 +12,7 @@ WHY THIS EXISTS
   scratch work that nobody could re-run. This is that practice, committed.
 
   It is NOT a second validator. It reproduces the structural checks in
-  Validate-Common.ps1, and it REPLAYS -- rather than restates -- the ~825 regex
+  Validate-Common.ps1, and it REPLAYS -- rather than restates -- the ~895 regex
   assertions in Validate-SteamShell.ps1 and Validate-SteamShell-XFE.ps1, reading
   them out of those files at run time. There is one copy of every product rule
   and it is still the PowerShell one; this only fires it earlier.
@@ -581,14 +581,29 @@ def main():
         vtext = "\n".join(
             re.sub(r"(?<!`)#.*$", "", line)
             for line in decode_like_powershell((ROOT / vpath).read_bytes()).split("\n"))
+        # $rawSource as well as $source, EACH AGAINST THE TEXT IT NAMES.
+        #
+        # $rawSource is the tree file without its #Includes resolved, and it
+        # exists so a -notmatch can be scoped to the tree: '<LogonTrigger>' and
+        # '<RunLevel>HighestAvailable</RunLevel>' are forbidden in the tree and
+        # perfectly legal in SteamShell-Common.ahk, which builds the task XML.
+        # Replaying a tree-scoped -notmatch against the effective source reports
+        # five violations that do not exist, and a harness that cries wolf stops
+        # being run -- which is the failure this whole file was written against.
+        #
+        # Replaying only $source was the other error: two -match assertions read
+        # $rawSource, so moving the RTSS state-report functions into the shared
+        # file broke them invisibly here and Windows found them instead.
+        texts = {"source": source, "rawsource": read_source(spath)}
         for op, want in (("-match", True), ("-notmatch", False)):
-            for m in re.finditer(r"\$source\s+" + re.escape(op)
+            for m in re.finditer(r"\$(raw[Ss]ource|[Ss]ource)\s+" + re.escape(op)
                                  + r"\s+((?:\s*(?:\+\s*)?'(?:[^']|'')*'\s*)+)", vtext):
+                subject = texts[m.group(1).lower()]
                 pattern = "".join(f.replace("''", "'")
-                                  for f in re.findall(r"'((?:[^']|'')*)'", m.group(1)))
+                                  for f in re.findall(r"'((?:[^']|'')*)'", m.group(2)))
                 line = vtext[:m.start()].count("\n") + 1
                 try:
-                    hit = bool(re.search(pattern, source, re.I))
+                    hit = bool(re.search(pattern, subject, re.I))
                 except re.error:
                     continue  # .NET-only construct; the build will judge it
                 replayed += 1
