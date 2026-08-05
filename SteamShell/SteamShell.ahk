@@ -81,7 +81,7 @@ try DirCreate(SteamShellDataDir "\backups")
 global SettingsPath := SteamShellDataDir "\SteamShellSettings.ini"
 ; Back-compat alias used by some helper functions
 global IniPath := SettingsPath
-global CurrentSettingsSchemaVersion := 20
+global CurrentSettingsSchemaVersion := 21
 global LogPath := SteamShellDataDir "\logs\SteamShell.log"
 global IntentionalExitMode := ""
 global SafeMode := false
@@ -586,6 +586,18 @@ global TempDisables := Map() ; key -> Map("prev", bool, "until", tick)
 global LiveLogSaved := Map() ; original logging settings when live logging enabled
 global HandsOffUntilTick := 0 ; if > now: pause focus behaviors
 global LastActionText := "Idle"
+; The scored candidate table from the most recent window-engine pass.
+;
+; Everything here is already computed to pick a game; only the winner used to
+; survive the function. Keeping the losers is what lets the Quick Menu answer
+; "why did it pick that window?" on the device, instead of the question becoming
+; a log request and a round trip.
+;
+; Trimmed and capped rather than held whole: these are read once a poll and the
+; page shows a handful of rows.
+global LastGameCandidates := []
+global GameScoreMaxRows := 8
+global EnableGameDetectionMenu := true
 global LastBestCandidateText := "-"
 global LastBestCandidateScore := -1
 global LastBestCandidateProc := ""
@@ -2663,6 +2675,7 @@ ChordHoldMs=500                                             ; Required L3+R3 hol
 TaskForceCloseHoldMs=1200                                   ; Hold X this long in Task Switcher to force-close a process
 MainOrder=Audio|Display|RTSS|SteamMenu|SteamQuickAccess|Tasks|GameBar|Keyboard|MouseMode|Settings|System
 HiddenItems=                                                ; Optional rows to hide; Settings and System stay available
+ShowGameDetection=true                                      ; Game Detection row under System: what the window engine scored and why
 AccentColor=Purple                                          ; Steam Blue|Blue|Purple|Magenta|Red|Orange|Yellow|Green|Teal|Custom
 AccentColorCustom=107C10                                    ; RRGGBB used when AccentColor=Custom; invalid values fall back to Purple
 
@@ -3393,7 +3406,7 @@ LoadSettings() {
     global LauncherCleanupLauncherExeListRaw, LauncherCleanupBackgroundExeListRaw, LauncherCleanupExcludeExeListRaw
     global LauncherCleanupLauncherList, LauncherCleanupBackgroundList, LauncherCleanupExcludeSet
     global EnableControllerMouseMode, EnablePersistentMouseMode, ControllerIndex, ControllerPollIntervalMs, ControllerDeadzone, ControllerMouseSpeed, ControllerMouseFastMultiplier, ControllerScrollIntervalMs, ControllerScrollStep, ControllerChordHoldMs
-    global EnableQuickMenu, QuickMenuChordHoldMs, TaskForceCloseHoldMs
+    global EnableQuickMenu, EnableGameDetectionMenu, QuickMenuChordHoldMs, TaskForceCloseHoldMs
     global QuickMenuMainOrderRaw, QuickMenuHiddenItemsRaw
     global QuickMenuMainOrder, QuickMenuHiddenItems
     global SteamMenuShortcut, SteamQuickAccessShortcut, SteamOverlayShortcut
@@ -3582,6 +3595,7 @@ LauncherCleanupAudioPeakThreshold := ReadNumber("LauncherCleanup", "AudioPeakThr
     ControllerChordHoldMs := ReadInt("Controller", "ControllerChordHoldMs", 500, 100, 2000)
 
     EnableQuickMenu := ReadBool("QuickMenu", "Enable", true)
+    EnableGameDetectionMenu := ReadBool("QuickMenu", "ShowGameDetection", true)
     QuickMenuChordHoldMs := ReadInt("QuickMenu", "ChordHoldMs", 500, 300, 3000)
     TaskForceCloseHoldMs := ReadInt("QuickMenu", "TaskForceCloseHoldMs", 1200, 600, 3000)
     QuickMenuMainOrderRaw := IniReadS(
@@ -5481,6 +5495,7 @@ ShowQuickMenuLayoutManager(*) {
 }
 
 QuickMenuGetDefinitions() {
+    global EnableGameDetectionMenu, LastGameCandidates
     global QuickMenuPage, QuickMenuDisplayModes
     global QuickMenuTaskPage, QuickMenuTaskWindows, PinnedForegroundHwnd
     global EnableAudioQuickControls, EnableDisplayQuickControls
@@ -5503,10 +5518,31 @@ QuickMenuGetDefinitions() {
             rows.Push(Map("id", "returnShell", "label", "Return To SteamShell"))
         else
             rows.Push(Map("id", "desktop", "label", "Exit Steam To Desktop"))
+        if EnableGameDetectionMenu
+            rows.Push(Map("id", "gameDetection", "label", "Game Detection"))
         rows.Push(Map("id", "exitApp", "label", "Exit SteamShell"))
         rows.Push(Map("id", "sleep", "label", "Sleep"))
         rows.Push(Map("id", "restart", "label", "Restart PC"))
         rows.Push(Map("id", "shutdown", "label", "Shut Down"))
+        return rows
+    }
+
+    ; Read-only. Every number here was already computed in order to choose a
+    ; game; this page only shows the losers alongside the winner, which is the
+    ; difference between "it picked the wrong window" and a report somebody can
+    ; act on without asking for a log.
+    ;
+    ; Ids carry a colon, like the LAYOUT page's rows, because the list is built
+    ; from whatever the last pass found rather than from a fixed set.
+    if (QuickMenuPage = "GAMESCORE") {
+        rows.Push(Map("id", "gameScoreBack", "label", "Back To System"))
+        if (LastGameCandidates.Length = 0) {
+            rows.Push(Map("id", "gameScoreEmpty", "label", "No candidates scored yet"))
+            return rows
+        }
+        for index, entry in LastGameCandidates
+            rows.Push(Map("id", "gamescore:" index, "label",
+                (index = 1 ? "> " : "   ") entry["proc"]))
         return rows
     }
 
@@ -6135,6 +6171,7 @@ QuickMenuValue(id) {
     global DisplaySelectedWidth, DisplaySelectedHeight, DisplaySelectedFrequency
     global DisplaySelectedScalePercent
     global QuickMenuTaskPage, QuickMenuTaskWindows
+    global LastGameCandidates, LastBestCandidateProc, LastBestCandidateScore
     global QuickMenuConfirmAction, QuickMenuConfirmUntilTick
     global EnableSplashScreen, EnableTaskbarHiding, EnableDesktopBlackout
     global EnableAudioQuickControls, EnableDisplayQuickControls
@@ -6150,6 +6187,21 @@ QuickMenuValue(id) {
 
     if (SubStr(id, 1, 7) = "layout:")
         return GetControllerLayoutText(SubStr(id, 8))
+    ; gamescore:N -- the evidence, not just the number. The score alone does not
+    ; say which rule produced it, which is the whole question this page answers.
+    if (SubStr(id, 1, 10) = "gamescore:") {
+        index := ToInt(SubStr(id, 11), 0)
+        if (index < 1 || index > LastGameCandidates.Length)
+            return ""
+        entry := LastGameCandidates[index]
+        parts := [entry["score"] ""]
+        if entry["nearFS"]
+            parts.Push("fullscreen")
+        parts.Push(entry["cpuKnown"] ? "cpu " Round(entry["cpu"]) "%" : "cpu ?")
+        if entry["audio"]
+            parts.Push("audio")
+        return JoinWith(parts, " | ")
+    }
     if (SubStr(id, 1, 11) = "taskWindow:") {
         item := FindTaskSwitcherWindow(ToInt(SubStr(id, 12), 0))
         return IsObject(item) ? ShortenText(item["exe"], 20) : "CLOSED"
@@ -6181,6 +6233,12 @@ QuickMenuValue(id) {
             if !IsObject(hdrState)
                 return "Unavailable"
             return "‹ " (hdrState["enabled"] ? "ON" : "OFF") " ›"
+        case "gameDetection":
+            return LastBestCandidateProc != ""
+                ? LastBestCandidateProc " (" LastBestCandidateScore ")"
+                : "Nothing detected"
+        case "gameScoreEmpty":
+            return ""
         case "hdrUnavailable":
             hdrState := GetPrimaryHdrState()
             if !IsObject(hdrState)
@@ -7105,6 +7163,16 @@ QuickMenuActivateSelected() {
             QuickMenuPage := "SYSTEM"
             QuickMenuSelected := 1
             QuickMenuBuildGui()
+            return
+        case "gameDetection":
+            QuickMenuPage := "GAMESCORE"
+            QuickMenuSelected := 1
+            QuickMenuRefresh()
+            return
+        case "gameScoreBack":
+            QuickMenuPage := "SYSTEM"
+            QuickMenuSelected := 1
+            QuickMenuRefresh()
             return
         case "audioBack", "systemBack", "tasksBack", "displayBack", "rtssBack", "layoutBack", "settingsBack", "settingsHome":
             QuickMenuGoBack()
@@ -9032,6 +9100,7 @@ WindowEngineEvaluateGame(snapshot, forceRun, &allowActivate, &skipReason) {
     global EnableGameScoreLogging, GameLogMode, GameLogTopN, GameLogRejectNearCandidates, GameLogRejectMinAreaPercent
     global AudioPeakThreshold
     global LastActionText, LastBestCandidateScore, LastBestCandidateProc, LastBestCandidateTitle, LastBestCandidateText
+    global LastGameCandidates, GameScoreMaxRows
 
     allowActivate := true
     skipReason := ""
@@ -9150,6 +9219,22 @@ WindowEngineEvaluateGame(snapshot, forceRun, &allowActivate, &skipReason) {
 
     if (candidates.Length > 1)
         SortCandidatesByScoreAreaDesc(candidates)
+
+    ; Snapshot for the Game Detection page. Sorted already, so row 1 is the
+    ; winner and the rest are in the order the engine rejected them.
+    LastGameCandidates := []
+    for _, entry in candidates {
+        if (LastGameCandidates.Length >= GameScoreMaxRows)
+            break
+        LastGameCandidates.Push(Map(
+            "proc", entry["proc"],
+            "title", entry.Has("title") ? entry["title"] : "",
+            "score", entry["score"],
+            "cpu", entry.Has("cpu") ? entry["cpu"] : 0,
+            "cpuKnown", entry.Has("cpuKnown") ? entry["cpuKnown"] : false,
+            "audio", entry.Has("audio") ? entry["audio"] : false,
+            "nearFS", entry.Has("nearFS") ? entry["nearFS"] : false))
+    }
 
     if (candidates.Length > 0) {
         best := candidates[1]
@@ -14546,6 +14631,7 @@ ShowSettingsEditor(*) {
     SettingsEditorAddCheckbox(category, "Features", "EnableTaskbarHiding", "Hide the Windows taskbar while SteamShell is active", &y, "true")
     SettingsEditorAddCheckbox(category, "Features", "EnableDesktopBlackout", "Show a black background instead of the wallpaper and desktop icons", &y, "true")
     SettingsEditorAddCheckbox(category, "QuickMenu", "Enable", "Enable the controller-first Quick Menu", &y, "true")
+    SettingsEditorAddCheckbox(category, "QuickMenu", "ShowGameDetection", "Show Game Detection under System (what the window engine scored, and why)", &y, "true")
     SettingsEditorAddCheckbox(category, "AudioQuickControls", "Enable", "Show Audio controls in the Quick Menu", &y, "true")
     SettingsEditorAddCheckbox(category, "DisplayQuickControls", "Enable", "Show Display and HDR controls in the Quick Menu", &y, "true")
     SettingsEditorAddChoice(category, "QuickMenu", "AccentColor", "Quick Menu accent color", QuickMenuAccentPresetNames(), &y, "Purple")
