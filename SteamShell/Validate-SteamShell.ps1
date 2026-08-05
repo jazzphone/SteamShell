@@ -1395,7 +1395,28 @@ $definitionsEnd = $source.IndexOf("QuickMenuBuildGui() {", $definitionsStart)
 $valuesStart = $source.IndexOf("QuickMenuValue(id) {")
 $valuesEnd = $source.IndexOf("QuickMenuRefresh() {", $valuesStart)
 $actionsStart = $source.IndexOf("QuickMenuActivateSelected() {")
-$actionsEnd = $source.IndexOf("GetActiveAudioOutputDevices() {", $actionsStart)
+# Ends at the next top-level definition, not at a NAMED neighbour.
+#
+# This read `IndexOf("GetActiveAudioOutputDevices() {", $actionsStart)`, which
+# said "the actions section ends where that function begins" -- true only while
+# that function happened to sit next in the file. It moved into
+# SteamShell-Shared.ahk, which the #Include inlines ABOVE this point, so the
+# forward search returned -1 and the section could not be extracted at all.
+#
+# The actions section is the body of QuickMenuActivateSelected, so that is what
+# is expressed here. The two sections above keep their named delimiters
+# deliberately: the definitions section spans several functions, and
+# ReleaseQuickMenuPaintResources sits inside it, so "the next definition" would
+# quietly shrink what is being checked.
+$actionsEnd = -1
+if ($actionsStart -ge 0) {
+    $afterHeader = $source.IndexOf("`n", $actionsStart) + 1
+    $nextDefinition = [regex]::Match(
+        $source.Substring($afterHeader), '(?m)^[A-Za-z_]\w*\(')
+    if ($nextDefinition.Success) {
+        $actionsEnd = $afterHeader + $nextDefinition.Index
+    }
+}
 Assert-True (
     $definitionsStart -ge 0 -and $definitionsEnd -gt $definitionsStart -and
     $valuesStart -ge 0 -and $valuesEnd -gt $valuesStart -and

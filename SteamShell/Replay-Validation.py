@@ -583,6 +583,32 @@ def main():
             more = f" (+{len(offenders) - 6} more)" if len(offenders) > 6 else ""
             fail(f"{name} has trailing whitespace on line(s) {shown}{more}.")
 
+    # ---- delimiters the validators slice sections with --------------------
+    #
+    # Not assertions, so replaying -match/-notmatch never saw them: the Quick
+    # Menu checks locate a section with $source.IndexOf("SomeFunction() {") and
+    # bound it with the name of whatever function happened to sit next in the
+    # file. Move that neighbour and IndexOf returns -1, the section comes out
+    # empty, and the failure reads "the dispatch sections could not be
+    # extracted" -- which says nothing about the function that actually moved.
+    #
+    # Every literal searched for this way must still be findable.
+    for vpath, spath in (("Validate-SteamShell.ps1", "SteamShell.ahk"),
+                         ("Validate-SteamShell-XFE.ps1", "SteamShell-XFE.ahk")):
+        if not (ROOT / vpath).exists():
+            continue
+        effective = _effective_source(spath)
+        vtext = "\n".join(
+            _strip_ps_comment(line)
+            for line in decode_like_powershell((ROOT / vpath).read_bytes()).split("\n"))
+        for m in re.finditer(r'\$\w*[Ss]ource\w*\.IndexOf\(\s*"([^"]+)"', vtext):
+            needle = m.group(1)
+            if needle not in effective:
+                fail(f"{vpath}:{vtext[:m.start()].count(chr(10)) + 1} slices a section "
+                     f'with IndexOf("{needle}"), which no longer appears in the '
+                     f"effective {spath}. The section will come out empty and the "
+                     "failure will name the section rather than the function that moved.")
+
     # ---- replay the product validators' regex assertions ------------------
     #
     # The structural checks above are mechanism. These are the PRODUCT rules, and

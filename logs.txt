@@ -34,7 +34,7 @@ FileInstall helper payload exists. This keeps clean release snapshots buildable.
 
 --- Validate-SteamShell.ps1
 Settings schema version: 20
-FAIL: SteamShell.ahk contains trailing whitespace.
+FAIL: The Quick Menu dispatch sections could not be extracted.
 
 --- Validate-SteamShell-XFE.ps1
 Shared parity: 128 functions defined once in SteamShell-Shared.ahk (two trees) and 97 in SteamShell-Common.ahk (all three programs); no tree redefines any of them.
@@ -50,7 +50,7 @@ PASS
 --- Build-SteamShell.ps1
 Running SteamShell static validation...
 Settings schema version: 20
-FAIL: SteamShell.ahk contains trailing whitespace.
+FAIL: The Quick Menu dispatch sections could not be extracted.
 
 ==============================================================================
   5. Does the build gate actually reject bad output?
@@ -85,9 +85,9 @@ Step                                            Status  Detail
 Environment                                     OK      PS 5.1.26100.8875, AHK 2.0.26
 Syntax: SteamShell-Helper.ahk                   PASS
 Syntax: SteamShell-XFE.ahk                      PASS
-Validator: Validate-SteamShell.ps1              FAIL    SteamShell.ahk contains trailing whitespace.
+Validator: Validate-SteamShell.ps1              FAIL    The Quick Menu dispatch sections could not be extracted.
 Validator: Validate-SteamShell-XFE.ps1          PASS
-Build: Build-SteamShell.ps1                     FAIL    SteamShell.ahk contains trailing whitespace.
+Build: Build-SteamShell.ps1                     FAIL    The Quick Menu dispatch sections could not be extracted.
 Exit-code mechanism                             OK      old=2 new=2 (both caught)
 Broken source rejected: SteamShell.ahk          SKIPPED baseline already failing
 Broken source rejected: SteamShell-XFE.ahk      SKIPPED baseline already failing
