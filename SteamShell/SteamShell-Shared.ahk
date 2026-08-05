@@ -3625,3 +3625,56 @@ SetRtssOverlayState(showOverlay) {
         showOverlay ? "RTSS overlay show requested" : "RTSS overlay hide requested",
         showOverlay ? "OverlayOnShortcut" : "OverlayOffShortcut")
 }
+
+; ==============================================================================
+; Game-detection snapshot
+; ==============================================================================
+; Called by each product's scorer at the point it already records the winner.
+; The trees differ in which scorer that is -- WindowEngineEvaluateGame in the
+; shell, XfeBestGameWindow in the companion -- and in nothing else, which is why
+; only the call site is per-tree.
+; ==============================================================================
+
+CaptureGameCandidates(candidates) {
+    global LastGameCandidates, GameScoreMaxRows
+    LastGameCandidates := TrimGameCandidates(candidates, GameScoreMaxRows)
+}
+
+; The summary shown on the row that opens the page.
+QuickMenuGameDetectionValue() {
+    global LastBestCandidateProc, LastBestCandidateScore
+    return LastBestCandidateProc != ""
+        ? LastBestCandidateProc " (" LastBestCandidateScore ")"
+        : "Nothing detected"
+}
+
+; Rows for the page: a back row, then one per candidate. Ids carry a colon, like
+; the task and layout rows, because the list comes from whatever the last pass
+; found rather than from a fixed set.
+QuickMenuGameScoreIds() {
+    global LastGameCandidates
+    ids := []
+    for index, _ in LastGameCandidates
+        ids.Push("gamescore:" index)
+    return ids
+}
+
+; Evidence text for a "gamescore:N" row id.
+QuickMenuGameScoreValue(id) {
+    global LastGameCandidates
+    if (SubStr(id, 1, 10) != "gamescore:")
+        return ""
+    index := ToInt(SubStr(id, 11), 0)
+    if (index < 1 || index > LastGameCandidates.Length)
+        return ""
+    return GameCandidateEvidenceText(LastGameCandidates[index])
+}
+
+QuickMenuGameScoreLabel(id) {
+    global LastGameCandidates
+    index := ToInt(SubStr(id, 11), 0)
+    if (index < 1 || index > LastGameCandidates.Length)
+        return ""
+    return GameCandidateLabel(LastGameCandidates[index], index)
+}
+

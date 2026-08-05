@@ -47,7 +47,7 @@ SetTitleMatchMode 2
 CoordMode "Mouse", "Screen"
 
 global AppVersion := "1.9.9"
-global SettingsSchemaVersion := 16
+global SettingsSchemaVersion := 17
 global IniPath := A_ScriptDir "\SteamShell-XFE.ini"
 global LogPath := A_ScriptDir "\SteamShell-XFE.log"
 global ScriptPid := DllCall("GetCurrentProcessId", "UInt")
@@ -408,6 +408,16 @@ global QuickMenuStatusCtrl := 0
 global QuickMenuRowsCtrl := 0
 global QuickMenuRowsBitmap := 0
 global QuickMenuRedrawSuspended := false
+
+; Game-detection snapshot, read by the shared presentation in
+; SteamShell-Shared.ahk. The companion scores candidates in XfeBestGameWindow
+; where the shell scores them in WindowEngineEvaluateGame; everything after that
+; point is the same question, so it is answered once, in the shared files.
+global LastGameCandidates := []
+global GameScoreMaxRows := 8
+global EnableGameDetectionMenu := true
+global LastBestCandidateProc := ""
+global LastBestCandidateScore := -1
 global GdiPlusToken := 0
 global GdiPlusModule := 0
 global QuickMenuMonitorIndex := 1
@@ -504,6 +514,7 @@ DefaultSettings() {
         ),
         "QuickMenu", Map(
             "Enable", "true",
+            "ShowGameDetection", "true",
             "ChordHoldMs", 500,
             "AccentColor", "Purple",
             "AccentColorCustom", "107C10"
@@ -869,7 +880,7 @@ RetireStartupSplashSettings() {
 }
 
 LoadSettings() {
-    global HeartbeatSeconds, EnableQuickMenu, QuickMenuChordHoldMs
+    global HeartbeatSeconds, EnableQuickMenu, EnableGameDetectionMenu, QuickMenuChordHoldMs
     global LogRotateMaxKB, LogRotateBackups
     global EnableControllerMouseMode, EnablePersistentMouseMode, ControllerIndex, ControllerPollIntervalMs
     global EnableAutoMouseMode, AutoMouseExeListRaw, AutoMouseExeSet
@@ -917,6 +928,7 @@ LoadSettings() {
     LogRotateMaxKB := ReadInt("Companion", "LogRotateMaxKB", 256, 32, 8192)
     LogRotateBackups := ReadInt("Companion", "LogRotateBackups", 2, 0, 10)
     EnableQuickMenu := ReadBool("QuickMenu", "Enable", true)
+    EnableGameDetectionMenu := ReadBool("QuickMenu", "ShowGameDetection", true)
     QuickMenuChordHoldMs := ReadInt("QuickMenu", "ChordHoldMs", 500, 250, 3000)
     ; Resolved through QuickMenuApplyAccent so an unknown preset or malformed hex
     ; falls back to the default instead of reaching the painter.
@@ -5554,6 +5566,7 @@ XfeGameScoreWeights() {
 ; Still no geometry, focus or activation. This reads the inventory it already
 ; builds and returns a name.
 XfeBestGameWindow() {
+    global LastBestCandidateProc, LastBestCandidateScore
     global AssistCpuThresholdPercent, AssistProtectedProcesses
     global AssistLauncherProcesses, EnableAudioAssist, AudioPeakThreshold
     protectedSet := ProcessNameSetFromList(AssistProtectedProcesses)
@@ -5638,6 +5651,16 @@ XfeBestGameWindow() {
     if (candidates.Length > 1)
         SortCandidatesByScoreAreaDesc(candidates)
     LogGameCandidateTable(candidates, [], "best-candidate")
+    ; The same snapshot the shell takes, at the same point: after the sort,
+    ; before anything decides what to do with the answer.
+    CaptureGameCandidates(candidates)
+    if (candidates.Length > 0) {
+        LastBestCandidateProc := candidates[1]["proc"]
+        LastBestCandidateScore := candidates[1]["score"]
+    } else {
+        LastBestCandidateProc := ""
+        LastBestCandidateScore := -1
+    }
     if (candidates.Length = 0)
         return ""
     ; No score floor, matching the shell, which sets LastBestCandidateProc from
@@ -6370,6 +6393,7 @@ QuickMenuGetRows() {
     global DisplaySelectedScalePercent
     global EnablePersistentMouseMode
     global RtssPendingFrameCap
+    global EnableGameDetectionMenu, LastGameCandidates
     rows := []
     switch QuickMenuPage {
         case "MAIN":
@@ -6542,7 +6566,22 @@ QuickMenuGetRows() {
             rows.Push(MenuRow("sleep", "Sleep", "", "sleep"))
             rows.Push(MenuRow("restart", "Restart", "", "restart"))
             rows.Push(MenuRow("shutdown", "Shut Down", "", "shutdown"))
+            if EnableGameDetectionMenu
+                rows.Push(MenuRow("gameDetection", "Game Detection",
+                    QuickMenuGameDetectionValue(), "page:GAMESCORE"))
             rows.Push(MenuRow("exit", "Exit Companion", "", "exit"))
+        ; Read-only. Every number was already computed to choose a game; this
+        ; only shows the losers beside the winner.
+        case "GAMESCORE":
+            rows.Push(MenuRow("back", "Back", "", "back"))
+            if (LastGameCandidates.Length = 0) {
+                rows.Push(MenuRow("gameScoreEmpty", "No candidates scored yet",
+                    "", "none"))
+            } else {
+                for _, rowId in QuickMenuGameScoreIds()
+                    rows.Push(MenuRow(rowId, QuickMenuGameScoreLabel(rowId),
+                        QuickMenuGameScoreValue(rowId), "none"))
+            }
     }
     return rows
 }

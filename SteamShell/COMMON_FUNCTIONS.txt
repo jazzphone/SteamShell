@@ -34,6 +34,8 @@ FmtPid
 FmtRect
 FmtScore
 ForceForegroundWindow
+GameCandidateEvidenceText
+GameCandidateLabel
 GameWindowCpuVerdict
 GameWindowShapeVerdict
 GetActiveAudioPidPeaks
@@ -55,6 +57,7 @@ GuidBuf
 HandleUncaughtError
 HexColorChannel
 HoldControllerMouseButton
+JoinWith
 MoveWindowPhysical
 NormalizeHexColor
 NormalizeKeyForDisplay
@@ -95,6 +98,8 @@ SortCandidatesByScoreAreaDesc
 SplitStartupCommandLine
 SteamShellPathIsAdminOnlyWritable
 StrRepeat
+ToInt
+TrimGameCandidates
 TruncPad
 WaitForNewExecutablePid
 WindowEngineIsLegacyApplicationSurface

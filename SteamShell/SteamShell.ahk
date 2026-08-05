@@ -3140,11 +3140,6 @@ _TryParseBool(x) {
     return ""  ; unknown token
 }
 
-ToInt(v, default := 0) {
-    s := Trim(v)
-    return RegExMatch(s, "^-?\d+$") ? (s + 0) : default
-}
-
 ToFloat(v, default := 0.0) {
     s := Trim(v)
     return RegExMatch(s, "^-?(?:\d+(?:\.\d*)?|\.\d+)$") ? (s + 0.0) : default
@@ -3240,13 +3235,6 @@ JoinPipe(listObj) {
     continue
     out .= (out = "" ? v : "|" v)
     }
-    return out
-}
-
-JoinWith(listObj, delimiter := ", ") {
-    out := ""
-    for _, value in listObj
-        out .= (out = "" ? "" : delimiter) value
     return out
 }
 
@@ -5540,9 +5528,8 @@ QuickMenuGetDefinitions() {
             rows.Push(Map("id", "gameScoreEmpty", "label", "No candidates scored yet"))
             return rows
         }
-        for index, entry in LastGameCandidates
-            rows.Push(Map("id", "gamescore:" index, "label",
-                (index = 1 ? "> " : "   ") entry["proc"]))
+        for _, rowId in QuickMenuGameScoreIds()
+            rows.Push(Map("id", rowId, "label", QuickMenuGameScoreLabel(rowId)))
         return rows
     }
 
@@ -6187,21 +6174,8 @@ QuickMenuValue(id) {
 
     if (SubStr(id, 1, 7) = "layout:")
         return GetControllerLayoutText(SubStr(id, 8))
-    ; gamescore:N -- the evidence, not just the number. The score alone does not
-    ; say which rule produced it, which is the whole question this page answers.
-    if (SubStr(id, 1, 10) = "gamescore:") {
-        index := ToInt(SubStr(id, 11), 0)
-        if (index < 1 || index > LastGameCandidates.Length)
-            return ""
-        entry := LastGameCandidates[index]
-        parts := [entry["score"] ""]
-        if entry["nearFS"]
-            parts.Push("fullscreen")
-        parts.Push(entry["cpuKnown"] ? "cpu " Round(entry["cpu"]) "%" : "cpu ?")
-        if entry["audio"]
-            parts.Push("audio")
-        return JoinWith(parts, " | ")
-    }
+    if (SubStr(id, 1, 10) = "gamescore:")
+        return QuickMenuGameScoreValue(id)
     if (SubStr(id, 1, 11) = "taskWindow:") {
         item := FindTaskSwitcherWindow(ToInt(SubStr(id, 12), 0))
         return IsObject(item) ? ShortenText(item["exe"], 20) : "CLOSED"
@@ -6234,9 +6208,7 @@ QuickMenuValue(id) {
                 return "Unavailable"
             return "‹ " (hdrState["enabled"] ? "ON" : "OFF") " ›"
         case "gameDetection":
-            return LastBestCandidateProc != ""
-                ? LastBestCandidateProc " (" LastBestCandidateScore ")"
-                : "Nothing detected"
+            return QuickMenuGameDetectionValue()
         case "gameScoreEmpty":
             return ""
         case "hdrUnavailable":
@@ -9220,21 +9192,9 @@ WindowEngineEvaluateGame(snapshot, forceRun, &allowActivate, &skipReason) {
     if (candidates.Length > 1)
         SortCandidatesByScoreAreaDesc(candidates)
 
-    ; Snapshot for the Game Detection page. Sorted already, so row 1 is the
-    ; winner and the rest are in the order the engine rejected them.
-    LastGameCandidates := []
-    for _, entry in candidates {
-        if (LastGameCandidates.Length >= GameScoreMaxRows)
-            break
-        LastGameCandidates.Push(Map(
-            "proc", entry["proc"],
-            "title", entry.Has("title") ? entry["title"] : "",
-            "score", entry["score"],
-            "cpu", entry.Has("cpu") ? entry["cpu"] : 0,
-            "cpuKnown", entry.Has("cpuKnown") ? entry["cpuKnown"] : false,
-            "audio", entry.Has("audio") ? entry["audio"] : false,
-            "nearFS", entry.Has("nearFS") ? entry["nearFS"] : false))
-    }
+    ; Snapshot for the Game Detection page, kept where the winner is already
+    ; recorded. The trimming and the presentation live in the shared files.
+    CaptureGameCandidates(candidates)
 
     if (candidates.Length > 0) {
         best := candidates[1]

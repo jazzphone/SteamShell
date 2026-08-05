@@ -93,6 +93,7 @@ AutoMouseProcessMatches
 BuildProductTrayMenu
 CachedInstallationVerdict
 CancelPendingRtssFrameCap
+CaptureGameCandidates
 CommitRtssPendingFrameCap
 ConfirmPrimaryDisplayMode
 CopyHealthReport
@@ -149,6 +150,10 @@ QuickMenuApplyAccent
 QuickMenuConfirm
 QuickMenuDestroyWindow
 QuickMenuDisplayReflow
+QuickMenuGameDetectionValue
+QuickMenuGameScoreIds
+QuickMenuGameScoreLabel
+QuickMenuGameScoreValue
 QuickMenuGoBack
 QuickMenuHideThenSend
 QuickMenuKeyboardActive

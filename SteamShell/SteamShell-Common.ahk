@@ -2236,3 +2236,80 @@ SendChordReleasingModifiers(keys) {
     try SendInput("{Ctrl up}{Alt up}{Shift up}{LWin up}{RWin up}")
     try SendInput(keys)
 }
+
+; ==============================================================================
+; Game-detection candidate presentation
+; ==============================================================================
+; Both products score every candidate window to choose a game, using the same
+; sort (SortCandidatesByScoreAreaDesc, below) and the same log table
+; (LogGameCandidateTable, in SteamShell-Shared.ahk). Only the entry point and the
+; setting names differ. These three take the candidate data as PARAMETERS and
+; hold nothing, which is what lets the presentation be written once here rather
+; than twice in the trees.
+; ==============================================================================
+
+; A capped, trimmed copy carrying only what the page shows. The scorer's own
+; candidate maps carry window handles and geometry that a menu has no use for
+; and that should not be kept alive between polls.
+TrimGameCandidates(candidates, maxRows) {
+    trimmed := []
+    for _, entry in candidates {
+        if (trimmed.Length >= maxRows)
+            break
+        trimmed.Push(Map(
+            "proc", entry.Has("proc") ? entry["proc"] : "",
+            "title", entry.Has("title") ? entry["title"] : "",
+            "score", entry.Has("score") ? entry["score"] : 0,
+            "cpu", entry.Has("cpu") ? entry["cpu"] : 0,
+            "cpuKnown", entry.Has("cpuKnown") ? entry["cpuKnown"] : false,
+            "audio", entry.Has("audio") ? entry["audio"] : false,
+            "nearFS", entry.Has("nearFS") ? entry["nearFS"] : false))
+    }
+    return trimmed
+}
+
+; The score WITH the evidence behind it. The number alone does not say which
+; rule produced it, and "why did it pick that window" is the only question this
+; page exists to answer.
+GameCandidateEvidenceText(entry) {
+    if !IsObject(entry)
+        return ""
+    parts := [entry["score"] ""]
+    if entry["nearFS"]
+        parts.Push("fullscreen")
+    parts.Push(entry["cpuKnown"] ? "cpu " Round(entry["cpu"]) "%" : "cpu ?")
+    if entry["audio"]
+        parts.Push("audio")
+    return JoinWith(parts, " | ")
+}
+
+; The winner is marked rather than merely sorted first, because a list ordered
+; by a number the reader is still deciding whether to trust does not say which
+; row won.
+GameCandidateLabel(entry, index) {
+    if !IsObject(entry)
+        return ""
+    return (index = 1 ? "> " : "   ") entry["proc"]
+}
+
+; ==============================================================================
+; Small conversions
+; ==============================================================================
+; Moved out of SteamShell.ahk when the game-detection presentation above needed
+; them: a function in this file may only call what is defined here, and shared
+; code may only call what BOTH trees have. Either rule alone would have been
+; satisfied by copying them; together they say define them once, here, where all
+; three programs can reach them.
+; ==============================================================================
+
+ToInt(v, default := 0) {
+    s := Trim(v)
+    return RegExMatch(s, "^-?\d+$") ? (s + 0) : default
+}
+
+JoinWith(listObj, delimiter := ", ") {
+    out := ""
+    for _, value in listObj
+        out .= (out = "" ? "" : delimiter) value
+    return out
+}
