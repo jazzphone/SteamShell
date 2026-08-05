@@ -11,11 +11,17 @@ WHY THIS EXISTS
   replayed in Python on the development machine ever since, but as ad-hoc
   scratch work that nobody could re-run. This is that practice, committed.
 
-  It is NOT a second validator. It reproduces the checks in Validate-Common.ps1
-  that are pure structure -- the ones that need no Windows, no AutoHotkey and no
-  PowerShell -- so drift is caught on the machine where the edit is made rather
-  than on the machine where the build runs. The product rules in
-  Validate-SteamShell.ps1 and Validate-SteamShell-XFE.ps1 stay where they are.
+  It is NOT a second validator. It reproduces the structural checks in
+  Validate-Common.ps1, and it REPLAYS -- rather than restates -- the ~825 regex
+  assertions in Validate-SteamShell.ps1 and Validate-SteamShell-XFE.ps1, reading
+  them out of those files at run time. There is one copy of every product rule
+  and it is still the PowerShell one; this only fires it earlier.
+
+  The replay was added after a consolidation pass broke four product assertions
+  and the Windows run reported one, because Assert-True throws on the first.
+  Both -match and -notmatch are replayed: the rule that mattered most was a
+  -notmatch saying the companion has no desktop mode, and checking only -match
+  would have missed it entirely.
 
 THE ENCODING TRAP, WHICH THIS FILE IS ON THE WRONG SIDE OF BY DEFAULT
 
@@ -109,6 +115,25 @@ def fail(message):
 
 def read_source(name):
     return decode_like_powershell((ROOT / name).read_bytes())
+
+
+def _effective_source(name, depth=0):
+    """#Include inlined, the way Get-EffectiveSource does it.
+
+    The product assertions run against this, not against the tree file: both
+    trees compile SteamShell-Shared.ahk in, so reading a tree on its own would
+    silently pass every assertion about a function that has moved out of it --
+    which is the failure the whole validator exists to prevent."""
+    if depth > 8:
+        raise RuntimeError(f"#Include nesting is too deep at '{name}'")
+    text = read_source(name)
+    while True:
+        m = re.search(r"(?m)^[ \t]*#Include[ \t]+(?:\*i[ \t]+)?(.+?)[ \t]*\r?$", text)
+        if not m:
+            return text
+        text = (text[:m.start()]
+                + _effective_source(m.group(1).strip('"'), depth + 1)
+                + text[m.end():])
 
 
 def strip_comments(line):
@@ -520,6 +545,57 @@ def main():
             fail(f"DIVERGENT_FUNCTIONS.txt lists '{name}', which is no longer defined in both "
                  "trees. Remove the entry.")
 
+    # ---- replay the product validators' regex assertions ------------------
+    #
+    # The structural checks above are mechanism. These are the PRODUCT rules, and
+    # they are the ones a consolidation actually breaks: they pin the shape of
+    # specific functions, and moving a function is exactly what changes its
+    # shape. Four of them broke in one pass and only the first was visible,
+    # because Assert-True throws.
+    #
+    # Two are worth naming, because they are opposite lessons:
+    #
+    #   The Quick Menu scale assertion pinned `scale := width / QuickMenuWidth()`
+    #   as a literal, so adding a divide-by-zero guard read as a regression. That
+    #   assertion described a spelling, not an invariant.
+    #
+    #   The companion's `-notmatch 'EnableDesktopAutoMouseMode'` is the opposite:
+    #   an architectural rule saying the companion has no desktop mode, written
+    #   so that reintroducing it "is a decision someone has to take
+    #   deliberately". Sharing a function required declaring that name in the
+    #   companion. The rule was right and the change was wrong.
+    #
+    # Both halves are replayed, because only checking -match would have missed
+    # the second entirely.
+    replayed = 0
+    for vpath, spath in (("Validate-SteamShell.ps1", "SteamShell.ahk"),
+                         ("Validate-SteamShell-XFE.ps1", "SteamShell-XFE.ahk")):
+        if not (ROOT / vpath).exists():
+            continue
+        source = _effective_source(spath)
+        # Comments stripped FIRST. A validator comment quoting the assertion it
+        # replaced -- "this used to read $source -notmatch 'HighestAvailable'" --
+        # is prose about a rule, not the rule, and reading it as one reports a
+        # violation that does not exist. The comment being misread here is itself
+        # explaining that same trap.
+        vtext = "\n".join(
+            re.sub(r"(?<!`)#.*$", "", line)
+            for line in decode_like_powershell((ROOT / vpath).read_bytes()).split("\n"))
+        for op, want in (("-match", True), ("-notmatch", False)):
+            for m in re.finditer(r"\$source\s+" + re.escape(op)
+                                 + r"\s+((?:\s*(?:\+\s*)?'(?:[^']|'')*'\s*)+)", vtext):
+                pattern = "".join(f.replace("''", "'")
+                                  for f in re.findall(r"'((?:[^']|'')*)'", m.group(1)))
+                line = vtext[:m.start()].count("\n") + 1
+                try:
+                    hit = bool(re.search(pattern, source, re.I))
+                except re.error:
+                    continue  # .NET-only construct; the build will judge it
+                replayed += 1
+                if hit != want:
+                    fail(f"{vpath}:{line} asserts {op} and it is no longer satisfied: "
+                         f"{pattern[:110]}")
+
     if "--dump" in sys.argv:
         print(f"{'function':38s} {'score':>6}  subset")
         for name in sorted(set(a) & set(b)):
@@ -536,6 +612,7 @@ def main():
         f"{n.replace('SteamShell', 'SS').replace('.ahk', '')}={len(m)}" for n, m in maps.items()))
     print(f"  defined in both   : {both}")
     print(f"  fingerprint flags : {len(flagged)} ({len(divergent)} allowlisted)")
+    print(f"  product assertions: {replayed} replayed from the two validators")
     if FAILURES:
         print(f"\nFAILED ({len(FAILURES)}):\n")
         for f in FAILURES:

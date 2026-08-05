@@ -89,7 +89,6 @@ ApplyElevatedRtssFrameLimit
 ApplyElevatedRtssProfileFrameLimit
 ApplyRtssGlobalState
 ApplyTrayIconImage
-AutoMouseModeActive
 AutoMouseProcessMatches
 BuildProductTrayMenu
 CachedInstallationVerdict

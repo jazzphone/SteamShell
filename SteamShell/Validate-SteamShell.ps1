@@ -603,9 +603,20 @@ Assert-True (
 
 # The surface is built at the control's physical size. Building it at
 # AutoHotkey's logical size would stretch every row on a high-DPI handheld.
+#
+# Accepts the divisor inline or via a local, because the local exists to be
+# guarded: every other input to the painter already refuses a degenerate value
+# -- the client rect, the row count, the bitmap -- and QuickMenuWidth() was the
+# one that could take the whole page out with a divide error instead. Pinning
+# the exact expression made adding that guard look like a regression, which is
+# the failure this file has had before: an assertion that describes today's
+# spelling rather than the invariant will one day fail the fix for a real bug.
 Assert-True (
     $source -match
-        '(?s)QuickMenuPaintRows\(\).*?GetClientRect.*?scale\s*:=\s*width\s*/\s*QuickMenuWidth\(\)') (
+        '(?s)QuickMenuPaintRows\(\).*?GetClientRect.*?(?:' +
+        'scale\s*:=\s*width\s*/\s*QuickMenuWidth\(\)' + '|' +
+        'logicalWidth\s*:=\s*QuickMenuWidth\(\).*?scale\s*:=\s*width\s*/\s*logicalWidth' +
+        ')') (
     "The Quick Menu row surface is no longer built at physical pixel size.")
 
 # The reference design uses neutral charcoal, a visible glow with room outside
@@ -3490,9 +3501,9 @@ Assert-True (
     $source -match
         '(?sm)^ReadText\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?CleanIniValue\(' -and
     $source -match
-        '(?sm)^ReadBool\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?CleanIniValue\(' -and
+        '(?sm)^ReadIniBool\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?CleanIniValue\(' -and
     $source -match
-        '(?sm)^ReadInt\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?CleanIniValue\(' -and
+        '(?sm)^ReadIniInt\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?CleanIniValue\(' -and
     $source -match
         '(?sm)^ReadNumber\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?CleanIniValue\(') (
     "A typed settings reader no longer strips inline comments through CleanIniValue.")

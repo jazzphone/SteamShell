@@ -136,4 +136,6 @@ SendChordSafe: three-line wrapper over SendChordReleasingModifiers in SteamShell
 # on the record.
 
 RecordShortcutChord: each tree wires up its own handler family, named its own way, and the body can only name one set -- see the table above
+AutoMouseModeActive: the companion has no desktop mode, and that is an ARCHITECTURAL rule rather than an omission. Validate-SteamShell-XFE.ps1 asserts -notmatch 'EnableDesktopAutoMouseMode\s*:=' and -notmatch 'DesktopAutoMouseExcludeExeSet', in its own words so that reintroducing the mode 'is a decision someone has to take deliberately'. Sharing standalone's body required declaring both names in the companion, which is precisely what that rule forbids. The reason was already written down -- in the validator rather than in a comment.
+EnsureRtssRunning: standalone starts RTSS through LaunchInteractiveApp so the tool does not inherit its administrator token; the companion has no token to shed and resolves the path through ResolveRtssExecutablePath, which its own validator pins as the centralized discovery route
 

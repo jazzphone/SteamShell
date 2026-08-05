@@ -609,7 +609,10 @@ Assert-True (
 # AutoHotkey's logical size would stretch every row on a high-DPI handheld.
 Assert-True (
     $source -match
-        '(?s)QuickMenuPaintRows\(\).*?GetClientRect.*?scale\s*:=\s*width\s*/\s*QuickMenuWidth\(\)') (
+        '(?s)QuickMenuPaintRows\(\).*?GetClientRect.*?(?:' +
+        'scale\s*:=\s*width\s*/\s*QuickMenuWidth\(\)' + '|' +
+        'logicalWidth\s*:=\s*QuickMenuWidth\(\).*?scale\s*:=\s*width\s*/\s*logicalWidth' +
+        ')') (
     "The Quick Menu row surface is no longer built at physical pixel size.")
 
 # The reference design uses neutral charcoal, a visible glow with room outside

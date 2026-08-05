@@ -362,13 +362,6 @@ global LastObservedForegroundWasGame := false
 
 ; Quick Menu state.
 global QuickMenuGui := unset
-; Declared so AutoMouseModeActive can be defined once. Xbox FSE owns the shell,
-; so the companion has no desktop mode to be in and these are constant -- which
-; makes the shared function take the same branch it always took here.
-global DesktopMode := false
-global EnableDesktopAutoMouseMode := false
-global DesktopAutoMouseExcludeExeSet := Map()
-
 global QuickMenuVisible := false
 global QuickMenuPage := "MAIN"
 global QuickMenuRows := []
@@ -10331,11 +10324,10 @@ OpenTouchKeyboard() {
 
 
 EnsureRtssRunning() {
-    global RtssPath
+    path := ResolveRtssExecutablePath()
     if ProcessExist("RTSS.exe")
         return true
-    path := NormalizePath(RtssPath)
-    if (path = "" || !FileExist(path))
+    if (path = "")
         return false
     try {
         Run('"' path '"', , "Min")
@@ -10407,4 +10399,31 @@ RecordShortcutChord() {
     result["send"] := shortcut
     result["display"] := display
     return result
+}
+
+
+AutoMouseModeActive() {
+    global EnableAutoMouseMode, EnablePersistentMouseMode, AutoMouseExeSet, ScriptPid
+    static cachedResult := false
+    static cachedTick := 0
+    ; All kill switches are checked ahead of the cache so tray/Settings changes
+    ; take effect on the next poll rather than up to 250 ms later.
+    if EnablePersistentMouseMode
+        return true
+    if !EnableAutoMouseMode
+        return false
+    if (AutoMouseExeSet.Count = 0)
+        return false
+    if (cachedTick && A_TickCount - cachedTick < 250)
+        return cachedResult
+    cachedTick := A_TickCount
+    cachedResult := false
+    try {
+        hwnd := DllCall("User32\GetForegroundWindow", "Ptr")
+        if (hwnd && WinGetPID("ahk_id " hwnd) != ScriptPid) {
+            foregroundExe := StrLower(WinGetProcessName("ahk_id " hwnd))
+            cachedResult := AutoMouseProcessMatches(foregroundExe)
+        }
+    }
+    return cachedResult
 }

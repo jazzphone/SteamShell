@@ -3581,36 +3581,6 @@ SendSteamOverlayChord() {
 ;
 ; Cached briefly: this is evaluated on every poll tick at ~16 ms, and the
 ; foreground process cannot change faster than a person can alt-tab.
-AutoMouseModeActive() {
-    global EnableAutoMouseMode, EnablePersistentMouseMode, AutoMouseExeSet, ScriptPid, DesktopMode
-    global EnableDesktopAutoMouseMode, DesktopAutoMouseExcludeExeSet
-    static cachedResult := false
-    static cachedTick := 0
-    ; All kill switches are checked ahead of the cache so tray/Settings changes
-    ; take effect on the next poll rather than up to 250 ms later.
-    if EnablePersistentMouseMode
-        return true
-    if !EnableAutoMouseMode
-        return false
-    if (DesktopMode && !EnableDesktopAutoMouseMode)
-        return false
-    if (!DesktopMode && AutoMouseExeSet.Count = 0)
-        return false
-    if (cachedTick && A_TickCount - cachedTick < 250)
-        return cachedResult
-    cachedTick := A_TickCount
-    cachedResult := false
-    try {
-        hwnd := DllCall("User32\GetForegroundWindow", "Ptr")
-        if (hwnd && WinGetPID("ahk_id " hwnd) != ScriptPid) {
-            foregroundExe := StrLower(WinGetProcessName("ahk_id " hwnd))
-            cachedResult := DesktopMode
-                ? !DesktopAutoMouseExcludeExeSet.Has(foregroundExe)
-                : AutoMouseProcessMatches(foregroundExe)
-        }
-    }
-    return cachedResult
-}
 
 SetRtssFrameLimiterState(enableLimiter) {
     global RtssFrameLimiterOnShortcut, RtssFrameLimiterOffShortcut
