@@ -1,14 +1,17 @@
+'\\10.0.0.60\data\SteamShell'
+CMD.EXE was started with the above path as the current directory.
+UNC paths are not supported.  Defaulting to Windows directory.
 
 ==============================================================================
   1. Environment
 ==============================================================================
 PowerShell edition : Desktop
-PowerShell version : 5.1.26100.4202
-Root               : Z:\
+PowerShell version : 5.1.26100.8875
+Root               : \\10.0.0.60\data\SteamShell
 Project folder found (both trees, shared file, both validators, one build).
-Interpreter        : C:\Users\Jason\AppData\Local\Programs\AutoHotkey\v2\AutoHotkey64.exe
+Interpreter        : C:\Users\Steam\AppData\Local\Programs\AutoHotkey\v2\AutoHotkey64.exe
   version          : 2.0.26
-Compiler           : C:\Users\Jason\AppData\Local\Programs\AutoHotkey\Compiler\Ahk2Exe.exe
+Compiler           : C:\Users\Steam\AppData\Local\Programs\AutoHotkey\Compiler\Ahk2Exe.exe
 
 ==============================================================================
   2. AutoHotkey syntax validation  <-- the result that matters most
@@ -31,7 +34,7 @@ FileInstall helper payload exists. This keeps clean release snapshots buildable.
 
 --- Validate-SteamShell.ps1
 Settings schema version: 20
-FAIL: The elevated helper must release held mouse buttons on exit and on an uncaught error, and arm the watchdog unconditionally.
+FAIL: SteamShell.ahk contains trailing whitespace.
 
 --- Validate-SteamShell-XFE.ps1
 Shared parity: 128 functions defined once in SteamShell-Shared.ahk (two trees) and 97 in SteamShell-Common.ahk (all three programs); no tree redefines any of them.
@@ -47,7 +50,7 @@ PASS
 --- Build-SteamShell.ps1
 Running SteamShell static validation...
 Settings schema version: 20
-FAIL: The elevated helper must release held mouse buttons on exit and on an uncaught error, and arm the watchdog unconditionally.
+FAIL: SteamShell.ahk contains trailing whitespace.
 
 ==============================================================================
   5. Does the build gate actually reject bad output?
@@ -79,12 +82,12 @@ SKIPPED - validation failed; the existing current folder was not changed.
 
 Step                                            Status  Detail
 ----                                            ------  ------
-Environment                                     OK      PS 5.1.26100.4202, AHK 2.0.26
+Environment                                     OK      PS 5.1.26100.8875, AHK 2.0.26
 Syntax: SteamShell-Helper.ahk                   PASS
 Syntax: SteamShell-XFE.ahk                      PASS
-Validator: Validate-SteamShell.ps1              FAIL    The elevated helper must release held mouse buttons on exit ...
+Validator: Validate-SteamShell.ps1              FAIL    SteamShell.ahk contains trailing whitespace.
 Validator: Validate-SteamShell-XFE.ps1          PASS
-Build: Build-SteamShell.ps1                     FAIL    The elevated helper must release held mouse buttons on exit ...
+Build: Build-SteamShell.ps1                     FAIL    SteamShell.ahk contains trailing whitespace.
 Exit-code mechanism                             OK      old=2 new=2 (both caught)
 Broken source rejected: SteamShell.ahk          SKIPPED baseline already failing
 Broken source rejected: SteamShell-XFE.ahk      SKIPPED baseline already failing

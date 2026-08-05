@@ -2218,7 +2218,7 @@ ControllerBindingHasLong(bindings, buttonName) {
 ; suspended timer, a thread that never returns, a reload that throws.
 ;
 ; Thirty seconds because a real drag is a few seconds and this must never end one
-; that is still happening. 
+; that is still happening.
 ControllerMouseSafetyTick() {
     released := ExpireControllerMouseButtons(30000)
     if (released != "")
@@ -2227,7 +2227,7 @@ ControllerMouseSafetyTick() {
 }
 
 ; Sends a chord with every modifier released first.
-; 
+;
 ; Existed in all THREE programs, identically, because the helper cannot see
 ; SteamShell-Shared.ahk. It holds no state at all, which is what makes it safe
 ; here -- the two callers that DO have state (the companion, which declines

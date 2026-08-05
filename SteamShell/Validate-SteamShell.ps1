@@ -1366,8 +1366,24 @@ Assert-True ($missingCallbacks.Count -eq 0) (
     "Named callbacks without matching functions: " +
     ($missingCallbacks -join ", "))
 
-$trailingWhitespace = [regex]::Matches($source, '(?m)[ \t]+$')
-Assert-True ($trailingWhitespace.Count -eq 0) "SteamShell.ahk contains trailing whitespace."
+# Named per FILE, not per program.
+#
+# $source is the effective source, so this also sees SteamShell-Shared.ahk and
+# SteamShell-Common.ahk -- and reported both as "SteamShell.ahk contains
+# trailing whitespace", which is a message that sends the reader to a file where
+# grep finds nothing. The rule was right and only its wording was wrong, which is
+# the most expensive kind of wrong in a diagnostic.
+$trailingWhitespaceFiles = @()
+foreach ($file in @("SteamShell.ahk", "SteamShell-Shared.ahk", "SteamShell-Common.ahk")) {
+    $path = Join-Path $projectRoot $file
+    if (-not (Test-Path -LiteralPath $path)) { continue }
+    $hits = [regex]::Matches((Get-Content -LiteralPath $path -Raw), '(?m)[ \t]+$')
+    if ($hits.Count -gt 0) {
+        $trailingWhitespaceFiles += "$file ($($hits.Count))"
+    }
+}
+Assert-True ($trailingWhitespaceFiles.Count -eq 0) (
+    "Trailing whitespace in: " + ($trailingWhitespaceFiles -join ", ") + ".")
 Assert-True ($source -match 'GuiLiteralText\(title\)') (
     "Settings headings are not using literal-ampersand rendering.")
 

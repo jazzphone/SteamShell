@@ -568,6 +568,21 @@ def main():
             fail(f"DIVERGENT_FUNCTIONS.txt lists '{name}', which is no longer defined in both "
                  "trees. Remove the entry.")
 
+    # ---- file hygiene ------------------------------------------------------
+    #
+    # Not a regex assertion, so replaying the validators does not cover it, and
+    # it reached Windows as a build failure over two lines of trailing space in
+    # a comment block. Cheap to check here; the whole point of this file is that
+    # the cheap ones should not need a round trip.
+    for name in ALL_FILES:
+        raw = read_source(name)
+        offenders = [i + 1 for i, line in enumerate(raw.split("\n"))
+                     if line != line.rstrip()]
+        if offenders:
+            shown = ", ".join(str(n) for n in offenders[:6])
+            more = f" (+{len(offenders) - 6} more)" if len(offenders) > 6 else ""
+            fail(f"{name} has trailing whitespace on line(s) {shown}{more}.")
+
     # ---- replay the product validators' regex assertions ------------------
     #
     # The structural checks above are mechanism. These are the PRODUCT rules, and
