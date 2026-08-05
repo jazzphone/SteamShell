@@ -75,17 +75,20 @@ ToggleQuickMenu: PENDING Phase 2b -- companion is standalone minus the desktop-m
 # ------------------------------------------------------------------------------
 # PERMANENT -- the privilege boundary
 # ------------------------------------------------------------------------------
-# The reason SHARED_FUNCTIONS.txt already records for OpenOSK and
-# OpenWindowsSettings, which applies to these two for the same cause: standalone
-# runs elevated so high-integrity controller input works, and every ordinary
-# utility it launches must cross a verified standard-user boundary first. The
-# companion runs at normal integrity and launches directly. Sharing standalone's
-# version compiles calls to LaunchInteractiveApp and
+# BOTH products run at normal integrity, and both drive the same elevated helper
+# binary through --product. The difference is a CONTINGENCY, not an architecture:
+# standalone can end up elevated anyway -- an administrator Setup takeover
+# re-launches it, and a user can start it as admin -- and as the shell it must
+# not pass that token to TabTip, Explorer or RTSS. Its launchers therefore open
+# with `if !A_IsAdmin` and then do exactly what the companion does; the ladder
+# below that branch is the part the companion has no use for.
+#
+# Sharing standalone's version compiles calls to LaunchInteractiveApp and
 # DesktopShellMatchesInteractiveUser into a program that has neither, which is a
 # LOAD-time failure -- caught by the reachability check, not by review.
 
-RunViaDesktopShell: standalone launches through its de-elevation ladder; the companion calls ShellExecute directly
-OpenTouchKeyboard: standalone reaches TabTip through LaunchInteractiveApp to shed its administrator token; the companion does not have one to shed
+RunViaDesktopShell: standalone carries an A_IsAdmin contingency ladder for the case where it has been started elevated; the companion has no such case and calls ShellExecute directly
+OpenTouchKeyboard: standalone reaches TabTip through LaunchInteractiveApp so that IF it has been started elevated the token is not inherited; the companion has no such path
 
 # ------------------------------------------------------------------------------
 # PERMANENT -- helper wrappers over one shared implementation
@@ -137,5 +140,5 @@ SendChordSafe: three-line wrapper over SendChordReleasingModifiers in SteamShell
 
 RecordShortcutChord: each tree wires up its own handler family, named its own way, and the body can only name one set -- see the table above
 AutoMouseModeActive: the companion has no desktop mode, and that is an ARCHITECTURAL rule rather than an omission. Validate-SteamShell-XFE.ps1 asserts -notmatch 'EnableDesktopAutoMouseMode\s*:=' and -notmatch 'DesktopAutoMouseExcludeExeSet', in its own words so that reintroducing the mode 'is a decision someone has to take deliberately'. Sharing standalone's body required declaring both names in the companion, which is precisely what that rule forbids. The reason was already written down -- in the validator rather than in a comment.
-EnsureRtssRunning: standalone starts RTSS through LaunchInteractiveApp so the tool does not inherit its administrator token; the companion has no token to shed and resolves the path through ResolveRtssExecutablePath, which its own validator pins as the centralized discovery route
+EnsureRtssRunning: standalone starts RTSS through LaunchInteractiveApp so an elevated shell cannot pass its token on; the companion resolves the path through ResolveRtssExecutablePath, which its own validator pins as the centralized discovery route
 

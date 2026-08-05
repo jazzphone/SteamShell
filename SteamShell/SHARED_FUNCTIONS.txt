@@ -23,10 +23,26 @@
 # Deliberately NOT listed, so the reason is on the record:
 #
 #   OpenOSK / OpenWindowsSettings
-#       Standalone runs elevated for high-integrity controller input, so both
-#       must cross its verified standard-user launch boundary. XFE deliberately
-#       runs at normal integrity and can launch them directly. Their privilege
-#       architectures now require different implementations.
+#       Standalone carries a contingency path for finding ITSELF elevated, and
+#       the companion does not.
+#
+#       This note used to say "standalone runs elevated for high-integrity
+#       controller input". That has not been true since the elevated helper
+#       arrived: both products run at normal integrity, both launch the SAME
+#       helper binary with --product=standalone or --product=xfe, and
+#       SteamShell.ahk's own health check reports A_IsAdmin as a WARNING -- "
+#       SteamShell.exe is elevated; Quick Menu focus isolation from Steam may
+#       not work correctly. Launch it normally."
+#
+#       What is still true is narrower. Standalone can END UP elevated -- an
+#       administrator Setup takeover re-launches it with an identity argument,
+#       and nothing stops a user starting it as admin -- and as the shell it
+#       must not hand that token to TabTip, Explorer or RTSS. So its launchers
+#       open with `if !A_IsAdmin` and do exactly what the companion does;
+#       everything below that branch is the contingency. Sharing them would
+#       compile CreateProcessWithStandardToken and
+#       DesktopShellMatchesInteractiveUser into a program that has neither,
+#       which is a LOAD-time failure.
 #
 # ---------------------------------------------------------------------------
 # ToggleQuickMenuHdrState USED TO BE LISTED ABOVE as a deliberate divergence:
