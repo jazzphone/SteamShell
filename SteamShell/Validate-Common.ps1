@@ -934,6 +934,12 @@ function Assert-SharedParity {
                 }
             }
         }
+        # Built once per tree. Compiled, because it is applied ~840 times.
+        if ($supers.Count -eq 0) { continue }
+        $superMatcher = New-Object System.Text.RegularExpressions.Regex(
+            ('\b(?:' + (($supers.Keys | ForEach-Object { [regex]::Escape($_) }) -join '|') + ')\b'),
+            ([System.Text.RegularExpressions.RegexOptions]::IgnoreCase -bor
+             [System.Text.RegularExpressions.RegexOptions]::Compiled))
         foreach ($fn in (Get-AhkFunctionMap -Text $treeText)) {
             $declared = @{}
             foreach ($m in [regex]::Matches($fn.Body, '(?m)^\s+global\s+([^\r\n]+)')) {
@@ -945,15 +951,20 @@ function Assert-SharedParity {
                 }
             }
             if ($declared.Count -eq 0) { continue }
+            # One pass over the body against an alternation of the super-global
+            # names, rather than tokenising every line and testing each word.
+            #
+            # The obvious version ran a \b(\w+)\b match per line across ~37,000
+            # lines and did a hashtable lookup per token. That is minutes in
+            # Windows PowerShell, and a check that appears to hang is the failure
+            # mode this file warns about elsewhere -- nobody waits for it twice,
+            # and then nobody runs the validator at all.
             $used = @{}
-            $bodyLines = $fn.Body -split "`n"
-            for ($i = 1; $i -lt $bodyLines.Count; $i++) {
-                $clean = $bodyLines[$i] -replace '"(?:[^"`]|`.)*"', '""'
-                $clean = $clean -replace '(?<!`);.*$', ''
-                foreach ($m in [regex]::Matches($clean, '\b([A-Za-z_]\w*)\b')) {
-                    $key = $m.Groups[1].Value.ToLowerInvariant()
-                    if ($supers.ContainsKey($key)) { $used[$key] = $true }
-                }
+            $clean = $fn.Body -replace '"(?:[^"`]|`.)*"', '""'
+            $clean = ($clean -split "`n" |
+                ForEach-Object { $_ -replace '(?<!`);.*$', '' }) -join "`n"
+            foreach ($m in $superMatcher.Matches($clean)) {
+                $used[$m.Value.ToLowerInvariant()] = $true
             }
             $omitted = @($used.Keys | Where-Object { -not $declared.ContainsKey($_) } | Sort-Object)
             if ($omitted.Count -gt 0) {
