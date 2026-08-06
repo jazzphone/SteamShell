@@ -6586,16 +6586,21 @@ SettingsPopulate() {
     SetFieldValue("LauncherCleanup.CooldownSec",
         ReadInt(MovedSettingSection("LauncherCleanup", "Assist", "CooldownSec"), "CooldownSec", 300, 30, 7200))
     SetFieldValue("LauncherCleanup.HardKill", ReadBool(MovedSettingSection("LauncherCleanup", "Assist", "HardKill"), "HardKill", true))
-    SetFieldValue("Controller.ControllerIndex",
-        ReadInt("Controller", "ControllerIndex", 0, 0, 3))
+    ; A dropdown since this row moved to the shared table, and a DropDownList's
+    ; .Value is a 1-BASED INDEX, not the number on screen. Setting it from the
+    ; stored 0-3 selected nothing for controller 0 and the wrong entry for the
+    ; rest, and saving it back wrote 1-4. Selected by text like every other
+    ; choice row.
+    SelectChoiceByText("Controller.ControllerIndex",
+        ReadInt("Controller", "ControllerIndex", 0, 0, 3), ["0", "1", "2", "3"])
     SetFieldValue("Controller.ControllerDeadzone",
         ReadInt("Controller", "ControllerDeadzone", 3000, 0, 32000))
     SetFieldValue("Controller.ControllerMouseSpeed",
-        ReadInt("Controller", "ControllerMouseSpeed", 100, 10, 300))
+        ReadInt("Controller", "ControllerMouseSpeed", 100, 1, 300))
     SetFieldValue("Controller.ControllerChordHoldMs",
         ReadInt("Controller", "ControllerChordHoldMs", 500, 100, 3000))
     SetFieldValue("Features.EnableAutoHideCursor", ReadBool(MovedSettingSection("Features", "Cursor", "EnableAutoHideCursor"), "EnableAutoHideCursor", true))
-    SetFieldValue("Timing.MouseHideDelay", ReadInt(MovedSettingSection("Timing", "Cursor", "MouseHideDelay"), "MouseHideDelay", 1000, 250, 10000))
+    SetFieldValue("Timing.MouseHideDelay", ReadInt(MovedSettingSection("Timing", "Cursor", "MouseHideDelay"), "MouseHideDelay", 1000, 0, 60000))
     SetFieldValue("Features.EnableMouseParkOnBoot", ReadBool(MovedSettingSection("Features", "Cursor", "EnableMouseParkOnBoot"), "EnableMouseParkOnBoot", true))
     SetFieldValue("Cursor.ParkOnGameStart", ReadBool("Cursor", "ParkOnGameStart", true))
     SetFieldValue("Cursor.ParkOnSteamReturn", ReadBool("Cursor", "ParkOnSteamReturn", true))
@@ -6732,7 +6737,7 @@ SaveSettings(*) {
             GetFieldValue("Steam.EnableViewHoldAction") ? "true" : "false"],
         ["Steam", "ViewHoldMs", GetFieldValue("Steam.ViewHoldMs", 500)],
         ["Steam", "ViewHoldInGameMs", GetFieldValue("Steam.ViewHoldInGameMs", 1000)],
-        ["Controller", "ControllerIndex", GetFieldValue("Controller.ControllerIndex", 0)],
+        ["Controller", "ControllerIndex", GetFieldText("Controller.ControllerIndex", "0")],
         ["Controller", "ControllerDeadzone", GetFieldValue("Controller.ControllerDeadzone", 3000)],
         ["Controller", "ControllerMouseSpeed", GetFieldValue("Controller.ControllerMouseSpeed", 100)],
         ["Controller", "ControllerChordHoldMs",

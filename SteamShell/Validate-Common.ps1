@@ -1196,10 +1196,14 @@ function Assert-SharedParity {
     $tableStart = $sharedText.IndexOf("SettingsCategoryRows(category) {")
     $tableEnd = $sharedText.IndexOf("return table.Has(category)", $tableStart)
     $tableText = $sharedText.Substring($tableStart, $tableEnd - $tableStart)
+    # Bounded to ONE row. A lazy .{0,300} runs past the end of a row that has no
+    # bounds and picks up the next row's, which reported the controller-index
+    # dropdown as if it offered 1-300.
     $boundedRows = [regex]::Matches(
         $tableText,
-        '(?s)"product", "(\w+)",.{0,80}?"section", "(\w+)", "key", "(\w+)",' +
-        '.{0,300}?"min", (\d+), "max", (\d+)')
+        '(?s)"product", "(\w+)",(?:(?!Map\("product").)*?' +
+        '"section", "(\w+)", "key", "(\w+)",(?:(?!Map\("product").)*?' +
+        '"min", (\d+), "max", (\d+)')
     Assert-True ($boundedRows.Count -ge 10) (
         "The shared page table's numeric rows could not be read, so a Settings " +
         "row accepting a value its own product clamps away would go unnoticed.")
@@ -1214,16 +1218,22 @@ function Assert-SharedParity {
             if ($product -eq "xfe" -and $tree -ne "SteamShell-XFE.ahk") { continue }
             $treeText = Get-Content -LiteralPath (Join-Path $projectRoot $tree) -Raw
             $flat = $treeText -replace '\s+', ' '
-            $read = [regex]::Match(
+            # EVERY read of the key, not the first. A tree reads most settings
+            # twice -- once into its globals at load, once to fill the Settings
+            # window -- and checking only the first let two of them drift apart
+            # inside the same tree, which is the same failure wearing a
+            # different hat.
+            $reads = [regex]::Matches(
                 $flat,
                 'ReadInt\( ?(?:MovedSettingSection\([^)]*\)|"' + [regex]::Escape($section) +
                 '") ?, ?"' + [regex]::Escape($key) + '" ?, ?[^,]+, ?(\d+) ?, ?(\d+)\)')
-            if (-not $read.Success) { continue }
-            Assert-True (
-                $read.Groups[1].Value -eq $low -and $read.Groups[2].Value -eq $high) (
-                "${tree}: $section.$key is read with bounds " +
-                "$($read.Groups[1].Value)-$($read.Groups[2].Value) but its Settings row " +
-                "offers $low-$high. The row would accept a value the next reload clamps away.")
+            foreach ($read in $reads) {
+                Assert-True (
+                    $read.Groups[1].Value -eq $low -and $read.Groups[2].Value -eq $high) (
+                    "${tree}: $section.$key is read with bounds " +
+                    "$($read.Groups[1].Value)-$($read.Groups[2].Value) but its Settings row " +
+                    "offers $low-$high. The row would accept a value the next reload clamps away.")
+            }
         }
     }
 
