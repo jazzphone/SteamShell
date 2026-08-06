@@ -531,6 +531,27 @@ def check_quickmenu_rows(sources):
         built = {r for r in built
                  if r is not None and not r.startswith(ROW_ID_FAMILIES)}
 
+        # What each row states as its own value. A literal "" states nothing and
+        # falls back to QuickMenuValue; anything else -- a literal or an
+        # expression like QuickMenuSettingValueText(id) -- is the row answering
+        # for itself.
+        row_states_value = {}
+        row_nav = {}
+        for args in call_arguments(rows_body, "MenuRow"):
+            if not args:
+                continue
+            row_id = _string_literal(args[0])
+            if row_id is None:
+                continue
+            if len(args) < 3:
+                row_states_value[row_id] = False
+                continue
+            literal = _string_literal(args[2])
+            row_states_value[row_id] = not (literal is not None and literal == "")
+            action = _string_literal(args[3]) if len(args) > 3 else None
+            row_nav[row_id] = bool(action) and (
+                action.startswith("page:") or action == "back")
+
         recorded = manifest.get(product, set())
         for gone in sorted(recorded - built):
             fail(f"{filename}: the Quick Menu row '{gone}' is in "
@@ -558,6 +579,48 @@ def check_quickmenu_rows(sources):
         # function is consulted here explicitly rather than by scanning
         # everything.
         #
+        # The companion too, since QuickMenuRowValueText answers for both now.
+        #
+        # It resolved values ONLY the shell's way -- QuickMenuValue(row id) -- so
+        # every companion row whose id has no case there rendered with an empty
+        # value column. That was every "toggle:" settings row it builds: labels
+        # with nothing beside them, on the page a user goes to in order to read
+        # the current setting. Nothing about a blank column fails, and this check
+        # existed for the shell and simply did not run for the companion.
+        if (product == "xfe"):
+            # Rows whose value column is deliberately empty: they DO something
+            # rather than hold a setting. Listed rather than inferred, so a row
+            # that loses its value by accident cannot hide among them -- the
+            # shell's copy of this check names its four the same way.
+            action_rows = {"back", "desktop", "restart", "shutdown", "sleep",
+                           "exitApp", "returnShell", "overlayOn", "overlayOff",
+                           "overlayToggle", "limiterOn", "limiterOff",
+                           "limiterToggle", "rtssStart", "rtssSaveProfile",
+                           "windowsSettings", "setControllerMappings"}
+            # The companion carries navigation in the ACTION, not in a row field,
+            # so its hub rows are not in `navigating`.
+            answerable = switch_case_labels(function_body(text, "QuickMenuValue"))
+            answerable |= switch_case_labels(
+                function_body(shared, "QuickMenuSettingValueText"))
+            answerable |= set(re.findall(
+                r'"(\w+)",\s*Map\("section",', shared))
+            for row_id, states_value in row_states_value.items():
+                if states_value:
+                    continue
+                base = row_id[7:] if row_id.startswith("toggle:") else row_id
+                if base in answerable or row_id in answerable:
+                    continue
+                if row_id in inert or row_id in navigating or row_id in action_rows:
+                    continue
+                if row_nav.get(row_id):
+                    continue
+                if row_id.startswith(ROW_ID_FAMILIES):
+                    continue
+                fail(f"{filename}: the Quick Menu row '{row_id}' renders no "
+                     "value. It carries none of its own and QuickMenuValue has "
+                     "no case for it, so the row shows a label and an empty "
+                     "column.")
+
         # Standalone only. The companion resolves each row's value when it
         # builds the row, so there is no separate mapping to be missing.
         if (product == "standalone"):

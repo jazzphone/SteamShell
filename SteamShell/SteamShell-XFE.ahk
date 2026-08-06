@@ -7315,7 +7315,21 @@ ProductVersionText() {
 }
 
 ProductCenterGui(guiObj) {
-    CenterGuiOnMonitorActual(guiObj, GetMonitorIndexForWindow(WinExist("A")), 900, 560)
+    ; Centre at whatever size the window already is. This used to pass 900x560 --
+    ; the Settings window's size -- for EVERY window SteamShell-Shared.ahk centres
+    ; through this seam, so the Quick Menu Layout dialog and the health check were
+    ; stretched to Settings' proportions with their content stranded in a corner.
+    ;
+    ; Moved, never resized, which is also why there is no DPI arithmetic here: the
+    ; window keeps the size AutoHotkey laid it out at.
+    try {
+        WinGetPos(, , &width, &height, "ahk_id " guiObj.Hwnd)
+        index := ClampInt(GetMonitorIndexForWindow(WinExist("A")), 1, MonitorGetCount())
+        MonitorGetWorkArea(index, &left, &top, &right, &bottom)
+        WinMove(Round(left + (((right - left) - width) / 2)),
+            Round(top + (((bottom - top) - height) / 2)), , ,
+            "ahk_id " guiObj.Hwnd)
+    }
 }
 
 PollController() {

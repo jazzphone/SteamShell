@@ -4011,10 +4011,47 @@ QuickMenuActivateShared(id) {
 ;
 ; QuickMenuValue itself stays per-product: it is the label map, and the two
 ; products genuinely word 19 of their 35 shared rows differently.
+; Which settings rows Left and Right actually step, so the value column can say
+; so. Every id here is shared, which is why one answer serves both products.
+QuickMenuSettingIsSteppable(id) {
+    static stepped := QuickMenuIdSet("qParkEdge|qOverlayMode|qLimiterMode"
+        . "|qAccentColor|qMouseSpeed|qMouseHideDelay|qFrameCap|qPersistentMouse")
+    return QuickMenuToggleTable().Has(id) || stepped.Has(id)
+}
+
+; The value column for one row.
+;
+; The two trees build rows differently -- the shell stores id and label and
+; resolves the value later, the companion carries the value on the row -- and
+; this asked ONLY the shell's way. Every id QuickMenuValue has no case for
+; therefore rendered blank, which is every "toggle:" settings row the companion
+; builds: the whole Quick Menu settings page showed labels and no values, and
+; there is nothing about a blank value column that fails.
+;
+; So a row that states its value is believed, and a row that does not is asked.
+;
+; The arrows are added here rather than baked into each value string. They mean
+; "Left and Right do something", and a row that means it should not have to
+; remember to say so -- which is how the companion ended up with arrows on its
+; HDR row and none on any settings row.
 QuickMenuRowValueText(row) {
-    if row.Has("back")
+    id := row["id"]
+    ; By id as well as by field. The shell marks a back row with a "back" key on
+    ; the row Map; the companion's MenuRow has no such field, so its back rows
+    ; asked QuickMenuValue("back"), got nothing, and displayed no glyph at all --
+    ; every page in the companion had a Back row with an empty value column where
+    ; the shell shows the arrow.
+    if (row.Has("back") || id = "back")
         return "‹"
-    return QuickMenuValue(row["id"])
+    text := row.Has("value") && row["value"] != ""
+        ? row["value"]
+        : QuickMenuValue(id)
+    if (text = "")
+        return ""
+    base := SubStr(id, 1, 7) = "toggle:" ? SubStr(id, 8) : id
+    if (QuickMenuSettingIsSteppable(base) && SubStr(text, 1, 1) != "‹")
+        return "‹ " text " ›"
+    return text
 }
 
 QuickMenuRowIsInert(index) {

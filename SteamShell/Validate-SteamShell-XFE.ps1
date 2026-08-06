@@ -797,6 +797,32 @@ Assert-True (
     $source -match 'case "system": return "Power & Diagnostics"' -and
     $source -notmatch 'MenuRow\("layoutPage"') (
     "The main Quick Menu rows, order, or title capitalization have regressed.")
+# Every settings row must render its value, and Back must render its arrow.
+#
+# QuickMenuRowValueText resolved values only the shell's way -- QuickMenuValue by
+# row id -- and this tree's settings rows carry ids like "toggle:qParkEdge" that
+# it has no case for. The whole Quick Menu settings page therefore showed labels
+# with an empty column beside them, on the page a user opens in order to READ the
+# current setting. Back rows were worse: the arrow is drawn from a "back" field
+# on the row Map, which MenuRow does not create, so no page showed one.
+#
+# Both halves are pinned because neither fails anything at build time, and the
+# row inventory cannot see either: it records ids, and these are values.
+Assert-True (
+    $source -match '(?s)QuickMenuSettingRow\(id, label\)\s*\{(?:(?!\n\})[\s\S])*?QuickMenuSettingValueText\(id\)' -and
+    $source -match '(?s)QuickMenuRowValueText\(row\)\s*\{(?:(?!\n\})[\s\S])*?row\.Has\("value"\)(?:(?!\n\})[\s\S])*?QuickMenuValue\(id\)' -and
+    $source -match '(?s)QuickMenuRowValueText\(row\)\s*\{(?:(?!\n\})[\s\S])*?id = "back"') (
+    "Quick Menu rows must render a value: settings rows must state theirs, " +
+    "QuickMenuRowValueText must believe a row that does and ask only when it " +
+    "does not, and a Back row must be recognised by id as well as by field.")
+
+# Left and Right say so in the value column, once, for both products.
+Assert-True (
+    $source -match '(?s)QuickMenuSettingIsSteppable\(id\)\s*\{(?:(?!\n\})[\s\S])*?QuickMenuToggleTable\(\)\.Has\(id\)' -and
+    $source -match '(?s)QuickMenuRowValueText\(row\)\s*\{(?:(?!\n\})[\s\S])*?QuickMenuSettingIsSteppable\(base\)') (
+    "Steppable rows must be wrapped in the arrows by the renderer rather than " +
+    "by each row remembering to include them.")
+
 # The task switcher must PAGE, not truncate.
 #
 # It used to build `Loop Min(QuickMenuTaskWindows.Length, 13)` to fit the row
