@@ -1853,18 +1853,35 @@ Assert-True (
 # neither populated nor saved, so the checkbox always drew unchecked and
 # clearing it did nothing. Nothing in the window looked wrong.
 #
-# Read from the BUILDER CALL SITES, which is where the keys are now. The earlier
-# version matched SettingsRegisterField with a literal category, and the row
-# helpers passed the category as a variable -- so it silently covered 37 of the
-# 61 fields there were at the time. Anchoring on the builders is what makes it
-# complete; the count is 59 since schema 11 removed the two exclusion-mode rows,
-# and the floor below is deliberately a floor rather than that number.
+# Read from the BUILDER CALL SITES *and* from the shared page table, because a
+# field's key can now live in either.
+#
+# The earlier version matched SettingsRegisterField with a literal category, and
+# the row helpers passed the category as a variable -- so it silently covered 37
+# of the 61 fields there were at the time. Anchoring on the builders fixed that;
+# there are 58 today, counted across both sources;
+# then most rows moved into SettingsCategoryRows and the same hole reopened from
+# the other side. The floor below is what caught it: the scan found too few
+# fields to be trustworthy and said so, rather than passing while checking a
+# third of the window.
+#
+# Table rows are keyed the way this tree looks them up: companionField where a
+# row carries one, Section.Key otherwise.
 $registeredFieldKeys = [regex]::Matches(
     $source,
     'Settings(?:AddCheckboxRow|AddEditRow|AddChoiceRow|AddShortcutRow|AddPathRow)' +
     '\(\s*\r?\n?\s*settings,\s*category,\s*\r?\n?\s*"([^"]+)"') |
-    ForEach-Object { $_.Groups[1].Value } |
-    Sort-Object -Unique
+    ForEach-Object { $_.Groups[1].Value }
+$tableRows = [regex]::Matches(
+    $source,
+    'Map\("product", "(both|xfe)", "type", "(?!note|section)(\w+)",\s*\r?\n\s*' +
+    '"section", "([^"]+)", "key", "([^"]+)",\s*\r?\n?\s*' +
+    '(?:"companionField", "([^"]+)",)?')
+$registeredFieldKeys += @($tableRows | ForEach-Object {
+    if ($_.Groups[5].Success) { $_.Groups[5].Value }
+    else { $_.Groups[3].Value + "." + $_.Groups[4].Value }
+})
+$registeredFieldKeys = @($registeredFieldKeys | Sort-Object -Unique)
 Assert-True ($registeredFieldKeys.Count -gt 55) (
     "The Settings field scan found too few fields to be trustworthy.")
 $populateBody = [regex]::Match(
