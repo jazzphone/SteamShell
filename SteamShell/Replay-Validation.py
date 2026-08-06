@@ -1231,6 +1231,17 @@ def main():
             # over specs, so "is this field populated?" is "does it have a spec?".
             # Built the same way there, so a rule reading it is replayed against
             # the same string rather than skipped.
+            # Both halves of the field scan now ask the same question of the
+            # same specs -- is this field described? -- so they read the same
+            # string. Named separately because the validator names them
+            # separately, and a subject it reads must be one this can rebuild.
+            "savebody": (
+                _match_or_empty(
+                    r"(?sm)^SettingsCompanionFieldSpecs\(\)\s*\{[\s\S]*?\n    \]",
+                    source)
+                + _match_or_empty(
+                    r"(?sm)^SettingsCategoryRows\(category\)\s*\{[\s\S]*?return table",
+                    source)),
             "populatebody": (
                 _match_or_empty(
                     r"(?sm)^SettingsCompanionFieldSpecs\(\)\s*\{[\s\S]*?\n    \]",

@@ -350,7 +350,7 @@ Assert-True (
     $source -match '(?s)case "rtssSettings":.*?ShowSettingsCategory\("RTSS & Performance"\)') (
     "RTSS main summary and Settings availability row must remain distinct.")
 Assert-True (
-    $source -match 'RTSS\.UseDllIntegration' -and
+    $source -match '"section", "RTSS", "key", "UseDllIntegration"' -and
     $source -match 'Use RTSSHooks64\.dll for live state and direct control' -and
     $source -match '(?s)GetRtssHooksApi\(\).*?if !RtssUseDllIntegration\s*\r?\n\s*return 0' -and
     $source -match '(?s)GetRtssMenuStatus\(\).*?return "Running \| Shortcuts"') (
@@ -1604,7 +1604,7 @@ Assert-True (
         '!ApplyRtssGlobalState\("limiter",\s*false\).*?return.*?' +
         'PersistRtssFrameCapSelection\("off",\s*state\["fps"\]\)' -and
     $source -match 'SetTimer\(RestoreRtssFrameLimitTick,\s*2000\)' -and
-    $source -match '"RTSS\.RestoreFrameLimitOnStartup"') (
+    $source -match '"section", "RTSS", "key", "RestoreFrameLimitOnStartup"') (
     "An XFE Frame Limit path no longer records what it applied, or the restore is not armed.")
 
 # ==============================================================================
@@ -1905,8 +1905,26 @@ $populateBody = ([regex]::Match(
     $source, '(?sm)^SettingsCompanionFieldSpecs\(\)\s*\{[\s\S]*?\n    \]').Value +
     [regex]::Match(
         $source, '(?sm)^SettingsCategoryRows\(category\)\s*\{[\s\S]*?return table').Value)
-$saveBody = [regex]::Match(
-    $source, '(?sm)^SaveSettings\(\*\)\s*\{(?:(?!\n\})[\s\S])*\n\}').Value
+# Saving is a loop over the same specs, so "is this field saved?" is again "does
+# it have a spec?" -- and it is the SAME spec that populates it, which is the
+# point: a field cannot now be filled from one place and written from another.
+Assert-True (
+    $source -match '(?sm)^SaveSettings\(\*\)\s*\{(?:(?!\n\})[\s\S])*?pairs := SettingsFieldPairs\(\)' -and
+    $source -match '(?sm)^SettingsFieldPairs\(\)\s*\{(?:(?!\n\})[\s\S])*?SettingsAllFieldSpecs\(\)') (
+    "SaveSettings must build its pairs from the field specs; a hand-written " +
+    "triple per field is the list that let a key and the field it reads drift.")
+# A checkbox's .Value is its state and its .Text is its LABEL; a dropdown is the
+# other way round. Reading a control without knowing its type would write labels
+# into the INI for every checkbox at once, silently. The TYPE must come from the
+# spec, which is why this pins the branch rather than trusting it.
+Assert-True (
+    $source -match '(?s)SettingsFieldPairs\(\)\s*\{(?:(?!\n\})[\s\S])*?' +
+        'row\["type"\] = "checkbox"(?:(?!\n\})[\s\S])*?GetFieldValue\(key\) \? "true" : "false"' -and
+    $source -match '(?s)SettingsFieldPairs\(\)\s*\{(?:(?!\n\})[\s\S])*?' +
+        'row\["type"\] = "choice"(?:(?!\n\})[\s\S])*?GetFieldText\(key, default\)') (
+    "SettingsFieldPairs must read a checkbox by value and a choice by text; " +
+    "either one read the other way writes the wrong thing for every such row.")
+$saveBody = $populateBody
 $unpopulated = @(
     $registeredFieldKeys | Where-Object {
         $parts = $_ -split '\.', 2
@@ -1914,7 +1932,11 @@ $unpopulated = @(
             ('"section", "' + [regex]::Escape($parts[0]) + '", "key", "' +
              [regex]::Escape($parts[1]) + '"')) })
 $unsaved = @(
-    $registeredFieldKeys | Where-Object { -not $saveBody.Contains('"' + $_ + '"') })
+    $registeredFieldKeys | Where-Object {
+        $parts = $_ -split '\.', 2
+        -not ($saveBody -match
+            ('"section", "' + [regex]::Escape($parts[0]) + '", "key", "' +
+             [regex]::Escape($parts[1]) + '"')) })
 Assert-True ($unpopulated.Count -eq 0) (
     "Settings fields are registered but never populated: " + ($unpopulated -join ", "))
 Assert-True ($unsaved.Count -eq 0) (

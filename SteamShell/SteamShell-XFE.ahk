@@ -6603,96 +6603,36 @@ GetFieldValue(key, fallback := "") {
     return SettingsFields[key].Value
 }
 
+; What every field currently holds, ready to be written.
+;
+; The section, the key and the TYPE all come from the field's own spec, which is
+; what makes this safe to derive. Reading the control without knowing its type is
+; the trap: a checkbox's .Value is its state but its .Text is its LABEL, and a
+; dropdown is the other way round -- .Text is what the user picked, .Value is a
+; row number. Sniffing the control would write "Enable RTSS integration in the
+; Quick Menu" into the INI for every checkbox at once, and nothing would fail.
+;
+; An Edit answers the same string to either, which is why "edit", "shortcut" and
+; "path" share a branch.
+SettingsFieldPairs() {
+    pairs := []
+    for _, row in SettingsAllFieldSpecs() {
+        key := row["section"] "." row["key"]
+        default := row.Has("default") ? row["default"] : ""
+        if (row["type"] = "checkbox")
+            value := GetFieldValue(key) ? "true" : "false"
+        else if (row["type"] = "choice")
+            value := GetFieldText(key, default)
+        else
+            value := GetFieldValue(key, default)
+        pairs.Push([row["section"], row["key"], value])
+    }
+    return pairs
+}
+
 SaveSettings(*) {
     global IniPath, SettingsDirty
-    pairs := [
-        ["QuickMenu", "Enable", GetFieldValue("QuickMenu.Enable") ? "true" : "false"],
-        ["QuickMenu", "ShowGameDetection", GetFieldValue("QuickMenu.ShowGameDetection") ? "true" : "false"],
-        ["QuickMenu", "ChordHoldMs", GetFieldValue("QuickMenu.ChordHoldMs", 500)],
-        ["QuickMenu", "AccentColor", GetFieldText("QuickMenu.AccentColor", "Purple")],
-        ["QuickMenu", "AccentColorCustom", GetFieldValue("QuickMenu.AccentColorCustom", "107C10")],
-        ["Companion", "HeartbeatSeconds", GetFieldValue("Companion.HeartbeatSeconds", 60)],
-        ["Controller", "EnableControllerMouseMode",
-            GetFieldValue("Controller.EnableControllerMouseMode") ? "true" : "false"],
-        ["Features", "EnableAutoMouseMode",
-            GetFieldValue("Features.EnableAutoMouseMode") ? "true" : "false"],
-        ["Controller", "AutoMouseExeList",
-            GetFieldText("Controller.AutoMouseExeList", "explorer.exe")],
-        ["Controller", "Backend",
-            GetFieldText("Controller.Backend", "Auto")],
-        ["Controller", "DiagnosticLogging",
-            GetFieldValue("Controller.DiagnosticLogging") ? "true" : "false"],
-        ["Controller", "RawInputProbe",
-            GetFieldValue("Controller.RawInputProbe") ? "true" : "false"],
-        ["StartupPrograms", "Enable",
-            GetFieldValue("StartupPrograms.Enable") ? "true" : "false"],
-        ["StartupPrograms", "DelayMs", GetFieldValue("StartupPrograms.DelayMs", 2000)],
-        ["StartupPrograms", "StaggerMs", GetFieldValue("StartupPrograms.StaggerMs", 1200)],
-        ["StartupPrograms", "WindowMode",
-            GetFieldText("StartupPrograms.WindowMode", "Hidden")],
-        ["StartupPrograms", "LaunchDeElevated",
-            GetFieldValue("StartupPrograms.LaunchDeElevated") ? "true" : "false"],
-        ["Assist", "EnableGameFocusLite",
-            GetFieldValue("Assist.EnableGameFocusLite") ? "true" : "false"],
-        ["Assist", "EnableSteamAssistLite",
-            GetFieldValue("Assist.EnableSteamAssistLite") ? "true" : "false"],
-        ["Assist", "EnableLauncherCleanupLite",
-            GetFieldValue("Assist.EnableLauncherCleanupLite") ? "true" : "false"],
-        ["Assist", "TickIntervalMs", GetFieldValue("Assist.TickIntervalMs", 2000)],
-        ["Assist", "CpuThresholdPercent", GetFieldValue("Assist.CpuThresholdPercent", 12)],
-        ["Assist", "ForegroundStableSec", GetFieldValue("Assist.ForegroundStableSec", 30)],
-        ["LauncherCleanup", "CooldownSec", GetFieldValue("LauncherCleanup.CooldownSec", 300)],
-        ["LauncherCleanup", "HardKill", GetFieldValue("LauncherCleanup.HardKill") ? "true" : "false"],
-        ["Assist", "SuspendOnShellOverlay",
-            GetFieldValue("Assist.SuspendOnShellOverlay") ? "true" : "false"],
-        ["Steam", "MenuShortcut", GetFieldValue("Steam.MenuShortcut")],
-        ["Steam", "QuickAccessShortcut", GetFieldValue("Steam.QuickAccessShortcut")],
-        ["Steam", "OverlayShortcut", GetFieldValue("Steam.OverlayShortcut")],
-        ["Steam", "EnableViewButtonActions",
-            GetFieldValue("Steam.EnableViewButtonActions") ? "true" : "false"],
-        ["Steam", "EnableViewTapAction",
-            GetFieldValue("Steam.EnableViewTapAction") ? "true" : "false"],
-        ["Steam", "EnableViewHoldAction",
-            GetFieldValue("Steam.EnableViewHoldAction") ? "true" : "false"],
-        ["Steam", "ViewHoldMs", GetFieldValue("Steam.ViewHoldMs", 500)],
-        ["Steam", "ViewHoldInGameMs", GetFieldValue("Steam.ViewHoldInGameMs", 1000)],
-        ["Controller", "ControllerIndex", GetFieldText("Controller.ControllerIndex", "0")],
-        ["Controller", "ControllerDeadzone", GetFieldValue("Controller.ControllerDeadzone", 3000)],
-        ["Controller", "ControllerMouseSpeed", GetFieldValue("Controller.ControllerMouseSpeed", 100)],
-        ["Controller", "ControllerChordHoldMs",
-            GetFieldValue("Controller.ControllerChordHoldMs", 500)],
-        ["Features", "EnableAutoHideCursor",
-            GetFieldValue("Features.EnableAutoHideCursor") ? "true" : "false"],
-        ["Timing", "MouseHideDelay", GetFieldValue("Timing.MouseHideDelay", 1000)],
-        ["Features", "EnableMouseParkOnBoot",
-            GetFieldValue("Features.EnableMouseParkOnBoot") ? "true" : "false"],
-        ["Cursor", "ParkOnGameStart",
-            GetFieldValue("Cursor.ParkOnGameStart") ? "true" : "false"],
-        ["Cursor", "ParkOnSteamReturn",
-            GetFieldValue("Cursor.ParkOnSteamReturn") ? "true" : "false"],
-        ["MousePark", "MouseParkEdge",
-            GetFieldText("MousePark.MouseParkEdge", "Right")],
-        ["RTSS", "EnableIntegration",
-            GetFieldValue("RTSS.EnableIntegration") ? "true" : "false"],
-        ["RTSS", "Path", GetFieldValue("RTSS.Path")],
-        ["RTSS", "UseDllIntegration",
-            GetFieldValue("RTSS.UseDllIntegration") ? "true" : "false"],
-        ["RTSS", "OverlayControlMode",
-            GetFieldText("RTSS.OverlayControlMode", "Separate")],
-        ["RTSS", "OverlayOnShortcut", GetFieldValue("RTSS.OverlayOnShortcut")],
-        ["RTSS", "OverlayOffShortcut", GetFieldValue("RTSS.OverlayOffShortcut")],
-        ["RTSS", "OverlayToggleShortcut", GetFieldValue("RTSS.OverlayToggleShortcut")],
-        ["RTSS", "FrameLimiterControlMode",
-            GetFieldText("RTSS.FrameLimiterControlMode", "Separate")],
-        ["RTSS", "PresetFrameCap", GetFieldValue("RTSS.PresetFrameCap", 158)],
-        ["RTSS", "FrameLimiterOnShortcut", GetFieldValue("RTSS.FrameLimiterOnShortcut")],
-        ["RTSS", "FrameLimiterOffShortcut", GetFieldValue("RTSS.FrameLimiterOffShortcut")],
-        ["RTSS", "CustomFrameCapShortcut", GetFieldValue("RTSS.CustomFrameCapShortcut")],
-        ["RTSS", "RestoreFrameLimitOnStartup",
-            GetFieldValue("RTSS.RestoreFrameLimitOnStartup") ? "true" : "false"],
-        ["RTSS", "EnableElevatedFrameCapWrites",
-            GetFieldValue("RTSS.EnableElevatedFrameCapWrites") ? "true" : "false"]
-    ]
+    pairs := SettingsFieldPairs()
     try {
         for _, pair in pairs
             IniWrite(pair[3], IniPath, pair[1], pair[2])
