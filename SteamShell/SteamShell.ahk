@@ -176,6 +176,45 @@ global QuickMenuSelected := 1
 ; Standalone has no companion to disable, so the guard never fires; the
 ; alternative was keeping both functions in two copies to avoid the name.
 global CompanionDisabled := false
+; Controller Learner state. The wizard lives in SteamShell-Shared.ahk; these
+; are the globals it drives, declared here because a shared function cannot
+; declare a global into a tree that never names it.
+global EnableControllerDiagnostics := false
+global LearnActive := false
+global LearnAnalogBytes := Map()
+global LearnAnalogValues := Map()
+global LearnAxisRejection := ""
+global LearnAxisSamples := []
+global LearnAxisStarted := false
+global LearnBaseline := 0
+global LearnCaptureUntil := 0
+global LearnCountdownCtrl := unset
+global LearnDetailCtrl := unset
+global LearnDevice := 0
+global LearnDeviceKey := ""
+global LearnDpadRetries := 0
+global LearnExcursion := 0
+global LearnGui := unset
+global LearnHatValues := Map()
+global LearnIdentifyDevices := Map()
+global LearnIdentifyReady := false
+global LearnLastAccepted := ""
+global LearnLength := 0
+global LearnPeak := 0
+global LearnProgressCtrl := unset
+global LearnPromptCtrl := unset
+global LearnReleaseMask := 0
+global LearnReleaseOffset := -1
+global LearnReleaseUntil := 0
+global LearnRestCount := 0
+global LearnRestNoise := 0
+global LearnRestSampling := false
+global LearnResultAxes := Map()
+global LearnResultButtons := []
+global LearnStepIndex := 0
+global LearnStepReports := 0
+global RestCheckPeak := Map()
+global RestCheckSamples := 0
 ; "auto" (default), "rawinput" or "xinput".
 ;
 ; Auto reads RawInput whenever HID reports are arriving and XInput otherwise, so
@@ -2666,6 +2705,7 @@ ExcludeExeList=steam.exe|steamwebhelper.exe|SteamShell.exe
 ; HID path for diagnosis -- it deliberately does NOT fall back.
 Backend=auto                                                ; auto | rawinput | xinput
 RawInputProbe=false                                         ; Log raw HID reports; diagnostic only
+Diagnostics=false                                           ; Log backend/slot detail on change; diagnostic only
 RawInputStaleMs=5000                                        ; Treat RawInput as silent after this gap
 EnableControllerMouseMode=true                              ; Enable controller mouse/keyboard mapping (hold View/Back)
 EnablePersistentMouseMode=false                             ; Apply controller mouse/mappings without holding View/Back
@@ -3285,9 +3325,8 @@ JoinPipe(listObj) {
 ; Per-tree seam required by SteamShell-Shared.ahk: does a learning wizard want
 ; this report instead of the decoder?
 ;
-; The shell has no learner yet, so nothing consumes reports ahead of the
-; decoder and every report is decoded. When the wizard lands here this answers
-; the same way the companion's does.
+; While the wizard is open it consumes reports, because decoding as well would
+; fire mappings from the very buttons being pressed to teach the layout.
 ; Single entry point for controller state.
 ;
 ; RawInput first, and it yields by itself: RawInputReadState answers false
@@ -3314,8 +3353,19 @@ ControllerReadState(&state) {
     return XInputGetState(ControllerIndex, &state) = 0
 }
 
+; Per-tree seam required by SteamShell-Shared.ahk: a modal dialog is up, so
+; controller input must not also drive the shell behind it.
+ProductSetDialogActive(active) {
+    global SettingsEditorDialogActive
+    SettingsEditorDialogActive := active
+}
+
 ProductControllerLearnConsumesReport(data, base, length, device) {
-    return false
+    global LearnActive
+    if !LearnActive
+        return false
+    ControllerLearnReport(data, base, length, device)
+    return true
 }
 
 SharedPersistSettings(changes) {
@@ -3456,6 +3506,7 @@ LoadSettings() {
     global EnableGameScoreLogging, GameLogMode, GameLogTopN, GameLogIntervalMs, GameLogIncludeTitles
     global GameLogRejectNearCandidates, GameLogRejectMinAreaPercent, LogRotateMaxKB, LogRotateBackups
     global ControllerBackend, EnableRawInputProbe, RawInputStaleMs
+    global EnableControllerDiagnostics
     global MouseParkRightOffsetPx, MouseParkYPercent, MouseParkEdge
     global EnableLauncherCleanup, LauncherCleanupSteamForegroundSec, LauncherCleanupRequireNoGame, LauncherCleanupUseCpuAudio, LauncherCleanupCpuThreshold, LauncherCleanupAudioPeakThreshold, LauncherCleanupDownloadGuard, LauncherCleanupDownloadGuardMode
     global LauncherCleanupCooldownSec, LauncherCleanupCheckIntervalMs, LauncherCleanupGracefulCloseMs, LauncherCleanupHardKill
@@ -3645,6 +3696,7 @@ LauncherCleanupAudioPeakThreshold := ReadNumber("LauncherCleanup", "AudioPeakThr
         ControllerBackend := "auto"
     }
     EnableRawInputProbe := ReadBool("Controller", "RawInputProbe", false)
+    EnableControllerDiagnostics := ReadBool("Controller", "Diagnostics", false)
     RawInputStaleMs := ReadInt("Controller", "RawInputStaleMs", 5000, 500, 60000)
     ControllerIndex := ReadInt("Controller", "ControllerIndex", 0, 0, 3)
     ControllerPollIntervalMs := ReadInt("Controller", "ControllerPollIntervalMs", 16, 5, 200)
@@ -3896,6 +3948,10 @@ ProductTrayItems() {
     items.Push(Map("label", "Open Quick Menu", "handler", TrayOpenQuickMenu))
     items.Push(Map("label", "Open Settings", "handler", TrayOpenSettings))
     items.Push(Map("label", "Open Diagnostics", "handler", ShowControlPanel))
+    ; Reachable from the tray rather than only from Settings, because the user
+    ; who needs it is the one whose controller does not work yet -- so it cannot
+    ; require a controller to get to.
+    items.Push(Map("label", "Learn Controller…", "handler", ShowControllerLearner))
     items.Push("")
     if (DesktopMode) {
         items.Push(Map(

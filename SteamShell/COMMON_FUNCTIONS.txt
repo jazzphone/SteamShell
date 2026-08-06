@@ -100,6 +100,7 @@ SplitStartupCommandLine
 SteamShellPathIsAdminOnlyWritable
 StrRepeat
 ToInt
+TopmostMsgBox
 TrimGameCandidates
 TruncPad
 WaitForNewExecutablePid

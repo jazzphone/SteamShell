@@ -2331,3 +2331,9 @@ JoinWith(listObj, delimiter := ", ") {
         out .= (out = "" ? "" : delimiter) value
     return out
 }
+
+; MB_SYSTEMMODAL. Despite the name, its actual effect here is to make the message
+; box topmost, which is exactly what is needed and needs no timer.
+TopmostMsgBox(text, title := "", options := "") {
+    return MsgBox(text, title, Trim(options " 4096"))
+}
