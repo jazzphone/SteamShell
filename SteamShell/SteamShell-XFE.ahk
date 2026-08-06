@@ -5652,48 +5652,7 @@ ShowSettings(*) {
     ; RTSS & Performance
     category := "RTSS & Performance"
     y := SettingsFirstRowY()
-    SettingsAddCheckboxRow(settings, category, "RTSS.EnableIntegration",
-        "Enable RTSS integration in the Quick Menu", &y)
-    SettingsAddPathRow(settings, category, "RTSS.Path", "RTSS executable",
-        SettingsBrowseRtss, &y)
-    SettingsAddCheckboxRow(settings, category, "RTSS.UseDllIntegration",
-        "Use RTSSHooks64.dll for live state and direct control (recommended)", &y)
-    SettingsAddNoteRow(settings, category,
-        "Loaded beside the configured RTSS.exe. Disable this to force the "
-        . "shortcut controls and configured FPS cap label.", &y, 40)
-    ; The two group boxes this replaces could not flow: a group box needs its
-    ; height before the rows inside it exist, which is what forced the whole
-    ; page into two hand-placed columns.
-    SettingsAddSectionRow(settings, category, "Overlay", &y)
-    SettingsAddChoiceRow(settings, category, "RTSS.OverlayControlMode",
-        "Overlay control mode", ["Separate On / Off", "Toggle"], &y)
-    SettingsAddShortcutRow(settings, category, "RTSS.OverlayToggleShortcut",
-        "Overlay toggle shortcut", &y)
-    SettingsAddShortcutRow(settings, category, "RTSS.OverlayOnShortcut",
-        "Overlay on shortcut", &y)
-    SettingsAddShortcutRow(settings, category, "RTSS.OverlayOffShortcut",
-        "Overlay off shortcut", &y)
-    SettingsAddSectionRow(settings, category, "Frame Limiter", &y)
-    SettingsAddChoiceRow(settings, category, "RTSS.FrameLimiterControlMode",
-        "Frame limiter control mode", ["Separate On / Off", "Toggle"], &y)
-    SettingsAddEditRow(settings, category, "RTSS.PresetFrameCap",
-        "Preset Frame Cap (FPS)", &y, true)
-    SettingsAddCheckboxRow(settings, category,
-        "RTSS.RestoreFrameLimitOnStartup",
-        "Restore the last Frame Limit selection when RTSS starts", &y)
-    ; OFF by default here, unlike standalone. The label leads with what it costs,
-    ; because the cost is what a user who chose XFE cares about: XFE is chosen
-    ; precisely because nothing in it is elevated. See README-XFE.md.
-    SettingsAddCheckboxRow(settings, category,
-        "RTSS.EnableElevatedFrameCapWrites",
-        "Use an elevated helper to set the Frame Limit — needed when RTSS is in "
-        . "Program Files, and asks for UAC at startup", &y, 44)
-    SettingsAddShortcutRow(settings, category, "RTSS.CustomFrameCapShortcut",
-        "Frame limiter toggle shortcut", &y)
-    SettingsAddShortcutRow(settings, category, "RTSS.FrameLimiterOnShortcut",
-        "Frame limiter on shortcut", &y)
-    SettingsAddShortcutRow(settings, category, "RTSS.FrameLimiterOffShortcut",
-        "Frame limiter off shortcut", &y)
+    SettingsAddSharedRows(settings, category, &y)
 
     ; Startup Programs
     category := "Startup Programs"
@@ -6161,19 +6120,33 @@ SettingsAddSharedRows(guiObj, category, &y) {
             SettingsAddNoteRow(guiObj, category, row["text"], &y, 40)
             continue
         }
+        if (row["type"] = "section") {
+            SettingsAddSectionRow(guiObj, category, row["label"], &y)
+            continue
+        }
         field := row.Has("companionField")
             ? row["companionField"]
             : row["section"] "." row["key"]
+        label := SettingsRowLabel(row, "xfe")
         switch row["type"] {
             case "checkbox":
-                SettingsAddCheckboxRow(guiObj, category, field, row["label"], &y)
+                ; Two lines where the words need two. The shell wraps by width;
+                ; this tree is told the height, so a long label silently clipped
+                ; until it was given one.
+                SettingsAddCheckboxRow(guiObj, category, field, label, &y,
+                    StrLen(label) > 90 ? 44 : 26)
             case "choice":
-                SettingsAddChoiceRow(guiObj, category, field, row["label"],
+                SettingsAddChoiceRow(guiObj, category, field, label,
                     row.Has("xfeChoices") ? row["xfeChoices"] : row["choices"],
                     &y, 150)
             case "edit":
-                SettingsAddEditRow(guiObj, category, field, row["label"], &y,
+                SettingsAddEditRow(guiObj, category, field, label, &y,
                     row.Has("fieldType") && row["fieldType"] = "integer")
+            case "shortcut":
+                SettingsAddShortcutRow(guiObj, category, field, label, &y)
+            case "path":
+                SettingsAddPathRow(guiObj, category, field, label,
+                    SettingsBrowseRtss, &y)
         }
     }
 }

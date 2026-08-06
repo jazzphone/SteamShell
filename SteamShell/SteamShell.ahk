@@ -10132,21 +10132,38 @@ SettingsEditorAddSharedRows(category, &y) {
     for _, row in SettingsCategoryRows(category) {
         if !SettingsRowAppliesTo(row, "standalone")
             continue
+        label := SettingsRowLabel(row, "standalone")
+        value := SettingsRowDefault(row, "standalone")
         switch row["type"] {
             case "checkbox":
                 SettingsEditorAddCheckbox(category, row["section"], row["key"],
-                    row["label"], &y, row["default"])
+                    label, &y, value)
             case "choice":
-                SettingsEditorAddChoice(category, row["section"], row["key"],
-                    row["label"], row["choices"], &y, row["default"])
+                ctrl := SettingsEditorAddChoice(category, row["section"],
+                    row["key"], label, row["choices"], &y, value)
+                ; Rows other rows are enabled by have to say so when they change,
+                ; or the fields they gate stay greyed out until the page is
+                ; rebuilt.
+                if (row.Has("dependency") && row["dependency"])
+                    ctrl.OnEvent("Change", SettingsEditorRefreshDependencies)
             case "edit":
                 SettingsEditorAddTextField(category, row["section"], row["key"],
-                    row["label"], &y, row["default"],
+                    label, &y, value,
                     row.Has("fieldType") ? row["fieldType"] : "text",
                     row.Has("min") ? row["min"] : "",
                     row.Has("max") ? row["max"] : "")
+            case "shortcut":
+                SettingsEditorAddShortcutField(category, row["section"],
+                    row["key"], label, &y, value)
+            case "path":
+                SettingsEditorAddPathField(category, row["section"], row["key"],
+                    label, &y, row["prompt"], row["filter"], value)
             case "note":
                 SettingsEditorAddNote(category, row["text"], &y)
+            ; "section" is a companion-only grouping row. The shell has no
+            ; builder for one, and inventing a layout for it blind is how the
+            ; audit starts reporting overlaps -- so the shell simply omits it and
+            ; the two pages differ by two headings until the renderers merge.
         }
     }
 }
@@ -14442,34 +14459,7 @@ ShowSettingsEditor(*) {
     SettingsEditorAddHeading(category, "RTSS & Performance"
         , "Live RTSS state is used when available; configured shortcuts remain the compatibility fallback.")
     y := 150
-    SettingsEditorAddCheckbox(category, "RTSS", "EnableIntegration", "Enable RTSS integration in the Quick Menu", &y, "true")
-    SettingsEditorAddPathField(category, "RTSS", "Path", "RTSS executable", &y
-        , "Select RTSS.exe", "Programs (*.exe)", "C:\Program Files (x86)\RivaTuner Statistics Server\RTSS.exe")
-    SettingsEditorAddCheckbox(category, "RTSS", "UseDllIntegration", "Use RTSSHooks64.dll for live state and direct control (recommended)", &y, "true")
-    rtssOverlayModeCtrl := SettingsEditorAddChoice(
-        category, "RTSS", "OverlayControlMode",
-        "Overlay control mode", ["Toggle", "Separate"], &y, "Separate")
-    rtssOverlayModeCtrl.OnEvent("Change", SettingsEditorRefreshDependencies)
-    SettingsEditorAddShortcutField(category, "RTSS", "OverlayToggleShortcut", "Overlay toggle shortcut", &y, "^+o")
-    SettingsEditorAddShortcutField(category, "RTSS", "OverlayOnShortcut", "Overlay on shortcut", &y, "^+1")
-    SettingsEditorAddShortcutField(category, "RTSS", "OverlayOffShortcut", "Overlay off shortcut", &y, "^+2")
-    rtssLimiterModeCtrl := SettingsEditorAddChoice(
-        category, "RTSS", "FrameLimiterControlMode",
-        "Frame limiter control mode", ["Toggle", "Separate"], &y, "Separate")
-    rtssLimiterModeCtrl.OnEvent("Change", SettingsEditorRefreshDependencies)
-    SettingsEditorAddTextField(
-        category, "RTSS", "PresetFrameCap",
-        "Preset Frame Cap (FPS)", &y, "158", "integer", 0, 1000)
-    SettingsEditorAddCheckbox(
-        category, "RTSS", "RestoreFrameLimitOnStartup",
-        "Restore the last Frame Limit selection when RTSS starts", &y, "true")
-    SettingsEditorAddCheckbox(
-        category, "RTSS", "EnableElevatedFrameCapWrites",
-        "Use the elevated helper to set the Frame Limit (needed when RTSS is in Program Files)",
-        &y, "true")
-    SettingsEditorAddShortcutField(category, "RTSS", "CustomFrameCapShortcut", "Frame limiter toggle shortcut", &y, "^+f")
-    SettingsEditorAddShortcutField(category, "RTSS", "FrameLimiterOnShortcut", "Frame limiter on shortcut", &y, "^+5")
-    SettingsEditorAddShortcutField(category, "RTSS", "FrameLimiterOffShortcut", "Frame limiter off shortcut", &y, "^+6")
+    SettingsEditorAddSharedRows(category, &y)
     SettingsEditorAddActionButton(category, "Launch Selected RTSS", SettingsEditorOpenRtss, 255, y + 4, 220)
 
     ; Launcher cleanup

@@ -2053,23 +2053,28 @@ Assert-True (
     $source -notmatch 'AddGroupBox\(') (
     "A Settings group box has returned; group boxes cannot flow and force hand placement.")
 Assert-True (
+    # Section breaks come from the shared page table now, as companion-only
+    # rows: the shell has no builder for one, so it omits them rather than
+    # having a layout invented for it blind.
     $source -match
-        '(?s)category := "RTSS & Performance"(?:(?!category := )[\s\S])*?' +
-        'SettingsAddSectionRow\(settings, category, "Overlay", &y\)' +
-        '(?:(?!category := )[\s\S])*?' +
-        'SettingsAddSectionRow\(settings, category, "Frame Limiter", &y\)') (
+        '(?s)"product", "xfe", "type", "section", "label", "Overlay"' +
+        '[\s\S]*?"product", "xfe", "type", "section", "label", "Frame Limiter"' -and
+    $source -match
+        '(?s)SettingsAddSharedRows\(guiObj, category, &y\)\s*\{[\s\S]*?' +
+        'row\["type"\] = "section"[\s\S]{0,120}?SettingsAddSectionRow\(') (
     "The RTSS page lost the section breaks that replaced its group boxes.")
 
 # Choice lists derive their stored value from the selected INDEX, so reordering
 # one to match standalone's wording would invert the setting. The order is
 # pinned here rather than left to the next person to notice.
 Assert-True (
+    # Pinned in the shared table now, which is also where the hazard got worse:
+    # the two trees listed these in OPPOSITE orders, and only the companion
+    # reads the index. One unified list has to keep 1 = Separate, 2 = Toggle.
     $source -match
-        'SettingsAddChoiceRow\(settings, category, "RTSS\.OverlayControlMode",\s*\r?\n?\s*' +
-        '"Overlay control mode", \["Separate On / Off", "Toggle"\]' -and
+        '(?s)"key", "OverlayControlMode",[\s\S]{0,200}?"choices", \["Separate", "Toggle"\]' -and
     $source -match
-        'SettingsAddChoiceRow\(settings, category, "RTSS\.FrameLimiterControlMode",\s*\r?\n?\s*' +
-        '"Frame limiter control mode", \["Separate On / Off", "Toggle"\]' -and
+        '(?s)"key", "FrameLimiterControlMode",[\s\S]{0,200}?"choices", \["Separate", "Toggle"\]' -and
     $source -match
         'SettingsAddChoiceRow\(settings, category, "StartupPrograms\.WindowMode",\s*\r?\n?\s*' +
         '"Launch window mode", \["Normal", "Minimized", "Hidden"\]' -and

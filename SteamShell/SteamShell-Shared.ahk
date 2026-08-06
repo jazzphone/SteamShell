@@ -5407,6 +5407,76 @@ RawInputReadState(&state) {
 ;                   one of them is a name somebody has to keep in step by hand.
 SettingsCategoryRows(category) {
     static table := Map(
+        "RTSS & Performance", [
+            Map("product", "both", "type", "checkbox",
+                "section", "RTSS", "key", "EnableIntegration",
+                "label", "Enable RTSS integration in the Quick Menu",
+                "default", "true"),
+            Map("product", "both", "type", "path",
+                "section", "RTSS", "key", "Path", "label", "RTSS executable",
+                "prompt", "Select RTSS.exe", "filter", "Programs (*.exe)",
+                "default", "C:\\Program Files (x86)\\RivaTuner Statistics Server\\RTSS.exe"),
+            Map("product", "both", "type", "checkbox",
+                "section", "RTSS", "key", "UseDllIntegration",
+                "label", "Use RTSSHooks64.dll for live state and direct control (recommended)",
+                "default", "true"),
+            Map("product", "both", "type", "note",
+                "text", "Loaded beside the configured RTSS.exe. Disable this to "
+                    . "force the shortcut controls and configured FPS cap label."),
+            Map("product", "xfe", "type", "section", "label", "Overlay"),
+            ; ORDER IS LOAD-BEARING. The companion stores this by choice INDEX --
+            ; populate Chooses 1 or 2, save reads 1 or 2 -- while the shell stores
+            ; the TEXT. The two trees listed these in OPPOSITE orders, so one
+            ; unified list had to be the one that keeps 1 = Separate and 2 =
+            ; Toggle, and the words had to stay what the shell already writes.
+            ; Reordering this silently inverts the companion's setting.
+            Map("product", "both", "type", "choice",
+                "section", "RTSS", "key", "OverlayControlMode",
+                "label", "Overlay control mode",
+                "choices", ["Separate", "Toggle"], "default", "Separate",
+                "dependency", true),
+            Map("product", "both", "type", "shortcut",
+                "section", "RTSS", "key", "OverlayToggleShortcut",
+                "label", "Overlay toggle shortcut", "default", "^+o"),
+            Map("product", "both", "type", "shortcut",
+                "section", "RTSS", "key", "OverlayOnShortcut",
+                "label", "Overlay on shortcut", "default", "^+1"),
+            Map("product", "both", "type", "shortcut",
+                "section", "RTSS", "key", "OverlayOffShortcut",
+                "label", "Overlay off shortcut", "default", "^+2"),
+            Map("product", "xfe", "type", "section", "label", "Frame Limiter"),
+            Map("product", "both", "type", "choice",
+                "section", "RTSS", "key", "FrameLimiterControlMode",
+                "label", "Frame limiter control mode",
+                "choices", ["Separate", "Toggle"], "default", "Separate",
+                "dependency", true),
+            Map("product", "both", "type", "edit",
+                "section", "RTSS", "key", "PresetFrameCap",
+                "label", "Preset Frame Cap (FPS)",
+                "default", "158", "fieldType", "integer", "min", 0, "max", 1000),
+            Map("product", "both", "type", "checkbox",
+                "section", "RTSS", "key", "RestoreFrameLimitOnStartup",
+                "label", "Restore the last Frame Limit selection when RTSS starts",
+                "default", "true"),
+            ; Different default AND different words, both deliberate. The
+            ; companion is chosen precisely because nothing in it is elevated, so
+            ; it defaults OFF and its label leads with what the setting costs.
+            Map("product", "both", "type", "checkbox",
+                "section", "RTSS", "key", "EnableElevatedFrameCapWrites",
+                "label", "Use the elevated helper to set the Frame Limit "
+                    . "(needed when RTSS is in Program Files)",
+                "xfeLabel", "Use an elevated helper to set the Frame Limit — "
+                    . "needed when RTSS is in Program Files, and asks for UAC at startup",
+                "default", "true", "xfeDefault", "false"),
+            Map("product", "both", "type", "shortcut",
+                "section", "RTSS", "key", "CustomFrameCapShortcut",
+                "label", "Frame limiter toggle shortcut", "default", "^+f"),
+            Map("product", "both", "type", "shortcut",
+                "section", "RTSS", "key", "FrameLimiterOnShortcut",
+                "label", "Frame limiter on shortcut", "default", "^+5"),
+            Map("product", "both", "type", "shortcut",
+                "section", "RTSS", "key", "FrameLimiterOffShortcut",
+                "label", "Frame limiter off shortcut", "default", "^+6")],
         "Controller & Cursor", [
             Map("product", "both", "type", "checkbox",
                 "section", "Controller", "key", "EnableControllerMouseMode",
@@ -5494,6 +5564,22 @@ SettingsCategoryRows(category) {
                 "label", "Automatic mouse throughout Windows desktop mode",
                 "default", "true")])
     return table.Has(category) ? table[category] : []
+}
+
+; The label and default this product shows for a shared row.
+;
+; Both differ for real reasons in at least one row -- the elevated frame-cap
+; write defaults OFF in the companion and its label leads with the cost, because
+; the companion is chosen precisely because nothing in it is elevated. A single
+; label would have to be wrong for one of them.
+SettingsRowLabel(row, product) {
+    return (product = "xfe" && row.Has("xfeLabel")) ? row["xfeLabel"] : row["label"]
+}
+
+SettingsRowDefault(row, product) {
+    if (product = "xfe" && row.Has("xfeDefault"))
+        return row["xfeDefault"]
+    return row.Has("default") ? row["default"] : ""
 }
 
 ; Whether a row belongs to the product being compiled.

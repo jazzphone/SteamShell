@@ -303,6 +303,8 @@ SetRtssFrameLimiterState
 SetRtssGlobalFrameLimit
 SetRtssOverlayState
 SettingsRowAppliesTo
+SettingsRowDefault
+SettingsRowLabel
 SettingsUpdateScrollBar
 SharedNotify
 ShouldLogRateLimited

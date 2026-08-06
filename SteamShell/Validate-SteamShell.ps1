@@ -2884,8 +2884,7 @@ Assert-True (
     $source -match
         '(?s)KickUserStartupPrograms\(\).*?SetTimer\(RestoreRtssFrameLimitTick,\s*2000\)' -and
     $source -match
-        'SettingsEditorAddCheckbox\(\s*\r?\n?\s*category,\s*"RTSS",\s*' +
-        '"RestoreFrameLimitOnStartup"') (
+        '(?s)"section", "RTSS", "key", "RestoreFrameLimitOnStartup"') (
     "The Frame Limit restore is disconnected, launches RTSS, or is missing from Settings.")
 
 # RTSSHooks64.dll is loaded into whichever process calls it, so every profile
@@ -2900,8 +2899,7 @@ Assert-True (
 Assert-True (
     $embeddedSchema.Contains("RTSS`0EnableElevatedFrameCapWrites") -and
     $source -match
-        'SettingsEditorAddCheckbox\(\s*\r?\n?\s*category,\s*"RTSS",\s*' +
-        '"EnableElevatedFrameCapWrites"' -and
+        '(?s)"section", "RTSS", "key", "EnableElevatedFrameCapWrites"' -and
     # Both write paths go STRAIGHT to the helper when one exists. Trying
     # in-process first cannot succeed in the only session where a helper
     # exists, and for per-game profiles it was actively harmful: the read-back
