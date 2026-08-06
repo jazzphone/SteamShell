@@ -1200,6 +1200,7 @@ function Assert-SharedParity {
         "ProductHealthResults", "ProductIdentity",
         "OpenOSK", "OpenTouchKeyboard",
         "ProductApplyQuickMenuSetting", "ProductControllerBindingAction",
+        "ProductControllerLearnConsumesReport",
         "ProductSettingBool",
         "ProductSettingsScrollBar", "ProductSettingsViewportHeight",
         "ProductTrayBaseTip", "ProductTrayItems", "ProductVersionText",

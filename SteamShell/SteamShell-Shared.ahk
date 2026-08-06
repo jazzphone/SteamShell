@@ -4410,3 +4410,930 @@ QuickMenuGameScoreLabel(id) {
     return GameCandidateLabel(LastGameCandidates[index], index)
 }
 
+; ==============================================================================
+; RawInput controller backend
+; ==============================================================================
+; Reads gamepads straight from the HID stack as WM_INPUT messages, decoding each
+; report into the XINPUT_STATE-shaped buffer the rest of both programs already
+; consumes -- so mappings, chords and the controller mouse are identical on
+; every backend.
+;
+; This was the companion's, written because XInput and GameInput both read all
+; zeros inside Xbox FSE. That is why it was BUILT, and it is not the limit of
+; what it DOES: registration passes RIDEV_INPUTSINK, so reports arrive whether
+; or not this program owns the foreground, and both the gamepad and joystick
+; usages are registered because controllers vary in which one they report.
+;
+; Which makes it the answer to a problem the shell has and the companion does
+; not. XInput covers Xbox-compatible pads and nothing else, so a controller that
+; does not speak it left the SHELL with no input at all -- on a machine where
+; there is no taskbar and no Start menu to fall back to, because the shell is
+; what SteamShell replaced. The companion at least still had Xbox FSE.
+;
+; Backend selection stays per-product: it yields to XInput by itself whenever no
+; reports are arriving, so a machine whose controller already worked keeps
+; working exactly as before.
+
+; ==============================================================================
+; RawInput probe
+; ==============================================================================
+; Answers exactly one question: do controller HID reports reach this background
+; process inside Xbox FSE?
+;
+; XInput and GameInput have been shown to report byte-identical state at every
+; sample, including all-zero inside FSE, which means they share a layer and no
+; choice between them can help. RawInput is a different mechanism: HID reports
+; delivered as WM_INPUT messages straight from the HID stack, and RIDEV_INPUTSINK
+; explicitly requests delivery while the process is NOT in the foreground.
+;
+; This began as a diagnostic probe. The registration and WM_INPUT handler now
+; serve three consumers: optional raw-byte logging, the normal RawInput decoder,
+; and the controller learner. Logging remains independently switchable.
+RawInputProbeStart() {
+    global EnableRawInputProbe, RawInputProbeActive, ControllerBackend
+    static RIDEV_INPUTSINK := 0x00000100
+    static USAGE_PAGE_GENERIC := 0x01
+    static USAGE_GAMEPAD := 0x05
+    static USAGE_JOYSTICK := 0x04
+
+    if RawInputProbeActive
+        return false
+    ; Register whenever RawInput is either the input source or being logged.
+    backend := StrLower(ControllerBackend)
+    needed := EnableRawInputProbe || backend = "rawinput" || backend = "auto"
+    ; Say so explicitly when not needed. Returning in silence made a setting that
+    ; never reached the application look identical to a probe that ran and found
+    ; nothing, which cost a full test cycle.
+    if !needed {
+        LogLine("RawInput: not registered (backend=" backend
+            . ", probe=" (EnableRawInputProbe ? "on" : "off") ").")
+        return false
+    }
+    hwnd := A_ScriptHwnd
+    if !hwnd {
+        LogLine("RawInput probe: no script window available.", "Warning")
+        return false
+    }
+
+    ; Two RAWINPUTDEVICE entries, 16 bytes each on x64. Gamepad and joystick are
+    ; both registered because controllers vary in which usage they report.
+    devices := Buffer(32, 0)
+    NumPut("UShort", USAGE_PAGE_GENERIC, devices, 0)
+    NumPut("UShort", USAGE_GAMEPAD, devices, 2)
+    NumPut("UInt", RIDEV_INPUTSINK, devices, 4)
+    NumPut("Ptr", hwnd, devices, 8)
+    NumPut("UShort", USAGE_PAGE_GENERIC, devices, 16)
+    NumPut("UShort", USAGE_JOYSTICK, devices, 18)
+    NumPut("UInt", RIDEV_INPUTSINK, devices, 20)
+    NumPut("Ptr", hwnd, devices, 24)
+
+    ok := false
+    try ok := DllCall("RegisterRawInputDevices", "Ptr", devices, "UInt", 2,
+        "UInt", 16, "Int") != 0
+    if !ok {
+        LogLine("RawInput probe: RegisterRawInputDevices failed (err "
+            . A_LastError ").", "Warning")
+        return false
+    }
+    OnMessage(0x00FF, RawInputProbeMessage)
+    RawInputProbeActive := true
+    LogLine("RawInput: registered for background gamepad/joystick reports.")
+    RawInputProbeEnumerate()
+    return true
+}
+
+
+; Forgets the locked device and clears the cached report.
+;
+; Called on a deliberate power transition rather than on every device change: it
+; also clears RawInputLastReportTick, which the automatic backend selection reads,
+; so resetting it casually would make `auto` flip to XInput mid-session.
+RawInputResetDeviceLock(reason) {
+    global RawInputDevice, RawInputLastReportTick, RawInputState
+    if (!RawInputDevice && !RawInputLastReportTick)
+        return
+    LogLine("RawInput: releasing device lock 0x" Format("{:X}", RawInputDevice)
+        . " (" reason "). The next matching report re-locks.")
+    RawInputDevice := 0
+    RawInputLastReportTick := 0
+    NumPut("UInt", 0, RawInputState, 0)
+    NumPut("UInt", 0, RawInputState, 4)
+    NumPut("UInt", 0, RawInputState, 8)
+    NumPut("UInt", 0, RawInputState, 12)
+}
+
+
+; Re-asserts the RawInput registration after a resume.
+;
+; The registration is per-window and should survive a suspend, since the window
+; does. Re-asserting it is cheap and removes the possibility that it did not,
+; which is the one failure mode device adoption cannot recover from: adoption
+; needs a WM_INPUT to react to, and there is nothing to adopt if registration is
+; gone.
+RawInputReregister() {
+    global RawInputProbeActive
+    RawInputProbeActive := false
+    if RawInputProbeStart()
+        SetTimer(RawInputResumeVerify, -10000)
+}
+
+
+; Reports whether controller reports actually resumed.
+;
+; Without this, a failed recovery is silent, and silence has already cost several
+; test cycles on this backend.
+RawInputResumeVerify() {
+    global RawInputLastReportTick, RawInputDevice, ControllerBackend
+    if RawInputLastReportTick {
+        LogLine("RawInput: reports resumed on device 0x"
+            . Format("{:X}", RawInputDevice) ".")
+        return
+    }
+    LogLine("RawInput: NO reports since resume after 10s. Press a button; if this"
+        . " persists, RawInput did not recover and the backend is effectively "
+        . (StrLower(ControllerBackend) = "rawinput" ? "dead until restart"
+            : "XInput only"), "Warning")
+}
+
+
+; Lists what RawInput actually knows about. Registration succeeds even when no
+; matching device exists, so a successful register followed by silence proves
+; nothing on its own. This reports whether a HID gamepad/joystick collection
+; exists at all -- Xbox pads on the XUSB driver are known not to publish one,
+; which would explain silence without any filtering being involved.
+RawInputProbeEnumerate() {
+    static RIDI_DEVICEINFO := 0x2000000B
+    static RIM_TYPEHID := 2
+    static LIST_ENTRY_SIZE := 16
+
+    count := 0
+    try {
+        if (DllCall("GetRawInputDeviceList", "Ptr", 0, "UInt*", &count,
+            "UInt", LIST_ENTRY_SIZE, "UInt") = 0xFFFFFFFF || !count) {
+            LogLine("RawInput probe: device list unavailable.", "Warning")
+            return
+        }
+        list := Buffer(count * LIST_ENTRY_SIZE, 0)
+        got := count
+        if (DllCall("GetRawInputDeviceList", "Ptr", list, "UInt*", &got,
+            "UInt", LIST_ENTRY_SIZE, "UInt") = 0xFFFFFFFF) {
+            LogLine("RawInput probe: device list read failed.", "Warning")
+            return
+        }
+        hidCount := 0
+        Loop got {
+            offset := (A_Index - 1) * LIST_ENTRY_SIZE
+            hDevice := NumGet(list, offset, "Ptr")
+            if (NumGet(list, offset + 8, "UInt") != RIM_TYPEHID)
+                continue
+            hidCount++
+            info := Buffer(32, 0)
+            NumPut("UInt", 32, info, 0)
+            size := 32
+            if (DllCall("GetRawInputDeviceInfoW", "Ptr", hDevice, "UInt", RIDI_DEVICEINFO,
+                "Ptr", info, "UInt*", &size, "UInt") = 0xFFFFFFFF)
+                continue
+            LogLine("RawInput HID: vid=0x" Format("{:04X}", NumGet(info, 8, "UInt"))
+                . " pid=0x" Format("{:04X}", NumGet(info, 12, "UInt"))
+                . " usagePage=0x" Format("{:02X}", NumGet(info, 20, "UShort"))
+                . " usage=0x" Format("{:02X}", NumGet(info, 22, "UShort")))
+        }
+        LogLine("RawInput probe: " got " devices enumerated, " hidCount " of them HID."
+            . (hidCount ? "" : " No HID collection exists for RawInput to deliver."))
+    }
+}
+
+
+RawInputProbeMessage(wParam, lParam, msg, hwnd) {
+    global EnableRawInputProbe, CompanionDisabled
+    static RID_INPUT := 0x10000003
+    static HEADER_SIZE := 24
+    static RIM_TYPEHID := 2
+    static lastHex := ""
+    static lastTick := 0
+    static arrivals := 0
+    static lastArrivalLog := 0
+    if CompanionDisabled
+        return 0
+
+    ; Count arrivals BEFORE any filtering. Without this, a message that is
+    ; received and then discarded during parsing is indistinguishable from a
+    ; message that never arrived.
+    arrivals++
+    if (A_TickCount - lastArrivalLog >= 2000) {
+        lastArrivalLog := A_TickCount
+        LogLine("RawInput probe: " arrivals " WM_INPUT message(s) received so far.")
+    }
+
+    size := 0
+    try {
+        if (DllCall("GetRawInputData", "Ptr", lParam, "UInt", RID_INPUT,
+            "Ptr", 0, "UInt*", &size, "UInt", HEADER_SIZE) = 0xFFFFFFFF || !size)
+            return
+        data := Buffer(size, 0)
+        if (DllCall("GetRawInputData", "Ptr", lParam, "UInt", RID_INPUT,
+            "Ptr", data, "UInt*", &size, "UInt", HEADER_SIZE) = 0xFFFFFFFF)
+            return
+        if (NumGet(data, 0, "UInt") != RIM_TYPEHID)
+            return
+        device := NumGet(data, 8, "Ptr")
+        sizeHid := NumGet(data, HEADER_SIZE, "UInt")
+        count := NumGet(data, HEADER_SIZE + 4, "UInt")
+        if (!sizeHid || !count)
+            return
+        ; Report the first report only, and cap the byte count: this identifies
+        ; presses without turning a 125 Hz stream into an unreadable log.
+        limit := Min(sizeHid, 20)
+        hex := ""
+        Loop limit
+            hex .= Format("{:02X}", NumGet(data, HEADER_SIZE + 8 + A_Index - 1, "UChar")) " "
+        hex := RTrim(hex)
+
+        ; The learning wizard sees reports first and consumes them: while it is
+        ; open, decoding as well would fire mappings from the very buttons being
+        ; pressed to teach the layout.
+        if ProductControllerLearnConsumesReport(data, HEADER_SIZE + 8, sizeHid, device) {
+            if !EnableRawInputProbe
+                return
+        } else {
+            ; Decode EVERY report, before any log rate-limiting. The cached state
+            ; is what the poll loop reads, so dropping reports here would drop
+            ; input.
+            RawInputDecodeReport(data, HEADER_SIZE + 8, sizeHid, device)
+        }
+
+        if !EnableRawInputProbe
+            return
+        ; Log on change, rate-limited, so a held button cannot flood the log.
+        if (hex = lastHex || A_TickCount - lastTick < 60)
+            return
+        lastHex := hex
+        lastTick := A_TickCount
+        foreground := "unknown"
+        try foreground := WinGetProcessName("A")
+        LogLine("RawHID dev=0x" Format("{:X}", device)
+            . " len=" sizeHid " n=" count " [" hex "] fg=" foreground)
+    }
+}
+
+
+; Decodes one HID gamepad report into the XINPUT_STATE-shaped buffer the rest of
+; the companion consumes, so mappings, chords and the controller mouse are
+; identical on every backend.
+;
+; Layout verified against hardware (device 0x10062, 16-byte report):
+;   1-2 LX, 3-4 LY, 5-6 RX, 7-8 RY   16-bit LE, 0x8000 centre, 0x0000 = left/up
+;   9-10  combined trigger axis      0x8000 neutral, above = LT, below = RT
+;   11    A B X Y LB RB View Menu    bits 0..7
+;   12    L3 R3 Guide                bits 0..2
+;   13    D-pad hat, 1..8 clockwise from north, 0 = released
+; Decides whether this device is the one whose reports we decode.
+;
+; The lock is not permanent, and must not be. RawInputDevice holds a
+; RAWINPUTHEADER.hDevice handle, and those handles are NOT stable for the life of
+; the process: Windows re-enumerates HID devices across sleep/resume and the same
+; controller comes back with a DIFFERENT handle. A permanent lock then rejects
+; every report the controller sends -- silently, because rejecting a report from
+; another device is normal behaviour. Measured symptom: input works, the Ally
+; sleeps, and input never returns inside FSE, while the desktop keeps working
+; because `auto` falls back to XInput, which re-resolves its slot on its own.
+;
+; So the lock is handed over when the locked device has gone quiet and a different
+; one is producing usable reports. A device that is actively reporting is never
+; displaced, which is what keeps a headset or remote out of the decoder -- the
+; reason the lock exists at all.
+RawInputClaimDevice(device) {
+    global RawInputDevice, RawInputLastReportTick
+    static DEVICE_HANDOVER_MS := 1000
+    if (RawInputDevice && device != RawInputDevice) {
+        if (RawInputLastReportTick
+            && A_TickCount - RawInputLastReportTick < DEVICE_HANDOVER_MS)
+            return false
+        LogLine("RawInput: device 0x" Format("{:X}", RawInputDevice) " went quiet; "
+            . "adopting 0x" Format("{:X}", device)
+            . " (re-enumerated, most likely across sleep).")
+        RawInputDevice := device
+        return true
+    }
+    if !RawInputDevice {
+        RawInputDevice := device
+        LogLine("RawInput: decoding reports from device 0x" Format("{:X}", device) ".")
+    }
+    return true
+}
+
+
+RawInputDecodeReport(data, base, length, device) {
+    global RawInputState, RawInputLastReportTick, RawInputDevice
+    static EXPECTED_LENGTH := 16
+    static warnedDevices := Map()
+    static announcedProfile := Map()
+
+    ; Only accept the report shape this decoder was verified against, and stay
+    ; with the first device that produces one. Other HID devices (headsets,
+    ; remotes) also raise WM_INPUT and would decode into nonsense.
+    ;
+    ; The byte layout below is NOT generic HID -- it is the layout of the ROG
+    ; Ally's built-in controller, read off the hardware. A controller with any
+    ; other report shape is rejected here, which is the safe outcome on the
+    ; desktop (XInput takes over) and a dead controller inside Xbox FSE, where
+    ; XInput reads zeros. Logged per device rather than once, because "some
+    ; other controller was ignored" is the whole diagnosis.
+    ; A learned profile takes precedence, and is tried before the length check --
+    ; the whole point of learning a controller is that its reports are a shape
+    ; this built-in layout would reject.
+    deviceKey := RawInputDeviceKey(device)
+    profile := LoadControllerProfile(deviceKey)
+    ; No identity available, so fall back to a profile keyed on report length.
+    if (!IsObject(profile) && deviceKey = "")
+        profile := LoadControllerProfile(ControllerProfileLengthKey(length))
+    if (IsObject(profile) && profile["length"] = length) {
+        if !RawInputClaimDevice(device)
+            return false
+        if !announcedProfile.Has(device) {
+            announcedProfile[device] := true
+            LogLine("RawInput: decoding device 0x" Format("{:X}", device)
+                . " with learned profile '" profile["key"] "'.")
+        }
+        return RawInputProfileDecode(profile, data, base, length)
+    }
+
+    if (length != EXPECTED_LENGTH) {
+        if !warnedDevices.Has(device) {
+            warnedDevices[device] := true
+            LogLine("RawInput: ignoring " length "-byte reports from device 0x"
+                . Format("{:X}", device) " (" RawInputDeviceKey(device) "). The "
+                . "built-in layout only understands " EXPECTED_LENGTH "-byte "
+                . "reports (the ROG Ally controller). Use Settings -> Controller "
+                . "& Cursor -> Learn Controller to teach this one, or it will work on the "
+                . "desktop through XInput but not inside Xbox FSE.", "Warning")
+        }
+        return false
+    }
+    if !RawInputClaimDevice(device)
+        return false
+
+    buttons := 0
+    face := NumGet(data, base + 11, "UChar")
+    extra := NumGet(data, base + 12, "UChar")
+    hat := NumGet(data, base + 13, "UChar")
+    if (face & 0x01)
+        buttons |= 0x1000        ; A
+    if (face & 0x02)
+        buttons |= 0x2000        ; B
+    if (face & 0x04)
+        buttons |= 0x4000        ; X
+    if (face & 0x08)
+        buttons |= 0x8000        ; Y
+    if (face & 0x10)
+        buttons |= 0x0100        ; LB
+    if (face & 0x20)
+        buttons |= 0x0200        ; RB
+    if (face & 0x40)
+        buttons |= 0x0020        ; View
+    if (face & 0x80)
+        buttons |= 0x0010        ; Menu
+    if (extra & 0x01)
+        buttons |= 0x0040        ; L3
+    if (extra & 0x02)
+        buttons |= 0x0080        ; R3
+    if (extra & 0x04)
+        buttons |= 0x0400        ; Guide
+    switch hat {
+        case 1:
+            buttons |= 0x0001
+        case 2:
+            buttons |= 0x0001 | 0x0008
+        case 3:
+            buttons |= 0x0008
+        case 4:
+            buttons |= 0x0002 | 0x0008
+        case 5:
+            buttons |= 0x0002
+        case 6:
+            buttons |= 0x0002 | 0x0004
+        case 7:
+            buttons |= 0x0004
+        case 8:
+            buttons |= 0x0001 | 0x0004
+    }
+
+    ; Combined trigger axis. LT and RT cancel when held together, so a chord can
+    ; never require both at once on this backend.
+    trigger := NumGet(data, base + 9, "UShort")
+    lt := 0
+    rt := 0
+    if (trigger > 0x8000)
+        lt := Min(255, (trigger - 0x8000) // 128)
+    else if (trigger < 0x8000)
+        rt := Min(255, (0x8000 - trigger) // 128)
+
+    NumPut("UInt", 0, RawInputState, 0)
+    NumPut("UShort", buttons, RawInputState, 4)
+    NumPut("UChar", lt, RawInputState, 6)
+    NumPut("UChar", rt, RawInputState, 7)
+    NumPut("Short", RawInputAxis(NumGet(data, base + 1, "UShort")), RawInputState, 8)
+    ; HID reports up as 0x0000; XInput expects up to be positive.
+    NumPut("Short", -RawInputAxis(NumGet(data, base + 3, "UShort")), RawInputState, 10)
+    NumPut("Short", RawInputAxis(NumGet(data, base + 5, "UShort")), RawInputState, 12)
+    NumPut("Short", -RawInputAxis(NumGet(data, base + 7, "UShort")), RawInputState, 14)
+    RawInputLastReportTick := A_TickCount
+    return true
+}
+
+
+; The XInput button bit for each name the learner knows.
+ControllerButtonBits() {
+    static bits := Map(
+        "Up", 0x0001, "Down", 0x0002, "Left", 0x0004, "Right", 0x0008,
+        "Menu", 0x0010, "View", 0x0020, "L3", 0x0040, "R3", 0x0080,
+        "LB", 0x0100, "RB", 0x0200, "Guide", 0x0400,
+        "A", 0x1000, "B", 0x2000, "X", 0x4000, "Y", 0x8000)
+    return bits
+}
+
+
+RawInputAxis(raw) {
+    value := raw - 0x8000
+    if (value < -32767)
+        return -32767
+    return value > 32767 ? 32767 : value
+}
+
+
+; The section name used when Windows will not identify a device at all.
+;
+; Keying a profile on report length is less precise than VID/PID, but it is
+; exactly as precise as the built-in layout it replaces -- that already matches on
+; nothing but `length = 16`. So this is not a new risk, it is the existing one
+; made writable, and it is what lets a controller whose metadata Windows withholds
+; still be taught.
+ControllerProfileLengthKey(length) {
+    return "LEN_" length
+}
+
+
+ControllerProfilePath() {
+    global IniPath
+    return RegExReplace(IniPath, "\.ini$", "") "-Controllers.ini"
+}
+
+
+; A stable identity for a RawInput device.
+;
+; hDevice handles change across sleep and re-plugging, so they cannot key a saved
+; profile. The device interface path does contain a stable identity -- the USB
+; vendor and product IDs, plus the interface and collection when a device exposes
+; several -- so that is what is extracted. If the driver withholds both the path
+; and numeric IDs, the HID preparsed descriptor is hashed as a final stable
+; layout identity.
+RawInputDeviceKey(hDevice, refresh := false) {
+    static RIDI_DEVICENAME := 0x20000007
+    static RIDI_DEVICEINFO := 0x2000000B
+    static RIDI_PREPARSEDDATA := 0x20000005
+    static cache := Map()
+    ; Identity lookups that failed recently, and when they may be retried.
+    ;
+    ; Failure must not be cached permanently -- a metadata query can fail while
+    ; the HID stack is still settling, and Save needs a later attempt to be able
+    ; to succeed. But it must not be retried on every report either: this runs
+    ; from the WM_INPUT handler at over 100 Hz, and the fallback chain below costs
+    ; five syscalls plus a byte-at-a-time hash of the entire HID descriptor. For a
+    ; device that can never be identified, that is pure waste on the input hot
+    ; path of a handheld. So failure backs off for a couple of seconds instead.
+    static failedUntil := Map()
+    static IDENTITY_RETRY_MS := 2000
+    if (refresh && cache.Has(hDevice))
+        cache.Delete(hDevice)
+    if refresh
+        failedUntil.Delete(hDevice)
+    if cache.Has(hDevice)
+        return cache[hDevice]
+    if (failedUntil.Has(hDevice) && A_TickCount < failedUntil[hDevice])
+        return ""
+    ; Captured for the diagnostic at the end of this function.
+    infoVid := 0
+    infoPid := 0
+    infoResult := "not tried"
+    descriptorBytes := 0
+    descriptorResult := "not tried"
+    name := ""
+    size := 0
+    nameError := ""
+    ; NOT named "buffer", and the catch is not optional.
+    ;
+    ; AutoHotkey identifiers are case-insensitive, so a local called buffer IS
+    ; the Buffer class: the constructor on the right resolved to the unassigned
+    ; local and threw before it ever ran. Inside the bare try that used to be
+    ; here that throw was swallowed, so RIDI_DEVICENAME appeared to fail on every
+    ; device on every machine -- which silently removed the &MI_/&Col suffixes
+    ; below, collapsing every collection of a composite gamepad onto one profile
+    ; key, and made the DEV_ checksum fallback unreachable. The failure is
+    ; carried to the once-per-device diagnostic at the end of this function
+    ; rather than logged here, because this runs from WM_INPUT above 100 Hz.
+    ;
+    ; ElevatedRtssFinalPath in SteamShell-Helper.ahk carries the same note.
+    try {
+        DllCall("GetRawInputDeviceInfoW", "Ptr", hDevice, "UInt", RIDI_DEVICENAME,
+            "Ptr", 0, "UInt*", &size)
+        if size {
+            nameBuffer := Buffer(size * 2 + 2, 0)
+            if (DllCall("GetRawInputDeviceInfoW", "Ptr", hDevice, "UInt", RIDI_DEVICENAME,
+                "Ptr", nameBuffer, "UInt*", &size, "UInt") != 0xFFFFFFFF)
+                name := StrGet(nameBuffer, "UTF-16")
+        }
+    } catch as err {
+        nameError := err.Message
+    }
+    key := ""
+    if RegExMatch(name, "i)VID_([0-9A-F]{4})&PID_([0-9A-F]{4})", &match) {
+        key := "VID_" StrUpper(match[1]) "_PID_" StrUpper(match[2])
+        ; A composite device exposes several collections; the gamepad is only one
+        ; of them, so the interface and collection numbers are part of the identity.
+        if RegExMatch(name, "i)&MI_([0-9A-F]{2})", &mi)
+            key .= "_MI_" StrUpper(mi[1])
+        if RegExMatch(name, "i)&Col([0-9]{2})", &col)
+            key .= "_Col" col[1]
+    } else if (name != "") {
+        ; No VID/PID in the path. Fall back to a checksum of it, which is still
+        ; stable for this device on this machine.
+        sum := 0
+        Loop Parse name
+            sum := Mod(sum * 31 + Ord(A_LoopField), 0xFFFFFFF)
+        key := "DEV_" Format("{:07X}", sum)
+    }
+    if (key = "") {
+        ; Some HID stacks deliver reports but do not return an interface path
+        ; for RIDI_DEVICENAME. RIDI_DEVICEINFO carries the numeric HID VID/PID
+        ; independently, so use it before declaring the device unidentifiable.
+        try {
+            info := Buffer(32, 0)
+            NumPut("UInt", 32, info, 0)
+            infoSize := 32
+            infoResult := DllCall("GetRawInputDeviceInfoW", "Ptr", hDevice, "UInt",
+                RIDI_DEVICEINFO, "Ptr", info, "UInt*", &infoSize, "UInt")
+            infoVid := NumGet(info, 8, "UInt") & 0xFFFF
+            infoPid := NumGet(info, 12, "UInt") & 0xFFFF
+            if (infoResult != 0xFFFFFFFF) {
+                vid := NumGet(info, 8, "UInt")
+                pid := NumGet(info, 12, "UInt")
+                if (vid || pid)
+                    key := "VID_" Format("{:04X}", vid & 0xFFFF)
+                        . "_PID_" Format("{:04X}", pid & 0xFFFF)
+            }
+        }
+    }
+    if (key = "") {
+        ; RawInput cannot deliver HID reports without preparsed descriptor data.
+        ; Some virtualised/filtered Ally drivers expose that data while
+        ; returning neither a device path nor usable RID_DEVICE_INFO IDs. Hash
+        ; the descriptor so the learned layout still survives handle changes.
+        try {
+            descriptorSize := 0
+            result := DllCall("GetRawInputDeviceInfoW", "Ptr", hDevice, "UInt",
+                RIDI_PREPARSEDDATA, "Ptr", 0, "UInt*", &descriptorSize, "UInt")
+            descriptorResult := result
+            descriptorBytes := descriptorSize
+            if (result != 0xFFFFFFFF && descriptorSize > 0) {
+                descriptor := Buffer(descriptorSize, 0)
+                result := DllCall("GetRawInputDeviceInfoW", "Ptr", hDevice,
+                    "UInt", RIDI_PREPARSEDDATA, "Ptr", descriptor,
+                    "UInt*", &descriptorSize, "UInt")
+                if (result != 0xFFFFFFFF && descriptorSize > 0) {
+                    hash := 2166136261
+                    Loop descriptorSize
+                        hash := Mod((hash ^ NumGet(descriptor,
+                            A_Index - 1, "UChar")) * 16777619, 0x100000000)
+                    key := "HID_DESC_" Format("{:08X}", hash)
+                        . "_" descriptorSize
+                }
+            }
+        }
+    }
+    ; Record what each route actually returned the first time a device cannot be
+    ; identified. "No identity available" is unactionable on its own, and this
+    ; failed on real hardware -- the Ally's own controller -- so the three return
+    ; values are the diagnosis.
+    static reported := Map()
+    if (key = "" && !reported.Has(hDevice)) {
+        reported[hDevice] := true
+        LogLine("RawInput identity: device 0x" Format("{:X}", hDevice)
+            . " unidentifiable. RIDI_DEVICENAME chars=" size
+            . " path='" (name != "" ? name : "(none)") "'"
+            ; Without this, a throw inside the path lookup was indistinguishable
+            ; from the HID stack returning a size and no path, and pointed the
+            ; diagnosis at the driver instead of at this function.
+            . (nameError != "" ? " pathError='" nameError "'" : "")
+            . ", RIDI_DEVICEINFO vid=0x" Format("{:04X}", infoVid)
+            . " pid=0x" Format("{:04X}", infoPid) " rc=" infoResult
+            . ", RIDI_PREPARSEDDATA bytes=" descriptorBytes
+            . " rc=" descriptorResult ".", "Warning")
+    }
+    ; Success caches permanently; failure only backs off. See failedUntil above.
+    if (key != "") {
+        cache[hDevice] := key
+        failedUntil.Delete(hDevice)
+    } else {
+        failedUntil[hDevice] := A_TickCount + IDENTITY_RETRY_MS
+    }
+    return key
+}
+
+
+; The human-readable device path, recorded beside a learned profile so the INI
+; can be read by a person. Called once per Save, not on the input path.
+;
+; NOT named "buffer" -- see the note in RawInputDeviceKey. This copy had the
+; same defect, so every profile ever saved recorded an empty Name.
+RawInputDeviceName(hDevice) {
+    static RIDI_DEVICENAME := 0x20000007
+    name := ""
+    size := 0
+    try {
+        DllCall("GetRawInputDeviceInfoW", "Ptr", hDevice, "UInt", RIDI_DEVICENAME,
+            "Ptr", 0, "UInt*", &size)
+        if size {
+            nameBuffer := Buffer(size * 2 + 2, 0)
+            if (DllCall("GetRawInputDeviceInfoW", "Ptr", hDevice, "UInt", RIDI_DEVICENAME,
+                "Ptr", nameBuffer, "UInt*", &size, "UInt") != 0xFFFFFFFF)
+                name := StrGet(nameBuffer, "UTF-16")
+        }
+    } catch as err {
+        LogLine("RawInput: the device path for 0x" Format("{:X}", hDevice)
+            . " could not be read: " err.Message, "Warning")
+    }
+    return name
+}
+
+
+
+; Loads a profile, or 0 when the device has none.
+;
+; Returns a Map of: length, buttons (array of name/offset/mask/pressed), hat
+; (Map or 0), axes (Map of name -> offset/size/neutral/direction/extent).
+;
+; The optional fourth button field and sixth axis field were added after the
+; first profile draft. Missing fields retain the original active-high and
+; full-range behaviour, so hand-written or early profiles remain valid.
+LoadControllerProfile(key, refresh := false) {
+    static cache := Map()
+    if (key = "")
+        return 0
+    ; Saving a VID/PID-only fallback must invalidate any previously cached miss
+    ; for the same device's more-specific MI/collection key.
+    if refresh
+        cache := Map()
+    if cache.Has(key)
+        return cache[key]
+    path := ControllerProfilePath()
+    if !FileExist(path) {
+        cache[key] := 0
+        return 0
+    }
+    section := key
+    length := 0
+    try length := Integer(IniRead(path, section, "ReportLength", "0"))
+    ; A device path may be available on one boot and unavailable on another.
+    ; Profiles saved from numeric RIDI_DEVICEINFO therefore use VID/PID only;
+    ; allow a later, more-specific MI/collection key to find that base profile.
+    if (length <= 0
+        && RegExMatch(key, "i)^(VID_[0-9A-F]{4}_PID_[0-9A-F]{4})", &base)
+        && base[1] != key) {
+        section := base[1]
+        try length := Integer(IniRead(path, section, "ReportLength", "0"))
+    }
+    if (length <= 0) {
+        cache[key] := 0
+        return 0
+    }
+    profile := Map("length", length, "buttons", [], "hat", 0, "axes", Map(),
+        "name", "", "key", section)
+    try profile["name"] := IniRead(path, section, "Name", "")
+
+    buttonText := ""
+    try buttonText := IniRead(path, section, "Buttons", "")
+    bits := ControllerButtonBits()
+    for _, entry in StrSplit(buttonText, "|") {
+        parts := StrSplit(Trim(entry), ":")
+        if (parts.Length < 3 || !bits.Has(parts[1]))
+            continue
+        try {
+            offset := Integer(parts[2])
+            mask := Integer(parts[3])
+            pressed := parts.Length >= 4 ? Integer(parts[4]) : mask
+            if (offset < 0 || offset >= length || mask < 1 || mask > 255)
+                continue
+            profile["buttons"].Push(Map(
+                "bit", bits[parts[1]],
+                "offset", offset,
+                "mask", mask,
+                "pressed", pressed & mask))
+        }
+    }
+
+    hatText := ""
+    try hatText := IniRead(path, section, "Hat", "")
+    parts := StrSplit(Trim(hatText), ":")
+    ; Current: offset : mask : released : N : NE : E : SE : S : SW : W : NW
+    ; Early profiles omitted mask; 0xFF preserves their whole-byte behaviour.
+    if (parts.Length >= 10) {
+        try {
+            offset := Integer(parts[1])
+            hasMask := parts.Length >= 11
+            mask := hasMask ? Integer(parts[2]) : 0xFF
+            releasedIndex := hasMask ? 3 : 2
+            firstDirectionIndex := hasMask ? 4 : 3
+            released := Integer(parts[releasedIndex])
+            if (offset < 0 || offset >= length || mask < 1 || mask > 255
+                || released < 0 || released > 255)
+                throw Error("Invalid hat")
+            directions := Map()
+            ; Same clockwise-from-north order the built-in layout uses.
+            order := [0x0001, 0x0001 | 0x0008, 0x0008, 0x0002 | 0x0008,
+                0x0002, 0x0002 | 0x0004, 0x0004, 0x0001 | 0x0004]
+            Loop 8 {
+                value := Integer(parts[firstDirectionIndex + A_Index - 1])
+                if (value < 0 || value > 255)
+                    throw Error("Invalid hat")
+                directions[value] := order[A_Index]
+            }
+            profile["hat"] := Map("offset", offset,
+                "mask", mask, "released", released, "directions", directions)
+        }
+    }
+
+    axisText := ""
+    try axisText := IniRead(path, section, "Axes", "")
+    validAxisNames := Map("LX", true, "LY", true, "RX", true, "RY", true,
+        "LT", true, "RT", true)
+    validAxisSizes := Map("u8", true, "u16le", true, "u16be", true)
+    for _, entry in StrSplit(axisText, "|") {
+        parts := StrSplit(Trim(entry), ":")
+        if (parts.Length < 5)
+            continue
+        try {
+            name := parts[1]
+            offset := Integer(parts[2])
+            size := parts[3]
+            neutral := Integer(parts[4])
+            direction := Integer(parts[5])
+            extent := parts.Length >= 6 ? Integer(parts[6]) : 0
+            width := size = "u8" ? 1 : 2
+            fullScale := size = "u8" ? 255 : 65535
+            if (!validAxisNames.Has(name) || !validAxisSizes.Has(size)
+                || offset < 0 || offset + width > length
+                || neutral < 0 || neutral > fullScale
+                || (direction != -1 && direction != 1)
+                || extent < 0 || extent > fullScale)
+                continue
+            profile["axes"][name] := Map(
+                "offset", offset,
+                "size", size,
+                "neutral", neutral,
+                "direction", direction,
+                "extent", extent)
+        }
+    }
+    if (profile["buttons"].Length = 0 && !IsObject(profile["hat"])
+        && profile["axes"].Count = 0) {
+        cache[key] := 0
+        return 0
+    }
+    cache[key] := profile
+    return profile
+}
+
+
+; Reads one axis field out of a report.
+ControllerProfileAxisRaw(data, base, axis) {
+    offset := base + axis["offset"]
+    if (axis["size"] = "u8")
+        return NumGet(data, offset, "UChar")
+    if (axis["size"] = "u16be") {
+        high := NumGet(data, offset, "UChar")
+        return (high << 8) | NumGet(data, offset + 1, "UChar")
+    }
+    return NumGet(data, offset, "UShort")
+}
+
+
+; Full scale of an axis field, used to normalise to XInput's ranges.
+ControllerProfileAxisSpan(axis) {
+    return axis["size"] = "u8" ? 255 : 65535
+}
+
+
+; Decodes a report using a learned profile.
+;
+; Produces exactly the same XINPUT_STATE-shaped buffer as the built-in decoder,
+; so every mapping, chord and the controller mouse behave identically no matter
+; how the layout was obtained.
+RawInputProfileDecode(profile, data, base, length) {
+    global RawInputState, RawInputLastReportTick
+    if (length != profile["length"])
+        return false
+
+    buttons := 0
+    for _, button in profile["buttons"] {
+        value := NumGet(data, base + button["offset"], "UChar")
+        if ((value & button["mask"]) = button["pressed"])
+            buttons |= button["bit"]
+    }
+    hat := profile["hat"]
+    if IsObject(hat) {
+        value := NumGet(data, base + hat["offset"], "UChar") & hat["mask"]
+        if (value != hat["released"] && hat["directions"].Has(value))
+            buttons |= hat["directions"][value]
+    }
+
+    lt := 0
+    rt := 0
+    axes := profile["axes"]
+    ; A shared trigger axis is not a special case here: LT and RT simply resolve
+    ; to the same offset with opposite directions, which is how the learner
+    ; records what it observed.
+    for _, name in ["LT", "RT"] {
+        if !axes.Has(name)
+            continue
+        axis := axes[name]
+        raw := ControllerProfileAxisRaw(data, base, axis)
+        delta := (raw - axis["neutral"]) * axis["direction"]
+        if (delta <= 0)
+            continue
+        ; The travel is only ever one side of neutral, and which side depends on
+        ; the direction, so the divisor has to follow it. Using the full span
+        ; would halve a trigger that rests at mid-scale -- which a shared trigger
+        ; axis does.
+        span := axis["extent"]
+        if (span <= 0) {
+            span := (axis["direction"] > 0)
+                ? ControllerProfileAxisSpan(axis) - axis["neutral"]
+                : axis["neutral"]
+        }
+        value := Min(255, Round(delta * 255 / Max(1, span)))
+        if (name = "LT")
+            lt := value
+        else
+            rt := value
+    }
+
+    thumbs := Map("LX", 8, "LY", 10, "RX", 12, "RY", 14)
+    NumPut("UInt", 0, RawInputState, 0)
+    NumPut("UShort", buttons, RawInputState, 4)
+    NumPut("UChar", lt, RawInputState, 6)
+    NumPut("UChar", rt, RawInputState, 7)
+    for name, stateOffset in thumbs {
+        value := 0
+        if axes.Has(name) {
+            axis := axes[name]
+            raw := ControllerProfileAxisRaw(data, base, axis)
+            offsetFromRest := raw - axis["neutral"]
+            ; Each side of neutral is scaled by its own travel, so an axis whose
+            ; rest point is not exactly mid-scale still reaches full deflection
+            ; both ways instead of clipping one side and falling short on the
+            ; other.
+            span := axis["extent"]
+            if (span <= 0) {
+                span := (offsetFromRest >= 0)
+                    ? ControllerProfileAxisSpan(axis) - axis["neutral"]
+                    : axis["neutral"]
+            }
+            scaled := Round(offsetFromRest * 32767 / Max(1, span))
+            value := ClampFloat(scaled * axis["direction"], -32767, 32767)
+        }
+        NumPut("Short", value, RawInputState, stateOffset)
+    }
+    RawInputLastReportTick := A_TickCount
+    return true
+}
+
+
+RawInputRegistered() {
+    global RawInputProbeActive
+    return RawInputProbeActive
+}
+
+
+; RawInput is event-driven, so the poll loop reads the most recent decoded
+; report. Reports stop arriving entirely outside Xbox FSE, so a stale cache is
+; cleared to neutral rather than left holding a button down forever.
+RawInputReadState(&state) {
+    global RawInputState, RawInputLastReportTick, RawInputStaleMs
+    if !RawInputLastReportTick
+        return false
+    if (A_TickCount - RawInputLastReportTick > RawInputStaleMs) {
+        if (NumGet(RawInputState, 4, "UShort") || NumGet(RawInputState, 6, "UChar")
+            || NumGet(RawInputState, 7, "UChar")) {
+            NumPut("UInt", 0, RawInputState, 0)
+            NumPut("UInt", 0, RawInputState, 4)
+            NumPut("UInt", 0, RawInputState, 8)
+            NumPut("UInt", 0, RawInputState, 12)
+        }
+        return false
+    }
+    if !IsObject(state)
+        state := Buffer(16, 0)
+    Loop 16
+        NumPut("UChar", NumGet(RawInputState, A_Index - 1, "UChar"), state, A_Index - 1)
+    return true
+}

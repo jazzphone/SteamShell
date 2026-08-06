@@ -176,6 +176,23 @@ global QuickMenuSelected := 1
 ; Standalone has no companion to disable, so the guard never fires; the
 ; alternative was keeping both functions in two copies to avoid the name.
 global CompanionDisabled := false
+; "auto" (default), "rawinput" or "xinput".
+;
+; Auto reads RawInput whenever HID reports are arriving and XInput otherwise, so
+; a machine whose controller already worked is unaffected: RawInput stays silent
+; and XInput answers exactly as it did. A controller XInput cannot see -- which
+; is every pad that does not speak it -- now has a path that reaches this
+; program instead of leaving the shell with no input at all.
+global ControllerBackend := "auto"
+; Logs raw HID gamepad reports as they arrive. Diagnostic use only.
+global EnableRawInputProbe := false
+global RawInputProbeActive := false
+; Reports arrive as WM_INPUT and are decoded into this XINPUT_STATE-shaped
+; buffer for the poll loop to read.
+global RawInputState := Buffer(16, 0)
+global RawInputLastReportTick := 0
+global RawInputDevice := 0
+global RawInputStaleMs := 5000
 
 global QuickMenuVisible := false
 global QuickMenuPreviousHwnd := 0
@@ -2644,6 +2661,12 @@ BackgroundExeList=UbisoftConnectService.exe|UplayWebCore.exe|UplayService.exe|Ep
 ExcludeExeList=steam.exe|steamwebhelper.exe|SteamShell.exe
 
 [Controller]
+; auto reads RawInput whenever HID reports are arriving and XInput otherwise, so
+; a controller XInput already handles is unaffected. Set rawinput to isolate the
+; HID path for diagnosis -- it deliberately does NOT fall back.
+Backend=auto                                                ; auto | rawinput | xinput
+RawInputProbe=false                                         ; Log raw HID reports; diagnostic only
+RawInputStaleMs=5000                                        ; Treat RawInput as silent after this gap
 EnableControllerMouseMode=true                              ; Enable controller mouse/keyboard mapping (hold View/Back)
 EnablePersistentMouseMode=false                             ; Apply controller mouse/mappings without holding View/Back
 ControllerIndex=0                                           ; 0=first controller
@@ -3259,6 +3282,42 @@ JoinPipe(listObj) {
 ; settings file is a machine that signs in to nothing. XFE implements the same
 ; name with direct writes, which is right for an ordinary application. Shared
 ; code calls this and does not have to know which.
+; Per-tree seam required by SteamShell-Shared.ahk: does a learning wizard want
+; this report instead of the decoder?
+;
+; The shell has no learner yet, so nothing consumes reports ahead of the
+; decoder and every report is decoded. When the wizard lands here this answers
+; the same way the companion's does.
+; Single entry point for controller state.
+;
+; RawInput first, and it yields by itself: RawInputReadState answers false
+; whenever no report has arrived inside RawInputStaleMs, so a machine whose
+; controller XInput already handles never takes this path and behaves exactly as
+; it did before the backend existed.
+;
+; An explicit "rawinput" does NOT fall back. The setting exists to isolate the
+; backend for diagnosis, and a silent fallback makes it behave identically to
+; auto -- which is what made a companion-side sleep test inconclusive once:
+; input still worked, which looked like RawInput recovering when it was XInput
+; the whole time.
+ControllerReadState(&state) {
+    global ControllerBackend, ControllerIndex
+    wanted := StrLower(ControllerBackend)
+    if (wanted = "rawinput" || wanted = "auto") {
+        if RawInputReadState(&state)
+            return true
+        if (wanted = "rawinput")
+            return false
+    }
+    if !IsObject(state)
+        state := Buffer(16, 0)
+    return XInputGetState(ControllerIndex, &state) = 0
+}
+
+ProductControllerLearnConsumesReport(data, base, length, device) {
+    return false
+}
+
 SharedPersistSettings(changes) {
     return CommitIniChanges(changes)
 }
@@ -3396,6 +3455,7 @@ LoadSettings() {
     global EnableAudioAssist, ScoreAudioActive
     global EnableGameScoreLogging, GameLogMode, GameLogTopN, GameLogIntervalMs, GameLogIncludeTitles
     global GameLogRejectNearCandidates, GameLogRejectMinAreaPercent, LogRotateMaxKB, LogRotateBackups
+    global ControllerBackend, EnableRawInputProbe, RawInputStaleMs
     global MouseParkRightOffsetPx, MouseParkYPercent, MouseParkEdge
     global EnableLauncherCleanup, LauncherCleanupSteamForegroundSec, LauncherCleanupRequireNoGame, LauncherCleanupUseCpuAudio, LauncherCleanupCpuThreshold, LauncherCleanupAudioPeakThreshold, LauncherCleanupDownloadGuard, LauncherCleanupDownloadGuardMode
     global LauncherCleanupCooldownSec, LauncherCleanupCheckIntervalMs, LauncherCleanupGracefulCloseMs, LauncherCleanupHardKill
@@ -3577,6 +3637,15 @@ LauncherCleanupAudioPeakThreshold := ReadNumber("LauncherCleanup", "AudioPeakThr
     ; Controller mouse mode (XInput / Xbox)
     EnableControllerMouseMode := ReadBool("Controller", "EnableControllerMouseMode", true)
     EnablePersistentMouseMode := ReadBool("Controller", "EnablePersistentMouseMode", false)
+    ControllerBackend := StrLower(ReadText("Controller", "Backend", "auto"))
+    if (ControllerBackend != "xinput" && ControllerBackend != "rawinput"
+        && ControllerBackend != "auto") {
+        LogLine("Unknown controller backend '" ControllerBackend
+            . "'; using auto.", "Warning")
+        ControllerBackend := "auto"
+    }
+    EnableRawInputProbe := ReadBool("Controller", "RawInputProbe", false)
+    RawInputStaleMs := ReadInt("Controller", "RawInputStaleMs", 5000, 500, 60000)
     ControllerIndex := ReadInt("Controller", "ControllerIndex", 0, 0, 3)
     ControllerPollIntervalMs := ReadInt("Controller", "ControllerPollIntervalMs", 16, 5, 200)
     ControllerDeadzone := ReadInt("Controller", "ControllerDeadzone", 3000, 0, 32000)
@@ -6970,7 +7039,7 @@ PollController() {
         && !settingsControllerActive && !isControllerTestActive)
     return
 
-    if (XInputGetState(ControllerIndex, &state) != 0) {
+    if !ControllerReadState(&state) {
         if isControllerTestActive {
             try ControllerTestGui["ControllerButtons"].Text :=
                 "No controller detected at configured index " (ControllerIndex + 1) "."
@@ -11655,6 +11724,7 @@ AppendProcessIntegrityHealth(results, checkName, pid, expectedIntegrity := "Medi
 ; Seam for SteamShell-Shared.ahk: this tree's own checks. The harness around them
 ; -- the window, the list, the report text, Copy and Refresh -- is shared.
 ProductHealthResults() {
+    global ControllerBackend, RawInputLastReportTick
     global SteamPath, SettingsPath, CurrentSettingsSchemaVersion
     global ShellRegKey, SteamShellInstalledExe, SteamShellVersion
     global SteamShellDataDir, SteamShellInstallationMode
@@ -11933,11 +12003,18 @@ ProductHealthResults() {
             : "; none are known to be elevated."))
 
     state := Buffer(16, 0)
-    controllerResult := XInputGetState(ControllerIndex, &state)
-    HealthResult(results, controllerResult = 0 ? "pass" : "warn", "Controller",
-        controllerResult = 0
-            ? "XInput controller " (ControllerIndex + 1) " is connected."
-            : "No controller was detected at configured index " (ControllerIndex + 1) ".")
+    ; Asked through the backend, not through XInput. Reporting "no controller
+    ; detected" to somebody whose pad is working over RawInput would be wrong
+    ; for exactly the user RawInput exists to serve -- and it is the first place
+    ; they would look.
+    controllerConnected := ControllerReadState(&state)
+    controllerVia := RawInputRegistered() && RawInputLastReportTick
+        ? "RawInput" : "XInput"
+    HealthResult(results, controllerConnected ? "pass" : "warn", "Controller",
+        controllerConnected
+            ? controllerVia " controller " (ControllerIndex + 1) " is connected."
+            : "No controller was detected at configured index "
+                (ControllerIndex + 1) " on backend " ControllerBackend ".")
 
     bindingOwners := Map()
     duplicateBindings := []
@@ -18108,6 +18185,12 @@ Hotkey("^!+p", (*) => ShowControlPanel())
 Hotkey("^!+q", (*) => ToggleQuickMenu())
 Hotkey("^!+s", (*) => ShowSettingsEditor())
 RegisterQuickMenuKeys()
+
+; Registers for WM_INPUT and starts decoding HID reports. Safe to call whichever
+; backend is configured: it declines and says so when RawInput is not wanted,
+; and when it is, RawInput still yields to XInput on its own if no reports
+; arrive. A controller that already worked keeps working.
+RawInputProbeStart()
 
 if SafeMode && !FirstRunSetupMode
     SetTimer(ShowSettingsEditor, -400)
