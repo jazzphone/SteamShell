@@ -2007,14 +2007,13 @@ Assert-True (
 # edits it is shared now, so the pair of Enable keys was a second way of saying
 # the same thing. The button that replaced them is pinned below.
 Assert-True (
+    # Order comes from the shared page table now, so the two products cannot
+    # order the same settings differently -- which is what this was checking by
+    # hand, one product at a time.
     $source -match
-        '(?s)category := "General"(?:(?!category := )[\s\S])*?' +
-        '"QuickMenu\.Enable"(?:(?!category := )[\s\S])*?' +
-        '"QuickMenu\.ShowGameDetection"(?:(?!category := )[\s\S])*?' +
-        '"QuickMenu\.AccentColor"(?:(?!category := )[\s\S])*?' +
-        '"QuickMenu\.AccentColorCustom"(?:(?!category := )[\s\S])*?' +
-        '"QuickMenu\.ChordHoldMs"(?:(?!category := )[\s\S])*?' +
-        '"Companion\.HeartbeatSeconds"') (
+        '(?s)"key", "Enable",[\s\S]*?"key", "ShowGameDetection",[\s\S]*?' +
+        '"key", "AccentColor",[\s\S]*?"key", "AccentColorCustom",[\s\S]*?' +
+        '"key", "ChordHoldMs",[\s\S]*?"key", "HeartbeatSeconds"') (
     "The General page no longer matches standalone's order for the settings both have.")
 # The companion reaches the shared layout manager, or it has no way at all to
 # hide a MAIN row -- which is the state retiring the Enable keys would leave it
@@ -2060,7 +2059,7 @@ Assert-True (
         '(?s)"product", "xfe", "type", "section", "label", "Overlay"' +
         '[\s\S]*?"product", "xfe", "type", "section", "label", "Frame Limiter"' -and
     $source -match
-        '(?s)SettingsAddSharedRows\(guiObj, category, &y\)\s*\{[\s\S]*?' +
+        '(?s)SettingsAddSharedRows\(guiObj, category, &y, tableKey := ""\)\s*\{[\s\S]*?' +
         'row\["type"\] = "section"[\s\S]{0,120}?SettingsAddSectionRow\(') (
     "The RTSS page lost the section breaks that replaced its group boxes.")
 
@@ -2075,9 +2074,10 @@ Assert-True (
     $source -notmatch 'GetFieldValue\("[^"]*"\s*(?:,\s*\d+\s*)?\)\s*=\s*\d' -and
     $source -notmatch 'ChoiceToValue\(' -and
     $source -match '(?s)SelectChoiceByText\(key, value, choices\)' -and
+    # The shell's order, per standing guidance, and safe to adopt only because
+    # nothing reads a choice back as an index any more.
     $source -match
-        'SettingsAddChoiceRow\(settings, category, "StartupPrograms\.WindowMode",\s*\r?\n?\s*' +
-        '"Launch window mode", \["Normal", "Minimized", "Hidden"\]' -and
+        '(?s)"key", "WindowMode",[\s\S]{0,200}?"choices", \["Hidden", "Minimized", "Normal"\]' -and
     # The park edge is a shared row now. Its stored value still comes from the
     # INDEX -- populate Chooses 1 or 2, save reads 1 or 2 -- so the ORDER in the
     # shared table is what must not move, whatever the two entries are called.

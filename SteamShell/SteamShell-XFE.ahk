@@ -5570,20 +5570,8 @@ ShowSettings(*) {
     ; General
     category := "General"
     y := SettingsFirstRowY()
-    SettingsAddCheckboxRow(settings, category, "QuickMenu.Enable",
-        "Enable the controller-first Quick Menu", &y)
-    SettingsAddCheckboxRow(settings, category, "QuickMenu.ShowGameDetection",
-        "Show Game Detection under System (what the window engine scored, and why)", &y)
-    SettingsAddChoiceRow(settings, category, "QuickMenu.AccentColor",
-        "Quick Menu accent color", QuickMenuAccentPresetNames(), &y)
-    SettingsAddEditRow(settings, category, "QuickMenu.AccentColorCustom",
-        "Custom accent (RRGGBB)", &y)
-    SettingsAddEditRow(settings, category, "QuickMenu.ChordHoldMs",
-        "Quick Menu L3+R3 hold time (ms)", &y, true)
-    ; Which MAIN rows appear and in what order. Shared with the shell -- this
-    ; window is why the Audio and Display "Enable" keys could be retired rather
-    ; than kept as a second way of saying the same thing.
-    SettingsAddButtonRow(settings, category, [
+    SettingsAddSharedRows(settings, category, &y)
+SettingsAddButtonRow(settings, category, [
         ["Customize Quick Menu...", ShowQuickMenuLayoutManager]], &y)
     ; XFE only from here: the companion has to prove it is still responsive
     ; while Xbox FSE is in front, which the shell never needs to do.
@@ -5657,15 +5645,7 @@ ShowSettings(*) {
     ; Startup Programs
     category := "Startup Programs"
     y := SettingsFirstRowY()
-    SettingsAddCheckboxRow(settings, category, "StartupPrograms.Enable",
-        "Launch configured startup programs with the companion", &y)
-    SettingsAddEditRow(settings, category, "StartupPrograms.DelayMs",
-        "Launch delay (ms)", &y, true)
-    ; XFE only: standalone launches its startup programs as one batch.
-    SettingsAddEditRow(settings, category, "StartupPrograms.StaggerMs",
-        "Gap between launches (ms)", &y, true)
-    SettingsAddChoiceRow(settings, category, "StartupPrograms.WindowMode",
-        "Launch window mode", ["Normal", "Minimized", "Hidden"], &y, 150)
+    SettingsAddSharedRows(settings, category, &y)
     StartupProgramsList := settings.AddListBox(
         "x300 y" y " w570 h180")
     SettingsTrackControl(category, StartupProgramsList)
@@ -5739,11 +5719,8 @@ ShowSettings(*) {
     LogonTaskStatusCtrl := settings.AddText("x300 y" y " w570 h20 +Wrap", "")
     SettingsTrackControl(category, LogonTaskStatusCtrl)
     y += 28
-    SettingsAddCheckboxRow(settings, category, "Controller.DiagnosticLogging",
-        "Log all XInput slots and GameInput on every change (diagnostic)", &y)
-    SettingsAddCheckboxRow(settings, category, "Controller.RawInputProbe",
-        "Log raw background HID gamepad reports (RawInput probe)", &y)
-    SettingsAddNoteRow(settings, category,
+    SettingsAddSharedRows(settings, category, &y, "Advanced & Logging")
+SettingsAddNoteRow(settings, category,
         "The heartbeat log proves whether the companion remains responsive while "
         . "Xbox FSE is active. Diagnostic logging compares every controller slot "
         . "against GameInput and records the foreground process, which reveals a "
@@ -6112,8 +6089,8 @@ SettingsRegisterField(category, key, control, eventName := "Change") {
 ; save still look fields up by an id that predates schema 13's section moves, so
 ; the id has to stay what they expect until they derive it from section and key
 ; like the shell does. The table records that debt rather than hiding it.
-SettingsAddSharedRows(guiObj, category, &y) {
-    for _, row in SettingsCategoryRows(category) {
+SettingsAddSharedRows(guiObj, category, &y, tableKey := "") {
+    for _, row in SettingsCategoryRows(tableKey != "" ? tableKey : category) {
         if !SettingsRowAppliesTo(row, "xfe")
             continue
         if (row["type"] = "note") {
@@ -6137,7 +6114,7 @@ SettingsAddSharedRows(guiObj, category, &y) {
                     StrLen(label) > 90 ? 44 : 26)
             case "choice":
                 SettingsAddChoiceRow(guiObj, category, field, label,
-                    row.Has("xfeChoices") ? row["xfeChoices"] : row["choices"],
+                    row.Has("xfeChoices") ? row["xfeChoices"] : SettingsRowChoices(row),
                     &y, 150)
             case "edit":
                 SettingsAddEditRow(guiObj, category, field, label, &y,

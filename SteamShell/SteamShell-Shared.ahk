@@ -5407,6 +5407,137 @@ RawInputReadState(&state) {
 ;                   one of them is a name somebody has to keep in step by hand.
 SettingsCategoryRows(category) {
     static table := Map(
+        ; Category names follow the shell's. The companion calls its logging page
+        ; "Advanced"; the shell calls it "Advanced & Logging" and that is the key
+        ; here, with the companion passing it explicitly while its own list keeps
+        ; the shorter name until category structure is unified too.
+        "General", [
+            Map("product", "standalone", "type", "checkbox",
+                "section", "Features", "key", "EnableTaskbarHiding",
+                "label", "Hide the Windows taskbar while SteamShell is active",
+                "default", "true"),
+            Map("product", "standalone", "type", "checkbox",
+                "section", "Features", "key", "EnableDesktopBlackout",
+                "label", "Show a black background instead of the wallpaper and desktop icons",
+                "default", "true"),
+            Map("product", "both", "type", "checkbox",
+                "section", "QuickMenu", "key", "Enable",
+                "label", "Enable the controller-first Quick Menu",
+                "default", "true"),
+            Map("product", "both", "type", "checkbox",
+                "section", "QuickMenu", "key", "ShowGameDetection",
+                "label", "Show Game Detection under System (what the window engine scored, and why)",
+                "default", "true"),
+            ; The preset list is shared and can grow, so it is asked for rather
+            ; than written out in two places that would then disagree.
+            Map("product", "both", "type", "choice",
+                "section", "QuickMenu", "key", "AccentColor",
+                "label", "Quick Menu accent color",
+                "choicesFrom", "accent", "default", "Purple"),
+            Map("product", "both", "type", "edit",
+                "section", "QuickMenu", "key", "AccentColorCustom",
+                "label", "Custom accent (RRGGBB)", "default", "107C10"),
+            Map("product", "both", "type", "edit",
+                "section", "QuickMenu", "key", "ChordHoldMs",
+                "label", "Quick Menu L3+R3 hold time (ms)",
+                "default", "500", "fieldType", "integer", "min", 300, "max", 3000),
+            Map("product", "standalone", "type", "edit",
+                "section", "QuickMenu", "key", "TaskForceCloseHoldMs",
+                "label", "Task Switcher force-close hold time (ms)",
+                "default", "1200", "fieldType", "integer", "min", 600, "max", 3000),
+            ; The companion reaches its heartbeat interval here; the shell has no
+            ; heartbeat, because nothing is watching to see whether it is alive.
+            Map("product", "xfe", "type", "edit",
+                "section", "Companion", "key", "HeartbeatSeconds",
+                "label", "Heartbeat log interval (seconds)",
+                "default", "60", "fieldType", "integer", "min", 5, "max", 3600),
+            Map("product", "standalone", "type", "edit",
+                "section", "BPM", "key", "BpmTitle",
+                "label", "Steam Big Picture window title",
+                "default", "Steam Big Picture Mode"),
+            ; The companion keeps these on its own Steam page, which also holds
+            ; View-button rows the shell has no equivalent for. Shared rows, one
+            ; definition, two placements until the categories themselves merge.
+            Map("product", "standalone", "type", "shortcut",
+                "section", "Steam", "key", "MenuShortcut",
+                "label", "Steam Menu shortcut", "default", "^1"),
+            Map("product", "standalone", "type", "shortcut",
+                "section", "Steam", "key", "QuickAccessShortcut",
+                "label", "Steam Quick Access shortcut", "default", "^2"),
+            Map("product", "standalone", "type", "shortcut",
+                "section", "Steam", "key", "OverlayShortcut",
+                "label", "In-game Steam overlay shortcut", "default", "+{Tab}")],
+        "Startup Programs", [
+            Map("product", "both", "type", "checkbox",
+                "section", "StartupPrograms", "key", "Enable",
+                "label", "Launch configured startup programs with SteamShell",
+                "xfeLabel", "Launch configured startup programs with the companion",
+                "default", "true"),
+            Map("product", "both", "type", "edit",
+                "section", "StartupPrograms", "key", "DelayMs",
+                "label", "Launch delay (ms)",
+                "default", "2000", "fieldType", "integer", "min", 0, "max", 600000),
+            Map("product", "xfe", "type", "edit",
+                "section", "StartupPrograms", "key", "StaggerMs",
+                "label", "Gap between launches (ms)",
+                "default", "1200", "fieldType", "integer", "min", 0, "max", 60000),
+            Map("product", "both", "type", "choice",
+                "section", "StartupPrograms", "key", "WindowMode",
+                "label", "Launch window mode",
+                "choices", ["Hidden", "Minimized", "Normal"], "default", "Hidden"),
+            ; The companion can drop its own token when launching. The shell
+            ; reaches the same outcome through LaunchInteractiveApp, which it
+            ; needs anyway because it can be started elevated.
+            Map("product", "xfe", "type", "checkbox",
+                "section", "StartupPrograms", "key", "LaunchDeElevated",
+                "label", "Start them as the normal user when the companion is elevated",
+                "default", "true")],
+        "Advanced & Logging", [
+            Map("product", "standalone", "type", "choice",
+                "section", "Logging", "key", "GameLogMode",
+                "label", "Game log detail",
+                "choices", ["OFF", "ACTIVATIONS", "TOPN", "DIAGNOSTIC"],
+                "default", "OFF", "dependency", true),
+            Map("product", "standalone", "type", "edit",
+                "section", "Logging", "key", "GameLogTopN",
+                "label", "Candidates recorded in TOPN/DIAGNOSTIC",
+                "default", "3", "fieldType", "integer", "min", 1, "max", 10),
+            Map("product", "standalone", "type", "edit",
+                "section", "Logging", "key", "GameLogIntervalMs",
+                "label", "Diagnostic logging interval (ms)",
+                "default", "3000", "fieldType", "integer", "min", 250, "max", 60000),
+            Map("product", "standalone", "type", "checkbox",
+                "section", "Logging", "key", "GameLogIncludeTitles",
+                "label", "Include window titles in diagnostic logs",
+                "default", "true"),
+            Map("product", "standalone", "type", "checkbox",
+                "section", "GameForegroundAssist",
+                "key", "GameAssistLogEvenWhenSkipped",
+                "label", "Log candidates even when game assistance is skipped",
+                "default", "true"),
+            Map("product", "standalone", "type", "edit",
+                "section", "Timing", "key", "SteamStartupGraceMs",
+                "label", "Steam startup warning delay (ms)",
+                "default", "120000", "fieldType", "integer", "min", 10000, "max", 600000),
+            Map("product", "standalone", "type", "edit",
+                "section", "Timing", "key", "SteamExitConfirmMs",
+                "label", "Steam exit confirmation period (ms)",
+                "default", "4000", "fieldType", "integer", "min", 1000, "max", 60000),
+            ; GameInput is named only in the companion's wording because only the
+            ; companion has it to compare against.
+            Map("product", "both", "type", "checkbox",
+                "section", "Controller", "key", "DiagnosticLogging",
+                "label", "Log all XInput slots on every change (diagnostic)",
+                "xfeLabel", "Log all XInput slots and GameInput on every change (diagnostic)",
+                "default", "false"),
+            Map("product", "both", "type", "checkbox",
+                "section", "Controller", "key", "RawInputProbe",
+                "label", "Log raw background HID gamepad reports (RawInput probe)",
+                "default", "false"),
+            Map("product", "standalone", "type", "edit",
+                "section", "Controller", "key", "RawInputStaleMs",
+                "label", "Treat RawInput as silent after (ms)",
+                "default", "5000", "fieldType", "integer", "min", 500, "max", 60000)],
         "RTSS & Performance", [
             Map("product", "both", "type", "checkbox",
                 "section", "RTSS", "key", "EnableIntegration",
@@ -5564,6 +5695,16 @@ SettingsCategoryRows(category) {
                 "label", "Automatic mouse throughout Windows desktop mode",
                 "default", "true")])
     return table.Has(category) ? table[category] : []
+}
+
+; The choice list for a row, asked for when it is not a fixed list.
+;
+; The accent presets are shared and can grow, so writing them out in the table
+; would create a third copy to keep in step with the two that already agree.
+SettingsRowChoices(row) {
+    if (row.Has("choicesFrom") && row["choicesFrom"] = "accent")
+        return QuickMenuAccentPresetNames()
+    return row["choices"]
 }
 
 ; The label and default this product shows for a shared row.

@@ -10128,8 +10128,8 @@ SettingsEditorMarkDirty(*) {
 ; The rows come from SettingsCategoryRows in SteamShell-Shared.ahk; only the
 ; drawing is here. Unifying the drawing is the next step, and it is checkable
 ; precisely because the same table has to produce the same rows through it.
-SettingsEditorAddSharedRows(category, &y) {
-    for _, row in SettingsCategoryRows(category) {
+SettingsEditorAddSharedRows(category, &y, tableKey := "") {
+    for _, row in SettingsCategoryRows(tableKey != "" ? tableKey : category) {
         if !SettingsRowAppliesTo(row, "standalone")
             continue
         label := SettingsRowLabel(row, "standalone")
@@ -10140,7 +10140,7 @@ SettingsEditorAddSharedRows(category, &y) {
                     label, &y, value)
             case "choice":
                 ctrl := SettingsEditorAddChoice(category, row["section"],
-                    row["key"], label, row["choices"], &y, value)
+                    row["key"], label, SettingsRowChoices(row), &y, value)
                 ; Rows other rows are enabled by have to say so when they change,
                 ; or the fields they gate stay greyed out until the page is
                 ; rebuilt.
@@ -14320,10 +14320,6 @@ ShowSettingsEditor(*) {
     SettingsEditorAddHeading(category, "General"
         , "Core shell behavior and which modules appear in the living-room Quick Menu.")
     y := 150
-    SettingsEditorAddCheckbox(category, "Features", "EnableTaskbarHiding", "Hide the Windows taskbar while SteamShell is active", &y, "true")
-    SettingsEditorAddCheckbox(category, "Features", "EnableDesktopBlackout", "Show a black background instead of the wallpaper and desktop icons", &y, "true")
-    SettingsEditorAddCheckbox(category, "QuickMenu", "Enable", "Enable the controller-first Quick Menu", &y, "true")
-    SettingsEditorAddCheckbox(category, "QuickMenu", "ShowGameDetection", "Show Game Detection under System (what the window engine scored, and why)", &y, "true")
     ; Audio and Display row visibility is NOT edited here. "Customize Quick
     ; Menu..." at the bottom of this page owns which MAIN rows appear, and it
     ; already lists Audio and Display & HDR alongside the other nine. Two
@@ -14335,14 +14331,7 @@ ShowSettingsEditor(*) {
     ;
     ; ShowGameDetection above stays, because the layout manager covers MAIN rows
     ; and that row lives under System.
-    SettingsEditorAddChoice(category, "QuickMenu", "AccentColor", "Quick Menu accent color", QuickMenuAccentPresetNames(), &y, "Purple")
-    SettingsEditorAddTextField(category, "QuickMenu", "AccentColorCustom", "Custom accent (RRGGBB)", &y, "107C10")
-    SettingsEditorAddTextField(category, "QuickMenu", "ChordHoldMs", "Quick Menu L3+R3 hold time (ms)", &y, "500", "integer", 300, 3000)
-    SettingsEditorAddTextField(category, "QuickMenu", "TaskForceCloseHoldMs", "Task Switcher force-close hold time (ms)", &y, "1200", "integer", 600, 3000)
-    SettingsEditorAddTextField(category, "BPM", "BpmTitle", "Steam Big Picture window title", &y, "Steam Big Picture Mode")
-    SettingsEditorAddShortcutField(category, "Steam", "MenuShortcut", "Steam Menu shortcut", &y, "^1")
-    SettingsEditorAddShortcutField(category, "Steam", "QuickAccessShortcut", "Steam Quick Access shortcut", &y, "^2")
-    SettingsEditorAddShortcutField(category, "Steam", "OverlayShortcut", "In-game Steam overlay shortcut", &y, "+{Tab}")
+    SettingsEditorAddSharedRows(category, &y)
     SettingsEditorAddActionButton(category, "Customize Quick Menu…", ShowQuickMenuLayoutManager, 255, y + 6, 240)
 
     ; Startup and splash
@@ -14373,11 +14362,7 @@ ShowSettingsEditor(*) {
     SettingsEditorAddHeading(category, "Startup Programs"
         , "Add up to 20 standard-user programs. Select a row to edit its command or optional arguments.")
     y := 150
-    SettingsEditorAddCheckbox(category, "StartupPrograms", "Enable", "Launch configured startup programs with SteamShell", &y, "true")
-    SettingsEditorAddTextField(category, "StartupPrograms", "DelayMs", "Launch delay (ms)", &y, "2000", "integer", 0, 600000)
-    SettingsEditorAddChoice(
-        category, "StartupPrograms", "WindowMode", "Launch window mode",
-        ["Hidden", "Minimized", "Normal"], &y, "Hidden")
+    SettingsEditorAddSharedRows(category, &y)
     startupListY := y + 6
     SettingsStartupListView := SettingsGui.AddListView(
         "x255 y" startupListY " w690 h150 -Multi", ["Slot", "Command"])
@@ -14505,25 +14490,7 @@ ShowSettingsEditor(*) {
     SettingsEditorAddHeading(category, "Advanced & Logging"
         , "Common diagnostics are available here. Open the Diagnostics Panel for timed overrides and detailed status.")
     y := 150
-    gameLogModeCtrl := SettingsEditorAddChoice(
-        category, "Logging", "GameLogMode",
-        "Game log detail", ["OFF", "ACTIVATIONS", "TOPN", "DIAGNOSTIC"], &y, "OFF")
-    gameLogModeCtrl.OnEvent("Change", SettingsEditorRefreshDependencies)
-    SettingsEditorAddTextField(category, "Logging", "GameLogTopN", "Candidates recorded in TOPN/DIAGNOSTIC", &y, "3", "integer", 1, 10)
-    SettingsEditorAddTextField(category, "Logging", "GameLogIntervalMs", "Diagnostic logging interval (ms)", &y, "3000", "integer", 250, 60000)
-    SettingsEditorAddCheckbox(category, "Logging", "GameLogIncludeTitles", "Include window titles in diagnostic logs", &y, "true")
-    SettingsEditorAddCheckbox(category, "GameForegroundAssist", "GameAssistLogEvenWhenSkipped", "Log candidates even when game assistance is skipped", &y, "true")
-    SettingsEditorAddTextField(category, "Timing", "SteamStartupGraceMs", "Steam startup warning delay (ms)", &y, "120000", "integer", 10000, 600000)
-    SettingsEditorAddTextField(category, "Timing", "SteamExitConfirmMs", "Steam exit confirmation period (ms)", &y, "4000", "integer", 1000, 60000)
-    ; Same two switches the companion offers, under the same keys and the same
-    ; words. Both are how somebody whose controller is not recognised finds out
-    ; whether reports are arriving at all.
-    SettingsEditorAddCheckbox(category, "Controller", "DiagnosticLogging",
-        "Log all XInput slots on every change (diagnostic)", &y, "false")
-    SettingsEditorAddCheckbox(category, "Controller", "RawInputProbe",
-        "Log raw background HID gamepad reports (RawInput probe)", &y, "false")
-    SettingsEditorAddTextField(category, "Controller", "RawInputStaleMs",
-        "Treat RawInput as silent after (ms)", &y, "5000", "integer", 500, 60000)
+    SettingsEditorAddSharedRows(category, &y)
     actionY := y + 12
     actionLeft := 255
     actionRight := 610

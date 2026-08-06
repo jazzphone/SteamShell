@@ -303,6 +303,7 @@ SetRtssFrameLimiterState
 SetRtssGlobalFrameLimit
 SetRtssOverlayState
 SettingsRowAppliesTo
+SettingsRowChoices
 SettingsRowDefault
 SettingsRowLabel
 SettingsUpdateScrollBar
