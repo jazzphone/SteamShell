@@ -771,9 +771,49 @@ def check_schema_versions():
                  + ", ".join(f"{k}={v}" for k, v in versions.items()) + ".")
 
 
+# PowerShell reads "$name:" inside a double-quoted string as a SCOPED variable
+# reference -- $env:, $script:, $global: -- and "$tree:" names a scope that does
+# not exist, so the file fails to PARSE. Not to run: to parse, which takes the
+# whole validator with it and every assertion in it.
+#
+# This exists because that reached a build. The check it broke had been
+# simulated here in Python and its logic counter-tested in both directions, and
+# all of that verified SEMANTICS while the defect was SYNTAX. There is no
+# PowerShell on the machine this replay runs on, so the parser cannot be the
+# check -- but this particular error is mechanical, and a lint for it costs
+# nothing.
+#
+# Scope prefixes are real syntax and are allowed by name, so the exemption is a
+# list rather than a guess.
+POWERSHELL_SCOPES = ("env", "script", "global", "local", "using", "private",
+                     "variable", "function")
+
+
+def check_powershell_scope_colons():
+    for name in ("Validate-Common.ps1", "Validate-SteamShell.ps1",
+                 "Validate-SteamShell-XFE.ps1", "Build-SteamShell.ps1"):
+        path = ROOT / name
+        if not path.exists():
+            continue
+        for number, line in enumerate(
+                decode_like_powershell(path.read_bytes()).splitlines(), 1):
+            for match in re.finditer(r'\$([A-Za-z_]\w*):', line):
+                if match.group(1).lower() in POWERSHELL_SCOPES:
+                    continue
+                # Only inside a double-quoted string is the colon parsed this
+                # way; a bare $x: in code is something else entirely.
+                if line.count('"', 0, match.start()) % 2 == 0:
+                    continue
+                fail(f"{name}:{number} interpolates \"${match.group(1)}:\", which "
+                     "PowerShell parses as a scoped variable reference and "
+                     "rejects at PARSE time, taking the whole validator with "
+                     f"it. Write \"${{{match.group(1)}}}:\" instead.")
+
+
 def main():
     sources = {name: read_source(name) for name in ALL_FILES}
     maps = {name: function_map(text) for name, text in sources.items()}
+    check_powershell_scope_colons()
     check_quickmenu_rows(sources)
     check_schema_versions()
     check_cross_name_duplicates(sources)

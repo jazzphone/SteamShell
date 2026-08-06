@@ -1165,7 +1165,7 @@ function Assert-SharedParity {
             $labelled = @(for ($i = 0; $i -lt $tokens.Count; $i += 2) { $tokens[$i] })
         }
         Assert-True ($labelled.Count -ge 10) (
-            "$tree: the ControllerBindingPretty label set could not be read, so " +
+            "${tree}: the ControllerBindingPretty label set could not be read, so " +
             "a label with no action behind it would go unnoticed.")
         foreach ($label in ($labelled | Sort-Object -Unique)) {
             Assert-True ($executable -contains $label) (
