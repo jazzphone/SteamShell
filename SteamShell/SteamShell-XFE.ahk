@@ -5603,40 +5603,9 @@ ShowSettings(*) {
     ; Controller & Cursor
     category := "Controller & Cursor"
     y := SettingsFirstRowY()
-    SettingsAddCheckboxRow(settings, category,
-        "Controller.EnableControllerMouseMode",
-        "Enable controller mouse mode while holding View/Back", &y)
-    ; GameInput is the companion-only entry: the shell offers Auto, RawInput and
-    ; XInput from the same key, in the same section, under the same words.
-    SettingsAddChoiceRow(settings, category, "Controller.Backend",
-        "Input backend", ["Auto", "XInput", "GameInput", "RawInput"], &y, 150)
-    SettingsAddNoteRow(settings, category,
-        "Auto is recommended: RawInput works inside Xbox FSE, XInput on the desktop.",
-        &y)
-    SettingsAddEditRow(settings, category, "Controller.ControllerIndex",
-        "Controller index (0–3)", &y, true)
-    SettingsAddEditRow(settings, category, "Controller.ControllerMouseSpeed",
-        "Controller mouse speed", &y, true)
-    SettingsAddEditRow(settings, category, "Controller.ControllerDeadzone",
-        "Stick deadzone", &y, true)
-    SettingsAddEditRow(settings, category, "Controller.ControllerChordHoldMs",
-        "Mapping long-press threshold (ms)", &y, true)
-    SettingsAddCheckboxRow(settings, category, "Cursor.EnableAutoHide",
-        "Automatically hide an idle mouse cursor", &y)
-    SettingsAddEditRow(settings, category, "Cursor.HideDelayMs",
-        "Cursor hide delay (ms)", &y, true)
-    SettingsAddCheckboxRow(settings, category, "Cursor.EnableMouseParkOnBoot",
-        "Park the mouse at the display edge once during startup", &y)
-    SettingsAddCheckboxRow(settings, category, "Cursor.ParkOnGameStart",
-        "Park when a game enters fullscreen", &y)
-    SettingsAddCheckboxRow(settings, category, "Cursor.ParkOnSteamReturn",
-        "Park after returning to Steam", &y)
-    SettingsAddChoiceRow(settings, category, "Cursor.ParkEdge",
-        "Mouse parking edge", ["Right edge", "Left edge"], &y, 150)
-    ; In the left column and in standalone's position, and now the same two rows
-    ; standalone shows: a master switch and the allowlist it consults.
-    SettingsAddCheckboxRow(settings, category, "Controller.EnableAutoMouseMode",
-        "Enable automatic mouse mode (master switch)", &y)
+    ; The rows themselves are defined once, in SteamShell-Shared.ahk, so this
+    ; page and the shell's cannot describe the same settings differently.
+    SettingsAddSharedRows(settings, category, &y)
     SettingsAddEditRow(settings, category, "Controller.AutoMouseExeList",
         "Automatic mouse applications (pipe-separated)", &y, false, 300)
     SettingsAddNoteRow(settings, category,
@@ -6178,6 +6147,37 @@ SettingsRegisterField(category, key, control, eventName := "Change") {
 ; the index (SetDropDownMode, WindowModeChoiceToValue, ParkEdge). Reordering a
 ; list to match standalone's would invert the setting, so the lists keep XFE's
 ; order and only the labels were aligned.
+; Draws the shared definition of a category with this tree's builders.
+;
+; companionField is honoured where a row carries one: this tree's populate and
+; save still look fields up by an id that predates schema 13's section moves, so
+; the id has to stay what they expect until they derive it from section and key
+; like the shell does. The table records that debt rather than hiding it.
+SettingsAddSharedRows(guiObj, category, &y) {
+    for _, row in SettingsCategoryRows(category) {
+        if !SettingsRowAppliesTo(row, "xfe")
+            continue
+        if (row["type"] = "note") {
+            SettingsAddNoteRow(guiObj, category, row["text"], &y, 40)
+            continue
+        }
+        field := row.Has("companionField")
+            ? row["companionField"]
+            : row["section"] "." row["key"]
+        switch row["type"] {
+            case "checkbox":
+                SettingsAddCheckboxRow(guiObj, category, field, row["label"], &y)
+            case "choice":
+                SettingsAddChoiceRow(guiObj, category, field, row["label"],
+                    row.Has("xfeChoices") ? row["xfeChoices"] : row["choices"],
+                    &y, 150)
+            case "edit":
+                SettingsAddEditRow(guiObj, category, field, row["label"], &y,
+                    row.Has("fieldType") && row["fieldType"] = "integer")
+        }
+    }
+}
+
 SettingsAddChoiceRow(guiObj, category, key, labelText, choices, &y, width := 200) {
     layout := SettingsLayout()
     label := guiObj.AddText("x" layout["labelX"] " y" (y + 3)

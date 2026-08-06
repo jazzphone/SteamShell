@@ -2037,11 +2037,13 @@ Assert-True (
 # which is where standalone keeps them. They lived in a free right-hand column
 # only because absolute layout left no room below. Two rows since schema 11.
 Assert-True (
+    # Order comes from the shared page table now, so it is pinned there once
+    # rather than in each tree's copy of the page.
     $source -match
-        '(?s)category := "Controller & Cursor"(?:(?!category := )[\s\S])*?' +
-        '"Cursor\.ParkEdge"(?:(?!category := )[\s\S])*?' +
-        '"Controller\.EnableAutoMouseMode"(?:(?!category := )[\s\S])*?' +
-        '"Controller\.AutoMouseExeList"') (
+        '(?s)"key", "MouseParkEdge"[\s\S]*?"key", "EnableAutoMouseMode"' -and
+    $source -match
+        '(?s)SettingsAddSharedRows\(settings, category, &y\)\s*\r?\n\s*' +
+        'SettingsAddEditRow\(settings, category, "Controller\.AutoMouseExeList"') (
     "The automatic mouse controls are not in standalone's position on the Controller page.")
 
 # The RTSS page is one flowing list, like standalone's. Its two side-by-side
@@ -2071,9 +2073,11 @@ Assert-True (
     $source -match
         'SettingsAddChoiceRow\(settings, category, "StartupPrograms\.WindowMode",\s*\r?\n?\s*' +
         '"Launch window mode", \["Normal", "Minimized", "Hidden"\]' -and
+    # The park edge is a shared row now. Its stored value still comes from the
+    # INDEX -- populate Chooses 1 or 2, save reads 1 or 2 -- so the ORDER in the
+    # shared table is what must not move, whatever the two entries are called.
     $source -match
-        'SettingsAddChoiceRow\(settings, category, "Cursor\.ParkEdge",\s*\r?\n?\s*' +
-        '"Mouse parking edge", \["Right edge", "Left edge"\]') (
+        '(?s)"key", "MouseParkEdge",[\s\S]{0,200}?"choices", \["Right", "Left"\]') (
     "A Settings choice list was reordered; its stored value comes from the index.")
 
 # The seam SteamShell-Shared.ahk calls back into. AutoHotkey resolves a missing

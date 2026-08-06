@@ -10123,6 +10123,34 @@ SettingsEditorMarkDirty(*) {
         SettingsEditorStatusCtrl.Text := "Unsaved changes"
 }
 
+; Draws the shared definition of a category with this tree's builders.
+;
+; The rows come from SettingsCategoryRows in SteamShell-Shared.ahk; only the
+; drawing is here. Unifying the drawing is the next step, and it is checkable
+; precisely because the same table has to produce the same rows through it.
+SettingsEditorAddSharedRows(category, &y) {
+    for _, row in SettingsCategoryRows(category) {
+        if !SettingsRowAppliesTo(row, "standalone")
+            continue
+        switch row["type"] {
+            case "checkbox":
+                SettingsEditorAddCheckbox(category, row["section"], row["key"],
+                    row["label"], &y, row["default"])
+            case "choice":
+                SettingsEditorAddChoice(category, row["section"], row["key"],
+                    row["label"], row["choices"], &y, row["default"])
+            case "edit":
+                SettingsEditorAddTextField(category, row["section"], row["key"],
+                    row["label"], &y, row["default"],
+                    row.Has("fieldType") ? row["fieldType"] : "text",
+                    row.Has("min") ? row["min"] : "",
+                    row.Has("max") ? row["max"] : "")
+            case "note":
+                SettingsEditorAddNote(category, row["text"], &y)
+        }
+    }
+}
+
 ; Explanatory text under a control, not bound to any setting.
 ;
 ; The companion has had SettingsAddNoteRow since it needed one; this is the same
@@ -14367,28 +14395,9 @@ ShowSettingsEditor(*) {
     SettingsEditorAddHeading(category, "Controller & Cursor"
         , "Shell mode uses an allowlist; Windows desktop mode can cover every app except your exclusions.")
     y := 150
-    SettingsEditorAddCheckbox(category, "Controller", "EnableControllerMouseMode", "Enable controller mouse mode while holding View/Back", &y, "true")
-    SettingsEditorAddChoice(category, "Controller", "Backend", "Input backend",
-        ["Auto", "RawInput", "XInput"], &y, "Auto")
-    SettingsEditorAddNote(category,
-        "Auto is recommended. XInput covers Xbox-compatible pads; RawInput reads "
-        . "any HID gamepad and is what makes a controller XInput cannot see "
-        . "usable at all. Learn Controller teaches RawInput an unknown pad.", &y)
-    SettingsEditorAddChoice(category, "Controller", "ControllerIndex", "Controller index", ["0", "1", "2", "3"], &y, "0")
-    SettingsEditorAddTextField(category, "Controller", "ControllerMouseSpeed", "Controller mouse speed", &y, "100", "integer", 1, 200)
-    SettingsEditorAddTextField(category, "Controller", "ControllerDeadzone", "Stick deadzone", &y, "3000", "integer", 0, 32000)
-    SettingsEditorAddTextField(category, "Controller", "ControllerChordHoldMs", "Mapping long-press threshold (ms)", &y, "500", "integer", 100, 2000)
-    SettingsEditorAddCheckbox(category, "Features", "EnableAutoHideCursor", "Automatically hide an idle mouse cursor", &y, "true")
-    SettingsEditorAddTextField(category, "Timing", "MouseHideDelay", "Cursor hide delay (ms)", &y, "1000", "integer", 0, 60000)
-    SettingsEditorAddCheckbox(category, "Features", "EnableMouseParkOnBoot", "Park the mouse at the display edge once during startup", &y, "true")
-    SettingsEditorAddCheckbox(category, "Features", "EnableMouseParkOnFocusChange", "Park once after a managed focus change", &y, "true")
-    SettingsEditorAddChoice(category, "MousePark", "MouseParkEdge", "Mouse parking edge", ["Right", "Left"], &y, "Right")
-    SettingsEditorAddCheckbox(
-        category, "Features", "EnableAutoMouseMode",
-        "Enable automatic mouse mode (master switch)", &y, "true")
-    SettingsEditorAddCheckbox(
-        category, "Features", "EnableDesktopAutoMouseMode",
-        "Automatic mouse throughout Windows desktop mode", &y, "true")
+    ; The rows themselves are defined once, in SteamShell-Shared.ahk, so this
+    ; page and the companion's cannot describe the same settings differently.
+    SettingsEditorAddSharedRows(category, &y)
     SettingsEditorAddActionButton(category, "Open Controller Mapping…", ShowControllerMappingWindow, 255, y + 5, 260)
     SettingsEditorAddActionButton(category, "Test / Calibrate Controller…", ShowControllerTest, 525, y + 5, 260)
     SettingsEditorAddActionButton(category, "Learn Controller…", ShowControllerLearner, 795, y + 5, 260)

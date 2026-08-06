@@ -1270,9 +1270,11 @@ Assert-True (
         # Checked, so the pin is that the state still comes from the two flags.
         '(?sm)^ProductTrayItems\(\)(?:(?!\n\})[\s\S])*?Automatic Mouse Throughout Desktop(?:(?!\n\})[\s\S])*?' +
         '"checked", EnableAutoMouseMode && EnableDesktopAutoMouseMode' -and
+    # Defined in the shared page table now, and marked standalone-only: the
+    # companion has no desktop mode, which its own validator enforces by name.
     $source -match
-        '(?s)SettingsEditorAddCheckbox\(\s*category,\s*"Features",\s*' +
-        '"EnableDesktopAutoMouseMode"' -and
+        '(?s)"product", "standalone", "type", "checkbox",\s*\r?\n\s*' +
+        '"section", "Features", "key", "EnableDesktopAutoMouseMode"' -and
     $source -match
         '(?s)SettingsEditorAddExeListField\(\s*category,\s*"Controller",\s*' +
         '"DesktopAutoMouseExcludeExeList"') (

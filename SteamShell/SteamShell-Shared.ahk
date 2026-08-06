@@ -5376,6 +5376,132 @@ RawInputReadState(&state) {
 }
 
 ; ==============================================================================
+; Settings page definition
+; ==============================================================================
+; What a Settings page CONTAINS, defined once for both products.
+;
+; The two Settings windows are separate implementations -- ProductSettingsScrollBar
+; records why -- and separate implementations of the same screen drift. They had:
+; rows one product offered and the other did not, the same setting under
+; different words, and a backend row whose comment still said the shell had no
+; backend to choose. Every one of those was found by looking, which is the
+; problem.
+;
+; This is the CONTENT half. Each tree still draws the rows with its own builders;
+; it just no longer decides what they are. The drawing halves are the next step,
+; and doing content first is what makes that one checkable: the same table has to
+; produce the same rows before and after.
+;
+; Section and key are given ONCE and both the read and the write derive from
+; them. That is the shell's model and it is the better one: the companion names a
+; field in three places -- the row, the populate and the save -- so
+; "Cursor.EnableAutoHide" is a row id that matches neither the section nor the
+; key it actually reads and writes, and keeping three names in step by hand is
+; how a setting silently stops saving.
+;
+;   product   "both", "standalone" or "xfe" -- who shows the row
+;   type      checkbox | choice | edit | note
+;   companionField  the id the companion's populate/save still use, where it
+;                   differs from Section.Key. Temporary: it exists only until
+;                   the companion derives both from section and key, and every
+;                   one of them is a name somebody has to keep in step by hand.
+SettingsCategoryRows(category) {
+    static table := Map(
+        "Controller & Cursor", [
+            Map("product", "both", "type", "checkbox",
+                "section", "Controller", "key", "EnableControllerMouseMode",
+                "label", "Enable controller mouse mode while holding View/Back",
+                "default", "true"),
+            ; Auto, RawInput and XInput in both. GameInput is the companion's
+            ; alone -- it reads all zeros outside Xbox FSE, so it is not an
+            ; option the shell could offer honestly.
+            Map("product", "both", "type", "choice",
+                "section", "Controller", "key", "Backend",
+                "label", "Input backend",
+                "choices", ["Auto", "RawInput", "XInput"],
+                "xfeChoices", ["Auto", "XInput", "GameInput", "RawInput"],
+                "default", "Auto"),
+            Map("product", "both", "type", "note",
+                "text", "Auto is recommended. XInput covers Xbox-compatible "
+                    . "pads; RawInput reads any HID gamepad and is what makes a "
+                    . "controller XInput cannot see usable at all. Learn "
+                    . "Controller teaches RawInput an unknown pad."),
+            Map("product", "both", "type", "choice",
+                "section", "Controller", "key", "ControllerIndex",
+                "label", "Controller index",
+                "choices", ["0", "1", "2", "3"], "default", "0"),
+            Map("product", "both", "type", "edit",
+                "section", "Controller", "key", "ControllerMouseSpeed",
+                "label", "Controller mouse speed",
+                "default", "100", "fieldType", "integer", "min", 1, "max", 300),
+            Map("product", "both", "type", "edit",
+                "section", "Controller", "key", "ControllerDeadzone",
+                "label", "Stick deadzone",
+                "default", "3000", "fieldType", "integer", "min", 0, "max", 32000),
+            Map("product", "both", "type", "edit",
+                "section", "Controller", "key", "ControllerChordHoldMs",
+                "label", "Mapping long-press threshold (ms)",
+                "default", "500", "fieldType", "integer", "min", 100, "max", 3000),
+            ; Schema 13 moved these out of [Cursor]; the companion's field IDS
+            ; never followed, which is why companionField says so out loud rather
+            ; than the two trees quietly disagreeing about where they live.
+            Map("product", "both", "type", "checkbox",
+                "section", "Features", "key", "EnableAutoHideCursor",
+                "companionField", "Cursor.EnableAutoHide",
+                "label", "Automatically hide an idle mouse cursor",
+                "default", "true"),
+            Map("product", "both", "type", "edit",
+                "section", "Timing", "key", "MouseHideDelay",
+                "companionField", "Cursor.HideDelayMs",
+                "label", "Cursor hide delay (ms)",
+                "default", "1000", "fieldType", "integer", "min", 0, "max", 60000),
+            Map("product", "both", "type", "checkbox",
+                "section", "Features", "key", "EnableMouseParkOnBoot",
+                "companionField", "Cursor.EnableMouseParkOnBoot",
+                "label", "Park the mouse at the display edge once during startup",
+                "default", "true"),
+            ; The companion parks on events the shell has no equivalent for, and
+            ; the shell parks on a focus change the companion does not track.
+            ; Different rules, not one rule under two names -- the migration
+            ; table says so too.
+            Map("product", "xfe", "type", "checkbox",
+                "section", "Cursor", "key", "ParkOnGameStart",
+                "companionField", "Cursor.ParkOnGameStart",
+                "label", "Park when a game enters fullscreen", "default", "true"),
+            Map("product", "xfe", "type", "checkbox",
+                "section", "Cursor", "key", "ParkOnSteamReturn",
+                "companionField", "Cursor.ParkOnSteamReturn",
+                "label", "Park after returning to Steam", "default", "true"),
+            Map("product", "standalone", "type", "checkbox",
+                "section", "Features", "key", "EnableMouseParkOnFocusChange",
+                "label", "Park once after a managed focus change",
+                "default", "true"),
+            Map("product", "both", "type", "choice",
+                "section", "MousePark", "key", "MouseParkEdge",
+                "companionField", "Cursor.ParkEdge",
+                "label", "Mouse parking edge",
+                "choices", ["Right", "Left"], "default", "Right"),
+            Map("product", "both", "type", "checkbox",
+                "section", "Features", "key", "EnableAutoMouseMode",
+                "companionField", "Controller.EnableAutoMouseMode",
+                "label", "Enable automatic mouse mode (master switch)",
+                "default", "true"),
+            ; The shell can put the whole Windows desktop in automatic mouse
+            ; mode. The companion has no desktop mode at all, and that is an
+            ; architectural rule its validator enforces by name.
+            Map("product", "standalone", "type", "checkbox",
+                "section", "Features", "key", "EnableDesktopAutoMouseMode",
+                "label", "Automatic mouse throughout Windows desktop mode",
+                "default", "true")])
+    return table.Has(category) ? table[category] : []
+}
+
+; Whether a row belongs to the product being compiled.
+SettingsRowAppliesTo(row, product) {
+    return row["product"] = "both" || row["product"] = product
+}
+
+; ==============================================================================
 ; Controller Learner
 ; ==============================================================================
 ; Teaches the RawInput decoder one controller's report layout, by asking for a
