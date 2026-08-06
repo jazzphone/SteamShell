@@ -10136,8 +10136,15 @@ SettingsEditorAddSharedRows(category, &y, tableKey := "") {
         value := SettingsRowDefault(row, "standalone")
         switch row["type"] {
             case "checkbox":
-                SettingsEditorAddCheckbox(category, row["section"], row["key"],
-                    label, &y, value)
+                ctrl := SettingsEditorAddCheckbox(category, row["section"],
+                    row["key"], label, &y, value)
+                ; A switch that gates other rows must announce a change, or the
+                ; fields it gates keep their old enabled state until the window
+                ; is rebuilt -- greyed out with the switch on, editable with it
+                ; off. Five of these were lost once already when a page swap
+                ; took the .OnEvent line attached to the row with it.
+                if (row.Has("dependency") && row["dependency"])
+                    ctrl.OnEvent("Click", SettingsEditorRefreshDependencies)
             case "choice":
                 ctrl := SettingsEditorAddChoice(category, row["section"],
                     row["key"], label, SettingsRowChoices(row), &y, value)
@@ -14339,23 +14346,7 @@ ShowSettingsEditor(*) {
     SettingsEditorAddHeading(category, "Startup & Splash"
         , "SteamShell stays at normal integrity. The optional helper provides controller input and window geometry for administrator windows.")
     y := 150
-    SettingsEditorAddCheckbox(
-        category, "Features", "EnableElevatedInputHelper",
-        "Enable elevated helper for administrator windows", &y, "true")
-    SettingsEditorAddPathField(category, "Paths", "SteamPath", "Steam executable", &y
-        , "Select Steam.exe", "Programs (*.exe)", "C:\Program Files (x86)\Steam\Steam.exe")
-    SettingsEditorAddCheckbox(category, "Features", "EnableSplashScreen", "Show the SteamShell startup splash", &y, "true")
-    SettingsEditorAddChoice(category, "Splash", "Mode", "Splash mode", ["Black", "Video"], &y, "Black")
-    SettingsEditorAddPathField(category, "Splash", "VideoPath", "Startup video", &y
-        , "Select a startup video", "Video Files (*.mp4; *.mkv; *.webm; *.wmv; *.avi)")
-    SettingsEditorAddPathField(category, "Splash", "MpvPath", "MPV executable", &y
-        , "Select mpv.exe", "Programs (*.exe)")
-    SettingsEditorAddCheckbox(category, "Splash", "Mute", "Mute startup video audio", &y, "false")
-    SettingsEditorAddCheckbox(category, "Splash", "PlayFullDuration", "Play the entire startup video", &y, "true")
-    SettingsEditorAddCheckbox(category, "Splash", "ForceSDR", "Force MPV to SDR output", &y, "true")
-    SettingsEditorAddTextField(category, "Timing", "SplashScreenDuration", "Black/timed splash duration (ms)", &y, "10000", "integer", 0, 60000)
-    SettingsEditorAddTextField(category, "Splash", "SafetyMaxMs", "Video safety timeout (ms)", &y, "15000", "integer", 1000, 600000)
-    SettingsEditorAddTextField(category, "Splash", "FadeOutMs", "Splash fade duration (ms)", &y, "300", "integer", 0, 5000)
+    SettingsEditorAddSharedRows(category, &y)
 
     ; Startup programs
     category := "Startup Programs"
@@ -14416,22 +14407,19 @@ ShowSettingsEditor(*) {
     SettingsEditorAddHeading(category, "Focus & Windows"
         , "One coordinated engine inventories windows, applies bounded geometry corrections, and selects one focus winner.")
     y := 150
-    SettingsEditorAddCheckbox(category, "Features", "EnableSteamRefocusMode", "Refocus Steam Big Picture when no application remains", &y, "true")
-    SettingsEditorAddTextField(category, "Timing", "SteamRefocusDelay", "Steam refocus delay (ms)", &y, "1000", "integer", 0, 60000)
-    gameAssistCtrl := SettingsEditorAddCheckbox(category, "Features", "EnableGameForegroundAssist", "Bring the active fullscreen-style game forward", &y, "true")
-    gameAssistCtrl.OnEvent("Click", SettingsEditorRefreshDependencies)
-    SettingsEditorAddCheckbox(category, "GameForegroundAssist", "GameRequireSteamForeground", "Run game assistance only while Steam is foreground", &y, "true")
+    SettingsEditorAddSharedRows(category, &y)
+    ; Hand-placed, and the only settings row that is. The companion compiles
+    ; SteamShell-Shared.ahk and forbids this key by name -- it is a shell
+    ; responsibility, and a name in a string still counts. So the row stays here
+    ; rather than the boundary being widened to admit it.
+    ;
+    ; It draws after the shared rows, which is where it sat before: last in the
+    ; flowing block, above the exclusion list.
     SettingsEditorAddMappedChoice(
         category, "GameForegroundAssist", "GameMinScoreToActivate",
         "Foreground sensitivity",
         ["Responsive (55)", "Balanced (60)", "Conservative (70)"],
         ["55", "60", "70"], &y, "55")
-    SettingsEditorAddCheckbox(category, "Features", "EnableAlwaysFocus", "Enable the AlwaysFocus executable list", &y, "true")
-    windowManagementCtrl := SettingsEditorAddCheckbox(category, "Features", "EnableWindowManagement", "Center windows and maximize large windows", &y, "true")
-    windowManagementCtrl.OnEvent("Click", SettingsEditorRefreshDependencies)
-    SettingsEditorAddTextField(
-        category, "WindowManagement", "MinWidthPercent",
-        "Maximize width threshold (%)", &y, "0.30", "percent", 5, 100)
     exclusionY := y + 8
     SettingsEditorAddExeListField(
         category, "WindowManagement", "ExcludeExeList",
@@ -14452,25 +14440,7 @@ ShowSettingsEditor(*) {
     SettingsEditorAddHeading(category, "Launcher Cleanup"
         , "Optional cleanup after returning to Steam. EXE lists are saved automatically in the required pipe-separated format.")
     y := 150
-    SettingsEditorAddCheckbox(category, "LauncherCleanup", "Enable", "Enable launcher cleanup", &y, "true")
-    requireNoGameCtrl := SettingsEditorAddCheckbox(
-        category, "LauncherCleanup", "RequireNoGame",
-        "Require SteamShell to detect that no game is running", &y, "true")
-    requireNoGameCtrl.OnEvent("Click", SettingsEditorRefreshDependencies)
-    SettingsEditorAddCheckbox(category, "LauncherCleanup", "HardKill", "Force-close remaining launcher processes after the grace period", &y, "true")
-    SettingsEditorAddTextField(category, "LauncherCleanup", "SteamForegroundSec", "Steam foreground time before cleanup (sec)", &y, "30", "integer", 1, 600)
-    SettingsEditorAddTextField(category, "LauncherCleanup", "CooldownSec", "Cleanup cooldown (sec)", &y, "300", "integer", 0, 86400)
-    SettingsEditorAddTextField(category, "LauncherCleanup", "GracefulCloseMs", "Graceful-close wait (ms)", &y, "4000", "integer", 0, 60000)
-    useCpuAudioCtrl := SettingsEditorAddCheckbox(
-        category, "LauncherCleanup", "UseCpuAudio",
-        "Use CPU and audio activity for the no-game safety check", &y, "true")
-    useCpuAudioCtrl.OnEvent("Click", SettingsEditorRefreshDependencies)
-    SettingsEditorAddTextField(category, "LauncherCleanup", "CpuThreshold", "CPU activity threshold", &y, "12", "integer", 0, 500)
-    downloadGuardCtrl := SettingsEditorAddCheckbox(
-        category, "LauncherCleanup", "DownloadGuard",
-        "Skip cleanup during possible downloads or updates", &y, "true")
-    downloadGuardCtrl.OnEvent("Click", SettingsEditorRefreshDependencies)
-    SettingsEditorAddChoice(category, "LauncherCleanup", "DownloadGuardMode", "Download guard sensitivity", ["Off", "Balanced", "Strict"], &y, "Balanced")
+    SettingsEditorAddSharedRows(category, &y)
     listY := y + 8
     SettingsEditorAddExeListField(
         category, "LauncherCleanup", "LauncherExeList", "Launcher EXEs to close", 255, listY)

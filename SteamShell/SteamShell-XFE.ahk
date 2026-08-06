@@ -5627,25 +5627,7 @@ SettingsAddButtonRow(settings, category, [
         "These shortcuts must match the bindings configured inside Steam itself. "
         . "The menu shortcuts only reach Steam while Steam owns the foreground.",
         &y, 40)
-    SettingsAddShortcutRow(settings, category, "Steam.MenuShortcut",
-        "Steam Menu shortcut", &y)
-    SettingsAddShortcutRow(settings, category, "Steam.QuickAccessShortcut",
-        "Steam Quick Access shortcut", &y)
-    SettingsAddShortcutRow(settings, category, "Steam.OverlayShortcut",
-        "In-game Steam overlay shortcut", &y)
-    SettingsAddSectionRow(settings, category, "View button", &y)
-    SettingsAddCheckboxRow(settings, category, "Steam.EnableViewButtonActions",
-        "Enable View button Steam actions", &y)
-    ; Tap and hold are separate switches because they misfire differently: the
-    ; hold is the one a game's own use of View can trigger by accident.
-    SettingsAddCheckboxRow(settings, category, "Steam.EnableViewTapAction",
-        "Tap — Steam menu when Steam is in front, nothing in a game", &y)
-    SettingsAddCheckboxRow(settings, category, "Steam.EnableViewHoldAction",
-        "Hold — Steam Quick Access, or the overlay in a game", &y)
-    SettingsAddEditRow(settings, category, "Steam.ViewHoldMs",
-        "Hold, Steam in front (ms)", &y, true)
-    SettingsAddEditRow(settings, category, "Steam.ViewHoldInGameMs",
-        "Hold, in a game (ms)", &y, true)
+    SettingsAddSharedRows(settings, category, &y)
     SettingsAddNoteRow(settings, category,
         "Longer in a game: View is often the scoreboard button and gets held.",
         &y)
@@ -5682,27 +5664,7 @@ SettingsAddButtonRow(settings, category, [
         "Automatic help from the shared default profile. None of these ever resize, "
         . "centre or maximise anything — Xbox FSE keeps control of presentation.",
         &y, 40)
-    SettingsAddCheckboxRow(settings, category, "Assist.EnableGameFocusLite",
-        "Game Focus Lite — return a game to the foreground if something steals it",
-        &y)
-    SettingsAddCheckboxRow(settings, category, "Assist.EnableSteamAssistLite",
-        "Steam Assist Lite — return to Steam when no game is running", &y)
-    SettingsAddCheckboxRow(settings, category,
-        "Assist.EnableLauncherCleanupLite",
-        "Launcher Cleanup Lite — close game launchers once nothing is playing", &y)
-    SettingsAddCheckboxRow(settings, category, "Assist.SuspendOnShellOverlay",
-        "Pause while the Xbox FSE switcher or another shell overlay is on screen",
-        &y)
-    SettingsAddEditRow(settings, category, "Assist.TickIntervalMs",
-        "Check interval (ms)", &y, true)
-    SettingsAddEditRow(settings, category, "Assist.CpuThresholdPercent",
-        "Game CPU threshold (%, 0 = window shape only)", &y, true)
-    SettingsAddEditRow(settings, category, "Assist.ForegroundStableSec",
-        "Settle time before cleanup (s)", &y, true)
-    SettingsAddEditRow(settings, category, "LauncherCleanup.CooldownSec",
-        "Minimum time between cleanups (s)", &y, true)
-    SettingsAddCheckboxRow(settings, category, "LauncherCleanup.HardKill",
-        "Force close launchers that ignore a polite close request", &y)
+    SettingsAddSharedRows(settings, category, &y)
     SettingsAddNoteRow(settings, category,
         "Process lists are edited in the INI under [Assist]. Assistance always "
         . "pauses while any SteamShell XFE window is in front. Use Quick Menu → "
@@ -6439,67 +6401,20 @@ SettingsCategoryCount() {
     return SettingsCategoryTable().Length
 }
 
-; The fields this tree builds on its own pages, described the way the shared
-; page table describes the rest.
+; The one field this tree builds outside the shared page table.
 ;
-; SettingsPopulate used to state every field twice over: once as a row and once
-; as a hand-written read, and the two agreed only because somebody kept them in
-; step. Forty of the fifty-eight already carry their section, key, type and
-; default in SettingsCategoryRows; these eighteen are the rest, and with them
-; one loop can fill the window.
+; It was eighteen. The other seventeen moved into SettingsCategoryRows with
+; their pages, so they are described where every other row is described. This
+; one is a literal row on the Controller page rather than a page of its own,
+; and it stays until that row moves too.
 ;
 ; movedFrom names the section a setting used to live in, so the read can still
 ; find a value a migration has not moved yet -- a read-only portable INI never
 ; gets migrated, and the setting has to keep working where it lies.
-;
-; Not in SteamShell-Shared.ahk deliberately: these are the companion's own
-; pages, and the shared table is for categories both products build.
 SettingsCompanionFieldSpecs() {
     static specs := [
-        Map("section", "Assist", "key", "CpuThresholdPercent",
-            "type", "edit", "default", 12,
-            "min", 0, "max", 100),
-        Map("section", "Assist", "key", "EnableGameFocusLite",
-            "type", "checkbox", "default", true),
-        Map("section", "Assist", "key", "EnableLauncherCleanupLite",
-            "type", "checkbox", "default", true),
-        Map("section", "Assist", "key", "EnableSteamAssistLite",
-            "type", "checkbox", "default", true),
-        Map("section", "Assist", "key", "ForegroundStableSec",
-            "type", "edit", "default", 30,
-            "min", 5, "max", 600),
-        Map("section", "Assist", "key", "SuspendOnShellOverlay",
-            "type", "checkbox", "default", true),
-        Map("section", "Assist", "key", "TickIntervalMs",
-            "type", "edit", "default", 2000,
-            "min", 500, "max", 30000),
         Map("section", "Controller", "key", "AutoMouseExeList",
-            "type", "edit", "default", "explorer.exe"),
-        Map("section", "LauncherCleanup", "key", "CooldownSec",
-            "type", "edit", "default", 300,
-            "min", 30, "max", 7200,
-            "movedFrom", "Assist"),
-        Map("section", "LauncherCleanup", "key", "HardKill",
-            "type", "checkbox", "default", true,
-            "movedFrom", "Assist"),
-        Map("section", "Steam", "key", "EnableViewButtonActions",
-            "type", "checkbox", "default", true),
-        Map("section", "Steam", "key", "EnableViewHoldAction",
-            "type", "checkbox", "default", true),
-        Map("section", "Steam", "key", "EnableViewTapAction",
-            "type", "checkbox", "default", true),
-        Map("section", "Steam", "key", "MenuShortcut",
-            "type", "edit", "default", "^1"),
-        Map("section", "Steam", "key", "OverlayShortcut",
-            "type", "edit", "default", "+{Tab}"),
-        Map("section", "Steam", "key", "QuickAccessShortcut",
-            "type", "edit", "default", "^2"),
-        Map("section", "Steam", "key", "ViewHoldInGameMs",
-            "type", "edit", "default", 1000,
-            "min", 200, "max", 5000),
-        Map("section", "Steam", "key", "ViewHoldMs",
-            "type", "edit", "default", 500,
-            "min", 200, "max", 5000)
+            "type", "edit", "default", "explorer.exe")
     ]
     return specs
 }

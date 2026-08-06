@@ -244,8 +244,8 @@ Assert-True ($windowManagementEditorFields.Count -eq 1) (
     "Full Settings must expose exactly one Window Management toggle.")
 Assert-True (
     $source -match
-        '(?s)"WindowManagement",\s*"MinWidthPercent",\s*' +
-        '"Maximize width threshold \(%\)".*?"percent",\s*5,\s*100') (
+        '(?s)"key", "MinWidthPercent",.*?"Maximize width threshold \(%\)".*?' +
+        '"fieldType", "percent", "min", 5, "max", 100') (
     "The maximize-width percentage control is not configured correctly.")
 Assert-True (
     $source -match
@@ -1962,8 +1962,8 @@ Assert-True (
         'if\s*!EnableElevatedInputHelper(?:(?!\n\})[\s\S])*?return false(?:(?!\n\})[\s\S])*?' +
         'ExtractEmbeddedElevatedHelper(?:(?!\n\})[\s\S])*?\*RunAs' -and
     $source -match
-        '(?s)SettingsEditorAddCheckbox\(\s*category,\s*"Features",\s*' +
-        '"EnableElevatedInputHelper".*?"true"') (
+        '(?s)"section", "Features", "key", "EnableElevatedInputHelper".*?' +
+        '"default", "true"') (
     "The default-on elevated helper setting is missing or disconnected.")
 Assert-True (
     $source -match
