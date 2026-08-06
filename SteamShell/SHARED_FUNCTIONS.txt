@@ -248,7 +248,6 @@ QuickMenuRowsClick
 QuickMenuSelectFirst
 QuickMenuSelectLast
 QuickMenuSetRedraw
-QuickMenuSettingIsSteppable
 QuickMenuSettingValueText
 QuickMenuTaskPageSize
 QuickMenuTaskSlice

@@ -4011,14 +4011,6 @@ QuickMenuActivateShared(id) {
 ;
 ; QuickMenuValue itself stays per-product: it is the label map, and the two
 ; products genuinely word 19 of their 35 shared rows differently.
-; Which settings rows Left and Right actually step, so the value column can say
-; so. Every id here is shared, which is why one answer serves both products.
-QuickMenuSettingIsSteppable(id) {
-    static stepped := QuickMenuIdSet("qParkEdge|qOverlayMode|qLimiterMode"
-        . "|qAccentColor|qMouseSpeed|qMouseHideDelay|qFrameCap|qPersistentMouse")
-    return QuickMenuToggleTable().Has(id) || stepped.Has(id)
-}
-
 ; The value column for one row.
 ;
 ; The two trees build rows differently -- the shell stores id and label and
@@ -4030,10 +4022,10 @@ QuickMenuSettingIsSteppable(id) {
 ;
 ; So a row that states its value is believed, and a row that does not is asked.
 ;
-; The arrows are added here rather than baked into each value string. They mean
-; "Left and Right do something", and a row that means it should not have to
-; remember to say so -- which is how the companion ended up with arrows on its
-; HDR row and none on any settings row.
+; No arrows are added here. The shell wraps a value in them where IT decides to
+; -- HDR, the display modes, the live RTSS state -- and leaves a plain ON or OFF
+; bare. Adding them to every steppable row made a settings page read "< ON >"
+; throughout, which is not what the shell does and not what anyone asked for.
 QuickMenuRowValueText(row) {
     id := row["id"]
     ; By id as well as by field. The shell marks a back row with a "back" key on
@@ -4048,9 +4040,6 @@ QuickMenuRowValueText(row) {
         : QuickMenuValue(id)
     if (text = "")
         return ""
-    base := SubStr(id, 1, 7) = "toggle:" ? SubStr(id, 8) : id
-    if (QuickMenuSettingIsSteppable(base) && SubStr(text, 1, 1) != "‹")
-        return "‹ " text " ›"
     return text
 }
 

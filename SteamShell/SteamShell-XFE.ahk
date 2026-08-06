@@ -3901,16 +3901,29 @@ QuickMenuGetRows() {
             rows.Push(MenuRow("settingsRtss", "RTSS + Performance", "",
                 "page:SETTINGS_RTSS"))
             rows.Push(MenuRow("windowsSettings", "Windows Settings", "", "windowsSettings"))
-        case "SETTINGS_COMPANION", "SETTINGS_INPUT", "SETTINGS_RTSS":
+            ; The one row that opens the full editor, on the hub, in the shell's
+            ; words. It used to sit at the bottom of every sub-page, so three
+            ; pages each offered their own "All Settings..." and the hub -- where
+            ; the shell puts it -- offered none.
+            ;
+            ; settingsEditor, not settings: MAIN already owns "settings" as the
+            ; row that opens this page, and under id-keyed lookup a second row
+            ; sharing that id would answer for the first.
+            rows.Push(MenuRow("settingsEditor", "Open Full Settings Editor", "",
+                "settingsEditor"))
+        case "SETTINGS_COMPANION", "SETTINGS_INPUT":
             rows.Push(MenuRow("back", "Back To Settings", "", "page:SETTINGS"))
             for _, row in QuickMenuSettingsRows(QuickMenuPage)
                 rows.Push(row)
-            ; settingsEditor, not settings: the MAIN page already owns "settings"
-            ; as the row that opens this page, and two different rows sharing one
-            ; id only worked while each row carried its own value and action.
-            ; Under id-keyed lookup the second one would answer for the first.
-            ; Standalone has always called this row settingsEditor.
-            rows.Push(MenuRow("settingsEditor", "All Settings…", "", "settingsEditor"))
+        case "SETTINGS_RTSS":
+            rows.Push(MenuRow("back", "Back To Settings", "", "page:SETTINGS"))
+            for _, row in QuickMenuSettingsRows(QuickMenuPage)
+                rows.Push(row)
+            ; The shell keeps an editor row on THIS page and no other, because
+            ; RTSS is where paths and shortcuts are edited and neither fits a
+            ; controller. Its words, too.
+            rows.Push(MenuRow("settingsEditor", "Edit Paths + Shortcuts", "",
+                "settingsEditor"))
         case "TASKS":
             rows.Push(MenuRow("back", "Back", "", "back"))
             QuickMenuTaskWindows := GetSwitchableWindows()
@@ -6095,7 +6108,13 @@ SettingsAddSharedRows(guiObj, category, &y, tableKey := "") {
         if !SettingsRowAppliesTo(row, "xfe")
             continue
         if (row["type"] = "note") {
-            SettingsAddNoteRow(guiObj, category, row["text"], &y, 40)
+            ; Height from the words, not a guess. A fixed 40 fitted the note it
+            ; was written for and clipped the next one that was longer -- the
+            ; backend note lost its last line, which is the line naming Learn
+            ; Controller. The content area is about 95 characters wide at this
+            ; font, and a line is 20 high.
+            SettingsAddNoteRow(guiObj, category, row["text"], &y,
+                Max(22, Ceil(StrLen(row["text"]) / 95) * 20 + 4))
             continue
         }
         if (row["type"] = "section") {

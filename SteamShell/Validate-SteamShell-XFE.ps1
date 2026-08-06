@@ -816,12 +816,18 @@ Assert-True (
     "QuickMenuRowValueText must believe a row that does and ask only when it " +
     "does not, and a Back row must be recognised by id as well as by field.")
 
-# Left and Right say so in the value column, once, for both products.
+# The value column says what the setting IS, and nothing else.
+#
+# A plain on/off row reads "ON", not "< ON >". The shell wraps a value in arrows
+# where it chooses to -- HDR, the display modes, the live RTSS state -- and those
+# rows say so themselves. Wrapping every steppable row made a whole settings page
+# read "< ON >" and did not match the shell, which is the product this one
+# follows.
 Assert-True (
-    $source -match '(?s)QuickMenuSettingIsSteppable\(id\)\s*\{(?:(?!\n\})[\s\S])*?QuickMenuToggleTable\(\)\.Has\(id\)' -and
-    $source -match '(?s)QuickMenuRowValueText\(row\)\s*\{(?:(?!\n\})[\s\S])*?QuickMenuSettingIsSteppable\(base\)') (
-    "Steppable rows must be wrapped in the arrows by the renderer rather than " +
-    "by each row remembering to include them.")
+    $source -notmatch 'QuickMenuSettingIsSteppable' -and
+    $source -notmatch '(?s)QuickMenuRowValueText\(row\)\s*\{(?:(?!\n\})[\s\S])*?"‹ " text') (
+    "Quick Menu values must not be wrapped in arrows by the renderer; a row that " +
+    "wants them says so itself, as the shell does.")
 
 # The task switcher must PAGE, not truncate.
 #
