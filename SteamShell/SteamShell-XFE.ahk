@@ -5606,7 +5606,8 @@ ShowSettings(*) {
     SettingsAddCheckboxRow(settings, category,
         "Controller.EnableControllerMouseMode",
         "Enable controller mouse mode while holding View/Back", &y)
-    ; XFE only. Standalone reads XInput and has no backend to choose.
+    ; GameInput is the companion-only entry: the shell offers Auto, RawInput and
+    ; XInput from the same key, in the same section, under the same words.
     SettingsAddChoiceRow(settings, category, "Controller.Backend",
         "Input backend", ["Auto", "XInput", "GameInput", "RawInput"], &y, 150)
     SettingsAddNoteRow(settings, category,

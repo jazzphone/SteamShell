@@ -2705,7 +2705,7 @@ ExcludeExeList=steam.exe|steamwebhelper.exe|SteamShell.exe
 ; HID path for diagnosis -- it deliberately does NOT fall back.
 Backend=auto                                                ; auto | rawinput | xinput
 RawInputProbe=false                                         ; Log raw HID reports; diagnostic only
-Diagnostics=false                                           ; Log backend/slot detail on change; diagnostic only
+DiagnosticLogging=false                                     ; Log backend/slot detail on change; diagnostic only
 RawInputStaleMs=5000                                        ; Treat RawInput as silent after this gap
 EnableControllerMouseMode=true                              ; Enable controller mouse/keyboard mapping (hold View/Back)
 EnablePersistentMouseMode=false                             ; Apply controller mouse/mappings without holding View/Back
@@ -3696,7 +3696,7 @@ LauncherCleanupAudioPeakThreshold := ReadNumber("LauncherCleanup", "AudioPeakThr
         ControllerBackend := "auto"
     }
     EnableRawInputProbe := ReadBool("Controller", "RawInputProbe", false)
-    EnableControllerDiagnostics := ReadBool("Controller", "Diagnostics", false)
+    EnableControllerDiagnostics := ReadBool("Controller", "DiagnosticLogging", false)
     RawInputStaleMs := ReadInt("Controller", "RawInputStaleMs", 5000, 500, 60000)
     ControllerIndex := ReadInt("Controller", "ControllerIndex", 0, 0, 3)
     ControllerPollIntervalMs := ReadInt("Controller", "ControllerPollIntervalMs", 16, 5, 200)
@@ -10123,6 +10123,20 @@ SettingsEditorMarkDirty(*) {
         SettingsEditorStatusCtrl.Text := "Unsaved changes"
 }
 
+; Explanatory text under a control, not bound to any setting.
+;
+; The companion has had SettingsAddNoteRow since it needed one; this is the same
+; row for this tree's Settings surface, which is a separate implementation.
+; Registered with the category like every other control so it shows and hides
+; with the page rather than surviving on top of the next one.
+SettingsEditorAddNote(category, text, &y, height := 34) {
+    global SettingsGui
+    ctrl := SettingsGui.AddText("x255 y" y " w690 h" height " +Wrap", text)
+    SettingsEditorRegisterControl(category, ctrl)
+    y += height + 6
+    return ctrl
+}
+
 SettingsEditorAddCheckbox(category, section, key, label, &y, defaultValue := "false") {
     global SettingsGui, SettingsEditorFields
     ctrl := SettingsGui.AddCheckbox("x255 y" y " w690 h25", label)
@@ -14354,6 +14368,12 @@ ShowSettingsEditor(*) {
         , "Shell mode uses an allowlist; Windows desktop mode can cover every app except your exclusions.")
     y := 150
     SettingsEditorAddCheckbox(category, "Controller", "EnableControllerMouseMode", "Enable controller mouse mode while holding View/Back", &y, "true")
+    SettingsEditorAddChoice(category, "Controller", "Backend", "Input backend",
+        ["Auto", "RawInput", "XInput"], &y, "Auto")
+    SettingsEditorAddNote(category,
+        "Auto is recommended. XInput covers Xbox-compatible pads; RawInput reads "
+        . "any HID gamepad and is what makes a controller XInput cannot see "
+        . "usable at all. Learn Controller teaches RawInput an unknown pad.", &y)
     SettingsEditorAddChoice(category, "Controller", "ControllerIndex", "Controller index", ["0", "1", "2", "3"], &y, "0")
     SettingsEditorAddTextField(category, "Controller", "ControllerMouseSpeed", "Controller mouse speed", &y, "100", "integer", 1, 200)
     SettingsEditorAddTextField(category, "Controller", "ControllerDeadzone", "Stick deadzone", &y, "3000", "integer", 0, 32000)
@@ -14371,6 +14391,7 @@ ShowSettingsEditor(*) {
         "Automatic mouse throughout Windows desktop mode", &y, "true")
     SettingsEditorAddActionButton(category, "Open Controller Mapping…", ShowControllerMappingWindow, 255, y + 5, 260)
     SettingsEditorAddActionButton(category, "Test / Calibrate Controller…", ShowControllerTest, 525, y + 5, 260)
+    SettingsEditorAddActionButton(category, "Learn Controller…", ShowControllerLearner, 795, y + 5, 260)
     autoMouseY := y + 48
     SettingsEditorAddExeListField(
         category, "Controller", "AutoMouseExeList",
@@ -14495,6 +14516,15 @@ ShowSettingsEditor(*) {
     SettingsEditorAddCheckbox(category, "GameForegroundAssist", "GameAssistLogEvenWhenSkipped", "Log candidates even when game assistance is skipped", &y, "true")
     SettingsEditorAddTextField(category, "Timing", "SteamStartupGraceMs", "Steam startup warning delay (ms)", &y, "120000", "integer", 10000, 600000)
     SettingsEditorAddTextField(category, "Timing", "SteamExitConfirmMs", "Steam exit confirmation period (ms)", &y, "4000", "integer", 1000, 60000)
+    ; Same two switches the companion offers, under the same keys and the same
+    ; words. Both are how somebody whose controller is not recognised finds out
+    ; whether reports are arriving at all.
+    SettingsEditorAddCheckbox(category, "Controller", "DiagnosticLogging",
+        "Log all XInput slots on every change (diagnostic)", &y, "false")
+    SettingsEditorAddCheckbox(category, "Controller", "RawInputProbe",
+        "Log raw background HID gamepad reports (RawInput probe)", &y, "false")
+    SettingsEditorAddTextField(category, "Controller", "RawInputStaleMs",
+        "Treat RawInput as silent after (ms)", &y, "5000", "integer", 500, 60000)
     actionY := y + 12
     actionLeft := 255
     actionRight := 610
