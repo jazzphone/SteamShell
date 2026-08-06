@@ -292,6 +292,13 @@ SanitizeDiagnosticText
 SaveRtssFrameLimitToProfile
 SendChordSafe
 SendRtssShortcut
+SettingsAddCheckbox
+SettingsAddChoice
+SettingsAddNote
+SettingsAddPathField
+SettingsAddRowsForCategory
+SettingsAddShortcutField
+SettingsAddTextField
 SettingsCategoryRows
 SettingsEditorRepaint
 SettingsEditorSetRedraw

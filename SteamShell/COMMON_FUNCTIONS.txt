@@ -34,6 +34,7 @@ FmtPid
 FmtRect
 FmtScore
 ForceForegroundWindow
+FormatSettingsFloat
 GameCandidateEvidenceText
 GameCandidateLabel
 GameWindowCpuVerdict
@@ -99,6 +100,7 @@ SortCandidatesByScoreAreaDesc
 SplitStartupCommandLine
 SteamShellPathIsAdminOnlyWritable
 StrRepeat
+ToFloat
 ToInt
 TopmostMsgBox
 TrimGameCandidates

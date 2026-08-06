@@ -2337,3 +2337,18 @@ JoinWith(listObj, delimiter := ", ") {
 TopmostMsgBox(text, title := "", options := "") {
     return MsgBox(text, title, Trim(options " 4096"))
 }
+
+ToFloat(v, default := 0.0) {
+    s := Trim(v)
+    return RegExMatch(s, "^-?(?:\d+(?:\.\d*)?|\.\d+)$") ? (s + 0.0) : default
+}
+
+
+FormatSettingsFloat(value, maxDecimals := 6) {
+    ; AutoHotkey can stringify a binary floating-point value as
+    ; 0.20000000000000001. Store a bounded, human-readable decimal instead.
+    text := Format("{:." maxDecimals "f}", value + 0.0)
+    text := RegExReplace(text, "0+$")
+    text := RegExReplace(text, "\.$")
+    return text = "-0" ? "0" : text
+}

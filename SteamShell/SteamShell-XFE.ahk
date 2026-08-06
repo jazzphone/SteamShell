@@ -5583,19 +5583,15 @@ ShowSettings(*) {
     ; General
     category := "General"
     y := SettingsFirstRowY()
-    SettingsAddSharedRows(settings, category, &y)
-SettingsAddButtonRow(settings, category, [
+    SettingsAddRowsForCategory(settings, category, "xfe", &y)
+    SettingsAddButtonRow(settings, category, [
         ["Customize Quick Menu...", ShowQuickMenuLayoutManager]], &y)
-    ; XFE only from here: the companion has to prove it is still responsive
-    ; while Xbox FSE is in front, which the shell never needs to do.
-    SettingsAddEditRow(settings, category, "Companion.HeartbeatSeconds",
-        "Heartbeat log interval (seconds)", &y, true)
     ; Startup is no longer something to configure here. Setup Assistant inside
     ; SteamShell.exe registers a per-user logon task when it installs XFE, so the
     ; old advice to add SteamShell-XFE.exe as an AnyFSE startup application now
     ; starts the companion twice. What is left is the part Setup cannot do,
     ; because it belongs to AnyFSE's own configuration.
-    SettingsAddNoteRow(settings, category,
+    SettingsAddNote(settings, category,
         "Integration: configure AnyFSE to launch Steam Big Picture as the Home "
         . "app, and leave “Exit FSE when Home app exits” off. Setup Assistant "
         . "already starts this companion at sign-in — do not also add it to "
@@ -5606,10 +5602,10 @@ SettingsAddButtonRow(settings, category, [
     y := SettingsFirstRowY()
     ; The rows themselves are defined once, in SteamShell-Shared.ahk, so this
     ; page and the shell's cannot describe the same settings differently.
-    SettingsAddSharedRows(settings, category, &y)
-    SettingsAddEditRow(settings, category, "Controller.AutoMouseExeList",
-        "Automatic mouse applications (pipe-separated)", &y, false, 300)
-    SettingsAddNoteRow(settings, category,
+    SettingsAddRowsForCategory(settings, category, "xfe", &y)
+    SettingsAddTextField(settings, category, "Controller", "AutoMouseExeList",
+        "Automatic mouse applications (pipe-separated)", &y, "explorer.exe")
+    SettingsAddNote(settings, category,
         "The controller acts as a mouse in these applications without holding "
         . "View/Back. Leave Xbox FSE off the list: it is controller-driven and "
         . "a pointer inside it gets in the way.", &y, 40)
@@ -5623,24 +5619,24 @@ SettingsAddButtonRow(settings, category, [
     ; button behaviour, which standalone does not have.
     category := "Steam"
     y := SettingsFirstRowY()
-    SettingsAddNoteRow(settings, category,
+    SettingsAddNote(settings, category,
         "These shortcuts must match the bindings configured inside Steam itself. "
         . "The menu shortcuts only reach Steam while Steam owns the foreground.",
         &y, 40)
-    SettingsAddSharedRows(settings, category, &y)
-    SettingsAddNoteRow(settings, category,
+    SettingsAddRowsForCategory(settings, category, "xfe", &y)
+    SettingsAddNote(settings, category,
         "Longer in a game: View is often the scoreboard button and gets held.",
         &y)
 
     ; RTSS & Performance
     category := "RTSS & Performance"
     y := SettingsFirstRowY()
-    SettingsAddSharedRows(settings, category, &y)
+    SettingsAddRowsForCategory(settings, category, "xfe", &y)
 
     ; Startup Programs
     category := "Startup Programs"
     y := SettingsFirstRowY()
-    SettingsAddSharedRows(settings, category, &y)
+    SettingsAddRowsForCategory(settings, category, "xfe", &y)
     StartupProgramsList := settings.AddListBox(
         "x300 y" y " w570 h180")
     SettingsTrackControl(category, StartupProgramsList)
@@ -5648,24 +5644,21 @@ SettingsAddButtonRow(settings, category, [
     SettingsAddButtonRow(settings, category, [
         ["Add Program...", SettingsAddStartupProgram],
         ["Remove Selected", SettingsRemoveStartupProgram]], &y)
-    SettingsAddNoteRow(settings, category,
+    SettingsAddNote(settings, category,
         "Hidden suits background helpers that should never draw over Xbox FSE.",
         &y)
-    SettingsAddCheckboxRow(settings, category,
-        "StartupPrograms.LaunchDeElevated",
-        "Start them as the normal user when the companion is elevated", &y)
 
     ; Assist — no standalone counterpart. Standalone has a coordinated Window
     ; Engine and a full Launcher Cleanup; these are the deliberately smaller
     ; versions that never touch presentation.
     category := "Assist"
     y := SettingsFirstRowY()
-    SettingsAddNoteRow(settings, category,
+    SettingsAddNote(settings, category,
         "Automatic help from the shared default profile. None of these ever resize, "
         . "centre or maximise anything — Xbox FSE keeps control of presentation.",
         &y, 40)
-    SettingsAddSharedRows(settings, category, &y)
-    SettingsAddNoteRow(settings, category,
+    SettingsAddRowsForCategory(settings, category, "xfe", &y)
+    SettingsAddNote(settings, category,
         "Process lists are edited in the INI under [Assist]. Assistance always "
         . "pauses while any SteamShell XFE window is in front. Use Quick Menu → "
         . "All Settings → Advanced → Probe Screen to identify an overlay that is "
@@ -5674,7 +5667,7 @@ SettingsAddButtonRow(settings, category, [
     ; Advanced
     category := "Advanced"
     y := SettingsFirstRowY()
-    SettingsAddNoteRow(settings, category,
+    SettingsAddNote(settings, category,
         "This companion contains no shell registration, Explorer control, taskbar "
         . "hiding, or window sizing. Xbox FSE keeps control of presentation.",
         &y, 40)
@@ -5694,8 +5687,8 @@ SettingsAddButtonRow(settings, category, [
     LogonTaskStatusCtrl := settings.AddText("x300 y" y " w570 h20 +Wrap", "")
     SettingsTrackControl(category, LogonTaskStatusCtrl)
     y += 28
-    SettingsAddSharedRows(settings, category, &y, "Advanced & Logging")
-SettingsAddNoteRow(settings, category,
+    SettingsAddRowsForCategory(settings, category, "xfe", &y, "Advanced & Logging")
+    SettingsAddNote(settings, category,
         "The heartbeat log proves whether the companion remains responsive while "
         . "Xbox FSE is active. Diagnostic logging compares every controller slot "
         . "against GameInput and records the foreground process, which reveals a "
@@ -6055,86 +6048,46 @@ SettingsRegisterField(category, key, control, eventName := "Change") {
 ; moves -- "Cursor.EnableAutoHide" for a setting living at [Features]
 ; EnableAutoHideCursor -- so the row, the populate and the save agreed only
 ; because three hand-written names happened to match.
-SettingsAddSharedRows(guiObj, category, &y, tableKey := "") {
-    for _, row in SettingsCategoryRows(tableKey != "" ? tableKey : category) {
-        if !SettingsRowAppliesTo(row, "xfe")
-            continue
-        if (row["type"] = "note") {
-            ; Height from the words, not a guess. A fixed 40 fitted the note it
-            ; was written for and clipped the next one that was longer -- the
-            ; backend note lost its last line, which is the line naming Learn
-            ; Controller. The content area is about 95 characters wide at this
-            ; font, and a line is 20 high.
-            SettingsAddNoteRow(guiObj, category, row["text"], &y,
-                Max(22, Ceil(StrLen(row["text"]) / 95) * 20 + 4))
-            continue
-        }
-        if (row["type"] = "section") {
-            SettingsAddSectionRow(guiObj, category, row["label"], &y)
-            continue
-        }
-        field := row["section"] "." row["key"]
-        label := SettingsRowLabel(row, "xfe")
-        switch row["type"] {
-            case "checkbox":
-                ; Two lines where the words need two. The shell wraps by width;
-                ; this tree is told the height, so a long label silently clipped
-                ; until it was given one.
-                SettingsAddCheckboxRow(guiObj, category, field, label, &y,
-                    StrLen(label) > 90 ? 44 : 26)
-            case "choice":
-                SettingsAddChoiceRow(guiObj, category, field, label,
-                    row.Has("xfeChoices") ? row["xfeChoices"] : SettingsRowChoices(row),
-                    &y, 150)
-            case "edit":
-                SettingsAddEditRow(guiObj, category, field, label, &y,
-                    row.Has("fieldType") && row["fieldType"] = "integer")
-            case "shortcut":
-                SettingsAddShortcutRow(guiObj, category, field, label, &y)
-            case "path":
-                SettingsAddPathRow(guiObj, category, field, label,
-                    SettingsBrowseRtss, &y)
-        }
-    }
+; Per-tree seams required by SteamShell-Shared.ahk's row builders.
+;
+; Registration records the control against the key its spec names, and tracks
+; every control so it shows and hides with its category.
+SettingsRegisterBuiltField(category, field) {
+    global SettingsFields
+    SettingsFields[field["section"] "." field["key"]] := field["ctrl"]
+    for _, ctrl in field["controls"]
+        SettingsTrackControl(category, ctrl)
 }
 
-SettingsAddChoiceRow(guiObj, category, key, labelText, choices, &y, width := 200) {
-    layout := SettingsLayout()
-    label := guiObj.AddText("x" layout["labelX"] " y" (y + 3)
-        . " w" layout["labelWidth"] " h22 +0x200", labelText)
-    SettingsTrackControl(category, label)
-    list := guiObj.AddDropDownList("x" layout["controlX"] " y" y
-        . " w" width " h300", choices)
-    SettingsRegisterField(category, key, list, "Change")
-    y += 34
-    return list
+SettingsProductMarkDirty(*) {
+    SettingsMarkDirty()
 }
 
-SettingsAddCheckboxRow(guiObj, category, key, labelText, &y, height := 26) {
-    layout := SettingsLayout()
-    options := "x" layout["contentX"] " y" y " w" layout["contentWidth"]
-        . " h" height
-    if (height > 26)
-        options .= " +Wrap"
-    control := guiObj.AddCheckbox(options, labelText)
-    SettingsRegisterField(category, key, control, "Click")
-    y += height + 6
-    return control
+; Only one path row exists here and it is RTSS's, which is why the browse
+; callback was a parameter rather than derived: there was nothing to derive it
+; from. The shared builder passes the field, so it can be.
+SettingsProductBrowsePath(field, prompt, filter, *) {
+    SettingsBrowseRtss()
+}
+
+SettingsProductRecordShortcut(field, *) {
+    SettingsRecordShortcut(field["section"] "." field["key"])
+}
+
+; Per-tree seams for the shared adapter. This product has no dependency pass --
+; nothing here greys a row from another row -- and it does have section breaks,
+; which replaced the group boxes that could not flow.
+SettingsProductWireDependency(ctrl, eventName) {
+}
+
+SettingsProductAddSectionRow(guiObj, category, title, &y) {
+    SettingsAddSectionRow(guiObj, category, title, &y)
 }
 
 ; A caption, not a field. Used where a page needs a sentence of context and for
 ; the section breaks that replaced the two side-by-side group boxes on the RTSS
 ; page -- group boxes cannot flow, because their height has to be known before
 ; the rows inside them exist.
-SettingsAddNoteRow(guiObj, category, text, &y, height := 22) {
-    layout := SettingsLayout()
-    control := guiObj.AddText("x" layout["contentX"] " y" y
-        . " w" layout["contentWidth"] " h" height " +Wrap", text)
-    SettingsTrackControl(category, control)
-    y += height + 8
-    return control
-}
-
 SettingsAddSectionRow(guiObj, category, title, &y) {
     layout := SettingsLayout()
     ; One advance, not two. A lead-in written as a second `y +=` would be a
@@ -6166,50 +6119,8 @@ SetFieldText(key, value) {
         try SettingsFields[key].Text := value
 }
 
-SettingsAddEditRow(guiObj, category, key, labelText, &y, numeric := false, width := 150) {
-    layout := SettingsLayout()
-    label := guiObj.AddText("x" layout["labelX"] " y" (y + 3)
-        . " w" layout["labelWidth"] " h22 +0x200", labelText)
-    SettingsTrackControl(category, label)
-    options := "x" layout["controlX"] " y" y " w" width " h26"
-    if numeric
-        options .= " Number"
-    edit := guiObj.AddEdit(options)
-    SettingsRegisterField(category, key, edit, "Change")
-    y += 34
-    return edit
-}
-
-SettingsAddShortcutRow(guiObj, category, key, labelText, &y) {
-    layout := SettingsLayout()
-    label := guiObj.AddText("x" layout["labelX"] " y" (y + 3)
-        . " w" layout["labelWidth"] " h22 +0x200", labelText)
-    SettingsTrackControl(category, label)
-    edit := guiObj.AddEdit("x" layout["controlX"] " y" y " w200 h26")
-    SettingsRegisterField(category, key, edit, "Change")
-    button := guiObj.AddButton("x778 y" (y - 1) " w92 h28", "Record...")
-    button.OnEvent("Click", SettingsRecordShortcut.Bind(key))
-    SettingsTrackControl(category, button)
-    y += 34
-    return edit
-}
-
 ; A text field with a Browse button, for a path. Wider than a plain edit row
 ; because a path is unreadable in 150 pixels.
-SettingsAddPathRow(guiObj, category, key, labelText, browseCallback, &y) {
-    layout := SettingsLayout()
-    label := guiObj.AddText("x" layout["labelX"] " y" (y + 3) " w160 h22 +0x200",
-        labelText)
-    SettingsTrackControl(category, label)
-    edit := guiObj.AddEdit("x466 y" y " w300 h26")
-    SettingsRegisterField(category, key, edit, "Change")
-    button := guiObj.AddButton("x774 y" (y - 1) " w96 h28", "Browse...")
-    button.OnEvent("Click", browseCallback)
-    SettingsTrackControl(category, button)
-    y += 34
-    return edit
-}
-
 ; Up to three buttons on one flowing line. entries is an array of
 ; [label, callback] pairs; more than three wraps onto the next line.
 SettingsAddButtonRow(guiObj, category, entries, &y) {

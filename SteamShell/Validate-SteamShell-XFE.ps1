@@ -2115,8 +2115,8 @@ Assert-True (
     $source -match
         '(?s)"key", "MouseParkEdge"[\s\S]*?"key", "EnableAutoMouseMode"' -and
     $source -match
-        '(?s)SettingsAddSharedRows\(settings, category, &y\)\s*\r?\n\s*' +
-        'SettingsAddEditRow\(settings, category, "Controller\.AutoMouseExeList"') (
+        '(?s)SettingsAddRowsForCategory\(settings, category, "xfe", &y\)\s*\r?\n\s*' +
+        'SettingsAddTextField\(settings, category, "Controller", "AutoMouseExeList"') (
     "The automatic mouse controls are not in standalone's position on the Controller page.")
 
 # The RTSS page is one flowing list, like standalone's. Its two side-by-side
@@ -2133,8 +2133,10 @@ Assert-True (
         '(?s)"product", "xfe", "type", "section", "label", "Overlay"' +
         '[\s\S]*?"product", "xfe", "type", "section", "label", "Frame Limiter"' -and
     $source -match
-        '(?s)SettingsAddSharedRows\(guiObj, category, &y, tableKey := ""\)\s*\{[\s\S]*?' +
-        'row\["type"\] = "section"[\s\S]{0,120}?SettingsAddSectionRow\(') (
+        '(?s)SettingsAddRowsForCategory\([^)]*\)\s*\{[\s\S]*?' +
+        'case "section":[\s\S]{0,120}?SettingsProductAddSectionRow\(' -and
+    $source -match
+        '(?s)SettingsProductAddSectionRow\(guiObj, category, title, &y\)\s*\{[\s\S]{0,160}?SettingsAddSectionRow\(') (
     "The RTSS page lost the section breaks that replaced its group boxes.")
 
 # Choice lists derive their stored value from the selected INDEX, so reordering

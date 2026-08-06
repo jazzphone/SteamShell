@@ -3211,19 +3211,7 @@ _TryParseBool(x) {
     return ""  ; unknown token
 }
 
-ToFloat(v, default := 0.0) {
-    s := Trim(v)
-    return RegExMatch(s, "^-?(?:\d+(?:\.\d*)?|\.\d+)$") ? (s + 0.0) : default
-}
 
-FormatSettingsFloat(value, maxDecimals := 6) {
-    ; AutoHotkey can stringify a binary floating-point value as
-    ; 0.20000000000000001. Store a bounded, human-readable decimal instead.
-    text := Format("{:." maxDecimals "f}", value + 0.0)
-    text := RegExReplace(text, "0+$")
-    text := RegExReplace(text, "\.$")
-    return text = "-0" ? "0" : text
-}
 
 ParseExeListPipe(raw) {
     list := []
@@ -10170,109 +10158,40 @@ SettingsEditorPopulateFields() {
 }
 
 
-SettingsEditorAddSharedRows(category, &y, tableKey := "") {
-    for _, row in SettingsCategoryRows(tableKey != "" ? tableKey : category) {
-        if !SettingsRowAppliesTo(row, "standalone")
-            continue
-        label := SettingsRowLabel(row, "standalone")
-        value := SettingsRowDefault(row, "standalone")
-        switch row["type"] {
-            case "checkbox":
-                ctrl := SettingsEditorAddCheckbox(category, row["section"],
-                    row["key"], label, &y, value)
-                ; A switch that gates other rows must announce a change, or the
-                ; fields it gates keep their old enabled state until the window
-                ; is rebuilt -- greyed out with the switch on, editable with it
-                ; off. Five of these were lost once already when a page swap
-                ; took the .OnEvent line attached to the row with it.
-                if (row.Has("dependency") && row["dependency"])
-                    ctrl.OnEvent("Click", SettingsEditorRefreshDependencies)
-            case "choice":
-                ctrl := SettingsEditorAddChoice(category, row["section"],
-                    row["key"], label, SettingsRowChoices(row), &y, value)
-                ; Rows other rows are enabled by have to say so when they change,
-                ; or the fields they gate stay greyed out until the page is
-                ; rebuilt.
-                if (row.Has("dependency") && row["dependency"])
-                    ctrl.OnEvent("Change", SettingsEditorRefreshDependencies)
-            case "edit":
-                SettingsEditorAddTextField(category, row["section"], row["key"],
-                    label, &y, value,
-                    row.Has("fieldType") ? row["fieldType"] : "text",
-                    row.Has("min") ? row["min"] : "",
-                    row.Has("max") ? row["max"] : "")
-            case "shortcut":
-                SettingsEditorAddShortcutField(category, row["section"],
-                    row["key"], label, &y, value)
-            case "path":
-                SettingsEditorAddPathField(category, row["section"], row["key"],
-                    label, &y, row["prompt"], row["filter"], value)
-            case "note":
-                SettingsEditorAddNote(category, row["text"], &y)
-            ; "section" is a companion-only grouping row. The shell has no
-            ; builder for one, and inventing a layout for it blind is how the
-            ; audit starts reporting overlaps -- so the shell simply omits it and
-            ; the two pages differ by two headings until the renderers merge.
-        }
-    }
+; Per-tree seams required by SteamShell-Shared.ahk's row builders: what a Browse
+; or Record button does. Both reach product-specific machinery -- this tree's
+; file dialog and its own shortcut recorder, which DIVERGENT_FUNCTIONS.txt
+; records as genuinely different from the companion's.
+SettingsProductBrowsePath(field, prompt, filter, *) {
+    SettingsEditorBrowsePath(field, prompt, filter)
 }
 
-; Explanatory text under a control, not bound to any setting.
-;
-; The companion has had SettingsAddNoteRow since it needed one; this is the same
-; row for this tree's Settings surface, which is a separate implementation.
-; Registered with the category like every other control so it shows and hides
-; with the page rather than surviving on top of the next one.
-SettingsEditorAddNote(category, text, &y, height := 34) {
-    global SettingsGui
-    layout := SettingsLayout()
-    ctrl := SettingsGui.AddText("x" layout["contentX"] " y" y " w690 h" height " +Wrap", text)
-    SettingsEditorRegisterControl(category, ctrl)
-    y += height + 6
-    return ctrl
+SettingsProductRecordShortcut(field, *) {
+    SettingsEditorRecordShortcut(field)
 }
 
-SettingsEditorAddCheckbox(category, section, key, label, &y, defaultValue := "false") {
-    global SettingsGui, SettingsEditorFields
-    layout := SettingsLayout()
-    ctrl := SettingsGui.AddCheckbox("x" layout["contentX"] " y" y " w690 h25", label)
-    ctrl.OnEvent("Click", SettingsEditorMarkDirty)
-    SettingsEditorRegisterControl(category, ctrl)
-    field := Map(
-        "category", category, "section", section, "key", key,
-        "label", label, "type", "bool", "default", defaultValue, "ctrl", ctrl,
-        "controls", [ctrl])
+; Per-tree seam required by SteamShell-Shared.ahk: record a field the shared row
+; builders just created, and make its controls follow their category.
+SettingsRegisterBuiltField(category, field) {
+    global SettingsEditorFields
     SettingsEditorFields.Push(field)
-    y += 31
-    return ctrl
+    for _, ctrl in field["controls"]
+        SettingsEditorRegisterControl(category, ctrl)
 }
 
-SettingsEditorAddTextField(category, section, key, label, &y, defaultValue := ""
-    , fieldType := "text", minValue := "", maxValue := "", rows := 1) {
-    global SettingsGui, SettingsEditorFields
-    layout := SettingsLayout()
-    labelCtrl := SettingsGui.AddText("x" layout["contentX"] " y" (y + 4) " w315 h24", label)
-    options := "x" layout["controlX"] " y" y " w" layout["controlWidth"]
-    if (rows > 1)
-        options .= " r" rows " WantTab"
-    initialValue := ""
-    if (fieldType = "percent") {
-        storedDefault := ToFloat(defaultValue, 0.0)
-        initialValue := FormatSettingsFloat(
-            ToFloat(initialValue, storedDefault) * 100, 4)
-    }
-    ctrl := SettingsGui.AddEdit(options, initialValue)
-    ctrl.OnEvent("Change", SettingsEditorMarkDirty)
-    SettingsEditorRegisterControl(category, labelCtrl)
-    SettingsEditorRegisterControl(category, ctrl)
-    field := Map(
-        "category", category, "section", section, "key", key,
-        "label", label, "type", fieldType, "default", defaultValue, "ctrl", ctrl,
-        "min", minValue, "max", maxValue,
-        "controls", [labelCtrl, ctrl])
-    SettingsEditorFields.Push(field)
-    y += rows > 1 ? (30 + rows * 20) : 34
-    return field
+; Per-tree seam: what this product calls "the settings changed".
+SettingsProductMarkDirty(*) {
+    SettingsEditorMarkDirty()
+}
+
+; Per-tree seams for the shared adapter: this product greys dependent rows from
+; a switch, and has no in-page section heading.
+SettingsProductWireDependency(ctrl, eventName) {
+    ctrl.OnEvent(eventName, SettingsEditorRefreshDependencies)
+}
+
+SettingsProductAddSectionRow(guiObj, category, title, &y) {
+    ; The shell has no section-break row; its pages are separated by category.
 }
 
 SettingsEditorParseExeList(raw) {
@@ -10446,31 +10365,6 @@ SettingsEditorPreviewLauncherCleanup(*) {
     SettingsEditorMsgBox(report, "OK Iconi", "Launcher Cleanup Preview")
 }
 
-SettingsEditorAddChoice(category, section, key, label, choices, &y, defaultValue := "") {
-    global SettingsGui, SettingsEditorFields
-    layout := SettingsLayout()
-    labelCtrl := SettingsGui.AddText("x" layout["contentX"] " y" (y + 4) " w315 h24", label)
-    ctrl := SettingsGui.AddDropDownList("x" layout["controlX"] " y" y " w320", choices)
-    current := defaultValue
-    selectedIndex := 1
-    for index, choice in choices {
-        if (StrLower(choice) = StrLower(current)) {
-            selectedIndex := index
-            break
-        }
-    }
-    ctrl.Choose(selectedIndex)
-    ctrl.OnEvent("Change", SettingsEditorMarkDirty)
-    SettingsEditorRegisterControl(category, labelCtrl)
-    SettingsEditorRegisterControl(category, ctrl)
-    field := Map(
-        "category", category, "section", section, "key", key,
-        "label", label, "type", "choice", "default", defaultValue, "ctrl", ctrl,
-        "choices", choices, "controls", [labelCtrl, ctrl])
-    SettingsEditorFields.Push(field)
-    y += 34
-    return ctrl
-}
 
 SettingsEditorAddMappedChoice(category, section, key, label, choices, values, &y, defaultValue := "") {
     global SettingsGui, SettingsEditorFields
@@ -10517,44 +10411,7 @@ SettingsEditorAddMappedChoice(category, section, key, label, choices, values, &y
     return ctrl
 }
 
-SettingsEditorAddPathField(category, section, key, label, &y, prompt, filter, defaultValue := "") {
-    global SettingsGui, SettingsEditorFields
-    layout := SettingsLayout()
-    labelCtrl := SettingsGui.AddText("x" layout["contentX"] " y" (y + 4) " w180 h24", label)
-    ctrl := SettingsGui.AddEdit("x" layout["pathX"] " y" y " w" layout["pathWidth"], "")
-    browseButton := SettingsGui.AddButton("x" layout["pathButtonX"] " y" (y - 1) " w92 h27", "Browse…")
-    field := Map(
-        "category", category, "section", section, "key", key,
-        "label", label, "type", "path", "default", defaultValue, "ctrl", ctrl)
-    ctrl.OnEvent("Change", SettingsEditorMarkDirty)
-    browseButton.OnEvent("Click", SettingsEditorBrowsePath.Bind(field, prompt, filter))
-    SettingsEditorRegisterControl(category, labelCtrl)
-    SettingsEditorRegisterControl(category, ctrl)
-    SettingsEditorRegisterControl(category, browseButton)
-    SettingsEditorFields.Push(field)
-    y += 35
-    return field
-}
 
-SettingsEditorAddShortcutField(category, section, key, label, &y, defaultValue := "") {
-    global SettingsGui, SettingsEditorFields
-    layout := SettingsLayout()
-    labelCtrl := SettingsGui.AddText("x" layout["contentX"] " y" (y + 4) " w315 h24", label)
-    ctrl := SettingsGui.AddEdit("x" layout["controlX"] " y" y " w245", "")
-    recordButton := SettingsGui.AddButton("x" layout["recordButtonX"] " y" (y - 1) " w112 h27", "Record…")
-    field := Map(
-        "category", category, "section", section, "key", key,
-        "label", label, "type", "text", "default", defaultValue, "ctrl", ctrl,
-        "controls", [labelCtrl, ctrl, recordButton])
-    ctrl.OnEvent("Change", SettingsEditorMarkDirty)
-    recordButton.OnEvent("Click", SettingsEditorRecordShortcut.Bind(field))
-    SettingsEditorRegisterControl(category, labelCtrl)
-    SettingsEditorRegisterControl(category, ctrl)
-    SettingsEditorRegisterControl(category, recordButton)
-    SettingsEditorFields.Push(field)
-    y += 34
-    return field
-}
 
 SettingsEditorSetFieldEnabled(section, key, enabled) {
     field := SettingsEditorFindField(section, key)
@@ -14386,7 +14243,7 @@ ShowSettingsEditor(*) {
     ;
     ; ShowGameDetection above stays, because the layout manager covers MAIN rows
     ; and that row lives under System.
-    SettingsEditorAddSharedRows(category, &y)
+    SettingsAddRowsForCategory(SettingsGui, category, "standalone", &y)
     SettingsEditorAddActionButton(category, "Customize Quick Menu…", ShowQuickMenuLayoutManager, 255, y + 6, 240)
 
     ; Startup and splash
@@ -14394,14 +14251,14 @@ ShowSettingsEditor(*) {
     SettingsEditorAddHeading(category, "Startup & Splash"
         , "SteamShell stays at normal integrity. The optional helper provides controller input and window geometry for administrator windows.")
     y := 150
-    SettingsEditorAddSharedRows(category, &y)
+    SettingsAddRowsForCategory(SettingsGui, category, "standalone", &y)
 
     ; Startup programs
     category := "Startup Programs"
     SettingsEditorAddHeading(category, "Startup Programs"
         , "Add up to 20 standard-user programs. Select a row to edit its command or optional arguments.")
     y := 150
-    SettingsEditorAddSharedRows(category, &y)
+    SettingsAddRowsForCategory(SettingsGui, category, "standalone", &y)
     startupListY := y + 6
     SettingsStartupListView := SettingsGui.AddListView(
         "x255 y" startupListY " w690 h150 -Multi", ["Slot", "Command"])
@@ -14438,7 +14295,7 @@ ShowSettingsEditor(*) {
     y := 150
     ; The rows themselves are defined once, in SteamShell-Shared.ahk, so this
     ; page and the companion's cannot describe the same settings differently.
-    SettingsEditorAddSharedRows(category, &y)
+    SettingsAddRowsForCategory(SettingsGui, category, "standalone", &y)
     SettingsEditorAddActionButton(category, "Open Controller Mapping…", ShowControllerMappingWindow, 255, y + 5, 260)
     SettingsEditorAddActionButton(category, "Test / Calibrate Controller…", ShowControllerTest, 525, y + 5, 260)
     SettingsEditorAddActionButton(category, "Learn Controller…", ShowControllerLearner, 795, y + 5, 260)
@@ -14455,7 +14312,7 @@ ShowSettingsEditor(*) {
     SettingsEditorAddHeading(category, "Focus & Windows"
         , "One coordinated engine inventories windows, applies bounded geometry corrections, and selects one focus winner.")
     y := 150
-    SettingsEditorAddSharedRows(category, &y)
+    SettingsAddRowsForCategory(SettingsGui, category, "standalone", &y)
     ; Hand-placed, and the only settings row that is. The companion compiles
     ; SteamShell-Shared.ahk and forbids this key by name -- it is a shell
     ; responsibility, and a name in a string still counts. So the row stays here
@@ -14480,7 +14337,7 @@ ShowSettingsEditor(*) {
     SettingsEditorAddHeading(category, "RTSS & Performance"
         , "Live RTSS state is used when available; configured shortcuts remain the compatibility fallback.")
     y := 150
-    SettingsEditorAddSharedRows(category, &y)
+    SettingsAddRowsForCategory(SettingsGui, category, "standalone", &y)
     SettingsEditorAddActionButton(category, "Launch Selected RTSS", SettingsEditorOpenRtss, 255, y + 4, 220)
 
     ; Launcher cleanup
@@ -14488,7 +14345,7 @@ ShowSettingsEditor(*) {
     SettingsEditorAddHeading(category, "Launcher Cleanup"
         , "Optional cleanup after returning to Steam. EXE lists are saved automatically in the required pipe-separated format.")
     y := 150
-    SettingsEditorAddSharedRows(category, &y)
+    SettingsAddRowsForCategory(SettingsGui, category, "standalone", &y)
     listY := y + 8
     SettingsEditorAddExeListField(
         category, "LauncherCleanup", "LauncherExeList", "Launcher EXEs to close", 255, listY)
@@ -14508,7 +14365,7 @@ ShowSettingsEditor(*) {
     SettingsEditorAddHeading(category, "Advanced & Logging"
         , "Common diagnostics are available here. Open the Diagnostics Panel for timed overrides and detailed status.")
     y := 150
-    SettingsEditorAddSharedRows(category, &y)
+    SettingsAddRowsForCategory(SettingsGui, category, "standalone", &y)
     actionY := y + 12
     actionLeft := 255
     actionRight := 610

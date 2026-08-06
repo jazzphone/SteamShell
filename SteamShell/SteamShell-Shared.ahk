@@ -7703,3 +7703,189 @@ GetMonitorWorkAreaForPoint(x, y, &left, &top, &right, &bottom) {
     MonitorGetWorkArea(1, &left, &top, &right, &bottom)
     return 1
 }
+
+; Draws a category from the shared definition, for whichever product asked.
+;
+; This was two adapters that the cross-name gate scored 0.88 on calls and 0.84
+; on body -- the same walk over the same table, differing only in which product
+; string they filtered by. That is a parameter, not a second function.
+;
+; tableKey exists because the companion calls its logging page "Advanced" and
+; the shell calls it "Advanced & Logging"; the rows are keyed by the shell's
+; name and the companion passes it explicitly.
+SettingsAddRowsForCategory(guiObj, category, product, &y, tableKey := "") {
+    for _, row in SettingsCategoryRows(tableKey != "" ? tableKey : category) {
+        if !SettingsRowAppliesTo(row, product)
+            continue
+        label := SettingsRowLabel(row, product)
+        value := SettingsRowDefault(row, product)
+        switch row["type"] {
+            case "checkbox":
+                ctrl := SettingsAddCheckbox(guiObj, category, row["section"],
+                    row["key"], label, &y, value)
+                if (row.Has("dependency") && row["dependency"])
+                    SettingsProductWireDependency(ctrl, "Click")
+            case "choice":
+                choices := (product = "xfe" && row.Has("xfeChoices"))
+                    ? row["xfeChoices"]
+                    : SettingsRowChoices(row)
+                ctrl := SettingsAddChoice(guiObj, category, row["section"],
+                    row["key"], label, choices, &y, value)
+                if (row.Has("dependency") && row["dependency"])
+                    SettingsProductWireDependency(ctrl, "Change")
+            case "edit":
+                SettingsAddTextField(guiObj, category, row["section"],
+                    row["key"], label, &y, value,
+                    row.Has("fieldType") ? row["fieldType"] : "text",
+                    row.Has("min") ? row["min"] : "",
+                    row.Has("max") ? row["max"] : "")
+            case "shortcut":
+                SettingsAddShortcutField(guiObj, category, row["section"],
+                    row["key"], label, &y, value)
+            case "path":
+                SettingsAddPathField(guiObj, category, row["section"],
+                    row["key"], label, &y, row["prompt"], row["filter"], value)
+            ; No "mappedchoice" case. The one row of that kind -- the shell's
+            ; foreground sensitivity -- is hand-placed, because the companion
+            ; forbids its key by name and compiles this file. A case here would
+            ; call a builder that exists in neither tree, and AutoHotkey resolves
+            ; that when the program STARTS, not when it compiles.
+            case "note":
+                ; Height from the words. A fixed height fitted the note it was
+                ; written for and clipped the next one that was longer.
+                SettingsAddNote(guiObj, category, row["text"], &y,
+                    Max(22, Ceil(StrLen(row["text"]) / 95) * 20 + 4))
+            case "section":
+                SettingsProductAddSectionRow(guiObj, category, label, &y)
+        }
+    }
+}
+
+; ==============================================================================
+; Settings row builders
+; ==============================================================================
+; One set of builders for both Settings windows.
+;
+; These are the SHELL's, moved rather than merged. Two implementations that were
+; 0.42 to 0.69 alike could have been reconciled into a third thing neither
+; product had been running; moving the mature one instead means the shell's
+; Settings window is unchanged by construction and the companion adopts what has
+; the bench time behind it.
+;
+; Two edits made them serve both: the window is passed in rather than read from
+; a global, and registration goes through a seam. Everything else -- the percent
+; scaling, the WantTab on multi-row edits, the pre-selected choice, the Browse
+; and Record buttons -- is the shell's code, untouched.
+;
+; They CREATE and REGISTER; they do not read the INI. Filling happens afterwards,
+; from the field specs, in both products.
+
+SettingsAddCheckbox(guiObj, category, section, key, label, &y, defaultValue := "false") {
+    layout := SettingsLayout()
+    ctrl := guiObj.AddCheckbox("x" layout["contentX"] " y" y " w690 h25", label)
+    ctrl.OnEvent("Click", SettingsProductMarkDirty)
+    field := Map(
+        "category", category, "section", section, "key", key,
+        "label", label, "type", "bool", "default", defaultValue, "ctrl", ctrl,
+        "controls", [ctrl])
+    SettingsRegisterBuiltField(category, field)
+    y += 31
+    return ctrl
+}
+
+
+SettingsAddChoice(guiObj, category, section, key, label, choices, &y, defaultValue := "") {
+    layout := SettingsLayout()
+    labelCtrl := guiObj.AddText("x" layout["contentX"] " y" (y + 4) " w315 h24", label)
+    ctrl := guiObj.AddDropDownList("x" layout["controlX"] " y" y " w320", choices)
+    current := defaultValue
+    selectedIndex := 1
+    for index, choice in choices {
+        if (StrLower(choice) = StrLower(current)) {
+            selectedIndex := index
+            break
+        }
+    }
+    ctrl.Choose(selectedIndex)
+    ctrl.OnEvent("Change", SettingsProductMarkDirty)
+    field := Map(
+        "category", category, "section", section, "key", key,
+        "label", label, "type", "choice", "default", defaultValue, "ctrl", ctrl,
+        "choices", choices, "controls", [labelCtrl, ctrl])
+    SettingsRegisterBuiltField(category, field)
+    y += 34
+    return ctrl
+}
+
+
+SettingsAddTextField(guiObj, category, section, key, label, &y, defaultValue := ""
+    , fieldType := "text", minValue := "", maxValue := "", rows := 1) {
+    layout := SettingsLayout()
+    labelCtrl := guiObj.AddText("x" layout["contentX"] " y" (y + 4) " w315 h24", label)
+    options := "x" layout["controlX"] " y" y " w" layout["controlWidth"]
+    if (rows > 1)
+        options .= " r" rows " WantTab"
+    initialValue := ""
+    if (fieldType = "percent") {
+        storedDefault := ToFloat(defaultValue, 0.0)
+        initialValue := FormatSettingsFloat(
+            ToFloat(initialValue, storedDefault) * 100, 4)
+    }
+    ctrl := guiObj.AddEdit(options, initialValue)
+    ctrl.OnEvent("Change", SettingsProductMarkDirty)
+    field := Map(
+        "category", category, "section", section, "key", key,
+        "label", label, "type", fieldType, "default", defaultValue, "ctrl", ctrl,
+        "min", minValue, "max", maxValue,
+        "controls", [labelCtrl, ctrl])
+    SettingsRegisterBuiltField(category, field)
+    y += rows > 1 ? (30 + rows * 20) : 34
+    return field
+}
+
+
+SettingsAddPathField(guiObj, category, section, key, label, &y, prompt, filter, defaultValue := "") {
+    layout := SettingsLayout()
+    labelCtrl := guiObj.AddText("x" layout["contentX"] " y" (y + 4) " w180 h24", label)
+    ctrl := guiObj.AddEdit("x" layout["pathX"] " y" y " w" layout["pathWidth"], "")
+    browseButton := guiObj.AddButton("x" layout["pathButtonX"] " y" (y - 1) " w92 h27", "Browse…")
+    field := Map(
+        "category", category, "section", section, "key", key,
+        "label", label, "type", "path", "default", defaultValue, "ctrl", ctrl)
+    ctrl.OnEvent("Change", SettingsProductMarkDirty)
+    browseButton.OnEvent("Click", SettingsProductBrowsePath.Bind(field, prompt, filter))
+    SettingsRegisterBuiltField(category, field)
+    y += 35
+    return field
+}
+
+
+SettingsAddShortcutField(guiObj, category, section, key, label, &y, defaultValue := "") {
+    layout := SettingsLayout()
+    labelCtrl := guiObj.AddText("x" layout["contentX"] " y" (y + 4) " w315 h24", label)
+    ctrl := guiObj.AddEdit("x" layout["controlX"] " y" y " w245", "")
+    recordButton := guiObj.AddButton("x" layout["recordButtonX"] " y" (y - 1) " w112 h27", "Record…")
+    field := Map(
+        "category", category, "section", section, "key", key,
+        "label", label, "type", "text", "default", defaultValue, "ctrl", ctrl,
+        "controls", [labelCtrl, ctrl, recordButton])
+    ctrl.OnEvent("Change", SettingsProductMarkDirty)
+    recordButton.OnEvent("Click", SettingsProductRecordShortcut.Bind(field))
+    SettingsRegisterBuiltField(category, field)
+    y += 34
+    return field
+}
+
+
+; Explanatory text under a control, not bound to any setting.
+;
+; The companion has had SettingsAddNoteRow since it needed one; this is the same
+; row for this tree's Settings surface, which is a separate implementation.
+; Registered with the category like every other control so it shows and hides
+; with the page rather than surviving on top of the next one.
+SettingsAddNote(guiObj, category, text, &y, height := 34) {
+    layout := SettingsLayout()
+    ctrl := guiObj.AddText("x" layout["contentX"] " y" y " w690 h" height " +Wrap", text)
+    y += height + 6
+    return ctrl
+}
