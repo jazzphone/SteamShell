@@ -5779,29 +5779,6 @@ SettingsForegroundRetry(attempt) {
 ;
 ; The content viewport is everything between the page description and the footer.
 ; A page may be taller than that; what does not fit scrolls.
-; The shell's columns, to the pixel.
-;
-; These were this tree's own -- label at 300, control at 570, content 570 wide
-; in a 900-pixel window -- and the shell's are label 255, control 575, content
-; 690 wide in a 980-pixel window. Two Settings windows the same program family
-; ships should not be different shapes, and where they differ the shell's is the
-; one with the bench time behind it.
-;
-; Still a table rather than numbers typed into each builder, which is the half of
-; this tree's model worth keeping: a row asks where the column is instead of
-; stating it, so moving a column is one edit rather than sixty. The shell states
-; them per control, which is why it has sixty-odd literal coordinates and this
-; has eleven.
-SettingsLayout() {
-    static layout := Map(
-        "labelX", 255, "labelWidth", 310,
-        "controlX", 575, "controlWidth", 370,
-        "contentX", 255, "contentWidth", 690,
-        "contentRight", 945,
-        "contentTop", 190, "contentBottom", 600,
-        "scrollBarX", 954, "scrollBarWidth", 18)
-    return layout
-}
 
 SettingsFirstRowY() {
     return SettingsLayout()["contentTop"]

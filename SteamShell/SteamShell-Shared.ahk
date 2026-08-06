@@ -5388,6 +5388,36 @@ SettingsSelectChoiceByText(ctrl, value, choices) {
     try ctrl.Choose(1)
 }
 
+; Where every Settings control sits, for both products.
+;
+; The shell's numbers, in the companion's table. The companion used its own --
+; label at 300, control at 570, content 570 wide in a 900-pixel window -- and
+; the shell's are label 255, control 575, content 690 wide in 980. Two Settings
+; windows the same family ships should not be different shapes.
+;
+; A table rather than numbers typed into each builder, which is the companion's
+; model and the better one: a builder asks where the column is instead of
+; stating it, so moving a column is one edit rather than sixty. The shell stated
+; them per control, which is why it carried sixty-odd literal coordinates.
+;
+; One definition means the two windows cannot drift apart by a pixel, which is
+; what has to be true before a row builder can serve both.
+SettingsLayout() {
+    static layout := Map(
+        "labelX", 255, "labelWidth", 310,
+        "controlX", 575, "controlWidth", 370,
+        "contentX", 255, "contentWidth", 690,
+        "contentRight", 945,
+        "contentTop", 190, "contentBottom", 600,
+        "scrollBarX", 954, "scrollBarWidth", 18,
+        ; The shell's remaining columns, which had no entry because only it has
+        ; these controls: a path field's edit is narrower to leave room for a
+        ; Browse button, and a shortcut field carries a Record button.
+        "pathX", 440, "pathWidth", 400,
+        "pathButtonX", 850, "recordButtonX", 830)
+    return layout
+}
+
 ; What a Settings page CONTAINS, defined once for both products.
 ;
 ; EVERY page, from both products, with "product" deciding who draws each row.

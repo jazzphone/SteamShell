@@ -10225,7 +10225,8 @@ SettingsEditorAddSharedRows(category, &y, tableKey := "") {
 ; with the page rather than surviving on top of the next one.
 SettingsEditorAddNote(category, text, &y, height := 34) {
     global SettingsGui
-    ctrl := SettingsGui.AddText("x255 y" y " w690 h" height " +Wrap", text)
+    layout := SettingsLayout()
+    ctrl := SettingsGui.AddText("x" layout["contentX"] " y" y " w690 h" height " +Wrap", text)
     SettingsEditorRegisterControl(category, ctrl)
     y += height + 6
     return ctrl
@@ -10233,7 +10234,8 @@ SettingsEditorAddNote(category, text, &y, height := 34) {
 
 SettingsEditorAddCheckbox(category, section, key, label, &y, defaultValue := "false") {
     global SettingsGui, SettingsEditorFields
-    ctrl := SettingsGui.AddCheckbox("x255 y" y " w690 h25", label)
+    layout := SettingsLayout()
+    ctrl := SettingsGui.AddCheckbox("x" layout["contentX"] " y" y " w690 h25", label)
     ctrl.OnEvent("Click", SettingsEditorMarkDirty)
     SettingsEditorRegisterControl(category, ctrl)
     field := Map(
@@ -10248,8 +10250,9 @@ SettingsEditorAddCheckbox(category, section, key, label, &y, defaultValue := "fa
 SettingsEditorAddTextField(category, section, key, label, &y, defaultValue := ""
     , fieldType := "text", minValue := "", maxValue := "", rows := 1) {
     global SettingsGui, SettingsEditorFields
-    labelCtrl := SettingsGui.AddText("x255 y" (y + 4) " w315 h24", label)
-    options := "x575 y" y " w370"
+    layout := SettingsLayout()
+    labelCtrl := SettingsGui.AddText("x" layout["contentX"] " y" (y + 4) " w315 h24", label)
+    options := "x" layout["controlX"] " y" y " w" layout["controlWidth"]
     if (rows > 1)
         options .= " r" rows " WantTab"
     initialValue := ""
@@ -10445,8 +10448,9 @@ SettingsEditorPreviewLauncherCleanup(*) {
 
 SettingsEditorAddChoice(category, section, key, label, choices, &y, defaultValue := "") {
     global SettingsGui, SettingsEditorFields
-    labelCtrl := SettingsGui.AddText("x255 y" (y + 4) " w315 h24", label)
-    ctrl := SettingsGui.AddDropDownList("x575 y" y " w320", choices)
+    layout := SettingsLayout()
+    labelCtrl := SettingsGui.AddText("x" layout["contentX"] " y" (y + 4) " w315 h24", label)
+    ctrl := SettingsGui.AddDropDownList("x" layout["controlX"] " y" y " w320", choices)
     current := defaultValue
     selectedIndex := 1
     for index, choice in choices {
@@ -10470,7 +10474,8 @@ SettingsEditorAddChoice(category, section, key, label, choices, &y, defaultValue
 
 SettingsEditorAddMappedChoice(category, section, key, label, choices, values, &y, defaultValue := "") {
     global SettingsGui, SettingsEditorFields
-    labelCtrl := SettingsGui.AddText("x255 y" (y + 4) " w315 h24", label)
+    layout := SettingsLayout()
+    labelCtrl := SettingsGui.AddText("x" layout["contentX"] " y" (y + 4) " w315 h24", label)
     displayChoices := []
     storedValues := []
     choiceCount := Min(choices.Length, values.Length)
@@ -10497,7 +10502,7 @@ SettingsEditorAddMappedChoice(category, section, key, label, choices, values, &y
         selectedIndex := displayChoices.Length
     }
 
-    ctrl := SettingsGui.AddDropDownList("x575 y" y " w320", displayChoices)
+    ctrl := SettingsGui.AddDropDownList("x" layout["controlX"] " y" y " w320", displayChoices)
     ctrl.Choose(selectedIndex)
     ctrl.OnEvent("Change", SettingsEditorMarkDirty)
     SettingsEditorRegisterControl(category, labelCtrl)
@@ -10514,9 +10519,10 @@ SettingsEditorAddMappedChoice(category, section, key, label, choices, values, &y
 
 SettingsEditorAddPathField(category, section, key, label, &y, prompt, filter, defaultValue := "") {
     global SettingsGui, SettingsEditorFields
-    labelCtrl := SettingsGui.AddText("x255 y" (y + 4) " w180 h24", label)
-    ctrl := SettingsGui.AddEdit("x440 y" y " w400", "")
-    browseButton := SettingsGui.AddButton("x850 y" (y - 1) " w92 h27", "Browse…")
+    layout := SettingsLayout()
+    labelCtrl := SettingsGui.AddText("x" layout["contentX"] " y" (y + 4) " w180 h24", label)
+    ctrl := SettingsGui.AddEdit("x" layout["pathX"] " y" y " w" layout["pathWidth"], "")
+    browseButton := SettingsGui.AddButton("x" layout["pathButtonX"] " y" (y - 1) " w92 h27", "Browse…")
     field := Map(
         "category", category, "section", section, "key", key,
         "label", label, "type", "path", "default", defaultValue, "ctrl", ctrl)
@@ -10532,9 +10538,10 @@ SettingsEditorAddPathField(category, section, key, label, &y, prompt, filter, de
 
 SettingsEditorAddShortcutField(category, section, key, label, &y, defaultValue := "") {
     global SettingsGui, SettingsEditorFields
-    labelCtrl := SettingsGui.AddText("x255 y" (y + 4) " w315 h24", label)
-    ctrl := SettingsGui.AddEdit("x575 y" y " w245", "")
-    recordButton := SettingsGui.AddButton("x830 y" (y - 1) " w112 h27", "Record…")
+    layout := SettingsLayout()
+    labelCtrl := SettingsGui.AddText("x" layout["contentX"] " y" (y + 4) " w315 h24", label)
+    ctrl := SettingsGui.AddEdit("x" layout["controlX"] " y" y " w245", "")
+    recordButton := SettingsGui.AddButton("x" layout["recordButtonX"] " y" (y - 1) " w112 h27", "Record…")
     field := Map(
         "category", category, "section", section, "key", key,
         "label", label, "type", "text", "default", defaultValue, "ctrl", ctrl,

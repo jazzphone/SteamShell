@@ -301,6 +301,7 @@ SetQuickMenuHdrState
 SetRtssFrameLimiterState
 SetRtssGlobalFrameLimit
 SetRtssOverlayState
+SettingsLayout
 SettingsRowAppliesTo
 SettingsRowChoices
 SettingsRowDefault
