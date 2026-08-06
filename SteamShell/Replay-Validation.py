@@ -809,6 +809,24 @@ def check_powershell_scope_colons():
                      "rejects at PARSE time, taking the whole validator with "
                      f"it. Write \"${{{match.group(1)}}}:\" instead.")
 
+            # Assert-True declares [bool]$Condition, and PowerShell's parameter
+            # binder will not coerce a String to Boolean -- it accepts only
+            # booleans and numbers. So `Assert-True ($body)` where $body holds
+            # the text of a regex match throws at RUN time, and because
+            # Validate-Common.ps1 is dot-sourced by both validators it takes
+            # every assertion in both down with it.
+            #
+            # A bare variable is flagged even when it genuinely holds a boolean.
+            # The rule cannot know the type, and being explicit costs one
+            # comparison while the alternative cost two build cycles.
+            bare = re.search(r'Assert-True\s+\(\s*(\$[A-Za-z_]\w*)\s*\)', line)
+            if bare:
+                fail(f"{name}:{number} passes {bare.group(1)} to Assert-True "
+                     "bare. Its -Condition is [bool], and the binder refuses to "
+                     "convert a String, so this throws at run time and takes "
+                     "both validators with it. Compare explicitly -- "
+                     f'{bare.group(1)} -ne "", -gt 0, -eq $true.')
+
 
 def main():
     sources = {name: read_source(name) for name in ALL_FILES}

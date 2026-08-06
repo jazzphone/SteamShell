@@ -1135,7 +1135,7 @@ function Assert-SharedParity {
         $seamBody = [regex]::Match(
             $treeText,
             '(?ms)^ProductControllerBindingAction\(action\)\s*\{.*?^\}\s*$').Value
-        Assert-True ($seamBody) (
+        Assert-True ($seamBody -ne "") (
             "$tree defines no ProductControllerBindingAction; the actions only " +
             "it implements would be unreachable.")
         $executable = @($sharedActions) +
@@ -1144,7 +1144,7 @@ function Assert-SharedParity {
         $prettyBody = [regex]::Match(
             $treeText,
             '(?ms)^ControllerBindingPretty\(key\)\s*\{.*?^\}\s*$').Value
-        Assert-True ($prettyBody) (
+        Assert-True ($prettyBody -ne "") (
             "$tree defines no ControllerBindingPretty; binding labels cannot be checked.")
         foreach ($action in ($executable | Sort-Object -Unique)) {
             Assert-True ($prettyBody -match ('"' + [regex]::Escape($action) + '"')) (
