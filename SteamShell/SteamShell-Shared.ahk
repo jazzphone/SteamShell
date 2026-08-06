@@ -5424,16 +5424,16 @@ SettingsCategoryRows(category) {
                 "text", "Loaded beside the configured RTSS.exe. Disable this to "
                     . "force the shortcut controls and configured FPS cap label."),
             Map("product", "xfe", "type", "section", "label", "Overlay"),
-            ; ORDER IS LOAD-BEARING. The companion stores this by choice INDEX --
-            ; populate Chooses 1 or 2, save reads 1 or 2 -- while the shell stores
-            ; the TEXT. The two trees listed these in OPPOSITE orders, so one
-            ; unified list had to be the one that keeps 1 = Separate and 2 =
-            ; Toggle, and the words had to stay what the shell already writes.
-            ; Reordering this silently inverts the companion's setting.
+            ; The shell's order and the shell's words. The companion listed
+            ; these the other way round and read the SELECTED INDEX, so merging
+            ; the lists would have inverted its setting -- which is why the
+            ; companion now selects and saves choice rows by TEXT, as the shell
+            ; always has. Fixing the mechanism rather than bending the list to it
+            ; is what makes this order safe to state once.
             Map("product", "both", "type", "choice",
                 "section", "RTSS", "key", "OverlayControlMode",
                 "label", "Overlay control mode",
-                "choices", ["Separate", "Toggle"], "default", "Separate",
+                "choices", ["Toggle", "Separate"], "default", "Separate",
                 "dependency", true),
             Map("product", "both", "type", "shortcut",
                 "section", "RTSS", "key", "OverlayToggleShortcut",
@@ -5448,7 +5448,7 @@ SettingsCategoryRows(category) {
             Map("product", "both", "type", "choice",
                 "section", "RTSS", "key", "FrameLimiterControlMode",
                 "label", "Frame limiter control mode",
-                "choices", ["Separate", "Toggle"], "default", "Separate",
+                "choices", ["Toggle", "Separate"], "default", "Separate",
                 "dependency", true),
             Map("product", "both", "type", "edit",
                 "section", "RTSS", "key", "PresetFrameCap",

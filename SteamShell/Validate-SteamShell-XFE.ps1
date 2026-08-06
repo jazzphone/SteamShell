@@ -2068,13 +2068,13 @@ Assert-True (
 # one to match standalone's wording would invert the setting. The order is
 # pinned here rather than left to the next person to notice.
 Assert-True (
-    # Pinned in the shared table now, which is also where the hazard got worse:
-    # the two trees listed these in OPPOSITE orders, and only the companion
-    # reads the index. One unified list has to keep 1 = Separate, 2 = Toggle.
-    $source -match
-        '(?s)"key", "OverlayControlMode",[\s\S]{0,200}?"choices", \["Separate", "Toggle"\]' -and
-    $source -match
-        '(?s)"key", "FrameLimiterControlMode",[\s\S]{0,200}?"choices", \["Separate", "Toggle"\]' -and
+    # The order no longer decides anything: choice rows are selected and saved
+    # by TEXT in both trees. What must hold is that NOTHING reads a choice back
+    # as an index again, which is the shape that made two opposite lists
+    # dangerous to merge.
+    $source -notmatch 'GetFieldValue\("[^"]*"\s*(?:,\s*\d+\s*)?\)\s*=\s*\d' -and
+    $source -notmatch 'ChoiceToValue\(' -and
+    $source -match '(?s)SelectChoiceByText\(key, value, choices\)' -and
     $source -match
         'SettingsAddChoiceRow\(settings, category, "StartupPrograms\.WindowMode",\s*\r?\n?\s*' +
         '"Launch window mode", \["Normal", "Minimized", "Hidden"\]' -and

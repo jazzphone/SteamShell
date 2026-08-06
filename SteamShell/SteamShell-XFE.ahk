@@ -6103,10 +6103,10 @@ SettingsRegisterField(category, key, control, eventName := "Change") {
 ; every other field type depends on.
 ;
 ; The CHOICE ORDER of each list is load-bearing where the value is derived from
-; the index (SetDropDownMode, WindowModeChoiceToValue, ParkEdge). Reordering a
-; list to match standalone's would invert the setting, so the lists keep XFE's
-; order and only the labels were aligned.
-; Draws the shared definition of a category with this tree's builders.
+; Choice rows are selected and saved by their TEXT, as the shell does. They used
+; to be selected and saved by INDEX, which tied the value in the INI to the
+; ORDER of a list kept somewhere else -- and two of those lists were in the
+; opposite order from the shell's.
 ;
 ; companionField is honoured where a row carries one: this tree's populate and
 ; save still look fields up by an id that predates schema 13's section moves, so
@@ -6448,7 +6448,9 @@ SettingsPopulate() {
         ReadBool(MovedSettingSection("Features", "Controller", "EnableAutoMouseMode"), "EnableAutoMouseMode", true))
     SetFieldValue("Controller.AutoMouseExeList",
         ReadText("Controller", "AutoMouseExeList", "explorer.exe"))
-    SetBackendChoice("Controller.Backend", ReadText("Controller", "Backend", "xinput"))
+    SelectChoiceByText("Controller.Backend",
+        ReadText("Controller", "Backend", "auto"),
+        ["Auto", "XInput", "GameInput", "RawInput"])
     SetFieldValue("Controller.DiagnosticLogging",
         ReadBool("Controller", "DiagnosticLogging", false))
     SetFieldValue("Controller.RawInputProbe",
@@ -6458,8 +6460,9 @@ SettingsPopulate() {
         ReadInt("StartupPrograms", "DelayMs", 2000, 0, 120000))
     SetFieldValue("StartupPrograms.StaggerMs",
         ReadInt("StartupPrograms", "StaggerMs", 1200, 0, 30000))
-    SetWindowModeChoice("StartupPrograms.WindowMode",
-        ReadText("StartupPrograms", "WindowMode", "Hidden"))
+    SelectChoiceByText("StartupPrograms.WindowMode",
+        ReadText("StartupPrograms", "WindowMode", "Hidden"),
+        ["Normal", "Minimized", "Hidden"])
     SetFieldValue("StartupPrograms.LaunchDeElevated",
         ReadBool("StartupPrograms", "LaunchDeElevated", true))
     SettingsRefreshStartupProgramsList()
@@ -6505,18 +6508,22 @@ SettingsPopulate() {
     SetFieldValue("Cursor.EnableMouseParkOnBoot", ReadBool(MovedSettingSection("Features", "Cursor", "EnableMouseParkOnBoot"), "EnableMouseParkOnBoot", true))
     SetFieldValue("Cursor.ParkOnGameStart", ReadBool("Cursor", "ParkOnGameStart", true))
     SetFieldValue("Cursor.ParkOnSteamReturn", ReadBool("Cursor", "ParkOnSteamReturn", true))
-    SetParkEdgeChoice("Cursor.ParkEdge", ReadText(MovedSettingSection("MousePark", "Cursor", "MouseParkEdge"), "MouseParkEdge", "right"))
+    SelectChoiceByText("Cursor.ParkEdge",
+        ReadText(MovedSettingSection("MousePark", "Cursor", "MouseParkEdge"),
+            "MouseParkEdge", "right"), ["Right", "Left"])
     SetFieldValue("RTSS.EnableIntegration", ReadBool("RTSS", "EnableIntegration", true))
     SetFieldValue("RTSS.Path", ReadText("RTSS", "Path", RtssPath))
     SetFieldValue("RTSS.UseDllIntegration",
         ReadBool("RTSS", "UseDllIntegration", true))
-    SetDropDownMode("RTSS.OverlayControlMode",
-        ReadText("RTSS", "OverlayControlMode", "separate"))
+    SelectChoiceByText("RTSS.OverlayControlMode",
+        ReadText("RTSS", "OverlayControlMode", "separate"),
+        ["Toggle", "Separate"])
     SetFieldValue("RTSS.OverlayOnShortcut", ReadText("RTSS", "OverlayOnShortcut", "^+1"))
     SetFieldValue("RTSS.OverlayOffShortcut", ReadText("RTSS", "OverlayOffShortcut", "^+2"))
     SetFieldValue("RTSS.OverlayToggleShortcut", ReadText("RTSS", "OverlayToggleShortcut", "^+o"))
-    SetDropDownMode("RTSS.FrameLimiterControlMode",
-        ReadText("RTSS", "FrameLimiterControlMode", "separate"))
+    SelectChoiceByText("RTSS.FrameLimiterControlMode",
+        ReadText("RTSS", "FrameLimiterControlMode", "separate"),
+        ["Toggle", "Separate"])
     SetFieldValue("RTSS.PresetFrameCap", ReadInt("RTSS", "PresetFrameCap", 158, 0, 1000))
     SetFieldValue("RTSS.FrameLimiterOnShortcut",
         ReadText("RTSS", "FrameLimiterOnShortcut", "^+5"))
@@ -6542,77 +6549,38 @@ SetFieldValue(key, value) {
         SettingsFields[key].Value := value
 }
 
-SetBackendChoice(key, backend) {
+; Selects a choice row by its TEXT, the way the shell does.
+;
+; This tree used to Choose() an INDEX for every choice field and read the index
+; back on save, so the words on screen and the value in the INI were connected
+; only by the ORDER of the list -- and the order lived in a third place. Two
+; lists in this program were in the opposite order from the shell's, which made
+; merging them a change that would have silently inverted the setting rather
+; than a change of wording.
+;
+; Matching on text has no order to get wrong: the item that says "Toggle" writes
+; "toggle". The comparison is case-insensitive and falls back to the first entry,
+; because the INI is hand-editable and a value that no longer matches any item
+; must land somewhere predictable rather than nowhere.
+SelectChoiceByText(key, value, choices) {
     global SettingsFields
     if !SettingsFields.Has(key)
         return
-    switch StrLower(Trim(backend)) {
-        case "xinput":
-            SettingsFields[key].Choose(2)
-        case "gameinput":
-            SettingsFields[key].Choose(3)
-        case "rawinput":
-            SettingsFields[key].Choose(4)
-        default:
-            SettingsFields[key].Choose(1)
+    wanted := StrLower(Trim(value))
+    for _, choice in choices {
+        if (StrLower(choice) = wanted) {
+            try SettingsFields[key].Text := choice
+            return
+        }
     }
+    try SettingsFields[key].Choose(1)
 }
 
 ; Matches the dropdown order: 1 Auto, 2 XInput, 3 GameInput, 4 RawInput.
 ; Auto is first because it is the default and the only choice that works both
 ; inside and outside Xbox FSE.
-BackendChoiceToValue(index) {
-    switch index {
-        case 2:
-            return "xinput"
-        case 3:
-            return "gameinput"
-        case 4:
-            return "rawinput"
-        default:
-            return "auto"
-    }
-}
-
 ; Matches the dropdown order: 1 Normal, 2 Minimized, 3 Hidden.
-SetWindowModeChoice(key, mode) {
-    global SettingsFields
-    if !SettingsFields.Has(key)
-        return
-    switch NormalizeWindowMode(mode) {
-        case "minimized":
-            SettingsFields[key].Choose(2)
-        case "hidden":
-            SettingsFields[key].Choose(3)
-        default:
-            SettingsFields[key].Choose(1)
-    }
-}
-
-WindowModeChoiceToValue(index) {
-    switch index {
-        case 2:
-            return "Minimized"
-        case 3:
-            return "Hidden"
-        default:
-            return "Normal"
-    }
-}
-
 ; Matches the dropdown order: 1 Right edge, 2 Left edge.
-SetParkEdgeChoice(key, edge) {
-    global SettingsFields
-    if SettingsFields.Has(key)
-        SettingsFields[key].Choose(StrLower(Trim(edge)) = "left" ? 2 : 1)
-}
-
-SetDropDownMode(key, mode) {
-    global SettingsFields
-    if SettingsFields.Has(key)
-        SettingsFields[key].Choose(StrLower(mode) = "toggle" ? 2 : 1)
-}
-
 GetFieldValue(key, fallback := "") {
     global SettingsFields
     if !SettingsFields.Has(key)
@@ -6636,7 +6604,7 @@ SaveSettings(*) {
         ["Controller", "AutoMouseExeList",
             GetFieldText("Controller.AutoMouseExeList", "explorer.exe")],
         ["Controller", "Backend",
-            BackendChoiceToValue(GetFieldValue("Controller.Backend", 1))],
+            GetFieldText("Controller.Backend", "Auto")],
         ["Controller", "DiagnosticLogging",
             GetFieldValue("Controller.DiagnosticLogging") ? "true" : "false"],
         ["Controller", "RawInputProbe",
@@ -6646,7 +6614,7 @@ SaveSettings(*) {
         ["StartupPrograms", "DelayMs", GetFieldValue("StartupPrograms.DelayMs", 2000)],
         ["StartupPrograms", "StaggerMs", GetFieldValue("StartupPrograms.StaggerMs", 1200)],
         ["StartupPrograms", "WindowMode",
-            WindowModeChoiceToValue(GetFieldValue("StartupPrograms.WindowMode", 3))],
+            GetFieldText("StartupPrograms.WindowMode", "Hidden")],
         ["StartupPrograms", "LaunchDeElevated",
             GetFieldValue("StartupPrograms.LaunchDeElevated") ? "true" : "false"],
         ["Assist", "EnableGameFocusLite",
@@ -6688,19 +6656,19 @@ SaveSettings(*) {
         ["Cursor", "ParkOnSteamReturn",
             GetFieldValue("Cursor.ParkOnSteamReturn") ? "true" : "false"],
         ["MousePark", "MouseParkEdge",
-            GetFieldValue("Cursor.ParkEdge", 1) = 2 ? "left" : "right"],
+            GetFieldText("Cursor.ParkEdge", "Right")],
         ["RTSS", "EnableIntegration",
             GetFieldValue("RTSS.EnableIntegration") ? "true" : "false"],
         ["RTSS", "Path", GetFieldValue("RTSS.Path")],
         ["RTSS", "UseDllIntegration",
             GetFieldValue("RTSS.UseDllIntegration") ? "true" : "false"],
         ["RTSS", "OverlayControlMode",
-            GetFieldValue("RTSS.OverlayControlMode") = 2 ? "toggle" : "separate"],
+            GetFieldText("RTSS.OverlayControlMode", "Separate")],
         ["RTSS", "OverlayOnShortcut", GetFieldValue("RTSS.OverlayOnShortcut")],
         ["RTSS", "OverlayOffShortcut", GetFieldValue("RTSS.OverlayOffShortcut")],
         ["RTSS", "OverlayToggleShortcut", GetFieldValue("RTSS.OverlayToggleShortcut")],
         ["RTSS", "FrameLimiterControlMode",
-            GetFieldValue("RTSS.FrameLimiterControlMode") = 2 ? "toggle" : "separate"],
+            GetFieldText("RTSS.FrameLimiterControlMode", "Separate")],
         ["RTSS", "PresetFrameCap", GetFieldValue("RTSS.PresetFrameCap", 158)],
         ["RTSS", "FrameLimiterOnShortcut", GetFieldValue("RTSS.FrameLimiterOnShortcut")],
         ["RTSS", "FrameLimiterOffShortcut", GetFieldValue("RTSS.FrameLimiterOffShortcut")],
