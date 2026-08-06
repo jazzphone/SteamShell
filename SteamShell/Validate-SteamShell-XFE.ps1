@@ -1046,9 +1046,21 @@ Assert-True (
 # Xbox FSE is a fullscreen window, so a normal window can hold the foreground and
 # still render behind it. Settings was focused but invisible until the task
 # switcher revealed it; no amount of retrying SetForegroundWindow fixes z-order.
+#
+# Pinned on the OPTION, not on the whole string. It used to name the minimum
+# size too, so widening the window to the shell's 980 failed a rule that has
+# nothing to say about width.
 Assert-True (
-    $source -match 'Gui\("-Resize \+AlwaysOnTop \+MinSize900x600"') (
+    $source -match 'Gui\("-Resize \+AlwaysOnTop \+MinSize\d+x\d+"') (
     "The Settings window must be always-on-top or it renders behind Xbox FSE.")
+# The columns are the shell's, so the window has to be wide enough for them:
+# content starts at 255 and runs 690 wide, and the scrollbar sits at 954.
+Assert-True (
+    $source -match 'MinSize9[89]\dx' -and
+    $source -match '"contentX", 255, "contentWidth", 690' -and
+    $source -match '"scrollBarX", 954') (
+    "The Settings window is narrower than the columns it draws; content or the " +
+    "scrollbar would fall outside it.")
 # A hidden/pre-show measurement can omit the scaled title bar and frame, leaving
 # Settings visibly too low and its bottom outside the monitor work area. Correct
 # it from the actual visible outer rectangle after Gui.Show has sized it.

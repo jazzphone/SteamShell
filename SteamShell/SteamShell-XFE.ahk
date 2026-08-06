@@ -5542,26 +5542,26 @@ ShowSettings(*) {
     ; was focused but invisible, and only the task switcher revealed it. The Quick
     ; Menu never had this problem because it has always been always-on-top. No
     ; amount of retrying SetForegroundWindow fixes a z-order problem.
-    settings := Gui("-Resize +AlwaysOnTop +MinSize900x600",
+    settings := Gui("-Resize +AlwaysOnTop +MinSize980x600",
         "SteamShell XFE Settings")
     settings.Opt("+OwnDialogs")
     settings.MarginX := 24
     settings.MarginY := 16
     settings.SetFont("s18 Bold", "Segoe UI")
-    settings.AddText("x24 y16 w860 h34", "SteamShell XFE Settings")
+    settings.AddText("x24 y16 w940 h34", "SteamShell XFE Settings")
     settings.SetFont("s9 Norm", "Segoe UI")
-    settings.AddText("x24 y52 w870 h24",
+    settings.AddText("x24 y52 w950 h24",
         "Right stick pointer • RB click • D-pad navigate • LT/RT categories • X keyboard • Y save")
     SettingsCategoryList := settings.AddListBox(
         "x24 y96 w225 h500 Choose1",
         SettingsCategoryNames())
     SettingsCategoryList.OnEvent("Change", SettingsCategoryChanged)
-    settings.AddText("x264 y96 w1 h504 +0x10")
+    settings.AddText("x245 y96 w1 h504 +0x10")
     settings.SetFont("s16 Bold", "Segoe UI")
-    SettingsCategoryTitleCtrl := settings.AddText("x286 y96 w610 h32", "General")
+    SettingsCategoryTitleCtrl := settings.AddText("x255 y96 w690 h32", "General")
     settings.SetFont("s9 Norm", "Segoe UI")
     SettingsCategoryDescriptionCtrl := settings.AddText(
-        "x286 y132 w610 h42 +Wrap",
+        "x255 y132 w690 h42 +Wrap",
         "Quick Menu, heartbeat, and the controls shown in the living-room interface.")
 
     ; --------------------------------------------------------------------------
@@ -5740,9 +5740,9 @@ SettingsAddNoteRow(settings, category,
         . "virtualised pad forwarding only some buttons.", &y, 60)
 
     settings.AddText("x24 y616 w430 h26 vSettingsStatus", "All changes saved")
-    saveButton := settings.AddButton("x620 y610 w135 h34 Default", "Save && Apply")
+    saveButton := settings.AddButton("x700 y610 w135 h34 Default", "Save && Apply")
     saveButton.OnEvent("Click", SaveSettings)
-    closeButton := settings.AddButton("x770 y610 w110 h34", "Close")
+    closeButton := settings.AddButton("x850 y610 w110 h34", "Close")
     closeButton.OnEvent("Click", CloseSettings)
     settings.OnEvent("Close", CloseSettings)
     settings.OnEvent("Escape", CloseSettings)
@@ -5817,14 +5817,27 @@ SettingsForegroundRetry(attempt) {
 ;
 ; The content viewport is everything between the page description and the footer.
 ; A page may be taller than that; what does not fit scrolls.
+; The shell's columns, to the pixel.
+;
+; These were this tree's own -- label at 300, control at 570, content 570 wide
+; in a 900-pixel window -- and the shell's are label 255, control 575, content
+; 690 wide in a 980-pixel window. Two Settings windows the same program family
+; ships should not be different shapes, and where they differ the shell's is the
+; one with the bench time behind it.
+;
+; Still a table rather than numbers typed into each builder, which is the half of
+; this tree's model worth keeping: a row asks where the column is instead of
+; stating it, so moving a column is one edit rather than sixty. The shell states
+; them per control, which is why it has sixty-odd literal coordinates and this
+; has eleven.
 SettingsLayout() {
     static layout := Map(
-        "labelX", 300, "labelWidth", 250,
-        "controlX", 570, "controlWidth", 200,
-        "contentX", 300, "contentWidth", 570,
-        "contentRight", 870,
+        "labelX", 255, "labelWidth", 310,
+        "controlX", 575, "controlWidth", 370,
+        "contentX", 255, "contentWidth", 690,
+        "contentRight", 945,
         "contentTop", 190, "contentBottom", 600,
-        "scrollBarX", 878, "scrollBarWidth", 16)
+        "scrollBarX", 954, "scrollBarWidth", 18)
     return layout
 }
 
