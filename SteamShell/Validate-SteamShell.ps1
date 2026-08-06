@@ -232,25 +232,20 @@ Assert-True (
     "The schema-17 first-run setup state or established-user migration is missing.")
 Assert-True (
     $source -match
-        '(?s)"section", "GameForegroundAssist", "key", "GameMinScoreToActivate".*?' +
+        '(?s)SettingsEditorAddMappedChoice\(\s*category,\s*' +
+        '"GameForegroundAssist",\s*"GameMinScoreToActivate".*?' +
         '"Responsive \(55\)".*?"Balanced \(60\)".*?"Conservative \(70\)"') (
     "Full Settings foreground-sensitivity presets are incomplete.")
-# Counted in the shared page table, which is where the row is defined now.
-# Two rows for one switch is the failure; one definition makes it unexpressible,
-# but the count is kept so that stays true if a hand-placed one ever returns.
-# Scoped to a SETTINGS row. The bare section/key pair also appears in
-# QuickMenuToggleTable, which describes the same setting for the Quick Menu --
-# counting that as a second Settings toggle would fail this for the wrong reason.
 $windowManagementEditorFields = [regex]::Matches(
     $source,
-    '(?s)"type", "checkbox",\s*\r?\n\s*' +
-    '"section", "Features", "key", "EnableWindowManagement"')
+    '(?s)SettingsEditorAddCheckbox\(\s*category,\s*"Features",\s*' +
+    '"EnableWindowManagement"')
 Assert-True ($windowManagementEditorFields.Count -eq 1) (
     "Full Settings must expose exactly one Window Management toggle.")
 Assert-True (
     $source -match
-        '(?s)"key", "MinWidthPercent",.*?"Maximize width threshold \(%\)".*?' +
-        '"fieldType", "percent", "min", 5, "max", 100') (
+        '(?s)"WindowManagement",\s*"MinWidthPercent",\s*' +
+        '"Maximize width threshold \(%\)".*?"percent",\s*5,\s*100') (
     "The maximize-width percentage control is not configured correctly.")
 Assert-True (
     $source -match
@@ -1967,8 +1962,8 @@ Assert-True (
         'if\s*!EnableElevatedInputHelper(?:(?!\n\})[\s\S])*?return false(?:(?!\n\})[\s\S])*?' +
         'ExtractEmbeddedElevatedHelper(?:(?!\n\})[\s\S])*?\*RunAs' -and
     $source -match
-        '(?s)"section", "Features", "key", "EnableElevatedInputHelper".*?' +
-        '"default", "true"') (
+        '(?s)SettingsEditorAddCheckbox\(\s*category,\s*"Features",\s*' +
+        '"EnableElevatedInputHelper".*?"true"') (
     "The default-on elevated helper setting is missing or disconnected.")
 Assert-True (
     $source -match
