@@ -340,26 +340,401 @@ def read_manifest(name):
     }
 
 
+_DIVERGENT_CACHE = []
+
+
 def read_divergent():
     """Names allowed to differ between the trees, with the reason recorded beside
     each. Format: `Name: why it is allowed to differ`. An entry with no reason is
-    itself a failure -- the reason is the whole value of the file."""
+    itself a failure -- the reason is the whole value of the file.
+
+    A name listed TWICE is also a failure. This is not tidiness. Five names once
+    carried a PENDING reason under one heading and a contradictory PERMANENT one
+    under another, and because the entries land in a dict the later silently won.
+    The PENDING half was the file's entire consolidation worklist, and no harness
+    could see it. A file whose stated purpose is to make a count go down cannot
+    hold two answers for the same name."""
+    # Parsed once: one call site sits inside a loop, and a file-level fault
+    # reported once per iteration reads as many faults instead of one.
+    if _DIVERGENT_CACHE:
+        return _DIVERGENT_CACHE[0]
     path = ROOT / "DIVERGENT_FUNCTIONS.txt"
     if not path.exists():
-        return {}
+        _DIVERGENT_CACHE.append({})
+        return _DIVERGENT_CACHE[0]
     out = {}
     for line in decode_like_powershell(path.read_bytes()).split("\n"):
         line = line.strip()
         if not line or line.startswith("#"):
             continue
         name, _, reason = line.partition(":")
-        out[name.strip().lower()] = reason.strip()
+        key = name.strip().lower()
+        if key in out:
+            fail(f"DIVERGENT_FUNCTIONS.txt lists '{name.strip()}' more than once. "
+                 "Only the last entry counts, so the others are reasons no harness "
+                 "reads. Keep one, and delete the entry entirely once the two "
+                 "copies are merged.")
+        out[key] = reason.strip()
+    _DIVERGENT_CACHE.append(out)
     return out
+
+
+def function_body(text, name):
+    """The text between a function's braces, by name. Empty when undefined."""
+    m = re.search(r"(?m)^" + re.escape(name) + r"\(", text)
+    if not m:
+        return ""
+    i = text.index("{", m.end() - 1) + 1
+    depth, j = 1, i
+    while depth > 0 and j < len(text):
+        if text[j] == "{":
+            depth += 1
+        elif text[j] == "}":
+            depth -= 1
+        j += 1
+    return text[i:j - 1]
+
+
+def call_arguments(text, fname):
+    """Every `fname(...)` call in text, arguments split on top-level commas.
+
+    Regex alone is not enough here and the difference is not cosmetic. A first
+    attempt matched `MenuRow\\(...\\)` with a non-greedy pattern and reported 18
+    handlers as unreachable, every one of them a false alarm from a call that
+    wrapped across lines or computed an argument inline. An assertion that cries
+    wolf 18 times gets switched off, so this tracks quote state and paren depth
+    and returns the arguments as written."""
+    out = []
+    for m in re.finditer(r"\b" + re.escape(fname) + r"\(", text):
+        i, depth, j, in_string = m.end(), 1, m.end(), False
+        while depth > 0 and j < len(text):
+            c = text[j]
+            if c == '"':
+                in_string = not in_string
+            elif not in_string:
+                if c == "(":
+                    depth += 1
+                elif c == ")":
+                    depth -= 1
+            j += 1
+        args, parts, depth, in_string, current = text[i:j - 1], [], 0, False, ""
+        for c in args:
+            if c == '"':
+                in_string = not in_string
+            if not in_string:
+                if c in "([":
+                    depth += 1
+                elif c in ")]":
+                    depth -= 1
+                elif c == "," and depth == 0:
+                    parts.append(current.strip())
+                    current = ""
+                    continue
+            current += c
+        parts.append(current.strip())
+        out.append(parts)
+    return out
+
+
+def _string_literal(argument):
+    argument = argument.strip()
+    if len(argument) > 1 and argument[0] == '"' and argument[-1] == '"' \
+            and '"' not in argument[1:-1]:
+        return argument[1:-1]
+    return None
+
+
+def switch_case_labels(body):
+    """Every string label in every `case` in a switch body, including the
+    comma-separated multi-label form."""
+    out = set()
+    for m in re.findall(r"(?m)^\s*case\s+([^:\n]+):", body):
+        out.update(re.findall(r'"([^"]+)"', m))
+    return out
+
+
+# Row ids whose behaviour is reached through a prefix rather than a case label.
+# Each is checked with SubStr in the resolver, so the literal id never appears
+# as a `case`.
+ROW_ID_FAMILIES = ("layout:", "taskWindow:", "gamescore:", "toggle:", "page:")
+
+
+def read_quickmenu_manifest():
+    """QUICKMENU_ROWS.txt -- the Quick Menu's row inventory, per product.
+
+    Format: `product id` per line, plus `product dynamic:name` for a handler
+    reached through a variable rather than a literal row."""
+    path = ROOT / "QUICKMENU_ROWS.txt"
+    if not path.exists():
+        fail("QUICKMENU_ROWS.txt is missing; it is the row inventory the Quick "
+             "Menu check enforces.")
+        return {}, {}
+    rows, dynamic = {}, {}
+    for line in decode_like_powershell(path.read_bytes()).split("\n"):
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        product, _, name = line.partition(" ")
+        name = name.strip()
+        if name.startswith("dynamic:"):
+            dynamic.setdefault(product, set()).add(name[len("dynamic:"):])
+        else:
+            rows.setdefault(product, set()).add(name)
+    return rows, dynamic
+
+
+def check_quickmenu_rows(sources):
+    """Every Quick Menu row reaches behaviour, and every behaviour has a row.
+
+    The fingerprint gate cannot see this. The two trees build rows differently,
+    which drags every QuickMenu* function below the 0.75 threshold, so the whole
+    family sits unmeasured -- and a row whose handler is deleted does not fail
+    to compile. It renders, selects, and does nothing.
+
+    Two directions, because each catches a different mistake:
+      - a row id with no handler is a dead row the user can select;
+      - a handler with no row is a case kept alive after its row went away,
+        which is what makes a switch grow without anyone deciding to.
+    """
+    manifest, dynamic = read_quickmenu_manifest()
+    shared = sources["SteamShell-Shared.ahk"]
+    inert = set(re.findall(
+        r'"([^"]+)",\s*true', function_body(shared, "QuickMenuRowIsInert")))
+
+    for product, filename, builder in (
+            ("standalone", "SteamShell.ahk", "QuickMenuGetDefinitions"),
+            ("xfe", "SteamShell-XFE.ahk", "QuickMenuGetRows")):
+        text = sources[filename]
+        rows_body = function_body(text, builder)
+        if not rows_body:
+            fail(f"{filename} defines no {builder}(); the Quick Menu row "
+                 "inventory cannot be checked.")
+            continue
+
+        # The two builders spell a row differently and the extraction has to
+        # respect that. Treating MenuRow's "first argument is the id" rule as
+        # general read standalone's `Map("audio", ...)` grouping key as a row id.
+        built, navigating = set(), set()
+        for args in call_arguments(rows_body, "MenuRow"):
+            if args:
+                built.add(_string_literal(args[0]))
+        for args in call_arguments(rows_body, "Map"):
+            if len(args) > 1 and _string_literal(args[0]) == "id":
+                row_id = _string_literal(args[1])
+                built.add(row_id)
+                # A row that declares "page" or "back" carries its own
+                # navigation and needs no case at all. That is the point of the
+                # field: sixteen ids used to reach two identical bodies.
+                keys = {_string_literal(a) for a in args[0::2]}
+                if row_id is not None and ({"page", "back"} & keys):
+                    navigating.add(row_id)
+        built = {r for r in built
+                 if r is not None and not r.startswith(ROW_ID_FAMILIES)}
+
+        recorded = manifest.get(product, set())
+        for gone in sorted(recorded - built):
+            fail(f"{filename}: the Quick Menu row '{gone}' is in "
+                 "QUICKMENU_ROWS.txt but no longer built. If that is "
+                 "deliberate, delete the line in the same commit; a row that "
+                 "vanishes silently is what this file exists to catch.")
+        for added in sorted(built - recorded):
+            fail(f"{filename}: the Quick Menu builds a row '{added}' that "
+                 "QUICKMENU_ROWS.txt does not record. Add it, so the inventory "
+                 "stays the list of rows that actually exist.")
+
+        # Direction 1: every row reaches an ACTIVATE path.
+        #
+        # Deliberately not "reaches any handler". Coverage as an OR across the
+        # value and activate switches passes a row that still shows its value
+        # but no longer does anything when pressed -- which is exactly the
+        # failure described above, and a first draft of this check let a deleted
+        # activate case through because the value case was still there.
+        handlers = switch_case_labels(function_body(text, "QuickMenuActivateSelected"))
+        handlers |= switch_case_labels(function_body(text, "QuickMenuAdjustSelected"))
+        # Actions both products implement identically live in Shared now, so a
+        # row can reach its behaviour without either tree naming it.
+        handlers |= switch_case_labels(
+            function_body(shared, "QuickMenuActivateShared"))
+        # The q* rows are reached by set membership, not by a case label.
+        for fn in ("IsQuickMenuToggleSetting", "IsQuickMenuAdjustSetting"):
+            handlers |= set(re.findall(r"[A-Za-z]\w*", function_body(text, fn)))
+        # A row reaches its behaviour by one of two routes, and which one
+        # depends on the tree. Standalone switches on the row's ID. The
+        # companion carries an ACTION on the row and switches on that, so a
+        # companion row is covered when its own action is handled -- not when
+        # its id happens to appear somewhere.
+        row_action = {}
+        for args in call_arguments(rows_body, "MenuRow"):
+            if args and len(args) > 3:
+                row_id = _string_literal(args[0])
+                if row_id is not None:
+                    row_action[row_id] = _string_literal(args[3])
+        row_actions = {a for a in row_action.values() if a}
+        for row in sorted(built):
+            if row in row_action:
+                action = row_action[row]
+                # None means the action is computed; the handler direction
+                # below still pins whatever it resolves to.
+                if action is None or action == "none" \
+                        or action.startswith(ROW_ID_FAMILIES) or action in handlers:
+                    continue
+                fail(f"{filename}: the Quick Menu row '{row}' carries action "
+                     f"'{action}', which no handler implements. It would render "
+                     "and do nothing when selected.")
+                continue
+            if row in handlers or row in inert or row in navigating:
+                continue
+            fail(f"{filename}: the Quick Menu row '{row}' reaches no activate, "
+                 "adjust or toggle handler and is not declared inert. It would "
+                 "render and do nothing when selected. If it is display-only, "
+                 "add it to QuickMenuRowIsInert so that is stated rather than "
+                 "inferred from a missing case.")
+
+        # Direction 2: every handler has a row. Dynamic ids are exempted by
+        # name so the exemption is a decision, not a hole.
+        allowed = built | inert | dynamic.get(product, set())
+        for fn in ("QuickMenuActivateSelected", "QuickMenuAdjustSelected"):
+            for label in sorted(switch_case_labels(function_body(text, fn))):
+                if label.startswith(ROW_ID_FAMILIES) or label in allowed:
+                    continue
+                if label in row_actions:
+                    continue
+                fail(f"{filename}: {fn} handles '{label}', which no Quick Menu "
+                     "row builds. Delete the case, or record it in "
+                     "QUICKMENU_ROWS.txt as 'dynamic:' if a variable reaches it.")
+
+
+# Keywords, plus the statements AutoHotkey allows without parentheses. A
+# parenless `Sleep 200` or a bare `Loop` reads as an identifier to any scanner
+# that only knows about expressions.
+def _body_tokens(body):
+    """A comment- and whitespace-blind token stream for a function body."""
+    text = "\n".join(body) if isinstance(body, list) else body
+    text = "\n".join(strip_comments(l) for l in text.split("\n"))
+    return [tok for tok in re.findall(r"[A-Za-z_]\w*|[^\s\w]", text) if tok]
+
+
+def check_cross_name_duplicates(sources):
+    """The same routine in both trees under two DIFFERENT names.
+
+    The blind spot this project was built without. Both the fingerprint gate and
+    DIVERGENT_FUNCTIONS.txt compare functions BY NAME, so a rename hides a
+    duplicate from every check there is -- SetStatus and ShowNotification were
+    three identical lines apiece and appeared on no list anywhere, and an entire
+    settings-UI subsystem was duplicated behind a Settings*/SettingsEditor*
+    prefix split.
+
+    Two measurements, because one is not enough. Call-sequence similarity alone
+    scores every one-call function against every other one-call function at
+    1.00, which produced pairings like NormalizePath against ToBool. The token
+    stream of the body is what separates them: real pairs scored 0.75 and up,
+    coincidences 0.68 and down, with nothing in between across the whole tree.
+    """
+    accepted = {}
+    path = ROOT / "CROSS_NAME_DUPLICATES.txt"
+    if path.exists():
+        for line in decode_like_powershell(path.read_bytes()).split("\n"):
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            pair, _, reason = line.partition(":")
+            accepted[pair.strip().lower()] = reason.strip()
+
+    a = function_map(sources["SteamShell.ahk"])
+    b = function_map(sources["SteamShell-XFE.ahk"])
+    fa = {n: fingerprint(a[n][1]) for n in a if n not in b}
+    fb = {n: fingerprint(b[n][1]) for n in b if n not in a}
+    fa = {n: f for n, f in fa.items() if f}
+    fb = {n: f for n, f in fb.items() if f}
+    ta = {n: _body_tokens(a[n][1]) for n in fa}
+    tb = {n: _body_tokens(b[n][1]) for n in fb}
+    for x in sorted(fb):
+        best = None
+        for s in fa:
+            call_score = similarity(fb[x], fa[s])
+            if call_score < 0.85:
+                continue
+            body_score = similarity(tb[x], ta[s])
+            if body_score < 0.72:
+                continue
+            if best is None or (call_score, body_score) > (best[0], best[1]):
+                best = (call_score, body_score, s)
+        if not best:
+            continue
+        key = f"{x}={best[2]}"
+        if key in accepted:
+            if not accepted[key]:
+                fail(f"CROSS_NAME_DUPLICATES.txt lists '{key}' with no reason. "
+                     "The reason is the entire value of that file.")
+            continue
+        fail(f"SteamShell-XFE.ahk's '{x}' and SteamShell.ahk's '{best[2]}' are "
+             f"the same routine under two names (calls {best[0]:.2f}, body "
+             f"{best[1]:.2f}). Give them one name and share it, or record the "
+             f"pair in CROSS_NAME_DUPLICATES.txt as '{key}: why' with the reason "
+             "they must stay separate.")
+
+
+def check_schema_versions():
+    """The settings schema version each program writes must equal the one it
+    reads back.
+
+    Not replayed from the validators, and that is the point. Standalone's rule
+    compares two regex CAPTURES rather than matching a source, and the
+    companion's matches against $sample with the version interpolated into a
+    double-quoted pattern -- and this file only replays single-quoted literals
+    asserted against a subject whose variable name contains "source". Both rules
+    were therefore invisible here, and both were FAILING: two commits bumped the
+    runtime version for the Game Detection settings and left the templates
+    behind, so every check below reported green on a tree Windows rejected.
+
+    A local harness that passes what the build fails is worse than no local
+    harness, so this is checked directly rather than inferred."""
+    standalone = read_source("SteamShell.ahk")
+    runtime = re.search(
+        r"(?m)^global CurrentSettingsSchemaVersion\s*:=\s*(\d+)\s*$", standalone)
+    embedded = re.search(r"(?m)^SettingsSchemaVersion=(\d+)", standalone)
+    sample = re.search(
+        r"(?m)^SettingsSchemaVersion=(\d+)",
+        decode_like_powershell((ROOT / "SteamShellSettings_SAMPLE.ini").read_bytes()))
+    for label, found in (("runtime", runtime), ("embedded default", embedded),
+                         ("sample INI", sample)):
+        if not found:
+            fail(f"SteamShell: the {label} settings schema version could not be read.")
+    if runtime and embedded and sample:
+        versions = {"runtime": runtime.group(1),
+                    "embedded default": embedded.group(1),
+                    "sample INI": sample.group(1)}
+        if len(set(versions.values())) != 1:
+            fail("SteamShell settings schema versions disagree: "
+                 + ", ".join(f"{k}={v}" for k, v in versions.items())
+                 + ". A fresh install writes the template's number and the "
+                 "runtime then migrates it on every start.")
+
+    companion = read_source("SteamShell-XFE.ahk")
+    xruntime = re.search(r"(?m)^global SettingsSchemaVersion\s*:=\s*(\d+)$", companion)
+    xdefault = re.search(r'"SettingsSchemaVersion",\s*(\d+)', companion)
+    xsample = re.search(
+        r"(?m)^SettingsSchemaVersion=(\d+)",
+        decode_like_powershell((ROOT / "SteamShell-XFE_SAMPLE.ini").read_bytes()))
+    for label, found in (("runtime", xruntime), ("DefaultSettings", xdefault),
+                         ("sample INI", xsample)):
+        if not found:
+            fail(f"SteamShell-XFE: the {label} settings schema version could not be read.")
+    if xruntime and xdefault and xsample:
+        versions = {"runtime": xruntime.group(1),
+                    "DefaultSettings": xdefault.group(1),
+                    "sample INI": xsample.group(1)}
+        if len(set(versions.values())) != 1:
+            fail("SteamShell-XFE settings schema versions disagree: "
+                 + ", ".join(f"{k}={v}" for k, v in versions.items()) + ".")
 
 
 def main():
     sources = {name: read_source(name) for name in ALL_FILES}
     maps = {name: function_map(text) for name, text in sources.items()}
+    check_quickmenu_rows(sources)
+    check_schema_versions()
+    check_cross_name_duplicates(sources)
 
     # ---- duplicate definitions -------------------------------------------
     # A duplicate silently wins over the earlier one.
@@ -662,6 +1037,8 @@ def main():
         # names. Three of these were learned one Windows round-trip at a time --
         # $source, then $rawSource, then $helperSource -- so the unknown-subject
         # report below exists to make the fourth one visible here instead.
+        sample_ini = ("SteamShellSettings_SAMPLE.ini"
+                      if spath == "SteamShell.ahk" else "SteamShell-XFE_SAMPLE.ini")
         texts = {
             "source": source,
             "rawsource": read_source(spath),
@@ -669,16 +1046,38 @@ def main():
             "helpereffective": _effective_source("SteamShell-Helper.ahk"),
             "sharedsource": read_source("SteamShell-Shared.ahk"),
             "commonsource": read_source("SteamShell-Common.ahk"),
+            # Neither of these has "source" in its name, which is exactly why
+            # they went unreplayed: the subject scan below used to look only for
+            # $*source*. Twenty-one rules read $sample and nine read
+            # $buildScript, and one of the $sample rules -- the companion's
+            # settings schema version -- was failing on Windows while this
+            # harness reported green.
+            "sample": decode_like_powershell((ROOT / sample_ini).read_bytes()),
+            "buildscript": (decode_like_powershell(
+                (ROOT / "Build-SteamShell.ps1").read_bytes())
+                if (ROOT / "Build-SteamShell.ps1").exists() else ""),
         }
+        # Subjects that are loop-local values rather than a file: each is a
+        # per-iteration string the validator built itself, so there is nothing
+        # here to replay them against. Listed rather than ignored, so the next
+        # subject that appears is reported instead of silently skipped.
+        LOOP_LOCAL = {"previous", "fallback", "current", "line", "declared",
+                      "candidate", "simulation", "forbiddenscope", "_",
+                      "defline"}
+        # EVERY subject, not just $*source*. The old pattern could not see a
+        # subject whose name lacked the word "source", so $sample and
+        # $buildScript were outside the net without anything saying so.
         for subject_name in sorted(set(
                 m.group(1).lower() for m in re.finditer(
-                    r"\$(\w*[Ss]ource\w*)\s+-(?:not)?match", vtext))):
+                    r"\$(\w+)\s+-(?:not)?match", vtext))):
+            if subject_name in LOOP_LOCAL:
+                continue
             if subject_name not in texts:
                 fail(f"{vpath} asserts against ${subject_name}, which "
                      "Replay-Validation.py does not know how to read. Every rule "
                      "written against it is going unchecked here. Add it to `texts`.")
         for op, want in (("-match", True), ("-notmatch", False)):
-            for m in re.finditer(r"\$(\w*[Ss]ource\w*)\s+" + re.escape(op)
+            for m in re.finditer(r"\$(\w+)\s+" + re.escape(op)
                                  + r"\s+((?:\s*(?:\+\s*)?'(?:[^']|'')*'\s*)+)", vtext):
                 if m.group(1).lower() not in texts:
                     continue

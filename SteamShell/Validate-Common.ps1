@@ -482,6 +482,280 @@ function Test-IsSubsequence {
     return $index -eq $Small.Count
 }
 
+# The text between a function's braces, by name. Empty when undefined.
+function Get-AhkFunctionBody {
+    param([string]$Source, [string]$Name)
+    $match = [regex]::Match($Source, "(?m)^" + [regex]::Escape($Name) + "\(")
+    if (-not $match.Success) { return "" }
+    $i = $Source.IndexOf("{", $match.Index) + 1
+    $depth = 1
+    $j = $i
+    while ($depth -gt 0 -and $j -lt $Source.Length) {
+        if ($Source[$j] -eq "{") { $depth++ }
+        elseif ($Source[$j] -eq "}") { $depth-- }
+        $j++
+    }
+    return $Source.Substring($i, $j - $i - 1)
+}
+
+# Every `Name(...)` call, arguments split on top-level commas with quote state
+# and paren depth tracked.
+#
+# The Python replay computes this identically and must keep doing so. A regex
+# that stopped at the first ")" reported 18 handlers as unreachable, every one a
+# false alarm from a call wrapped across lines -- and an assertion that cries
+# wolf 18 times gets switched off rather than fixed.
+function Get-AhkCallArguments {
+    param([string]$Source, [string]$Name)
+    $results = New-Object System.Collections.Generic.List[object]
+    foreach ($m in [regex]::Matches($Source, "\b" + [regex]::Escape($Name) + "\(")) {
+        $i = $m.Index + $m.Length
+        $depth = 1
+        $j = $i
+        $inString = $false
+        while ($depth -gt 0 -and $j -lt $Source.Length) {
+            $c = $Source[$j]
+            if ($c -eq '"') { $inString = -not $inString }
+            elseif (-not $inString) {
+                if ($c -eq "(") { $depth++ }
+                elseif ($c -eq ")") { $depth-- }
+            }
+            $j++
+        }
+        # Not $args: that is an automatic variable holding the function's own
+        # unbound arguments, and assigning to it here would be shadowing a
+        # reserved name for no reason.
+        $argumentText = $Source.Substring($i, $j - $i - 1)
+        $parts = New-Object System.Collections.Generic.List[string]
+        $depth = 0
+        $inString = $false
+        $current = ""
+        foreach ($c in $argumentText.ToCharArray()) {
+            if ($c -eq '"') { $inString = -not $inString }
+            if (-not $inString) {
+                if ($c -eq "(" -or $c -eq "[") { $depth++ }
+                elseif ($c -eq ")" -or $c -eq "]") { $depth-- }
+                elseif ($c -eq "," -and $depth -eq 0) {
+                    $parts.Add($current.Trim()); $current = ""; continue
+                }
+            }
+            $current += $c
+        }
+        $parts.Add($current.Trim())
+        $results.Add($parts.ToArray())
+    }
+    # Comma operator: PowerShell UNROLLS a collection on return, so a bare
+    # `return $results.ToArray()` hands back the elements rather than the array.
+    # Get-AhkCallFingerprint above already carries this for the same reason.
+    return , $results.ToArray()
+}
+
+function Get-AhkStringLiteral {
+    param([string]$Argument)
+    $a = $Argument.Trim()
+    if ($a.Length -gt 1 -and $a[0] -eq '"' -and $a[-1] -eq '"' -and
+        -not $a.Substring(1, $a.Length - 2).Contains('"')) {
+        return $a.Substring(1, $a.Length - 2)
+    }
+    return $null
+}
+
+function Get-AhkSwitchCaseLabels {
+    param([string]$Body)
+    $out = New-Object System.Collections.Generic.HashSet[string]
+    foreach ($m in [regex]::Matches($Body, "(?m)^\s*case\s+([^:\n]+):")) {
+        foreach ($s in [regex]::Matches($m.Groups[1].Value, '"([^"]+)"')) {
+            [void]$out.Add($s.Groups[1].Value)
+        }
+    }
+    # Comma operator, or PowerShell unrolls the HashSet into an Object[] and the
+    # caller's .Add() fails with "Collection was of a fixed size."
+    return , $out
+}
+
+# Every Quick Menu row reaches behaviour, and every behaviour has a row.
+#
+# The fingerprint gate cannot see the Quick Menu: the two trees build rows
+# differently, which drags every QuickMenu* function below the 0.75 threshold,
+# so twelve functions and about 1,150 lines sit unmeasured in the one part of
+# the program a user drives directly. Nothing about a broken row fails to
+# compile -- a `case` that no longer exists falls through, so the row renders,
+# selects, and does nothing.
+#
+# Checked in the ACTIVATE direction specifically. Accepting "reaches any
+# handler" passes a row that still shows its value but no longer acts, which is
+# the exact failure this exists to catch.
+function Assert-QuickMenuRows {
+    param(
+        [Parameter(Mandatory = $true)][string]$ProjectRoot,
+        [switch]$Quiet
+    )
+    $manifestPath = Join-Path $ProjectRoot "QUICKMENU_ROWS.txt"
+    Assert-True (Test-Path -LiteralPath $manifestPath) (
+        "QUICKMENU_ROWS.txt is missing; it is the row inventory this check enforces.")
+    if (-not (Test-Path -LiteralPath $manifestPath)) { return }
+
+    $recorded = @{}
+    $dynamic = @{}
+    foreach ($line in (Get-Content -LiteralPath $manifestPath)) {
+        $trimmed = $line.Trim()
+        if ($trimmed -eq "" -or $trimmed.StartsWith("#")) { continue }
+        $space = $trimmed.IndexOf(" ")
+        if ($space -lt 1) { continue }
+        $product = $trimmed.Substring(0, $space)
+        $name = $trimmed.Substring($space + 1).Trim()
+        if ($name.StartsWith("dynamic:")) {
+            if (-not $dynamic.ContainsKey($product)) {
+                $dynamic[$product] = New-Object System.Collections.Generic.HashSet[string]
+            }
+            [void]$dynamic[$product].Add($name.Substring(8))
+        } else {
+            if (-not $recorded.ContainsKey($product)) {
+                $recorded[$product] = New-Object System.Collections.Generic.HashSet[string]
+            }
+            [void]$recorded[$product].Add($name)
+        }
+    }
+
+    $families = @("layout:", "taskWindow:", "gamescore:", "toggle:", "page:")
+    $sharedText = Get-Content -LiteralPath (Join-Path $ProjectRoot "SteamShell-Shared.ahk") -Raw
+    $inert = New-Object System.Collections.Generic.HashSet[string]
+    foreach ($m in [regex]::Matches(
+        (Get-AhkFunctionBody -Source $sharedText -Name "QuickMenuRowIsInert"),
+        '"([^"]+)",\s*true')) {
+        [void]$inert.Add($m.Groups[1].Value)
+    }
+
+    foreach ($pair in @(
+        @{ Product = "standalone"; File = "SteamShell.ahk"; Builder = "QuickMenuGetDefinitions" },
+        @{ Product = "xfe";        File = "SteamShell-XFE.ahk"; Builder = "QuickMenuGetRows" })) {
+        $text = Get-Content -LiteralPath (Join-Path $ProjectRoot $pair.File) -Raw
+        $rowsBody = Get-AhkFunctionBody -Source $text -Name $pair.Builder
+        Assert-True ($rowsBody -ne "") (
+            "$($pair.File) defines no $($pair.Builder)(); the Quick Menu row inventory cannot be checked.")
+        if ($rowsBody -eq "") { continue }
+
+        # The two builders spell a row differently, and the extraction respects
+        # that: treating MenuRow's "first argument is the id" rule as general
+        # read standalone's Map("audio", ...) grouping key as a row id.
+        $built = New-Object System.Collections.Generic.HashSet[string]
+        $rowAction = @{}
+        foreach ($a in (Get-AhkCallArguments -Source $rowsBody -Name "MenuRow")) {
+            if ($a.Count -lt 1) { continue }
+            $id = Get-AhkStringLiteral $a[0]
+            if ($null -eq $id) { continue }
+            [void]$built.Add($id)
+            if ($a.Count -gt 3) { $rowAction[$id] = Get-AhkStringLiteral $a[3] }
+        }
+        # A row declaring "page" or "back" carries its own navigation and needs
+        # no case at all. That is the point of the field: sixteen ids used to
+        # reach two identical bodies.
+        $navigating = New-Object System.Collections.Generic.HashSet[string]
+        foreach ($a in (Get-AhkCallArguments -Source $rowsBody -Name "Map")) {
+            if ($a.Count -gt 1 -and (Get-AhkStringLiteral $a[0]) -eq "id") {
+                $id = Get-AhkStringLiteral $a[1]
+                if ($null -ne $id) {
+                    [void]$built.Add($id)
+                    for ($k = 0; $k -lt $a.Count; $k += 2) {
+                        $key = Get-AhkStringLiteral $a[$k]
+                        if ($key -eq "page" -or $key -eq "back") {
+                            [void]$navigating.Add($id)
+                        }
+                    }
+                }
+            }
+        }
+        $filtered = New-Object System.Collections.Generic.HashSet[string]
+        foreach ($candidate in @($built)) {
+            $isFamily = $false
+            foreach ($prefix in $families) {
+                if ($candidate.StartsWith($prefix)) { $isFamily = $true; break }
+            }
+            if (-not $isFamily) { [void]$filtered.Add($candidate) }
+        }
+        $built = $filtered
+
+        $known = $recorded[$pair.Product]
+        if ($null -eq $known) { $known = New-Object System.Collections.Generic.HashSet[string] }
+        foreach ($gone in @($known | Where-Object { -not $built.Contains($_) } | Sort-Object)) {
+            Assert-True $false (
+                "$($pair.File): the Quick Menu row '$gone' is in QUICKMENU_ROWS.txt but no " +
+                "longer built. If that is deliberate, delete the line in the same commit; a " +
+                "row that vanishes silently is what this file exists to catch.")
+        }
+        foreach ($added in @($built | Where-Object { -not $known.Contains($_) } | Sort-Object)) {
+            Assert-True $false (
+                "$($pair.File): the Quick Menu builds a row '$added' that QUICKMENU_ROWS.txt " +
+                "does not record. Add it, so the inventory stays the list of rows that exist.")
+        }
+
+        $handlers = Get-AhkSwitchCaseLabels (
+            Get-AhkFunctionBody -Source $text -Name "QuickMenuActivateSelected")
+        foreach ($label in (Get-AhkSwitchCaseLabels (
+            Get-AhkFunctionBody -Source $text -Name "QuickMenuAdjustSelected"))) {
+            [void]$handlers.Add($label)
+        }
+        foreach ($fn in @("IsQuickMenuToggleSetting", "IsQuickMenuAdjustSetting")) {
+            foreach ($m in [regex]::Matches(
+                (Get-AhkFunctionBody -Source $text -Name $fn), "[A-Za-z]\w*")) {
+                [void]$handlers.Add($m.Value)
+            }
+        }
+        # Actions both products implement identically live in Shared now, so a
+        # row can reach its behaviour without either tree naming it.
+        foreach ($label in (Get-AhkSwitchCaseLabels (
+            Get-AhkFunctionBody -Source $sharedText -Name "QuickMenuActivateShared"))) {
+            [void]$handlers.Add($label)
+        }
+
+        foreach ($row in @($built | Sort-Object)) {
+            if ($rowAction.ContainsKey($row)) {
+                $action = $rowAction[$row]
+                if ($null -eq $action -or $action -eq "none" -or
+                    ($families | Where-Object { $action.StartsWith($_) }) -or
+                    $handlers.Contains($action)) { continue }
+                Assert-True $false (
+                    "$($pair.File): the Quick Menu row '$row' carries action '$action', which " +
+                    "no handler implements. It would render and do nothing when selected.")
+                continue
+            }
+            if ($handlers.Contains($row) -or $inert.Contains($row) -or
+                $navigating.Contains($row)) { continue }
+            Assert-True $false (
+                "$($pair.File): the Quick Menu row '$row' reaches no activate, adjust or " +
+                "toggle handler and is not declared inert. It would render and do nothing " +
+                "when selected. If it is display-only, add it to QuickMenuRowIsInert so that " +
+                "is stated rather than inferred from a missing case.")
+        }
+
+        $rowActions = New-Object System.Collections.Generic.HashSet[string]
+        foreach ($v in $rowAction.Values) { if ($null -ne $v) { [void]$rowActions.Add($v) } }
+        $allowed = New-Object System.Collections.Generic.HashSet[string]
+        foreach ($s in @($built) + @($inert)) { [void]$allowed.Add($s) }
+        if ($dynamic.ContainsKey($pair.Product)) {
+            foreach ($s in $dynamic[$pair.Product]) { [void]$allowed.Add($s) }
+        }
+        foreach ($fn in @("QuickMenuActivateSelected", "QuickMenuAdjustSelected")) {
+            foreach ($label in @((Get-AhkSwitchCaseLabels (
+                Get-AhkFunctionBody -Source $text -Name $fn)) | Sort-Object)) {
+                if ($families | Where-Object { $label.StartsWith($_) }) { continue }
+                if ($allowed.Contains($label) -or $rowActions.Contains($label)) { continue }
+                Assert-True $false (
+                    "$($pair.File): $fn handles '$label', which no Quick Menu row builds. " +
+                    "Delete the case, or record it in QUICKMENU_ROWS.txt as 'dynamic:' if a " +
+                    "variable reaches it.")
+            }
+        }
+    }
+
+    if (-not $Quiet) {
+        Write-Host ("Quick Menu rows: {0} recorded across {1} products; every row reaches an " +
+            "activate path and every handler has a row." -f
+            (@($recorded.Values | ForEach-Object { $_.Count }) | Measure-Object -Sum).Sum,
+            $recorded.Count)
+    }
+}
+
 function Assert-SharedParity {
     param(
         [Parameter(Mandatory = $true)][string]$ProjectRoot,
@@ -832,16 +1106,18 @@ function Assert-SharedParity {
     # growing back.
     $sharedSeamAllowed = @(
         "LogLine", "SharedPersistSettings",
-        "ElevatedRtssRequestPath", "EnsureRtssRunning", "HideQuickMenu",
+        "HideQuickMenu", "ShowQuickMenu",
+        "ProductLaunchMinimized", "ProductQuickMenuBlockedReason",
+        "MouseWatchDisabled", "MouseWatchHoldsCursorVisible",
         "PersistRtssCustomFrameCap", "ProductBestGameExe",
-        "ProductCenterGui", "ProductElevatedHelperAlive",
+        "ProductCenterGui", "ProductDataDir", "ProductElevatedHelperAlive",
         "ProductHealthResults", "ProductIdentity",
         "ProductSettingsScrollBar", "ProductSettingsViewportHeight",
         "ProductTrayBaseTip", "ProductTrayItems", "ProductVersionText",
         "QuickMenuActivateSelected", "QuickMenuAdjustSelected",
         "QuickMenuBuildGui", "QuickMenuCloseSelected",
         "QuickMenuMouseChoose", "QuickMenuNormalizeSelection",
-        "QuickMenuRefresh", "QuickMenuRowValueText")
+        "QuickMenuRefresh", "QuickMenuValue")
     foreach ($name in $sharedSeamAllowed) {
         foreach ($pair in @(
             @{ Name = "SteamShell.ahk"; Table = $standalone },
@@ -993,6 +1269,12 @@ function Assert-SharedParity {
     # It FAILS rather than advises, because an advisory nobody acts on is how
     # this got to 34. Divergence is now something declared in
     # DIVERGENT_FUNCTIONS.txt with a stated reason, not something drifted into.
+    # A name listed TWICE fails here too. Five names once carried a PENDING
+    # reason under one heading and a contradictory PERMANENT one under another,
+    # and because the entries land in a hashtable the later silently won. The
+    # PENDING half was the file's entire consolidation worklist, and neither
+    # harness could see it. A file whose stated purpose is to make a count go
+    # down cannot hold two answers for the same name.
     $divergent = @{}
     if (Test-Path -LiteralPath $divergentPath) {
         foreach ($line in (Get-Content -LiteralPath $divergentPath)) {
@@ -1000,11 +1282,18 @@ function Assert-SharedParity {
             if ($trimmed -eq "" -or $trimmed.StartsWith("#")) { continue }
             $split = $trimmed.IndexOf(":")
             if ($split -lt 0) {
-                $divergent[$trimmed.ToLowerInvariant()] = ""
+                $key = $trimmed.ToLowerInvariant()
+                $reason = ""
             } else {
-                $divergent[$trimmed.Substring(0, $split).Trim().ToLowerInvariant()] =
-                    $trimmed.Substring($split + 1).Trim()
+                $key = $trimmed.Substring(0, $split).Trim().ToLowerInvariant()
+                $reason = $trimmed.Substring($split + 1).Trim()
             }
+            Assert-True (-not $divergent.ContainsKey($key)) (
+                "DIVERGENT_FUNCTIONS.txt lists '$key' more than once. Only the " +
+                "last entry counts, so the others are reasons no harness reads. " +
+                "Keep one, and delete the entry entirely once the two copies " +
+                "are merged.")
+            $divergent[$key] = $reason
         }
     }
     $flagged = @{}

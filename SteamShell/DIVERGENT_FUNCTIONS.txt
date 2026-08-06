@@ -26,8 +26,18 @@
 # moment its two copies are merged; a stale entry also fails, so the file cannot
 # quietly become a list of things nobody looks at again.
 #
-# PENDING entries are a worklist, not a justification. They record consolidation
-# that is scheduled and not yet done, so the count going down is visible.
+# ONE ENTRY PER NAME, and that also fails the build now.
+#
+# This file used to carry PENDING headings as a separate worklist, and five names
+# ended up listed twice: a PENDING reason under one heading, a contradictory
+# PERMANENT one under another. Both harnesses read this file into a dictionary,
+# so the later entry silently won and the PENDING half was text nothing read.
+# Those five were the entire worklist. The count this file exists to drive down
+# could not be seen going down.
+#
+# So scheduled consolidation is now recorded IN the one reason that name is
+# allowed -- "...; Phase 4a's table should absorb both" -- where the gate that
+# prints the reason will print the plan with it.
 
 # ------------------------------------------------------------------------------
 # PERMANENT -- the per-product seam
@@ -40,37 +50,13 @@ ProductVersionText: standalone reports a shell version and the helper build; the
 ProductTrayBaseTip: the notification-area tooltip states what the program is, and they are not the same program
 ProductTrayItems: the companion's tray menu has no shell controls to offer, because Xbox FSE owns the shell; the shapes differ because the menus genuinely differ
 ProductSettingsScrollBar: the two Settings surfaces are separate implementations holding their scrollbar in differently named globals; revisit when Phase 4c unifies settings
+ProductDataDir: where each program writes what it writes -- the shell reads a global Setup can relocate, the companion is portable and answers A_ScriptDir. Asking through the seam is what let ElevatedRtssRequestPath stop being two functions.
 
 # ------------------------------------------------------------------------------
 # PERMANENT -- product vocabulary
 # ------------------------------------------------------------------------------
 
 ControllerBindingPretty: resolution logic is shared; the LABELS are deliberately not. The companion speaks Xbox FSE's vocabulary -- "Game Bar" for WinG, "Back / Escape" for Esc, "Close window" for AltF4 -- and offers TaskView, WindowsDesktop and Settings actions standalone does not, while standalone offers ControlPanel. Kept as a per-product label map behind one shared resolver.
-
-# ------------------------------------------------------------------------------
-# PENDING Phase 2a -- identical call sequence, moving to SteamShell-Shared.ahk
-# ------------------------------------------------------------------------------
-# Same routine, different text only: parameter names, line wrapping, an if-chain
-# against a ternary. No abstraction needed; adopt the superset version.
-
-ElevatedRtssRequestPath: PENDING Phase 2a -- identical call sequence, differs only in how the path is spelled
-ExecuteControllerBinding: PENDING Phase 2a -- 0.88; the builtin action sets differ, the dispatch does not
-MouseWatch: PENDING Phase 2a -- identical call sequence
-
-# ------------------------------------------------------------------------------
-# PENDING Phase 2b -- one is a strict subset of the other
-# ------------------------------------------------------------------------------
-# Six of these eight are XFE-inside-SS. That is not two programs that grew
-# apart; it is one program copied and trimmed. Share the superset and let the
-# companion's missing state be false.
-
-QuickMenuHideThenSteamMenu: PENDING Phase 2b -- standalone is the subset here
-ToggleQuickMenu: PENDING Phase 2b -- companion is standalone minus the desktop-mode guard
-
-# ------------------------------------------------------------------------------
-# PENDING Phase 2c -- resolvable through an abstraction that already exists
-# ------------------------------------------------------------------------------
-
 
 # ------------------------------------------------------------------------------
 # PERMANENT -- the privilege boundary
@@ -101,12 +87,12 @@ OpenTouchKeyboard: standalone reaches TabTip through LaunchInteractiveApp so tha
 
 ReadBool: three-line wrapper binding IniPath or SettingsPath to ReadIniBool in SteamShell-Common.ahk
 ReadInt: three-line wrapper binding IniPath or SettingsPath to ReadIniInt in SteamShell-Common.ahk
+ProductQuickMenuBlockedReason: standalone refuses to open the menu while the desktop is being restored or when it is switched off; the companion has neither state and always answers ""
 InitXInput: three-line wrapper caching ResolveXInputDll in each program's own XInputDll global
 HasLongBinding: three-line wrapper passing each program's ControllerMap to ControllerBindingHasLong
-ElevatedRtssRequestPath: the two programs write to different places by design -- standalone to its ProgramData directory, the companion beside its own script, because it is portable and standalone is the shell
-ToggleQuickMenu: standalone guards on DesktopRestorePending and on EnableQuickMenu, and names its own settings file in the refusal; the companion has no desktop restore to be in the middle of
 QuickMenuHideThenSteamMenu: the companion resolves the shortcut through SendSteamMenu rather than reading SteamMenuShortcut, so the two take their value from different places
-MouseWatch: the gates genuinely differ -- standalone suppresses hiding while Explorer is allowed, the companion while Settings is visible. Unifying is a cursor-behaviour change in both and belongs in a pass that can be tested on hardware.
+MouseWatchDisabled: standalone stands the whole pass down while Explorer is allowed, because the desktop shell owns the cursor then; the companion has no desktop shell and gates only on the setting
+MouseWatchHoldsCursorVisible: asked after movement tracking rather than before it, so it declines hiding without stopping the cursor reappearing -- the companion holds it for a pointer-driven Settings window, standalone holds it for nothing
 ExecuteControllerBinding: the builtin ACTION SET is per-product, the same divergence recorded for ControllerBindingPretty -- the companion has TaskView, WindowsDesktop and Settings, standalone has ControlPanel and launches Explorer through its de-elevation path. Phase 4a's table should absorb both.
 SendChordSafe: three-line wrapper over SendChordReleasingModifiers in SteamShell-Common.ahk; the shared copy also declines while the companion is disabled, which the helper has no concept of
 
@@ -138,7 +124,6 @@ SendChordSafe: three-line wrapper over SendChordReleasingModifiers in SteamShell
 # tree that works, for one function; the entry is cheaper and the reason is now
 # on the record.
 
-RecordShortcutChord: each tree wires up its own handler family, named its own way, and the body can only name one set -- see the table above
+RecordShortcutChord: each tree wires up its own handler family, named its own way, and the body can only name one set -- see the table above. MEASURED, because the note above used to claim renaming one family would merge these and that is false: the six handlers differ in SUBSTANCE, not only in name. Standalone's are consistently the larger -- 28/20, 16/8, 33/16, 38/21, 11/5 lines -- and body similarity runs from 0.94 down to 0.48. Its Accept snaps a default modifier map when the user never pressed a main key, which the companion's simply does not do. Renaming would therefore turn one divergent entry into six. The merge worth doing is adopting standalone's richer handlers into the companion, which is an input-capture behaviour change and needs testing on hardware.
 AutoMouseModeActive: the companion has no desktop mode, and that is an ARCHITECTURAL rule rather than an omission. Validate-SteamShell-XFE.ps1 asserts -notmatch 'EnableDesktopAutoMouseMode\s*:=' and -notmatch 'DesktopAutoMouseExcludeExeSet', in its own words so that reintroducing the mode 'is a decision someone has to take deliberately'. Sharing standalone's body required declaring both names in the companion, which is precisely what that rule forbids. The reason was already written down -- in the validator rather than in a comment.
-EnsureRtssRunning: standalone starts RTSS through LaunchInteractiveApp so an elevated shell cannot pass its token on; the companion resolves the path through ResolveRtssExecutablePath, which its own validator pins as the centralized discovery route
 

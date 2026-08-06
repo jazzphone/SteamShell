@@ -1432,10 +1432,62 @@ $quickMenuIds = @(
         Sort-Object -Unique
 )
 $blankValueIds = @("desktop", "restart", "shutdown", "sleep")
+# Rows that dispatch through DATA rather than through a named case.
+#
+# A row carrying "page" or "back" navigates from the field itself --
+# QuickMenuActivateSelected reads row.Has("back") / row["page"] before its
+# switch -- so sixteen ids that used to need a case here no longer have one.
+# Rows in QuickMenuToggleTable answer both their value and their write from that
+# table, keyed on the row id, so they have no case in the value switch either.
+#
+# Without these two sets this check reads a deliberate consolidation as a
+# regression, which is exactly what it did: "Quick Menu row has no activation
+# mapping: audioMenu".
+$fieldDispatchedIds = @()
+$backDispatchedIds = @()
+foreach ($defLine in ($definitionsText -split "`r?`n")) {
+    $idMatch = [regex]::Match($defLine, 'Map\("id",\s*"([^":]+)"')
+    if (-not $idMatch.Success) { continue }
+    $rowId = $idMatch.Groups[1].Value
+    if ($defLine -match '"back",\s*true') {
+        $backDispatchedIds += $rowId
+        $fieldDispatchedIds += $rowId
+    } elseif ($defLine -match '"page",\s*"') {
+        $fieldDispatchedIds += $rowId
+    }
+}
+$tableDispatchedIds = @(
+    [regex]::Matches($source, '"(q\w+)",\s*Map\("section",') |
+        ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique)
+Assert-True ($fieldDispatchedIds.Count -ge 8 -and $tableDispatchedIds.Count -ge 8) (
+    "The Quick Menu page/back fields or the toggle table could not be read; " +
+    "this check would silently stop covering the rows they dispatch.")
+# Read from QuickMenuRowIsInert rather than restated here. The two lists drifted
+# the moment a row was declared inert in the shared file and this copy was not
+# updated -- gameScoreEmpty, which has never done anything when selected.
 $unavailableActionIds = @(
+    [regex]::Matches(
+        [regex]::Match($source, '(?ms)^QuickMenuRowIsInert\(index\)\s*\{.*?^\}\s*$').Value,
+        '"([^"]+)",\s*true') | ForEach-Object { $_.Groups[1].Value })
+foreach ($required in @(
     "displayScaleUnavailable", "displayUnavailable", "hdrUnavailable",
-    "rtssDisabled", "rtssMissing", "tasksUnavailable"
-)
+    "rtssDisabled", "rtssMissing", "tasksUnavailable")) {
+    Assert-True ($unavailableActionIds -contains $required) (
+        "QuickMenuRowIsInert no longer declares '$required' inert; either the " +
+        "row gained an action or the inert list was read wrongly.")
+}
+# Actions both products implement identically live in QuickMenuActivateShared,
+# which QuickMenuActivateSelected calls before its own switch. Those ids are
+# dispatched, just not from the body this check reads.
+$sharedActionIds = @(
+    [regex]::Matches(
+        [regex]::Match($source, '(?ms)^QuickMenuActivateShared\(id\)\s*\{.*?^\}\s*$').Value,
+        '(?m)^\s*case\s+([^:\n]+):') |
+        ForEach-Object { [regex]::Matches($_.Groups[1].Value, '"([^"]+)"') } |
+        ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique)
+Assert-True ($sharedActionIds.Count -ge 12) (
+    "QuickMenuActivateShared could not be read; the rows it dispatches would " +
+    "be reported as having no activation mapping.")
 # Settings rows are dispatched through shared predicates rather than named cases,
 # because AutoHotkey v2 caps a Case at 20 values. Their pipe-separated id lists
 # count as activation coverage.
@@ -1462,11 +1514,16 @@ Assert-True (
     ([regex]::Matches($source, 'IsQuickMenuAdjustSetting\(id\)')).Count -ge 2) (
     "Quick Menu activation or adjustment no longer consults the settings predicates.")
 foreach ($id in $quickMenuIds) {
-    if ($blankValueIds -notcontains $id) {
+    if ($blankValueIds -notcontains $id -and
+        $backDispatchedIds -notcontains $id -and
+        $tableDispatchedIds -notcontains $id) {
         Assert-True ($valuesText.Contains('"' + $id + '"')) (
             "Quick Menu row has no value mapping: $id")
     }
-    if ($unavailableActionIds -notcontains $id) {
+    if ($unavailableActionIds -notcontains $id -and
+        $fieldDispatchedIds -notcontains $id -and
+        $tableDispatchedIds -notcontains $id -and
+        $sharedActionIds -notcontains $id) {
         Assert-True (
             $actionsText.Contains('"' + $id + '"') -or
             $predicateActionIds.ContainsKey($id)) (
@@ -1634,10 +1691,18 @@ Assert-True (
     "The blackout safety tick no longer re-sinks the backdrop or re-hides the desktop.")
 # The blackout must stay switchable from the controller, because a misbehaving
 # backdrop is exactly the situation where no other input is reachable.
+#
+# The row is driven by QuickMenuToggleTable now rather than by a `case` of its
+# own, so both halves are pinned: the table entry that says which setting it
+# writes, and the ProductSettingBool arm that reads the live value back. Either
+# one missing leaves the row present and inert, which is the failure this
+# assertion has always been about.
 Assert-True (
     $source -match '"qBlackout",\s*"label",\s*"Black Desktop Background"' -and
     $source -match
-        '(?s)case\s+"qBlackout":\s*\r?\n\s*PersistQuickMenuSetting\(\s*"Features",\s*"EnableDesktopBlackout"') (
+        '(?s)"qBlackout",\s*Map\(\s*"section",\s*"Features",\s*"key",\s*"EnableDesktopBlackout"\)' -and
+    $source -match
+        '(?s)case\s+"qBlackout":\s*return\s+EnableDesktopBlackout') (
     "The desktop blackout is no longer toggleable from the Quick Menu.")
 Assert-True (
     $source -match
@@ -2907,10 +2972,16 @@ Assert-True (
         'WaitForSingleObject(?:(?!\n\})[\s\S])*?' +
         'IniRead\(ElevatedRtssRequestPath\(\),\s*"Result",\s*"Seq",\s*"-1"\)' +
         '(?:(?!\n\})[\s\S])*?completed\s*=\s*RtssElevatedRequestSeq' -and
-    # A request is not a setting: it never goes through the settings file.
+    # A request is not a setting: it never goes through the settings file. The
+    # builder is shared now and asks ProductDataDir() where to write; this tree's
+    # answer to that is the directory Setup can relocate, so both halves are
+    # pinned -- the shared one for the filename, this one for the location.
     $source -match
         '(?sm)^ElevatedRtssRequestPath\(\)\s*\{(?:(?!\n\})[\s\S])*?' +
-        'SteamShellDataDir\s*"\\rtss-request\.ini"') (
+        'ProductDataDir\(\)\s*"\\rtss-request\.ini"' -and
+    $source -match
+        '(?sm)^ProductDataDir\(\)\s*\{(?:(?!\n\})[\s\S])*?' +
+        'return\s+SteamShellDataDir') (
     "The elevated RTSS path is split across processes, unverified, or per-game saves still report success blindly.")
 
 # What the helper is allowed to be told, and where it may write.
@@ -3587,7 +3658,21 @@ Assert-True (
 # because a frozen release snapshot used to hold one tree. A snapshot is the
 # whole folder now, and a silent skip is the last thing this check should be
 # capable of.
+# The shared Quick Menu dispatcher is called with the variable THIS tree names.
+#
+# Standalone reads the row id into `id`; the companion dispatches on the
+# `action` a row carries and has no `id` in that function. Pasting one tree's
+# call into the other names a local that is never assigned, which AutoHotkey
+# does not refuse to compile -- it hands QuickMenuActivateShared an empty value
+# and every shared row silently stops responding. That happened during the
+# consolidation and no existing check saw it: the function existed, the
+# manifests agreed, and the row inventory was satisfied. This pins the argument.
+Assert-True (
+    $source -match '(?m)^\s*if QuickMenuActivateShared\(id\) \{') (
+    "QuickMenuActivateSelected must pass its own id to QuickMenuActivateShared; " +
+    "the other tree's variable name is an unassigned local here.")
 Assert-SharedParity -ProjectRoot $projectRoot -Quiet:$Quiet
+Assert-QuickMenuRows -ProjectRoot $projectRoot -Quiet:$Quiet
 # Reports only. See Report-StructuralDrift in Validate-Common.ps1 for why a
 # high structural score is evidence rather than a verdict.
 Report-StructuralDrift -ProjectRoot $projectRoot -Quiet:$Quiet | Out-Null

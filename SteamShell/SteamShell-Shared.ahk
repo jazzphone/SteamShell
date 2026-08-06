@@ -771,6 +771,21 @@ ElevatedRtssEventName() {
     return "Local\SteamShellRtssApply-" ScriptPid
 }
 
+; Where the request file is written. The two products keep their data in
+; different places -- the shell under a directory Setup can relocate, the
+; companion beside its own executable because it is portable -- and that is the
+; whole of what used to differ between two copies of this function. It is a
+; question to ask the product, not a routine to write twice.
+;
+; Deliberately NOT the settings file. This is a request, not a setting: it has
+; no meaning once serviced, it must not be staged through CommitIniChanges
+; beside the user's real configuration, and keeping it separate means the whole
+; of what crosses into the elevated process is two integers and a name in a file
+; that contains nothing else.
+ElevatedRtssRequestPath() {
+    return ProductDataDir() "\rtss-request.ini"
+}
+
 ; The completion event's name, as a function for the same reason the request
 ; event's name is one.
 ;
@@ -3329,6 +3344,442 @@ GetBindingValue(key) {
     }
 }
 
+; Open or close the Quick Menu, unless the product says it cannot right now.
+;
+; The two copies of this differed only in that standalone refuses while the
+; desktop is being restored or when the menu is switched off, and the companion
+; has neither state. That is a question to ask the product, not a reason to
+; write the routine twice.
+ToggleQuickMenu(*) {
+    global QuickMenuVisible
+    reason := ProductQuickMenuBlockedReason()
+    if (reason != "") {
+        ShowNotification(reason, "Warning")
+        return
+    }
+    if QuickMenuVisible
+        HideQuickMenu()
+    else
+        ShowQuickMenu()
+}
+
+; Start RTSS if it is not already running, minimized, and wait for it to appear.
+;
+; The two copies differed only in HOW they launched it -- standalone through
+; LaunchInteractiveApp so an elevated shell cannot pass its token on, the
+; companion through a plain Run. ProductLaunchMinimized is that difference and
+; nothing else.
+EnsureRtssRunning() {
+    path := ResolveRtssExecutablePath()
+    if ProcessExist("RTSS.exe")
+        return true
+    if (path = "")
+        return false
+    SplitPath(path, , &directory)
+    if !ProductLaunchMinimized(path, directory)
+        return false
+    return ProcessWait("RTSS.exe", 3) != 0
+}
+
+; ==============================================================================
+; Functions that were the same routine under two names
+; ==============================================================================
+; Each existed in both trees spelled differently -- SetStatus against
+; ShowNotification, GuiSafeLabel against GuiLiteralText, SettingsRepaint against
+; SettingsEditorRepaint -- so no check could see them. The fingerprint gate and
+; DIVERGENT_FUNCTIONS.txt both compare functions BY NAME, which makes a rename
+; the one form of duplication this project was structurally blind to.
+;
+; GetRtssMenuStatus is the one to remember: its two copies differed in a local
+; variable name and nothing else, yet an earlier audit counted the RTSS row as
+; DISPLAYING different text in the two products, because it compared the two
+; call expressions as strings and the companion's name was different.
+;
+; The companion's old name is deliberately NOT written out here. The product
+; validators match against raw source, comments included, so naming a retired
+; function in a comment can SATISFY an assertion that was meant to find it in
+; code -- which is exactly what happened while this block was being written.
+; ==============================================================================
+
+ShowNotification(message, kind := "Info") {
+    SharedNotify(message, kind)
+}
+
+GuiLiteralText(text) {
+    ; Native Win32 controls interpret a single ampersand as an access-key marker.
+    ; Double it whenever user-facing text should display the literal character.
+    return StrReplace(text, "&", "&&")
+}
+
+IsCloaked(hwnd) {
+    cloaked := 0
+    try {
+    hr := DllCall("dwmapi\DwmGetWindowAttribute"
+    , "Ptr", hwnd
+    , "UInt", 14
+    , "UInt*", cloaked
+    , "UInt", 4
+    , "Int")
+    return (hr = 0) && (cloaked != 0)
+    } catch {
+    return false
+    }
+}
+
+SettingsEditorRepaint() {
+    global SettingsGui
+    if !IsSet(SettingsGui) || !IsObject(SettingsGui)
+        return
+    ; RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW
+    try DllCall("User32\RedrawWindow"
+        , "Ptr", SettingsGui.Hwnd
+        , "Ptr", 0
+        , "Ptr", 0
+        , "UInt", 0x0185
+        , "Int")
+}
+
+SettingsEditorSetRedraw(enabled) {
+    global SettingsGui
+    if !IsSet(SettingsGui) || !IsObject(SettingsGui)
+        return
+    try DllCall("User32\SendMessageW"
+        , "Ptr", SettingsGui.Hwnd
+        , "UInt", 0x000B ; WM_SETREDRAW
+        , "Ptr", enabled ? 1 : 0
+        , "Ptr", 0
+        , "Ptr")
+}
+
+SettingsEditorGetScrollTrackPosition() {
+    scrollBar := ProductSettingsScrollBar()
+    if !IsObject(scrollBar)
+        return 0
+    scrollInfo := Buffer(28, 0)
+    NumPut("UInt", 28, scrollInfo, 0)
+    NumPut("UInt", 0x10, scrollInfo, 4) ; SIF_TRACKPOS
+    try {
+        if DllCall("User32\GetScrollInfo"
+            , "Ptr", scrollBar.Hwnd
+            , "Int", 2 ; SB_CTL
+            , "Ptr", scrollInfo)
+            return NumGet(scrollInfo, 24, "Int")
+    }
+    return 0
+}
+
+GetRtssMenuStatus() {
+    global EnableRTSSIntegration, RtssPath, RtssUseDllIntegration
+    if (!EnableRTSSIntegration)
+        return "Setup Required"
+    if ProcessExist("RTSS.exe") {
+        if !RtssUseDllIntegration
+            return "Running | Shortcuts"
+        liveState := GetRtssGlobalState()
+        if IsObject(liveState)
+            return "Overlay " (liveState["overlay"] ? "On" : "Off")
+                . " | Limiter " (liveState["limiter"] ? "On" : "Off")
+        return "Running"
+    }
+    return ResolveRtssExecutablePath() != "" ? "RTSS Ready" : "RTSS Not Found"
+}
+
+; ==============================================================================
+; Quick Menu layout manager
+; ==============================================================================
+; Which rows the MAIN page shows and in what order, and the window that edits
+; it. Shared because the two products offer the SAME eleven sections -- Audio,
+; Display & HDR, RTSS, Steam Menu, Steam Quick Access, Task Switcher, Game Bar,
+; Open Keyboard, Mouse Mode, Settings, System -- and there was never a reason
+; for only one of them to be able to reorder or hide them.
+;
+; The companion had no layout manager at all, so its only way to hide the Audio
+; and Display rows was a pair of Enable keys that duplicated what this window
+; does everywhere else. Sharing this is what let those keys be retired rather
+; than reimplemented a second time.
+;
+; Two seams keep it product-neutral, and both already existed:
+;   ProductCenterGui      -- the shell centres on its target monitor, the
+;                            companion on its own
+;   SharedPersistSettings -- the shell stages through CommitIniChanges, the
+;                            companion writes its portable INI directly
+; ==============================================================================
+
+GetDefaultQuickMenuOrder() {
+    return ["audio", "display", "rtss", "steammenu", "steamquickaccess",
+        "tasks", "gamebar", "keyboard", "mousemode", "settings", "system"]
+}
+
+ParseQuickMenuMainOrder(raw) {
+    allowed := Map()
+    for _, itemName in GetDefaultQuickMenuOrder()
+        allowed[itemName] := true
+    result := []
+    seen := Map()
+    for _, rawName in StrSplit(raw, "|") {
+        itemName := StrLower(Trim(rawName))
+        if (!allowed.Has(itemName) || seen.Has(itemName))
+            continue
+        seen[itemName] := true
+        result.Push(itemName)
+    }
+    for _, itemName in GetDefaultQuickMenuOrder() {
+        if !seen.Has(itemName)
+            result.Push(itemName)
+    }
+    return result
+}
+
+QuickMenuLayoutLabel(itemName) {
+    switch StrLower(itemName) {
+        case "audio": return "Audio"
+        case "display": return "Display & HDR"
+        case "rtss": return "RTSS & Performance"
+        case "steammenu": return "Steam Menu"
+        case "steamquickaccess": return "Steam Quick Access"
+        case "tasks": return "Task Switcher"
+        case "gamebar": return "Game Bar"
+        case "keyboard": return "Open Keyboard"
+        case "mousemode": return "Mouse Mode"
+        case "settings": return "Settings"
+        case "system": return "System"
+        default: return itemName
+    }
+}
+
+RefreshQuickMenuLayoutManager() {
+    global QuickMenuLayoutGui, QuickMenuMainOrder, QuickMenuHiddenItems
+    if !IsSet(QuickMenuLayoutGui)
+        return
+    try {
+        listView := QuickMenuLayoutGui["QuickMenuLayoutList"]
+        listView.Delete()
+        for _, itemName in QuickMenuMainOrder {
+            required := itemName = "settings" || itemName = "system"
+            visibility := required ? "Always" : (QuickMenuHiddenItems.Has(itemName) ? "Hidden" : "Visible")
+            listView.Add("", QuickMenuLayoutLabel(itemName), visibility, itemName)
+        }
+        listView.ModifyCol(1, 275)
+        listView.ModifyCol(2, 100)
+        listView.ModifyCol(3, 0)
+        if listView.GetCount()
+            listView.Modify(1, "Select Focus")
+    }
+}
+
+QuickMenuLayoutMove(direction, *) {
+    global QuickMenuLayoutGui
+    if !IsSet(QuickMenuLayoutGui)
+        return
+    listView := QuickMenuLayoutGui["QuickMenuLayoutList"]
+    row := listView.GetNext(0, "F")
+    if (!row)
+        row := listView.GetNext()
+    target := row + direction
+    if (!row || target < 1 || target > listView.GetCount())
+        return
+    first := [listView.GetText(row, 1), listView.GetText(row, 2), listView.GetText(row, 3)]
+    second := [listView.GetText(target, 1), listView.GetText(target, 2), listView.GetText(target, 3)]
+    listView.Modify(row, "", second*)
+    listView.Modify(target, "Select Focus Vis", first*)
+}
+
+QuickMenuLayoutToggle(*) {
+    global QuickMenuLayoutGui
+    if !IsSet(QuickMenuLayoutGui)
+        return
+    listView := QuickMenuLayoutGui["QuickMenuLayoutList"]
+    row := listView.GetNext(0, "F")
+    if (!row)
+        row := listView.GetNext()
+    if (!row)
+        return
+    itemName := listView.GetText(row, 3)
+    if (itemName = "settings" || itemName = "system") {
+        QuickMenuLayoutGui["QuickMenuLayoutStatus"].Text :=
+            "Settings and System remain visible as recovery paths."
+        return
+    }
+    current := listView.GetText(row, 2)
+    listView.Modify(row, "", listView.GetText(row, 1),
+        current = "Hidden" ? "Visible" : "Hidden", itemName)
+}
+
+QuickMenuLayoutRestoreDefault(*) {
+    global QuickMenuLayoutGui
+    if !IsSet(QuickMenuLayoutGui)
+        return
+    listView := QuickMenuLayoutGui["QuickMenuLayoutList"]
+    listView.Delete()
+    for _, itemName in GetDefaultQuickMenuOrder()
+        listView.Add("", QuickMenuLayoutLabel(itemName),
+            itemName = "settings" || itemName = "system" ? "Always" : "Visible", itemName)
+    listView.Modify(1, "Select Focus")
+    QuickMenuLayoutGui["QuickMenuLayoutStatus"].Text :=
+        "Default order restored in the editor. Choose Save Layout to apply it."
+}
+
+QuickMenuLayoutSave(*) {
+    global QuickMenuLayoutGui, QuickMenuMainOrderRaw, QuickMenuHiddenItemsRaw
+    global QuickMenuMainOrder, QuickMenuHiddenItems, QuickMenuVisible
+    if !IsSet(QuickMenuLayoutGui)
+        return
+    listView := QuickMenuLayoutGui["QuickMenuLayoutList"]
+    order := []
+    hidden := []
+    Loop listView.GetCount() {
+        itemName := listView.GetText(A_Index, 3)
+        order.Push(itemName)
+        if (listView.GetText(A_Index, 2) = "Hidden")
+            hidden.Push(itemName)
+    }
+    QuickMenuMainOrderRaw := JoinWith(order, "|")
+    QuickMenuHiddenItemsRaw := JoinWith(hidden, "|")
+    if !SharedPersistSettings([
+        Map("section", "QuickMenu", "key", "MainOrder", "value", QuickMenuMainOrderRaw),
+        Map("section", "QuickMenu", "key", "HiddenItems", "value", QuickMenuHiddenItemsRaw)
+    ]) {
+        QuickMenuLayoutGui["QuickMenuLayoutStatus"].Text := "The layout could not be saved."
+        return
+    }
+    QuickMenuMainOrder := ParseQuickMenuMainOrder(QuickMenuMainOrderRaw)
+    QuickMenuHiddenItems := Map()
+    for _, itemName in hidden
+        QuickMenuHiddenItems[itemName] := true
+    QuickMenuLayoutGui["QuickMenuLayoutStatus"].Text := "Quick Menu layout saved and applied."
+    if QuickMenuVisible
+        QuickMenuBuildGui()
+}
+
+ShowQuickMenuLayoutManager(*) {
+    global QuickMenuLayoutGui
+    if !IsSet(QuickMenuLayoutGui) {
+        QuickMenuLayoutGui := Gui("+AlwaysOnTop +ToolWindow -Resize", "Quick Menu Layout")
+        QuickMenuLayoutGui.SetFont("s10", "Segoe UI")
+        title := QuickMenuLayoutGui.AddText("xm ym w590 h30", "Quick Menu Layout")
+        title.SetFont("s17 Bold", "Segoe UI")
+        QuickMenuLayoutGui.AddText(
+            "xm y+2 w590 h38 +Wrap",
+            "Reorder the main menu and hide rows you do not use. Settings and System always remain available.")
+        QuickMenuLayoutGui.AddListView(
+            "xm y+8 w590 r10 -Multi vQuickMenuLayoutList", ["Section", "Visibility", "Key"])
+        upButton := QuickMenuLayoutGui.AddButton("xm y+8 w105 h32", "Move Up")
+        upButton.OnEvent("Click", QuickMenuLayoutMove.Bind(-1))
+        downButton := QuickMenuLayoutGui.AddButton("x+8 yp w105 h32", "Move Down")
+        downButton.OnEvent("Click", QuickMenuLayoutMove.Bind(1))
+        toggleButton := QuickMenuLayoutGui.AddButton("x+8 yp w125 h32", "Show / Hide")
+        toggleButton.OnEvent("Click", QuickMenuLayoutToggle)
+        defaultButton := QuickMenuLayoutGui.AddButton("x+8 yp w125 h32", "Restore Default")
+        defaultButton.OnEvent("Click", QuickMenuLayoutRestoreDefault)
+        saveButton := QuickMenuLayoutGui.AddButton("x+8 yp w105 h32", "Save Layout")
+        saveButton.OnEvent("Click", QuickMenuLayoutSave)
+        QuickMenuLayoutGui.AddText("xm y+8 w460 h24 vQuickMenuLayoutStatus", "")
+        closeButton := QuickMenuLayoutGui.AddButton("x+8 yp-5 w105 h30", "Close")
+        closeButton.OnEvent("Click", (*) => QuickMenuLayoutGui.Hide())
+        QuickMenuLayoutGui.OnEvent("Close", (*) => QuickMenuLayoutGui.Hide())
+        QuickMenuLayoutGui.OnEvent("Escape", (*) => QuickMenuLayoutGui.Hide())
+    }
+    QuickMenuLayoutGui.Show()
+    ProductCenterGui(QuickMenuLayoutGui)
+    RefreshQuickMenuLayoutManager()
+}
+
+; Which setting each plain on/off Quick Menu row writes. Data, not code.
+;
+; These eleven ids used to appear twice in standalone as near-identical `case`
+; bodies -- once in the value resolver returning "ON"/"OFF", once in the toggle
+; writing the INI -- so adding a switch meant remembering two places, and the
+; ids were baked into two product-specific switches that shared code could not
+; enter. As a table the rows are the same shape for both products, and the only
+; thing left that a shared caller cannot do is read the live global by name,
+; which is what ProductSettingBool exists for.
+;
+; Deliberately only the rows whose value really is a plain "ON"/"OFF". The ones
+; that read "ON  *  NEXT BOOT", "PAUSED"/"ACTIVE" or cycle through named modes
+; keep their own cases: their text is per-row vocabulary, not a boolean with a
+; skin on it, and folding them in here would mean encoding label text as data
+; for no gain.
+QuickMenuToggleTable() {
+    static table := Map(
+        ; Unlike the taskbar toggle this applies at once, so it stays usable
+        ; as an escape hatch if the backdrop ever misbehaves on a given machine.
+        "qBlackout", Map("section", "Features", "key", "EnableDesktopBlackout"),
+        "qControllerMouse", Map("section", "Controller", "key", "EnableControllerMouseMode"),
+        "qAutoHideCursor", Map("section", "Features", "key", "EnableAutoHideCursor"),
+        "qParkBoot", Map("section", "Features", "key", "EnableMouseParkOnBoot"),
+        "qParkFocus", Map("section", "Features", "key", "EnableMouseParkOnFocusChange"),
+        "qSteamRefocus", Map("section", "Features", "key", "EnableSteamRefocusMode"),
+        "qGameAssist", Map("section", "Features", "key", "EnableGameForegroundAssist"),
+        "qAlwaysFocus", Map("section", "Features", "key", "EnableAlwaysFocus"),
+        "qRtssIntegration", Map("section", "RTSS", "key", "EnableIntegration"))
+    return table
+}
+
+; The Quick Menu actions both products implement identically.
+;
+; Fourteen of the thirty ids both trees handle had byte-identical bodies; these
+; are those. The other sixteen are not refactoring decisions -- they differ in
+; how each product notifies (ShowNotification against SetStatus), in what it
+; calls its own settings window, and in real behaviour, like standalone
+; launching Steam when steamMenu is chosen and Steam is not running. Those stay
+; per-tree until somebody decides the product question underneath them.
+;
+; Every case here falls through to the caller's QuickMenuRefresh(), which is why
+; this reports whether it handled the id rather than refreshing itself: gameBar
+; returns early in both trees and deliberately is NOT in this list.
+;
+; Returns true when the id was handled.
+QuickMenuActivateShared(id) {
+    switch id {
+        case "audioOutput":
+            CycleDefaultAudioOutput(1)
+        case "volume":
+            QuickMenuAdjustSelected(1)
+        case "hdr":
+            ToggleQuickMenuHdrState()
+        case "displayResolution":
+            CycleDisplayResolution(1)
+        case "displayRefresh":
+            CycleDisplayFrequency(1)
+        case "displayScale":
+            CycleDisplayScale(1)
+        case "displayApply":
+            ApplyDisplaySelection()
+        case "rtssOverlayState", "overlayToggle":
+            ToggleRtssOverlay()
+        case "limiterToggle":
+            ToggleRtssFrameLimiter()
+        case "rtssFrameLimitCustom":
+            AdjustRtssCustomFrameCap(1)
+        case "overlayOn":
+            SetRtssOverlayState(true)
+        case "overlayOff":
+            SetRtssOverlayState(false)
+        case "limiterOn":
+            SetRtssFrameLimiterState(true)
+        case "limiterOff":
+            SetRtssFrameLimiterState(false)
+        default:
+            return false
+    }
+    return true
+}
+
+; The value column for a row, asked of the ROW rather than of its id.
+;
+; A row that declares itself a back row answers with the glyph directly, which
+; is what let eight standalone ids stop sharing one `case` that existed purely
+; to return it. The companion builds no row carrying "back", so that branch
+; simply does not fire there and its back rows keep the empty value they had.
+;
+; QuickMenuValue itself stays per-product: it is the label map, and the two
+; products genuinely word 19 of their 35 shared rows differently.
+QuickMenuRowValueText(row) {
+    if row.Has("back")
+        return "‹"
+    return QuickMenuValue(row["id"])
+}
+
 QuickMenuRowIsInert(index) {
     global QuickMenuRows
     static inert := Map(
@@ -3337,10 +3788,54 @@ QuickMenuRowIsInert(index) {
         "displayScaleUnavailable", true,
         "tasksUnavailable", true,
         "rtssMissing", true,
-        "rtssDisabled", true)
+        "rtssDisabled", true,
+        ; Declared rather than assumed. This row reports that nothing has been
+        ; scored yet, and selecting it has never done anything -- but standalone
+        ; expressed that by having no case for it, which is indistinguishable
+        ; from a case somebody deleted. The companion already said so out loud
+        ; by giving it action "none".
+        "gameScoreEmpty", true)
     if (index < 1 || index > QuickMenuRows.Length)
         return false
     return inert.Has(QuickMenuRows[index]["id"])
+}
+
+; The idle-cursor pass, on a timer in both products: track the pointer, re-show
+; the cursor the moment it moves, hide it again once it has been still for
+; MouseHideDelay.
+;
+; The two copies of this had an identical call sequence and differed in three
+; things: a global spelled MouseHideDelayMs on one side, and two suppression
+; gates asked at two different points. The name was drift and is now one name.
+; The gates are real -- see MouseWatchDisabled and MouseWatchHoldsCursorVisible
+; in each tree -- so they stayed per-product, asked from here at exactly the
+; points their own copies asked them, which is what keeps this a consolidation
+; rather than a cursor-behaviour change nobody tested on hardware.
+MouseWatch() {
+    global MouseHidden, LastMouseX, LastMouseY, LastMouseMoveTick, MouseHideDelay
+
+    if MouseWatchDisabled()
+        return
+
+    MouseGetPos(&mx, &my)
+    if (mx != LastMouseX || my != LastMouseY) {
+        LastMouseX := mx
+        LastMouseY := my
+        LastMouseMoveTick := A_TickCount
+        if MouseHidden {
+            SystemCursor("Show")
+            MouseHidden := false
+        }
+        return
+    }
+
+    if MouseWatchHoldsCursorVisible()
+        return
+
+    if (!MouseHidden && (A_TickCount - LastMouseMoveTick >= MouseHideDelay)) {
+        SystemCursor("Hide")
+        MouseHidden := true
+    }
 }
 
 SystemCursor(mode := "Show") {

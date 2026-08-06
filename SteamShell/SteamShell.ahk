@@ -291,8 +291,6 @@ global SetupAssistantExternalPid := 0
 global SetupAssistantExternalStartedTick := 0
 
 ; Optional living-room integrations exposed by the quick menu
-global EnableAudioQuickControls := true
-global EnableDisplayQuickControls := true
 global EnableRTSSIntegration := true
 global RtssPath := "C:\Program Files (x86)\RivaTuner Statistics Server\RTSS.exe"
 global RtssUseDllIntegration := true
@@ -2122,21 +2120,12 @@ EnsureElevatedGeometryEvent() {
 ; ------------------------------------------------------------------------------
 ; Elevated RTSS frame cap request -- per-tree half
 ; ------------------------------------------------------------------------------
-; The request channel itself now lives in SteamShell-Shared.ahk: the event names,
-; the request write, the completion wait, and the two Apply* verifiers are
-; identical in both trees and are compiled from one definition. What stays here
-; is the one part that genuinely differs -- where the request file is written,
-; because the two programs keep their data in different places.
-
-; Deliberately NOT the settings file. This is a request, not a setting: it has
-; no meaning once serviced, it must not be staged through CommitIniChanges
-; beside the user's real configuration, and keeping it separate means the whole
-; of what crosses into the elevated process is two integers in a file that
-; contains nothing else.
-ElevatedRtssRequestPath() {
-    global SteamShellDataDir
-    return SteamShellDataDir "\rtss-request.ini"
-}
+; The request channel lives entirely in SteamShell-Shared.ahk now, including
+; ElevatedRtssRequestPath(). "The two programs keep their data in different
+; places" was the reason this last piece stayed per-tree, and it was a reason to
+; ask the product for its directory rather than to write the function twice --
+; the two copies differed in SteamShellDataDir against A_ScriptDir and in
+; nothing else. ProductDataDir() is that question; see the seam below.
 
 SetElevatedGeometryRuntimeEnabled(enabled) {
     global ElevatedGeometryEventHandle
@@ -2448,7 +2437,6 @@ SetTimer(ControllerMouseSafetyTick, 5000)
 ; HELPERS (v2.0.19 compatibility)
 ; ==============================================================================
 
-
 SetSessionState(newState, detail := "") {
     global SessionState
     newState := StrUpper(Trim(newState))
@@ -2497,7 +2485,7 @@ GetDefaultSettingsIniText() {
 ; ==================================================================================================
 
 [SteamShell]
-SettingsSchemaVersion=20                                   ; Internal schema used for safe settings upgrades
+SettingsSchemaVersion=21                                   ; Internal schema used for safe settings upgrades
 
 [Setup]
 SetupState=Pending                                         ; Pending | InProgress | Complete
@@ -2676,14 +2664,9 @@ TaskForceCloseHoldMs=1200                                   ; Hold X this long i
 MainOrder=Audio|Display|RTSS|SteamMenu|SteamQuickAccess|Tasks|GameBar|Keyboard|MouseMode|Settings|System
 HiddenItems=                                                ; Optional rows to hide; Settings and System stay available
 ShowGameDetection=true                                      ; Game Detection row under System: what the window engine scored and why
+GameScoreMaxRows=8                                          ; How many scored candidates the Game Detection page lists (1-20)
 AccentColor=Purple                                          ; Steam Blue|Blue|Purple|Magenta|Red|Orange|Yellow|Green|Teal|Custom
 AccentColorCustom=107C10                                    ; RRGGBB used when AccentColor=Custom; invalid values fall back to Purple
-
-[AudioQuickControls]
-Enable=true                                                 ; Volume and mute controls in the quick menu
-
-[DisplayQuickControls]
-Enable=true                                                 ; Resolution/refresh/HDR controls when supported
 
 [RTSS]
 EnableIntegration=true                                      ; Enabled by default; the menu reports setup required when RTSS is unavailable
@@ -2874,6 +2857,14 @@ GetRetiredIniKeys() {
     ; GameLogMode and could create contradictory combinations.
     if TryReadIniRaw("Logging", "EnableGameScoreLogging", &retiredLoggingToggle)
         retired.Push(Map("section", "Logging", "key", "EnableGameScoreLogging"))
+
+    ; Row visibility moved to [QuickMenu] HiddenItems, which the Quick Menu
+    ; layout manager edits. These two said the same thing for two of the eleven
+    ; rows, so a user could hide Audio in one place and show it in the other.
+    for _, retiredSection in ["AudioQuickControls", "DisplayQuickControls"] {
+        if TryReadIniRaw(retiredSection, "Enable", &retiredQuickControl)
+            retired.Push(Map("section", retiredSection, "key", "Enable"))
+    }
 
     ; The old RTSS preset list was replaced by one user-configured frame cap.
     rtssSection := ""
@@ -3394,11 +3385,10 @@ LoadSettings() {
     global LauncherCleanupLauncherExeListRaw, LauncherCleanupBackgroundExeListRaw, LauncherCleanupExcludeExeListRaw
     global LauncherCleanupLauncherList, LauncherCleanupBackgroundList, LauncherCleanupExcludeSet
     global EnableControllerMouseMode, EnablePersistentMouseMode, ControllerIndex, ControllerPollIntervalMs, ControllerDeadzone, ControllerMouseSpeed, ControllerMouseFastMultiplier, ControllerScrollIntervalMs, ControllerScrollStep, ControllerChordHoldMs
-    global EnableQuickMenu, EnableGameDetectionMenu, QuickMenuChordHoldMs, TaskForceCloseHoldMs
+    global EnableQuickMenu, EnableGameDetectionMenu, GameScoreMaxRows, QuickMenuChordHoldMs, TaskForceCloseHoldMs
     global QuickMenuMainOrderRaw, QuickMenuHiddenItemsRaw
     global QuickMenuMainOrder, QuickMenuHiddenItems
     global SteamMenuShortcut, SteamQuickAccessShortcut, SteamOverlayShortcut
-    global EnableAudioQuickControls, EnableDisplayQuickControls
     global EnableRTSSIntegration, RtssPath, RtssUseDllIntegration, RtssOverlayControlMode
     global RtssOverlayToggleShortcut, RtssOverlayOnShortcut, RtssOverlayOffShortcut
     global RtssFrameLimiterControlMode, RtssPresetFrameCap, RtssCustomFrameCap
@@ -3519,10 +3509,7 @@ LoadSettings() {
     ScoreCpuNonZeroBonus := ReadInt("GameForegroundAssist", "ScoreCpuNonZeroBonus", 15, 0, 200)
     GameMinScoreToActivate := ReadInt("GameForegroundAssist", "GameMinScoreToActivate", 55, 0, 300)
 
-    GameLogMode := StrUpper(IniReadS("Logging","GameLogMode","OFF"))
-    if (GameLogMode != "OFF" && GameLogMode != "ACTIVATIONS"
-        && GameLogMode != "TOPN" && GameLogMode != "DIAGNOSTIC")
-        GameLogMode := "OFF"
+    GameLogMode := NormalizeGameLogMode(IniReadS("Logging", "GameLogMode", "OFF"))
     EnableGameScoreLogging := GameLogMode != "OFF"
     GameLogTopN := ReadInt("Logging", "GameLogTopN", 3, 1, 10)
     GameLogIntervalMs := ReadInt("Logging", "GameLogIntervalMs", 3000, 250, 60000)
@@ -3584,6 +3571,7 @@ LauncherCleanupAudioPeakThreshold := ReadNumber("LauncherCleanup", "AudioPeakThr
 
     EnableQuickMenu := ReadBool("QuickMenu", "Enable", true)
     EnableGameDetectionMenu := ReadBool("QuickMenu", "ShowGameDetection", true)
+    GameScoreMaxRows := ReadInt("QuickMenu", "GameScoreMaxRows", 8, 1, 20)
     QuickMenuChordHoldMs := ReadInt("QuickMenu", "ChordHoldMs", 500, 300, 3000)
     TaskForceCloseHoldMs := ReadInt("QuickMenu", "TaskForceCloseHoldMs", 1200, 600, 3000)
     QuickMenuMainOrderRaw := IniReadS(
@@ -3602,8 +3590,6 @@ LauncherCleanupAudioPeakThreshold := ReadNumber("LauncherCleanup", "AudioPeakThr
         if (itemName != "")
             QuickMenuHiddenItems[itemName] := true
     }
-    EnableAudioQuickControls := ReadBool("AudioQuickControls", "Enable", true)
-    EnableDisplayQuickControls := ReadBool("DisplayQuickControls", "Enable", true)
 
     EnableRTSSIntegration := ReadBool("RTSS", "EnableIntegration", true)
     RtssPath := IniReadS("RTSS","Path","C:\Program Files (x86)\RivaTuner Statistics Server\RTSS.exe")
@@ -3731,13 +3717,6 @@ InitDpiAwareness() {
 ; LOG-ONLY ACTION MESSAGES + TRAY ACTIONS
 ; ==============================================================================
 
-; Alias for SharedNotify, which holds the implementation. Kept so this tree's
-; call sites read naturally; SteamShell-Shared.ahk explains why the name outlived
-; the toast it was named after.
-ShowNotification(message, kind := "Info") {
-    SharedNotify(message, kind)
-}
-
 TrayOpenQuickMenu(*) {
     global QuickMenuVisible, QuickMenuGui
     if QuickMenuVisible {
@@ -3789,8 +3768,6 @@ TrayExitSteamShell(*) {
     ExitSteamShell()
 }
 
-
-
 ; The tray right-click shows the ordinary Windows menu, matching XFE.
 ;
 ; It previously did not. AutoHotkey will not launch a timer thread while a menu
@@ -3812,8 +3789,6 @@ TrayExitSteamShell(*) {
 ; Escape, or a click elsewhere -- both of which are available to whatever pointer
 ; opened it. Double-click still opens the Quick Menu, via the menu's default
 ; item, so the controller-friendly surface is one gesture away.
-
-
 
 ; Seam for SteamShell-Shared.ahk. The entries this product offers, in order;
 ; anything that is not a Map is a separator.
@@ -3859,7 +3834,6 @@ ProductTrayBaseTip() {
             A_ScriptDir, SteamShellDataDir, SteamShellInstallationMode) != ""
             ? " — installation moved" : "")
 }
-
 
 ; SPLASH
 ; ==============================================================================
@@ -4461,32 +4435,26 @@ HandleCursorAfterManagedFocus(hwnd, wasAlreadyActive := false) {
         MaybeHideCursorOnRefocus()
 }
 
-MouseWatch() {
-    global AllowExplorer, EnableAutoHideCursor, MouseHidden
-    global LastMouseX, LastMouseY, LastMouseMoveTick, MouseHideDelay
-
-    if (AllowExplorer || !EnableAutoHideCursor)
-    return
-
-    MouseGetPos(&mx, &my)
-    if (mx != LastMouseX || my != LastMouseY) {
-    LastMouseX := mx
-    LastMouseY := my
-    LastMouseMoveTick := A_TickCount
-    if (MouseHidden) {
-    SystemCursor("Show")
-    MouseHidden := false
-    }
-    return
-    }
-
-    if (!MouseHidden && (A_TickCount - LastMouseMoveTick >= MouseHideDelay)) {
-    SystemCursor("Hide")
-    MouseHidden := true
-    }
+; Seams for the shared MouseWatch. The two products suppress cursor hiding for
+; different reasons and -- this is the part that matters -- at different points,
+; so they are two questions rather than one.
+;
+; This tree stops the whole pass while Explorer is allowed: with the desktop
+; shell up, the cursor is Explorer's to manage, and even the position tracking
+; should not run. The companion instead lets movement keep re-showing the cursor
+; and only declines to hide it. Collapsing these into one gate would change
+; behaviour in one product or the other, which is a hardware-testable change and
+; not what sharing the body is for.
+MouseWatchDisabled() {
+    global AllowExplorer, EnableAutoHideCursor
+    return AllowExplorer || !EnableAutoHideCursor
 }
 
-
+; Nothing in this tree holds the cursor visible once the pass is running; the
+; Explorer case is handled above, before tracking.
+MouseWatchHoldsCursorVisible() {
+    return false
+}
 
 ControllerTestActive() {
     global ControllerTestGui
@@ -5100,20 +5068,16 @@ RecordShortcutChord_Accept(*) {
 ; ==============================================================================
 ; CONTROLLER-FIRST QUICK MENU
 ; ==============================================================================
-ToggleQuickMenu(*) {
-    global QuickMenuVisible, EnableQuickMenu, DesktopRestorePending
-    if DesktopRestorePending {
-        ShowNotification("Quick Menu is unavailable while the desktop is being restored", "Warning")
-        return
-    }
-    if (!EnableQuickMenu) {
-        ShowNotification("Quick Menu is disabled in SteamShellSettings.ini", "Warning")
-        return
-    }
-    if (QuickMenuVisible)
-        HideQuickMenu()
-    else
-        ShowQuickMenu()
+; Seam for the shared ToggleQuickMenu: why this product will not open the menu
+; right now, or "" if it will. Standalone has two reasons; the companion has
+; none, which is what made the two copies look like different routines.
+ProductQuickMenuBlockedReason() {
+    global EnableQuickMenu, DesktopRestorePending
+    if DesktopRestorePending
+        return "Quick Menu is unavailable while the desktop is being restored"
+    if !EnableQuickMenu
+        return "Quick Menu is disabled in SteamShellSettings.ini"
+    return ""
 }
 
 ShowQuickMenu(*) {
@@ -5279,11 +5243,6 @@ DestroyQuickMenuForSurfaceTransition() {
     try DllCall("dwmapi\DwmFlush")
 }
 
-GetDefaultQuickMenuOrder() {
-    return ["audio", "display", "rtss", "steammenu", "steamquickaccess",
-        "tasks", "gamebar", "keyboard", "mousemode", "settings", "system"]
-}
-
 MigrateQuickMenuOrderForSchema15(raw) {
     ; Parse supplies any missing supported rows. Pull the two new rows back out,
     ; then insert them together directly after Game Bar while retaining every
@@ -5308,192 +5267,17 @@ MigrateQuickMenuOrderForSchema15(raw) {
     return JoinWith(migrated, "|")
 }
 
-ParseQuickMenuMainOrder(raw) {
-    allowed := Map()
-    for _, itemName in GetDefaultQuickMenuOrder()
-        allowed[itemName] := true
-    result := []
-    seen := Map()
-    for _, rawName in StrSplit(raw, "|") {
-        itemName := StrLower(Trim(rawName))
-        if (!allowed.Has(itemName) || seen.Has(itemName))
-            continue
-        seen[itemName] := true
-        result.Push(itemName)
-    }
-    for _, itemName in GetDefaultQuickMenuOrder() {
-        if !seen.Has(itemName)
-            result.Push(itemName)
-    }
-    return result
-}
-
-QuickMenuLayoutLabel(itemName) {
-    switch StrLower(itemName) {
-        case "audio": return "Audio"
-        case "display": return "Display & HDR"
-        case "rtss": return "RTSS & Performance"
-        case "steammenu": return "Steam Menu"
-        case "steamquickaccess": return "Steam Quick Access"
-        case "tasks": return "Task Switcher"
-        case "gamebar": return "Game Bar"
-        case "keyboard": return "Open Keyboard"
-        case "mousemode": return "Mouse Mode"
-        case "settings": return "Settings"
-        case "system": return "System"
-        default: return itemName
-    }
-}
-
-RefreshQuickMenuLayoutManager() {
-    global QuickMenuLayoutGui, QuickMenuMainOrder, QuickMenuHiddenItems
-    if !IsSet(QuickMenuLayoutGui)
-        return
-    try {
-        listView := QuickMenuLayoutGui["QuickMenuLayoutList"]
-        listView.Delete()
-        for _, itemName in QuickMenuMainOrder {
-            required := itemName = "settings" || itemName = "system"
-            visibility := required ? "Always" : (QuickMenuHiddenItems.Has(itemName) ? "Hidden" : "Visible")
-            listView.Add("", QuickMenuLayoutLabel(itemName), visibility, itemName)
-        }
-        listView.ModifyCol(1, 275)
-        listView.ModifyCol(2, 100)
-        listView.ModifyCol(3, 0)
-        if listView.GetCount()
-            listView.Modify(1, "Select Focus")
-    }
-}
-
-QuickMenuLayoutMove(direction, *) {
-    global QuickMenuLayoutGui
-    if !IsSet(QuickMenuLayoutGui)
-        return
-    listView := QuickMenuLayoutGui["QuickMenuLayoutList"]
-    row := listView.GetNext(0, "F")
-    if (!row)
-        row := listView.GetNext()
-    target := row + direction
-    if (!row || target < 1 || target > listView.GetCount())
-        return
-    first := [listView.GetText(row, 1), listView.GetText(row, 2), listView.GetText(row, 3)]
-    second := [listView.GetText(target, 1), listView.GetText(target, 2), listView.GetText(target, 3)]
-    listView.Modify(row, "", second*)
-    listView.Modify(target, "Select Focus Vis", first*)
-}
-
-QuickMenuLayoutToggle(*) {
-    global QuickMenuLayoutGui
-    if !IsSet(QuickMenuLayoutGui)
-        return
-    listView := QuickMenuLayoutGui["QuickMenuLayoutList"]
-    row := listView.GetNext(0, "F")
-    if (!row)
-        row := listView.GetNext()
-    if (!row)
-        return
-    itemName := listView.GetText(row, 3)
-    if (itemName = "settings" || itemName = "system") {
-        QuickMenuLayoutGui["QuickMenuLayoutStatus"].Text :=
-            "Settings and System remain visible as recovery paths."
-        return
-    }
-    current := listView.GetText(row, 2)
-    listView.Modify(row, "", listView.GetText(row, 1),
-        current = "Hidden" ? "Visible" : "Hidden", itemName)
-}
-
-QuickMenuLayoutRestoreDefault(*) {
-    global QuickMenuLayoutGui
-    if !IsSet(QuickMenuLayoutGui)
-        return
-    listView := QuickMenuLayoutGui["QuickMenuLayoutList"]
-    listView.Delete()
-    for _, itemName in GetDefaultQuickMenuOrder()
-        listView.Add("", QuickMenuLayoutLabel(itemName),
-            itemName = "settings" || itemName = "system" ? "Always" : "Visible", itemName)
-    listView.Modify(1, "Select Focus")
-    QuickMenuLayoutGui["QuickMenuLayoutStatus"].Text :=
-        "Default order restored in the editor. Choose Save Layout to apply it."
-}
-
-QuickMenuLayoutSave(*) {
-    global QuickMenuLayoutGui, QuickMenuMainOrderRaw, QuickMenuHiddenItemsRaw
-    global QuickMenuMainOrder, QuickMenuHiddenItems, QuickMenuVisible
-    if !IsSet(QuickMenuLayoutGui)
-        return
-    listView := QuickMenuLayoutGui["QuickMenuLayoutList"]
-    order := []
-    hidden := []
-    Loop listView.GetCount() {
-        itemName := listView.GetText(A_Index, 3)
-        order.Push(itemName)
-        if (listView.GetText(A_Index, 2) = "Hidden")
-            hidden.Push(itemName)
-    }
-    QuickMenuMainOrderRaw := JoinWith(order, "|")
-    QuickMenuHiddenItemsRaw := JoinWith(hidden, "|")
-    if !CommitIniChanges([
-        Map("section", "QuickMenu", "key", "MainOrder", "value", QuickMenuMainOrderRaw),
-        Map("section", "QuickMenu", "key", "HiddenItems", "value", QuickMenuHiddenItemsRaw)
-    ]) {
-        QuickMenuLayoutGui["QuickMenuLayoutStatus"].Text := "SteamShell could not save the layout."
-        return
-    }
-    QuickMenuMainOrder := ParseQuickMenuMainOrder(QuickMenuMainOrderRaw)
-    QuickMenuHiddenItems := Map()
-    for _, itemName in hidden
-        QuickMenuHiddenItems[itemName] := true
-    QuickMenuLayoutGui["QuickMenuLayoutStatus"].Text := "Quick Menu layout saved and applied."
-    if QuickMenuVisible
-        QuickMenuBuildGui()
-}
-
-ShowQuickMenuLayoutManager(*) {
-    global QuickMenuLayoutGui
-    if !IsSet(QuickMenuLayoutGui) {
-        QuickMenuLayoutGui := Gui("+AlwaysOnTop +ToolWindow -Resize", "Quick Menu Layout")
-        QuickMenuLayoutGui.SetFont("s10", "Segoe UI")
-        title := QuickMenuLayoutGui.AddText("xm ym w590 h30", "Quick Menu Layout")
-        title.SetFont("s17 Bold", "Segoe UI")
-        QuickMenuLayoutGui.AddText(
-            "xm y+2 w590 h38 +Wrap",
-            "Reorder the main menu and hide rows you do not use. Settings and System always remain available.")
-        QuickMenuLayoutGui.AddListView(
-            "xm y+8 w590 r10 -Multi vQuickMenuLayoutList", ["Section", "Visibility", "Key"])
-        upButton := QuickMenuLayoutGui.AddButton("xm y+8 w105 h32", "Move Up")
-        upButton.OnEvent("Click", QuickMenuLayoutMove.Bind(-1))
-        downButton := QuickMenuLayoutGui.AddButton("x+8 yp w105 h32", "Move Down")
-        downButton.OnEvent("Click", QuickMenuLayoutMove.Bind(1))
-        toggleButton := QuickMenuLayoutGui.AddButton("x+8 yp w125 h32", "Show / Hide")
-        toggleButton.OnEvent("Click", QuickMenuLayoutToggle)
-        defaultButton := QuickMenuLayoutGui.AddButton("x+8 yp w125 h32", "Restore Default")
-        defaultButton.OnEvent("Click", QuickMenuLayoutRestoreDefault)
-        saveButton := QuickMenuLayoutGui.AddButton("x+8 yp w105 h32", "Save Layout")
-        saveButton.OnEvent("Click", QuickMenuLayoutSave)
-        QuickMenuLayoutGui.AddText("xm y+8 w460 h24 vQuickMenuLayoutStatus", "")
-        closeButton := QuickMenuLayoutGui.AddButton("x+8 yp-5 w105 h30", "Close")
-        closeButton.OnEvent("Click", (*) => QuickMenuLayoutGui.Hide())
-        QuickMenuLayoutGui.OnEvent("Close", (*) => QuickMenuLayoutGui.Hide())
-        QuickMenuLayoutGui.OnEvent("Escape", (*) => QuickMenuLayoutGui.Hide())
-    }
-    QuickMenuLayoutGui.Show()
-    CenterGuiOnTargetMonitor(QuickMenuLayoutGui)
-    RefreshQuickMenuLayoutManager()
-}
-
 QuickMenuGetDefinitions() {
     global EnableGameDetectionMenu, LastGameCandidates
     global QuickMenuPage, QuickMenuDisplayModes
     global QuickMenuTaskPage, QuickMenuTaskWindows, PinnedForegroundHwnd
-    global EnableAudioQuickControls, EnableDisplayQuickControls
     global EnableRTSSIntegration, RtssPath
     global RtssOverlayControlMode, RtssFrameLimiterControlMode
     global QuickMenuMainOrder, QuickMenuHiddenItems, DesktopMode
     rows := []
 
     if (QuickMenuPage = "AUDIO") {
-        rows.Push(Map("id", "audioBack", "label", "Back"))
+        rows.Push(Map("id", "back", "label", "Back", "back", true))
         rows.Push(Map("id", "audioOutput", "label", "Output"))
         rows.Push(Map("id", "volume", "label", "Volume"))
         rows.Push(Map("id", "mute", "label", "Mute"))
@@ -5501,7 +5285,7 @@ QuickMenuGetDefinitions() {
     }
 
     if (QuickMenuPage = "SYSTEM") {
-        rows.Push(Map("id", "systemBack", "label", "Back To Quick Settings"))
+        rows.Push(Map("id", "back", "label", "Back To Quick Settings", "back", true))
         if (DesktopMode)
             rows.Push(Map("id", "returnShell", "label", "Return To SteamShell"))
         else
@@ -5534,29 +5318,27 @@ QuickMenuGetDefinitions() {
     }
 
     if (QuickMenuPage = "SETTINGS") {
-        rows.Push(Map("id", "settingsBack", "label", "Back To Quick Settings"))
-        rows.Push(Map("id", "settingsGeneral", "label", "General + Startup"))
-        rows.Push(Map("id", "settingsInput", "label", "Controller + Cursor"))
-        rows.Push(Map("id", "settingsFocus", "label", "Focus + Window Engine"))
-        rows.Push(Map("id", "settingsRtss", "label", "RTSS + Performance"))
+        rows.Push(Map("id", "back", "label", "Back To Quick Settings", "back", true))
+        rows.Push(Map("id", "settingsGeneral", "label", "General + Startup", "page", "SETTINGS_GENERAL"))
+        rows.Push(Map("id", "settingsInput", "label", "Controller + Cursor", "page", "SETTINGS_INPUT"))
+        rows.Push(Map("id", "settingsFocus", "label", "Focus + Window Engine", "page", "SETTINGS_FOCUS"))
+        rows.Push(Map("id", "settingsRtss", "label", "RTSS + Performance", "page", "SETTINGS_RTSS"))
         rows.Push(Map("id", "windowsSettings", "label", "Windows Settings"))
         rows.Push(Map("id", "settingsEditor", "label", "Open Full Settings Editor"))
         return rows
     }
 
     if (QuickMenuPage = "SETTINGS_GENERAL") {
-        rows.Push(Map("id", "settingsHome", "label", "Back To Settings"))
+        rows.Push(Map("id", "back", "label", "Back To Settings", "back", true))
         rows.Push(Map("id", "qSplash", "label", "Startup Splash"))
         rows.Push(Map("id", "qTaskbar", "label", "Hide Taskbar In Shell"))
         rows.Push(Map("id", "qBlackout", "label", "Black Desktop Background"))
-        rows.Push(Map("id", "qAudioControls", "label", "Quick Menu Audio"))
-        rows.Push(Map("id", "qDisplayControls", "label", "Quick Menu Display"))
         rows.Push(Map("id", "qAccentColor", "label", "Quick Menu Accent"))
         return rows
     }
 
     if (QuickMenuPage = "SETTINGS_INPUT") {
-        rows.Push(Map("id", "settingsHome", "label", "Back To Settings"))
+        rows.Push(Map("id", "back", "label", "Back To Settings", "back", true))
         rows.Push(Map("id", "qControllerMouse", "label", "Controller Mouse"))
         rows.Push(Map("id", "qMouseSpeed", "label", "Controller Mouse Speed"))
         rows.Push(Map("id", "qAutoHideCursor", "label", "Auto-Hide Cursor"))
@@ -5568,7 +5350,7 @@ QuickMenuGetDefinitions() {
     }
 
     if (QuickMenuPage = "SETTINGS_FOCUS") {
-        rows.Push(Map("id", "settingsHome", "label", "Back To Settings"))
+        rows.Push(Map("id", "back", "label", "Back To Settings", "back", true))
         rows.Push(Map("id", "qSteamRefocus", "label", "Steam Refocus"))
         rows.Push(Map("id", "qGameAssist", "label", "Game Foreground Assist"))
         rows.Push(Map("id", "qAlwaysFocus", "label", "AlwaysFocus Support"))
@@ -5578,7 +5360,7 @@ QuickMenuGetDefinitions() {
     }
 
     if (QuickMenuPage = "SETTINGS_RTSS") {
-        rows.Push(Map("id", "settingsHome", "label", "Back To Settings"))
+        rows.Push(Map("id", "back", "label", "Back To Settings", "back", true))
         rows.Push(Map("id", "qRtssIntegration", "label", "RTSS Integration"))
         rows.Push(Map("id", "qOverlayMode", "label", "Overlay Controls"))
         rows.Push(Map("id", "qLimiterMode", "label", "Frame Limiter Controls"))
@@ -5588,7 +5370,7 @@ QuickMenuGetDefinitions() {
     }
 
     if (QuickMenuPage = "TASKS") {
-        rows.Push(Map("id", "tasksBack", "label", "Back To Quick Settings"))
+        rows.Push(Map("id", "back", "label", "Back To Quick Settings", "back", true))
         if (PinnedForegroundHwnd && DllCall("IsWindow", "Ptr", PinnedForegroundHwnd))
             rows.Push(Map("id", "taskRelease", "label", "Release Focus Lock"))
 
@@ -5616,7 +5398,7 @@ QuickMenuGetDefinitions() {
     }
 
     if (QuickMenuPage = "DISPLAY") {
-        rows.Push(Map("id", "displayBack", "label", "Back"))
+        rows.Push(Map("id", "back", "label", "Back", "back", true))
         hdrState := GetPrimaryHdrState()
         if (IsObject(hdrState) && hdrState["supported"] && !hdrState["forceDisabled"])
             rows.Push(Map("id", "hdr", "label", "HDR"))
@@ -5640,7 +5422,7 @@ QuickMenuGetDefinitions() {
     }
 
     if (QuickMenuPage = "RTSS") {
-        rows.Push(Map("id", "rtssBack", "label", "Back"))
+        rows.Push(Map("id", "back", "label", "Back", "back", true))
         rtssRunning := ProcessExist("RTSS.exe") != 0
         if !rtssRunning {
             if !EnableRTSSIntegration
@@ -5686,7 +5468,7 @@ QuickMenuGetDefinitions() {
     }
 
     if (QuickMenuPage = "LAYOUT") {
-        rows.Push(Map("id", "layoutBack", "label", "Back To Quick Settings"))
+        rows.Push(Map("id", "back", "label", "Back To Quick Settings", "back", true))
         for _, buttonName in ["A","B","X","Y","LB","RB","LT","RT","Start","L3","R3"]
             rows.Push(Map("id", "layout:" buttonName, "label", "Back + " buttonName))
         rows.Push(Map("id", "setControllerMappings", "label", "Set Controller Mappings"))
@@ -5694,9 +5476,9 @@ QuickMenuGetDefinitions() {
     }
 
     available := Map(
-        "audio", EnableAudioQuickControls ? Map("id", "audioMenu", "label", "Audio") : 0,
-        "display", EnableDisplayQuickControls ? Map("id", "display", "label", "Display & HDR") : 0,
-        "rtss", Map("id", "rtssMenu", "label", "RTSS & Performance"),
+        "audio", Map("id", "audioMenu", "label", "Audio", "page", "AUDIO"),
+        "display", Map("id", "display", "label", "Display & HDR"),
+        "rtss", Map("id", "rtssMenu", "label", "RTSS & Performance", "page", "RTSS"),
         "steammenu", Map("id", "steamMenu", "label",
             IsSteamRunning() ? "Steam Menu" : "Launch Steam"),
         "steamquickaccess", Map("id", "steamQuickAccess", "label", "Steam Quick Access"),
@@ -5704,8 +5486,8 @@ QuickMenuGetDefinitions() {
         "gamebar", Map("id", "gameBar", "label", "Game Bar"),
         "keyboard", Map("id", "openKeyboard", "label", "Open Keyboard"),
         "mousemode", Map("id", "qPersistentMouse", "label", "Mouse Mode"),
-        "settings", Map("id", "settings", "label", "Settings"),
-        "system", Map("id", "system", "label", "System"))
+        "settings", Map("id", "settings", "label", "Settings", "page", "SETTINGS"),
+        "system", Map("id", "system", "label", "System", "page", "SYSTEM"))
     added := Map()
     for _, itemName in QuickMenuMainOrder {
         if !available.Has(itemName) || !IsObject(available[itemName])
@@ -5769,10 +5551,6 @@ ReleaseQuickMenuPaintResources() {
 ; The one line of the painter that differs between the two trees, isolated so
 ; the rest can stay identical: standalone resolves a row's value live, while XFE
 ; rebuilds its whole row list per repaint and already carries it.
-QuickMenuRowValueText(row) {
-    return QuickMenuValue(row["id"])
-}
-
 QuickMenuBuildGui() {
     global QuickMenuGui, QuickMenuRows, QuickMenuPage, QuickMenuVisible
     global QuickMenuTitleCtrl, QuickMenuStatusCtrl
@@ -5822,8 +5600,11 @@ QuickMenuBuildGui() {
         QuickMenuTitleCtrl.Text := GuiLiteralText(QuickMenuTitleText())
         QuickMenuRows := []
         Loop Min(defs.Length, 14) {
-            def := defs[A_Index]
-            QuickMenuRows.Push(Map("id", def["id"], "label", def["label"]))
+            ; The descriptor itself, not a copy of two of its keys. Rows now
+            ; carry their own navigation -- "page" and "back" -- and rebuilding
+            ; a bare id/label pair here dropped exactly the fields that make a
+            ; row able to say what it does without a switch knowing its name.
+            QuickMenuRows.Push(defs[A_Index])
         }
         ; The painted band is sized to the rows actually on this page, so a short
         ; page leaves no dead surface for a glow to spill onto.
@@ -5850,7 +5631,6 @@ QuickMenuBuildGui() {
         QuickMenuSetRedraw(true)
     }
 }
-
 
 QuickMenuHintText() {
     global QuickMenuPage
@@ -6120,22 +5900,6 @@ ReleasePinnedForeground(showNotice := true) {
         ShowNotification("Task Switcher focus lock released", "Success")
 }
 
-GetRtssMenuStatus() {
-    global EnableRTSSIntegration, RtssPath, RtssUseDllIntegration
-    if (!EnableRTSSIntegration)
-        return "Setup Required"
-    if ProcessExist("RTSS.exe") {
-        if !RtssUseDllIntegration
-            return "Running | Shortcuts"
-        liveState := GetRtssGlobalState()
-        if IsObject(liveState)
-            return "Overlay " (liveState["overlay"] ? "On" : "Off")
-                . " | Limiter " (liveState["limiter"] ? "On" : "Off")
-        return "Running"
-    }
-    return ResolveRtssExecutablePath() != "" ? "RTSS Ready" : "RTSS Not Found"
-}
-
 GetControllerLayoutText(buttonName) {
     shortBinding := ControllerBindingPretty(buttonName ".Short")
     longBinding := ControllerBindingPretty(buttonName ".Long")
@@ -6161,7 +5925,6 @@ QuickMenuValue(id) {
     global LastGameCandidates, LastBestCandidateProc, LastBestCandidateScore
     global QuickMenuConfirmAction, QuickMenuConfirmUntilTick
     global EnableSplashScreen, EnableTaskbarHiding, EnableDesktopBlackout
-    global EnableAudioQuickControls, EnableDisplayQuickControls
     global EnableControllerMouseMode, EnablePersistentMouseMode, ControllerMouseSpeed, EnableAutoHideCursor, MouseHideDelay
     global EnableMouseParkOnBoot, EnableMouseParkOnFocusChange, MouseParkEdge
     global EnableSteamRefocusMode, EnableGameForegroundAssist, EnableAlwaysFocus, EnableWindowManagement
@@ -6172,10 +5935,19 @@ QuickMenuValue(id) {
     if (QuickMenuConfirmAction = id && A_TickCount < QuickMenuConfirmUntilTick)
         return "SELECT AGAIN TO CONFIRM"
 
+    ; Plain on/off rows answer from the table rather than from a case each.
+    if QuickMenuToggleTable().Has(id)
+        return ProductSettingBool(id) ? "ON" : "OFF"
+
     if (SubStr(id, 1, 7) = "layout:")
         return GetControllerLayoutText(SubStr(id, 8))
     if (SubStr(id, 1, 10) = "gamescore:")
         return QuickMenuGameScoreValue(id)
+    ; Back To System. Not a "back" row -- QuickMenuGoBack would leave GAMESCORE
+    ; for MAIN rather than for the page it came from -- so it keeps its own case
+    ; and states the glyph here, which is what every other back row displays.
+    if (id = "gameScoreBack")
+        return "‹"
     if (SubStr(id, 1, 11) = "taskWindow:") {
         item := FindTaskSwitcherWindow(ToInt(SubStr(id, 12), 0))
         return IsObject(item) ? ShortenText(item["exe"], 20) : "CLOSED"
@@ -6299,40 +6071,16 @@ QuickMenuValue(id) {
             return EnableSplashScreen ? "ON  •  NEXT BOOT" : "OFF  •  NEXT BOOT"
         case "qTaskbar":
             return EnableTaskbarHiding ? "ON  •  NEXT BOOT" : "OFF  •  NEXT BOOT"
-        case "qBlackout":
-            ; Unlike the taskbar toggle this applies at once, so it stays usable as an
-            ; escape hatch if the backdrop ever misbehaves on a given machine.
-            return EnableDesktopBlackout ? "ON" : "OFF"
-        case "qAudioControls":
-            return EnableAudioQuickControls ? "ON" : "OFF"
-        case "qDisplayControls":
-            return EnableDisplayQuickControls ? "ON" : "OFF"
-        case "qControllerMouse":
-            return EnableControllerMouseMode ? "ON" : "OFF"
         case "qMouseSpeed":
             return ControllerMouseSpeed
-        case "qAutoHideCursor":
-            return EnableAutoHideCursor ? "ON" : "OFF"
         case "qMouseHideDelay":
             return MouseHideDelay = 0 ? "IMMEDIATE" : Format("{:.1f} SEC", MouseHideDelay / 1000)
-        case "qParkBoot":
-            return EnableMouseParkOnBoot ? "ON" : "OFF"
-        case "qParkFocus":
-            return EnableMouseParkOnFocusChange ? "ON" : "OFF"
         case "qParkEdge":
             return StrUpper(MouseParkEdge)
-        case "qSteamRefocus":
-            return EnableSteamRefocusMode ? "ON" : "OFF"
-        case "qGameAssist":
-            return EnableGameForegroundAssist ? "ON" : "OFF"
-        case "qAlwaysFocus":
-            return EnableAlwaysFocus ? "ON" : "OFF"
         case "qWindowManagement":
             return EnableWindowManagement ? "ON  •  COORDINATED" : "OFF  •  COORDINATED"
         case "qFocusPaused":
             return FocusAssistancePaused ? "PAUSED" : "ACTIVE"
-        case "qRtssIntegration":
-            return EnableRTSSIntegration ? "ON" : "OFF"
         case "qOverlayMode":
             return StrUpper(RtssOverlayControlMode)
         case "qLimiterMode":
@@ -6347,8 +6095,6 @@ QuickMenuValue(id) {
             return "Power & Diagnostics"
         case "settingsGeneral", "settingsInput", "settingsFocus", "settingsRtss", "settingsEditor", "setControllerMappings":
             return "›"
-        case "audioBack", "systemBack", "tasksBack", "displayBack", "rtssBack", "layoutBack", "settingsBack", "settingsHome":
-            return "‹"
         default:
             return ""
     }
@@ -6421,7 +6167,6 @@ QuickMenuCloseSelected() {
             RequestCloseTaskSwitcherWindow(hwnd)
     }
 }
-
 
 QuickMenuHandleController(pressed, released := 0, lx := 0, ly := 0, buttons := 0) {
     global QuickMenuSelected, QuickMenuPage, TaskForceCloseHoldMs, ControllerChordHoldMs
@@ -6604,13 +6349,44 @@ PersistQuickMenuSetting(section, key, value) {
     return true
 }
 
-
 ; One source of truth for the Quick Menu's settings rows, shared by activation
 ; and left/right adjustment. These were duplicated `case` lists until AutoHotkey
 ; v2's hard limit of 20 parameters per `Case` rejected the longer one.
+; The live value behind a QuickMenuToggleTable row, by ROW ID.
+;
+; The one thing a shared caller genuinely cannot do. AutoHotkey v2 has no way to
+; read a global by a name held in a variable, so the table can carry the section
+; and the key but not the current state -- and the alternative, keeping every
+; setting in a Map instead of its own global, would touch every reader in the
+; program. One lookup is the floor, and this is it.
+;
+; Keyed on the row id rather than on the setting key, and it stays that way even
+; though the pair that forced it -- two rows both writing a key literally named
+; "Enable", in different sections -- has since been retired. A setting key is
+; not unique across sections, so the id is the only safe lookup.
+ProductSettingBool(id) {
+    global EnableDesktopBlackout
+    global EnableControllerMouseMode, EnableAutoHideCursor
+    global EnableMouseParkOnBoot, EnableMouseParkOnFocusChange
+    global EnableSteamRefocusMode, EnableGameForegroundAssist, EnableAlwaysFocus
+    global EnableRTSSIntegration
+    switch id {
+        case "qBlackout": return EnableDesktopBlackout
+        case "qControllerMouse": return EnableControllerMouseMode
+        case "qAutoHideCursor": return EnableAutoHideCursor
+        case "qParkBoot": return EnableMouseParkOnBoot
+        case "qParkFocus": return EnableMouseParkOnFocusChange
+        case "qSteamRefocus": return EnableSteamRefocusMode
+        case "qGameAssist": return EnableGameForegroundAssist
+        case "qAlwaysFocus": return EnableAlwaysFocus
+        case "qRtssIntegration": return EnableRTSSIntegration
+    }
+    return false
+}
+
 IsQuickMenuToggleSetting(id) {
     static ids := QuickMenuIdSet(
-        "qSplash|qTaskbar|qBlackout|qAudioControls|qDisplayControls"
+        "qSplash|qTaskbar|qBlackout"
         . "|qControllerMouse|qPersistentMouse|qAutoHideCursor|qParkBoot|qParkFocus|qParkEdge"
         . "|qSteamRefocus|qGameAssist|qAlwaysFocus|qWindowManagement|qFocusPaused"
         . "|qRtssIntegration|qOverlayMode|qLimiterMode")
@@ -6623,8 +6399,15 @@ IsQuickMenuAdjustSetting(id) {
 }
 
 ToggleQuickMenuSetting(id) {
+    ; Same table, other direction. The value above and the write below used to
+    ; be two `case` lists over the same eleven ids.
+    if QuickMenuToggleTable().Has(id) {
+        entry := QuickMenuToggleTable()[id]
+        PersistQuickMenuSetting(entry["section"], entry["key"],
+            ProductSettingBool(id) ? "false" : "true")
+        return
+    }
     global EnableSplashScreen, EnableTaskbarHiding, EnableDesktopBlackout
-    global EnableAudioQuickControls, EnableDisplayQuickControls
     global EnableControllerMouseMode, EnablePersistentMouseMode, EnableAutoHideCursor
     global EnableMouseParkOnBoot, EnableMouseParkOnFocusChange, MouseParkEdge
     global EnableSteamRefocusMode, EnableGameForegroundAssist, EnableAlwaysFocus, EnableWindowManagement
@@ -6636,14 +6419,6 @@ ToggleQuickMenuSetting(id) {
             PersistQuickMenuSetting("Features", "EnableSplashScreen", EnableSplashScreen ? "false" : "true")
         case "qTaskbar":
             PersistQuickMenuSetting("Features", "EnableTaskbarHiding", EnableTaskbarHiding ? "false" : "true")
-        case "qBlackout":
-            PersistQuickMenuSetting("Features", "EnableDesktopBlackout", EnableDesktopBlackout ? "false" : "true")
-        case "qAudioControls":
-            PersistQuickMenuSetting("AudioQuickControls", "Enable", EnableAudioQuickControls ? "false" : "true")
-        case "qDisplayControls":
-            PersistQuickMenuSetting("DisplayQuickControls", "Enable", EnableDisplayQuickControls ? "false" : "true")
-        case "qControllerMouse":
-            PersistQuickMenuSetting("Controller", "EnableControllerMouseMode", EnableControllerMouseMode ? "false" : "true")
         case "qPersistentMouse":
             next := !EnablePersistentMouseMode
             changes := [Map("section", "Controller", "key", "EnablePersistentMouseMode",
@@ -6659,26 +6434,12 @@ ToggleQuickMenuSetting(id) {
             ApplyRuntimeTimers()
             SyncControlPanel()
             ShowNotification("Mouse Mode: " (next ? "On" : "Off"), "Success")
-        case "qAutoHideCursor":
-            PersistQuickMenuSetting("Features", "EnableAutoHideCursor", EnableAutoHideCursor ? "false" : "true")
-        case "qParkBoot":
-            PersistQuickMenuSetting("Features", "EnableMouseParkOnBoot", EnableMouseParkOnBoot ? "false" : "true")
-        case "qParkFocus":
-            PersistQuickMenuSetting("Features", "EnableMouseParkOnFocusChange", EnableMouseParkOnFocusChange ? "false" : "true")
         case "qParkEdge":
             PersistQuickMenuSetting("MousePark", "MouseParkEdge", MouseParkEdge = "right" ? "Left" : "Right")
-        case "qSteamRefocus":
-            PersistQuickMenuSetting("Features", "EnableSteamRefocusMode", EnableSteamRefocusMode ? "false" : "true")
-        case "qGameAssist":
-            PersistQuickMenuSetting("Features", "EnableGameForegroundAssist", EnableGameForegroundAssist ? "false" : "true")
-        case "qAlwaysFocus":
-            PersistQuickMenuSetting("Features", "EnableAlwaysFocus", EnableAlwaysFocus ? "false" : "true")
         case "qWindowManagement":
             PersistQuickMenuSetting("Features", "EnableWindowManagement", EnableWindowManagement ? "false" : "true")
         case "qFocusPaused":
             FocusAssistancePaused := !FocusAssistancePaused
-        case "qRtssIntegration":
-            PersistQuickMenuSetting("RTSS", "EnableIntegration", EnableRTSSIntegration ? "false" : "true")
         case "qOverlayMode":
             PersistQuickMenuSetting("RTSS", "OverlayControlMode"
                 , RtssOverlayControlMode = "toggle" ? "Separate" : "Toggle")
@@ -6963,7 +6724,26 @@ QuickMenuActivateSelected() {
 
     if (QuickMenuRows.Length = 0)
         return
-    id := QuickMenuRows[QuickMenuSelected]["id"]
+    row := QuickMenuRows[QuickMenuSelected]
+    id := row["id"]
+
+    ; Navigation is a property of the row, not a name the switch below has to
+    ; recognise. Sixteen ids used to reach two identical bodies here -- eight
+    ; calling QuickMenuGoBack, eight setting a page and rebuilding -- and every
+    ; new page meant remembering to add its id in three places.
+    ;
+    ; Rows that do setup work before navigating (display, tasks) keep their
+    ; cases below, because they are not just a page change.
+    if row.Has("back") {
+        QuickMenuGoBack()
+        return
+    }
+    if row.Has("page") {
+        QuickMenuPage := row["page"]
+        QuickMenuSelected := 1
+        QuickMenuBuildGui()
+        return
+    }
 
     if (SubStr(id, 1, 7) = "layout:")
         return
@@ -6972,16 +6752,12 @@ QuickMenuActivateSelected() {
         return
     }
 
+    ; Actions both products implement identically.
+    if QuickMenuActivateShared(id) {
+        QuickMenuRefresh()
+        return
+    }
     switch id {
-        case "audioMenu":
-            QuickMenuPage := "AUDIO"
-            QuickMenuSelected := 1
-            QuickMenuBuildGui()
-            return
-        case "audioOutput":
-            CycleDefaultAudioOutput(1)
-        case "volume":
-            QuickMenuAdjustSelected(1)
         case "mute":
             try {
                 SoundSetMute(-1)
@@ -6990,16 +6766,6 @@ QuickMenuActivateSelected() {
             } catch {
                 ShowNotification("Windows mute control is unavailable", "Warning")
             }
-        case "hdr":
-            ToggleQuickMenuHdrState()
-        case "displayResolution":
-            CycleDisplayResolution(1)
-        case "displayRefresh":
-            CycleDisplayFrequency(1)
-        case "displayScale":
-            CycleDisplayScale(1)
-        case "displayApply":
-            ApplyDisplaySelection()
         case "display":
             OpenQuickMenuDisplayPage()
             return
@@ -7016,20 +6782,11 @@ QuickMenuActivateSelected() {
             ReleasePinnedForeground()
             OpenQuickMenuTaskPage()
             return
-        case "rtssMenu":
-            QuickMenuPage := "RTSS"
-            QuickMenuSelected := 1
-            QuickMenuBuildGui()
-            return
         case "rtssStart":
             if !EnsureRtssRunning()
                 ShowNotification("RTSS could not be started", "Warning")
             QuickMenuBuildGui()
             return
-        case "rtssOverlayState", "overlayToggle":
-            ToggleRtssOverlay()
-        case "limiterToggle":
-            ToggleRtssFrameLimiter()
         case "rtssFrameLimit":
             ; Wraps: A is the only control on this row for a user who never
             ; discovers Left/Right, so it has to be able to reach every entry.
@@ -7037,8 +6794,6 @@ QuickMenuActivateSelected() {
                 QuickMenuBuildGui()
                 return
             }
-        case "rtssFrameLimitCustom":
-            AdjustRtssCustomFrameCap(1)
         case "rtssSaveProfile":
             ; Writes a file RTSS then applies to that game on every future launch,
             ; with nothing on screen afterwards to say it happened. Confirmed.
@@ -7048,42 +6803,9 @@ QuickMenuActivateSelected() {
                 "saving " RtssProfileTargetExe() " frame limit") {
                 SaveRtssFrameLimitToProfile()
             }
-        case "overlayOn":
-            SetRtssOverlayState(true)
-        case "overlayOff":
-            SetRtssOverlayState(false)
-        case "limiterOn":
-            SetRtssFrameLimiterState(true)
-        case "limiterOff":
-            SetRtssFrameLimiterState(false)
         case "rtssSettings":
             HideQuickMenu(false)
             ShowSettingsEditorCategory("RTSS & Performance")
-            return
-        case "settings":
-            QuickMenuPage := "SETTINGS"
-            QuickMenuSelected := 1
-            QuickMenuBuildGui()
-            return
-        case "settingsGeneral":
-            QuickMenuPage := "SETTINGS_GENERAL"
-            QuickMenuSelected := 1
-            QuickMenuBuildGui()
-            return
-        case "settingsInput":
-            QuickMenuPage := "SETTINGS_INPUT"
-            QuickMenuSelected := 1
-            QuickMenuBuildGui()
-            return
-        case "settingsFocus":
-            QuickMenuPage := "SETTINGS_FOCUS"
-            QuickMenuSelected := 1
-            QuickMenuBuildGui()
-            return
-        case "settingsRtss":
-            QuickMenuPage := "SETTINGS_RTSS"
-            QuickMenuSelected := 1
-            QuickMenuBuildGui()
             return
         case "settingsEditor":
             HideQuickMenu(false)
@@ -7131,11 +6853,6 @@ QuickMenuActivateSelected() {
                 return
             HideQuickMenu(false)
             ExitSteamShell()
-        case "system":
-            QuickMenuPage := "SYSTEM"
-            QuickMenuSelected := 1
-            QuickMenuBuildGui()
-            return
         case "gameDetection":
             QuickMenuPage := "GAMESCORE"
             QuickMenuSelected := 1
@@ -7145,9 +6862,6 @@ QuickMenuActivateSelected() {
             QuickMenuPage := "SYSTEM"
             QuickMenuSelected := 1
             QuickMenuRefresh()
-            return
-        case "audioBack", "systemBack", "tasksBack", "displayBack", "rtssBack", "layoutBack", "settingsBack", "settingsHome":
-            QuickMenuGoBack()
             return
         case "sleep":
             if !QuickMenuConfirm("sleep", "sleep")
@@ -7178,7 +6892,6 @@ QuickMenuActivateSelected() {
     }
     QuickMenuRefresh()
 }
-
 
 GetCurrentDisplayModeText() {
     global DisplayPendingOldMode, DisplayPendingUntilTick
@@ -7228,11 +6941,6 @@ IsSteamRunning() {
 ; user's own tuning and are deliberately never written: a quick menu that edits
 ; whichever profile happens to be in the foreground is a menu that can silently
 ; change a game's configuration.
-
-
-
-
-
 
 PersistRtssCustomFrameCap(value) {
     global RtssCustomFrameCap
@@ -7717,23 +7425,6 @@ prevViewDown := true
     ExecuteControllerBinding("Y.Short")
     } finally {
     inPoll := false
-    }
-}
-; ==============================================================================
-; DWM CLOAK CHECK (skip UWP/hidden surfaces)
-; ==============================================================================
-IsCloaked(hwnd) {
-    cloaked := 0
-    try {
-    hr := DllCall("dwmapi\DwmGetWindowAttribute"
-    , "Ptr", hwnd
-    , "UInt", 14
-    , "UInt*", cloaked
-    , "UInt", 4
-    , "Int")
-    return (hr = 0) && (cloaked != 0)
-    } catch {
-    return false
     }
 }
 
@@ -8971,10 +8662,6 @@ IsSteamForeground() {
     }
 }
 
-
-
-
-
 ; Every operational line gets a timestamp and a level, matching XFE.
 ;
 ; Without the timestamp the log records what happened but not when, so two lines
@@ -8985,14 +8672,6 @@ IsSteamForeground() {
 LogLine(message, level := "Info") {
     LogRawLine(FormatTime(A_Now, "yyyy-MM-dd HH:mm:ss") " [" level "] " message)
 }
-
-
-
-
-
-
-
-
 
 ; ==============================================================================
 ; GAME ASSIST
@@ -9023,7 +8702,6 @@ ActivateWindowRobust(hwnd) {
     return false
     }
 }
-
 
 ForceGameAssistOnce() {
     snapshot := WindowEngineBuildSnapshot()
@@ -9334,9 +9012,6 @@ SteamBpmSurfacePresent() {
     }
     return false
 }
-
-
-
 
 WindowEngineIsApplicationBlocker(item) {
     legacySurface := WindowEngineIsLegacyApplicationSurface(item)
@@ -10241,15 +9916,6 @@ CheckTempDisables() {
     SetTimer(CheckTempDisables, 0)
 }
 
-; ==============================================================================
-; PERSISTENT SETTINGS EDITOR
-; ==============================================================================
-GuiLiteralText(text) {
-    ; Native Win32 controls interpret a single ampersand as an access-key marker.
-    ; Double it whenever user-facing text should display the literal character.
-    return StrReplace(text, "&", "&&")
-}
-
 SettingsEditorNormalizeWindow() {
     global SettingsGui
     if !IsSet(SettingsGui)
@@ -10931,49 +10597,6 @@ SettingsEditorApplyCategoryLayout(activeCategory) {
         SettingsEditorSetRedraw(true)
         SettingsEditorRepaint()
     }
-}
-
-SettingsEditorSetRedraw(enabled) {
-    global SettingsGui
-    if !IsSet(SettingsGui) || !IsObject(SettingsGui)
-        return
-    try DllCall("User32\SendMessageW"
-        , "Ptr", SettingsGui.Hwnd
-        , "UInt", 0x000B ; WM_SETREDRAW
-        , "Ptr", enabled ? 1 : 0
-        , "Ptr", 0
-        , "Ptr")
-}
-
-SettingsEditorRepaint() {
-    global SettingsGui
-    if !IsSet(SettingsGui) || !IsObject(SettingsGui)
-        return
-    ; RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW
-    try DllCall("User32\RedrawWindow"
-        , "Ptr", SettingsGui.Hwnd
-        , "Ptr", 0
-        , "Ptr", 0
-        , "UInt", 0x0185
-        , "Int")
-}
-
-
-SettingsEditorGetScrollTrackPosition() {
-    global SettingsEditorScrollBar
-    if !IsObject(SettingsEditorScrollBar)
-        return 0
-    scrollInfo := Buffer(28, 0)
-    NumPut("UInt", 28, scrollInfo, 0)
-    NumPut("UInt", 0x10, scrollInfo, 4) ; SIF_TRACKPOS
-    try {
-        if DllCall("User32\GetScrollInfo"
-            , "Ptr", SettingsEditorScrollBar.Hwnd
-            , "Int", 2 ; SB_CTL
-            , "Ptr", scrollInfo)
-            return NumGet(scrollInfo, 24, "Int")
-    }
-    return 0
 }
 
 SettingsEditorVerticalScroll(wParam, lParam, msg, hwnd) {
@@ -12083,7 +11706,6 @@ SettingsEditorResetAll(*) {
     SettingsEditorReloadAfterFileChange()
 }
 
-
 AppendProcessIntegrityHealth(results, checkName, pid, expectedIntegrity := "Medium") {
     global ExpectedInteractiveUserSid, ExpectedInteractiveSessionId
     if !pid {
@@ -12432,9 +12054,6 @@ ProductHealthResults() {
     return results
 }
 
-
-
-
 ExportDiagnosticBundle(*) {
     global HealthCheckResults, SettingsPath, LogPath, SteamShellVersion, ShellRegKey
     global HealthCheckGui, SettingsEditorStatusCtrl
@@ -12501,7 +12120,6 @@ ExportDiagnosticBundle(*) {
         }
     }
 }
-
 
 ; The window a dialog must sit above, or 0 when none is showing.
 ;
@@ -14592,10 +14210,19 @@ ShowSettingsEditor(*) {
     SettingsEditorAddCheckbox(category, "Features", "EnableDesktopBlackout", "Show a black background instead of the wallpaper and desktop icons", &y, "true")
     SettingsEditorAddCheckbox(category, "QuickMenu", "Enable", "Enable the controller-first Quick Menu", &y, "true")
     SettingsEditorAddCheckbox(category, "QuickMenu", "ShowGameDetection", "Show Game Detection under System (what the window engine scored, and why)", &y, "true")
-    SettingsEditorAddCheckbox(category, "AudioQuickControls", "Enable", "Show Audio controls in the Quick Menu", &y, "true")
-    SettingsEditorAddCheckbox(category, "DisplayQuickControls", "Enable", "Show Display and HDR controls in the Quick Menu", &y, "true")
+    ; Audio and Display row visibility is NOT edited here. "Customize Quick
+    ; Menu..." at the bottom of this page owns which MAIN rows appear, and it
+    ; already lists Audio and Display & HDR alongside the other nine. Two
+    ; controls for one outcome is how they end up disagreeing.
+    ;
+    ; The [AudioQuickControls]/[DisplayQuickControls] Enable keys still exist and
+    ; the Quick Menu's own Settings page still toggles them, which is the part
+    ; reachable from a controller; the layout manager is a desktop window.
+    ;
+    ; ShowGameDetection above stays, because the layout manager covers MAIN rows
+    ; and that row lives under System.
     SettingsEditorAddChoice(category, "QuickMenu", "AccentColor", "Quick Menu accent color", QuickMenuAccentPresetNames(), &y, "Purple")
-    SettingsEditorAddTextField(category, "QuickMenu", "AccentColorCustom", "Custom accent (RRGGBB, used when accent is Custom)", &y, "107C10")
+    SettingsEditorAddTextField(category, "QuickMenu", "AccentColorCustom", "Custom accent (RRGGBB)", &y, "107C10")
     SettingsEditorAddTextField(category, "QuickMenu", "ChordHoldMs", "Quick Menu L3+R3 hold time (ms)", &y, "500", "integer", 300, 3000)
     SettingsEditorAddTextField(category, "QuickMenu", "TaskForceCloseHoldMs", "Task Switcher force-close hold time (ms)", &y, "1200", "integer", 600, 3000)
     SettingsEditorAddTextField(category, "BPM", "BpmTitle", "Steam Big Picture window title", &y, "Steam Big Picture Mode")
@@ -18570,6 +18197,17 @@ ProductBestGameExe() {
     return LastBestCandidateProc
 }
 
+; Seam for SteamShell-Shared.ahk: where this product keeps files it writes.
+;
+; Read live rather than captured, because this one moves. Setup's takeover
+; rewrites it from the installation record, a portable run points it at
+; A_ScriptDir, and choosing a data directory during installation reassigns it
+; again -- so a shared caller asking mid-run has to get the current answer.
+ProductDataDir() {
+    global SteamShellDataDir
+    return SteamShellDataDir
+}
+
 ; Seams for the shared health harness.
 ProductVersionText() {
     global SteamShellVersion
@@ -18598,7 +18236,6 @@ ProductSettingsViewportHeight() {
     global SettingsEditorContentTop, SettingsEditorContentBottom
     return Max(1, SettingsEditorContentBottom - SettingsEditorContentTop)
 }
-
 
 RunViaDesktopShell(filePath, arguments := "", directory := "", show := 1) {
     ; ShellExecute through Explorer's desktop automation object so an elevated
@@ -18650,7 +18287,6 @@ RunViaDesktopShell(filePath, arguments := "", directory := "", show := 1) {
         "Warning")
     return false
 }
-
 
 OpenTouchKeyboard() {
     ; Present the modern touch keyboard without terminating Windows text-input
@@ -18716,22 +18352,14 @@ OpenTouchKeyboard() {
     }
 }
 
-
-EnsureRtssRunning() {
-    path := ResolveRtssExecutablePath()
-    if ProcessExist("RTSS.exe")
-        return true
-    if (path = "")
-        return false
-    SplitPath(path, , &directory)
+; Seam for the shared EnsureRtssRunning. This tree starts RTSS through
+; LaunchInteractiveApp so that IF the shell has been started elevated the token
+; is not inherited; the companion has no such contingency and simply Runs it.
+; That was the whole of the difference between the two copies.
+ProductLaunchMinimized(path, directory) {
     pid := 0
-    if LaunchInteractiveApp(
-        path, "", directory, "Minimized", &pid, "RTSS")
-        && ProcessWait("RTSS.exe", 3)
-        return true
-    return false
+    return LaunchInteractiveApp(path, "", directory, "Minimized", &pid, "RTSS")
 }
-
 
 RecordShortcutChord() {
     ; Records a single shortcut chord (modifiers + one key) without typing.
@@ -18832,7 +18460,6 @@ RecordShortcutChord() {
     res["display"] := display
     return res
 }
-
 
 AutoMouseModeActive() {
     global EnableAutoMouseMode, EnablePersistentMouseMode, AutoMouseExeSet, ScriptPid, DesktopMode

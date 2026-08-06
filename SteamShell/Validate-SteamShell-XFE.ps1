@@ -343,16 +343,17 @@ Assert-True (
     $source -match '(?s)StartRtssFromQuickMenu\(\).*?EnsureRtssRunning\(\).*?SetTimer\(RefreshQuickMenuAfterRtssStart,\s*-600\)') (
     "The RTSS page must offer and refresh after its couch-friendly start action.")
 Assert-True (
-    $source -match '(?s)GetRtssSummary\(\).*?"Overlay ".*?" \| Limiter "' -and
+    $source -match '(?s)GetRtssMenuStatus\(\).*?"Overlay ".*?" \| Limiter "' -and
     $source -match '(?s)GetRtssAvailability\(\).*?if ProcessExist\("RTSS\.exe"\)\s*\r?\n\s*return "Running"' -and
-    $source -match 'MenuRow\("rtssSettings", "RTSS Settings", GetRtssAvailability\(\),\s*\r?\n\s*"rtssSettings"\)' -and
+    $source -match 'MenuRow\("rtssSettings", "RTSS Settings", "", "rtssSettings"\)' -and
+    $source -match '(?s)case "rtssSettings": return GetRtssAvailability\(\)' -and
     $source -match '(?s)case "rtssSettings":.*?ShowSettingsCategory\("RTSS & Performance"\)') (
     "RTSS main summary and Settings availability row must remain distinct.")
 Assert-True (
     $source -match 'RTSS\.UseDllIntegration' -and
     $source -match 'Use RTSSHooks64\.dll for live state and direct control' -and
     $source -match '(?s)GetRtssHooksApi\(\).*?if !RtssUseDllIntegration\s*\r?\n\s*return 0' -and
-    $source -match '(?s)GetRtssSummary\(\).*?return "Running \| Shortcuts"') (
+    $source -match '(?s)GetRtssMenuStatus\(\).*?return "Running \| Shortcuts"') (
     "The user-selectable RTSS DLL/forced-shortcut mode is incomplete.")
 Assert-True (
     $source -notmatch 'StartupSplash\.Enable' -and
@@ -362,8 +363,14 @@ Assert-True (
     $source -match '(?s)RetireStartupSplashSettings\(\).*?\.pre-schema-6\.bak.*?IniDelete\(IniPath, "StartupSplash"\)') (
     "XFE must retire and migrate the late startup curtain instead of exposing or running it.")
 Assert-True (
-    $source -match '(?s)QuickMenuActivateSelected\(\).*?case "rtssOverlayState":\s*\r?\n\s*ToggleRtssOverlay\(\).*?case "rtssFrameLimit":\s*\r?\n(?:\s*;[^\r\n]*\r?\n)*\s*CycleRtssFrameCap\(1, true\)' -and
-    $source -match '(?s)QuickMenuAdjustSelected\([^)]*\).*?case "rtssOverlayState":\s*\r?\n\s*SetRtssOverlayState\(direction > 0\).*?case "rtssFrameLimit":\s*\r?\n\s*CycleRtssFrameCap\(direction\)') (
+    # The A-press half moved into QuickMenuActivateShared when the fourteen
+    # identical actions stopped being written twice; rtssFrameLimit stayed
+    # per-tree because standalone rebuilds the page and the companion does not.
+    $source -match '(?s)QuickMenuActivateShared\(id\).*?case "rtssOverlayState", "overlayToggle":\s*\r?\n\s*ToggleRtssOverlay\(\)' -and
+    # Both now rebuild on the Custom transition, because a repaint no longer
+    # re-composes the rows and that transition adds or removes one.
+    $source -match '(?s)QuickMenuActivateSelected\(\).*?case "rtssFrameLimit":\s*\r?\n(?:\s*;[^\r\n]*\r?\n)*\s*if CycleRtssFrameCap\(1, true\) \{' -and
+    $source -match '(?s)QuickMenuAdjustSelected\([^)]*\).*?case "rtssOverlayState":\s*\r?\n\s*SetRtssOverlayState\(direction > 0\).*?case "rtssFrameLimit":\s*\r?\n(?:\s*;[^\r\n]*\r?\n)*\s*if CycleRtssFrameCap\(direction\) \{') (
     "RTSS state rows must support A toggle and Left/Right cycling.")
 Assert-True (
     $source -match
@@ -776,15 +783,18 @@ Assert-True (
     $source -notmatch 'MenuRow\("health", "Run Health Check"' -and
     $source -notmatch 'MenuRow\("screenProbe", "Probe Screen"' -and
     $source -notmatch 'MenuRow\("rearmInput", "Re-arm Controller Input"' -and
-    $source -match '(?s)case "SYSTEM":.*?MenuRow\("sleep".*?MenuRow\("restart".*?MenuRow\("shutdown".*?MenuRow\("exit"') (
+    $source -match '(?s)case "SYSTEM":.*?MenuRow\("sleep".*?MenuRow\("restart".*?MenuRow\("shutdown".*?MenuRow\("exitApp"') (
     "The System Quick Menu must stay limited to power and companion-exit actions.")
 Assert-True (
     $source -match
         '(?s)case\s+"MAIN":.*?MenuRow\("gameBar".*?' +
         'MenuRow\("openKeyboard",\s*"Open Keyboard".*?' +
-        'MenuRow\("mouseMode",\s*"Mouse Mode".*?' +
-        'MenuRow\("settingsPage".*?"Features & Configuration".*?' +
-        'MenuRow\("systemPage".*?"Power & Diagnostics"' -and
+        'MenuRow\("qPersistentMouse",\s*"Mouse Mode".*?' +
+        'MenuRow\("settings".*?' +
+        'MenuRow\("system"' -and
+    # The value text moved into QuickMenuValue when rows stopped carrying it.
+    $source -match 'case "settings": return "Features & Configuration"' -and
+    $source -match 'case "system": return "Power & Diagnostics"' -and
     $source -notmatch 'MenuRow\("layoutPage"') (
     "The main Quick Menu rows, order, or title capitalization have regressed.")
 Assert-True (
@@ -799,7 +809,7 @@ Assert-True (
     "Keyboard or Windows Settings does not dismiss the Quick Menu before opening.")
 Assert-True (
     $source -match
-        '(?s)QuickMenuToggleMeta\(id\).*?case\s+"mouseMode":.*?' +
+        '(?s)QuickMenuToggleMeta\(id\).*?case\s+"qPersistentMouse":.*?' +
         'EnablePersistentMouseMode' -and
     $source -match
         '(?s)QuickMenuToggleSetting\(id\).*?enabledControllerMaster.*?' +
@@ -1007,7 +1017,7 @@ Assert-True ($source -match '(?m)^CoordMode "Mouse", "Screen"$') (
 # back first; Xbox FSE re-asserts it and the new window never comes forward.
 Assert-True (
     $source -match 'HideQuickMenuForOwnWindow\(' -and
-    $source -match '(?s)case "settings":\s*\r?\n\s*HideQuickMenuForOwnWindow\(\)') (
+    $source -match '(?s)case "settingsEditor":\s*\r?\n\s*HideQuickMenuForOwnWindow\(\)') (
     "Opening Settings from the Quick Menu must suppress the focus hand-back.")
 # Window resizing must be done by Gui.Show, not by a predicted physical size: a
 # mismatch does not wobble the window, it sizes it wrong and cuts content off.
@@ -1843,8 +1853,8 @@ Assert-True (
 Assert-True (
     $source -match
         '(?sm)^SettingsApplyCategoryLayout\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?' +
-        'SettingsSetRedraw\(false\)(?:(?!\n\})[\s\S])*?' +
-        'finally \{(?:(?!\n\})[\s\S])*?SettingsSetRedraw\(true\)') (
+        'SettingsEditorSetRedraw\(false\)(?:(?!\n\})[\s\S])*?' +
+        'finally \{(?:(?!\n\})[\s\S])*?SettingsEditorSetRedraw\(true\)') (
     "Settings scrolling no longer batches its control movement behind WM_SETREDRAW.")
 
 # Recorded positions must be cleared with the window that produced them.
@@ -1880,19 +1890,40 @@ Assert-True (
 # Launcher Cleanup do jobs XFE deliberately leaves to Xbox FSE, and inventing
 # XFE settings to match them would be worse than the difference.
 
-# General leads with the six settings standalone's General also has, in
-# standalone's order, before the companion-only heartbeat row.
+# General leads with the settings standalone's General also has, in standalone's
+# order, before the companion-only heartbeat row.
+#
+# Audio.EnableQuickControls and Display.EnableQuickControls used to sit between
+# QuickMenu.Enable and the accent rows. They are gone from BOTH trees: hiding a
+# MAIN row is what [QuickMenu] HiddenItems does, and the layout manager that
+# edits it is shared now, so the pair of Enable keys was a second way of saying
+# the same thing. The button that replaced them is pinned below.
 Assert-True (
     $source -match
         '(?s)category := "General"(?:(?!category := )[\s\S])*?' +
         '"QuickMenu\.Enable"(?:(?!category := )[\s\S])*?' +
-        '"Audio\.EnableQuickControls"(?:(?!category := )[\s\S])*?' +
-        '"Display\.EnableQuickControls"(?:(?!category := )[\s\S])*?' +
+        '"QuickMenu\.ShowGameDetection"(?:(?!category := )[\s\S])*?' +
         '"QuickMenu\.AccentColor"(?:(?!category := )[\s\S])*?' +
         '"QuickMenu\.AccentColorCustom"(?:(?!category := )[\s\S])*?' +
         '"QuickMenu\.ChordHoldMs"(?:(?!category := )[\s\S])*?' +
         '"Companion\.HeartbeatSeconds"') (
     "The General page no longer matches standalone's order for the settings both have.")
+# The companion reaches the shared layout manager, or it has no way at all to
+# hide a MAIN row -- which is the state retiring the Enable keys would leave it
+# in if this button were ever dropped.
+#
+# Scoped to BEHAVIOUR, not to the word. A blanket -notmatch on
+# 'EnableQuickControls' also caught RetireQuickControlSettings, which has to name
+# the key in order to delete it -- the same trap as a validator comment quoting
+# the rule it replaced. What must not come back is the key being READ as a live
+# setting or WRITTEN as a default.
+Assert-True (
+    $source -match 'ShowQuickMenuLayoutManager' -and
+    $source -match '(?s)RetireQuickControlSettings\(\).*?IniDelete\(IniPath, retiredSection, "EnableQuickControls"\)' -and
+    $source -notmatch 'ReadBool\(\s*"(?:Audio|Display)",\s*"EnableQuickControls"' -and
+    $source -notmatch '"EnableQuickControls",\s*"true"') (
+    "The companion must offer the shared Quick Menu layout manager, must retire " +
+    "the per-row Enable keys, and must not read or default them again.")
 
 # The automatic-mouse controls sit in the left column below the parking rows,
 # which is where standalone keeps them. They lived in a free right-hand column
@@ -1949,7 +1980,21 @@ Assert-True (
 # because a frozen release snapshot used to hold one tree. A snapshot is the
 # whole folder now, and a silent skip is the last thing this check should be
 # capable of.
+# The shared Quick Menu dispatcher is called with the variable THIS tree names.
+#
+# Standalone reads the row id into `id`; the companion dispatches on the
+# `action` a row carries and has no `id` in that function. Pasting one tree's
+# call into the other names a local that is never assigned, which AutoHotkey
+# does not refuse to compile -- it hands QuickMenuActivateShared an empty value
+# and every shared row silently stops responding. That happened during the
+# consolidation and no existing check saw it: the function existed, the
+# manifests agreed, and the row inventory was satisfied. This pins the argument.
+Assert-True (
+    $source -match '(?m)^\s*if QuickMenuActivateShared\(action\) \{') (
+    "QuickMenuActivateSelected must pass its own action to QuickMenuActivateShared; " +
+    "the other tree's variable name is an unassigned local here.")
 Assert-SharedParity -ProjectRoot $projectRoot -Quiet:$Quiet
+Assert-QuickMenuRows -ProjectRoot $projectRoot -Quiet:$Quiet
 # Reports only. See Report-StructuralDrift in Validate-Common.ps1 for why a
 # high structural score is evidence rather than a verdict.
 Report-StructuralDrift -ProjectRoot $projectRoot -Quiet:$Quiet | Out-Null

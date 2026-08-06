@@ -1,0 +1,169 @@
+# Every row the Quick Menu builds, per product. A decision record, like
+# SHARED_FUNCTIONS.txt and DIVERGENT_FUNCTIONS.txt.
+#
+# Why this file exists
+# --------------------
+# The fingerprint gate cannot see the Quick Menu. The two trees build rows
+# differently -- standalone stores id and label and resolves the value later,
+# the companion carries value and action on the row -- and that difference drags
+# every QuickMenu* function below the 0.75 threshold. Twelve functions and about
+# 1,150 lines therefore sit unmeasured, in the one part of the program a user
+# drives directly.
+#
+# Nothing about a broken row fails to compile. AutoHotkey resolves a `case` that
+# no longer exists by falling through, so a row whose handler was deleted still
+# renders, still selects, and does nothing. That is the failure this file makes
+# loud, and it is the reason the inventory is recorded rather than derived: a row
+# that DISAPPEARS is invisible to any check that only reads the code as it is.
+#
+# Format
+# ------
+#   <product> <rowId>              a row the product builds
+#   <product> dynamic:<name>       a handler reached through a variable rather
+#                                  than a literal row, so the "every handler has
+#                                  a row" direction does not flag it
+#
+# Ids carrying a colon -- layout:, taskWindow:, gamescore:, toggle:, page: --
+# are families resolved by prefix and are deliberately not listed one by one.
+#
+# Delete a line in the same commit that deletes its row. An entry with no row,
+# and a row with no entry, both fail the build.
+
+
+# ----------------------------------------------------------------------------
+# standalone
+# ----------------------------------------------------------------------------
+standalone audioMenu
+standalone back
+standalone audioOutput
+standalone desktop
+standalone display
+standalone displayApply
+standalone displayRefresh
+standalone displayResolution
+standalone displayScale
+standalone displayScaleUnavailable
+standalone displayUnavailable
+standalone exitApp
+standalone gameBar
+standalone gameDetection
+standalone gameScoreBack
+standalone gameScoreEmpty
+standalone hdr
+standalone hdrUnavailable
+standalone limiterOff
+standalone limiterOn
+standalone limiterToggle
+standalone mute
+standalone openKeyboard
+standalone overlayOff
+standalone overlayOn
+standalone overlayToggle
+standalone qAccentColor
+standalone qAlwaysFocus
+standalone qAutoHideCursor
+standalone qBlackout
+standalone qControllerMouse
+standalone qFocusPaused
+standalone qFrameCap
+standalone qGameAssist
+standalone qLimiterMode
+standalone qMouseHideDelay
+standalone qMouseSpeed
+standalone qOverlayMode
+standalone qParkBoot
+standalone qParkEdge
+standalone qParkFocus
+standalone qPersistentMouse
+standalone qRtssIntegration
+standalone qSplash
+standalone qSteamRefocus
+standalone qTaskbar
+standalone qWindowManagement
+standalone restart
+standalone returnShell
+standalone rtssDisabled
+standalone rtssFrameLimit
+standalone rtssFrameLimitCustom
+standalone rtssMenu
+standalone rtssMissing
+standalone rtssOverlayState
+standalone rtssSaveProfile
+standalone rtssSettings
+standalone rtssStart
+standalone setControllerMappings
+standalone settings
+standalone settingsEditor
+standalone settingsFocus
+standalone settingsGeneral
+standalone settingsInput
+standalone settingsRtss
+standalone shutdown
+standalone sleep
+standalone steamMenu
+standalone steamQuickAccess
+standalone system
+standalone taskNext
+standalone taskPrev
+standalone taskRelease
+standalone tasks
+standalone tasksUnavailable
+standalone volume
+standalone windowsSettings
+
+# ----------------------------------------------------------------------------
+# xfe
+# ----------------------------------------------------------------------------
+
+# Reached through a variable rather than a literal row: the HDR row picks its
+# action from live state, and the accent row is adjusted rather than activated.
+xfe audioMenu
+xfe audioOutput
+xfe back
+xfe display
+xfe displayApply
+xfe displayRefresh
+xfe displayResolution
+xfe displayScale
+xfe displayScaleUnavailable
+xfe displayUnavailable
+xfe exitApp
+xfe gameBar
+xfe gameDetection
+xfe gameScoreEmpty
+xfe hdr
+xfe hdrUnavailable
+xfe limiterOff
+xfe limiterOn
+xfe limiterToggle
+xfe mute
+xfe openKeyboard
+xfe overlayOff
+xfe overlayOn
+xfe overlayToggle
+xfe qPersistentMouse
+xfe restart
+xfe rtssDisabled
+xfe rtssFrameLimit
+xfe rtssFrameLimitCustom
+xfe rtssMenu
+xfe rtssMissing
+xfe rtssOverlayState
+xfe rtssSaveProfile
+xfe rtssSettings
+xfe rtssStart
+xfe setControllerMappings
+xfe settingsEditor
+xfe settings
+xfe shutdown
+xfe sleep
+xfe steamMenu
+xfe steamQuickAccess
+xfe system
+xfe tasks
+xfe tasksUnavailable
+xfe volume
+xfe windowsSettings
+
+xfe dynamic:hdr
+xfe dynamic:accentColor

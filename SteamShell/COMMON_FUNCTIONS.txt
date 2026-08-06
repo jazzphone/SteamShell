@@ -59,6 +59,7 @@ HexColorChannel
 HoldControllerMouseButton
 JoinWith
 MoveWindowPhysical
+NormalizeGameLogMode
 NormalizeHexColor
 NormalizeKeyForDisplay
 NormalizeMediaPath

@@ -427,6 +427,24 @@ RtssFrameCapModeIsKnown(mode) {
     return KNOWN.Has(StrLower(Trim(mode)))
 }
 
+; [Logging] GameLogMode, normalized to one of the four names the game-candidate
+; logger understands. Anything else -- a typo, a value from an older build, an
+; empty key -- reads as OFF, because a logging mode nobody recognizes should log
+; nothing rather than something arbitrary.
+;
+; Shared because the derived switch is shared. LogGameCandidateTable gates on
+; EnableGameScoreLogging AND on this mode, and the two trees used to arrive at
+; those from different places: the shell normalized here and derived the bool,
+; the companion read an independent [Logging] EnableGameScoreLogging bool and
+; took the mode raw. So in the companion the pair could disagree -- GameLogMode
+; TOPN with the bool unset logged nothing at all, silently, which is the failure
+; this ends. Both trees now normalize here and derive the bool from the result.
+NormalizeGameLogMode(raw) {
+    static KNOWN := Map("OFF", true, "ACTIVATIONS", true, "TOPN", true, "DIAGNOSTIC", true)
+    mode := StrUpper(Trim(raw))
+    return KNOWN.Has(mode) ? mode : "OFF"
+}
+
 GetTokenInformationBuffer(token, informationClass, &informationBuffer, &errorCode) {
     needed := 0
     DllCall(

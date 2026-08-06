@@ -83,8 +83,11 @@
 #
 #   The ElevatedRtss* request channel
 #       Both trees ask the same helper for the same thing in the same words.
-#       ElevatedRtssRequestPath() stays per-tree, because that is the one part
-#       that genuinely differs: the two programs keep their data elsewhere.
+#       ElevatedRtssRequestPath() was the exception here, kept per-tree because
+#       the two programs keep their data elsewhere. That was a reason to ask the
+#       product where its directory is, not to write the path builder twice: the
+#       copies differed in SteamShellDataDir against A_ScriptDir and in nothing
+#       else. ProductDataDir() is now that question, and the builder is shared.
 #
 # What did NOT move, and should not: deployment. Setup Assistant, the embedded
 # payload, installation modes, the protected on-demand task, and
@@ -123,15 +126,18 @@ DistinctDisplayResolutions
 ElevatedHelperLocationIsProtected
 ElevatedRtssDoneEventName
 ElevatedRtssEventName
+ElevatedRtssRequestPath
 ElevatedRtssWritesAvailable
 EnsureDisplayScaleSelection
 EnsureDisplaySelection
 EnsureElevatedRtssDoneEvent
 EnsureElevatedRtssEvent
 EnsureGdiPlus
+EnsureRtssRunning
 FormatHealthReport
 FrequenciesForResolution
 GetActiveAudioOutputDevices
+GetDefaultQuickMenuOrder
 GetBindingValue
 GetDisplayApplyValue
 GetFrameCapLabel
@@ -143,11 +149,14 @@ GetRtssFrameCapState
 GetRtssFrameLimit
 GetRtssGlobalState
 GetRtssHooksApi
+GetRtssMenuStatus
+GuiLiteralText
 HasLongBinding
 HealthResult
 InitializeTrayMenu
 InitXInput
 InstallationRecordAlert
+IsCloaked
 IsRtssFrameCapPreset
 IsSteamProcess
 IsUsableProfileExe
@@ -155,11 +164,14 @@ LogGameCandidateTable
 LogRawLine
 LogRow
 LogSteamShellSetupRecordDrift
+MouseWatch
 NormalizeKeyForSend
+ParseQuickMenuMainOrder
 PersistRtssFrameCapSelection
 PersistRtssFrameCapStateNow
 QueueQuickMenuDisplayReflow
 QuickMenuAccentPresetHex
+QuickMenuActivateShared
 QuickMenuAccentPresetNames
 QuickMenuAccentValueText
 QuickMenuApplyAccent
@@ -173,20 +185,28 @@ QuickMenuGameScoreValue
 QuickMenuGoBack
 QuickMenuHideThenSend
 QuickMenuKeyboardActive
+QuickMenuLayoutLabel
+QuickMenuLayoutMove
+QuickMenuLayoutRestoreDefault
+QuickMenuLayoutSave
+QuickMenuLayoutToggle
 QuickMenuMoveSelection
 QuickMenuPaintRows
 QuickMenuRowAcceptsRepeat
 QuickMenuRowIsInert
+QuickMenuRowValueText
 QuickMenuRowsClick
 QuickMenuSelectFirst
 QuickMenuSelectLast
 QuickMenuSetRedraw
 QuickMenuTitleText
+QuickMenuToggleTable
 ReadBool
 ReadInt
 ReadNumber
 ReadText
 ReassertTrayIcon
+RefreshQuickMenuLayoutManager
 RecordShortcutCancel
 RefreshHealthCheck
 RegisterQuickMenuKeys
@@ -206,6 +226,9 @@ SanitizeDiagnosticText
 SaveRtssFrameLimitToProfile
 SendChordSafe
 SendRtssShortcut
+SettingsEditorRepaint
+SettingsEditorSetRedraw
+SettingsEditorGetScrollTrackPosition
 SendSteamOverlayChord
 SetQuickMenuHdrState
 SetRtssFrameLimiterState
@@ -214,7 +237,9 @@ SetRtssOverlayState
 SettingsUpdateScrollBar
 SharedNotify
 ShouldLogRateLimited
+ShowNotification
 ShowHealthCheck
+ShowQuickMenuLayoutManager
 ShutdownGdiPlus
 ShutdownRtssHooksApi
 SteamShellInstallationVerdict
@@ -224,6 +249,7 @@ StopElevatedHelper
 SystemCursor
 TaskbarCreatedHandler
 ToggleQuickMenuHdrState
+ToggleQuickMenu
 ToggleRtssFrameLimiter
 ToggleRtssOverlay
 TryInvokeTouchKeyboard
