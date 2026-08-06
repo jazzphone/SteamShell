@@ -3183,8 +3183,36 @@ Assert-True (
     $helperSource -match
         '(?sm)^LogLine\([^)]*\)(?:(?!\n\})[\s\S])*?RotateHelperLogIfNeeded(?:(?!\n\})[\s\S])*?FileAppend' -and
     $helperSource -match
-        'LogMaxBytes\s*:=\s*ReadInt\("Logging",\s*"GameLogRotateMaxKB"') (
+        'LogMaxBytes\s*:=\s*ReadInt\("Logging",\s*"LogRotateMaxKB"') (
     "The elevated helper log is no longer beside the protected binary or no longer rotates.")
+
+# One name for one setting, across both products and the helper.
+#
+# The helper serves both trees and used to branch on --product= to read the same
+# two values under two spellings -- [Companion] LogRotateMaxKB for XFE, [Logging]
+# GameLogRotateMaxKB here. A branch like that is only ever as correct as the
+# spellings it hard-codes: rename either side and the helper silently falls back
+# to its defaults instead of honouring what the user set, which shows up as a log
+# that grows without bound rather than as anything that fails.
+#
+# So the absence of the branch is the assertion, not just the presence of the new
+# key. Schema 22 here and schema 18 in XFE carry the old values across.
+Assert-True (
+    $helperSource -notmatch 'GameLogRotate' -and
+    $helperSource -notmatch 'HelperProduct\s*=\s*"xfe"[\s\S]{0,400}?LogRotateMaxKB' -and
+    $source -notmatch 'GameLogRotate' -and
+    $source -match 'LogRotateMaxKB\s*:=\s*ReadInt\("Logging",\s*"LogRotateMaxKB"' -and
+    $source -match 'LogRotateBackups\s*:=\s*ReadInt\("Logging",\s*"LogRotateBackups"') (
+    "Log rotation must be one setting under one name -- [Logging] LogRotateMaxKB " +
+    "and LogRotateBackups -- with no GameLog-prefixed survivor and no per-product " +
+    "branch in the elevated helper.")
+
+# A rename is worthless if it strands the user's configured value.
+Assert-True (
+    $source -match '(?s)GetRetiredIniKeys\(\)\s*\{[\s\S]*?"GameLog"\s+rotateKey[\s\S]*?' +
+        '"replacementKey",\s*"Log"\s+rotateKey') (
+    "Schema 22 must carry GameLogRotateMaxKB/GameLogRotateBackups into their " +
+    "unprefixed replacements rather than dropping them.")
 
 # EnableElevatedInputHelper is a security control. One that only takes effect at
 # the next boot is not one.

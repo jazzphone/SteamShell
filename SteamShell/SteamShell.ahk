@@ -81,7 +81,7 @@ try DirCreate(SteamShellDataDir "\backups")
 global SettingsPath := SteamShellDataDir "\SteamShellSettings.ini"
 ; Back-compat alias used by some helper functions
 global IniPath := SettingsPath
-global CurrentSettingsSchemaVersion := 21
+global CurrentSettingsSchemaVersion := 22
 global LogPath := SteamShellDataDir "\logs\SteamShell.log"
 global IntentionalExitMode := ""
 global SafeMode := false
@@ -2485,7 +2485,7 @@ GetDefaultSettingsIniText() {
 ; ==================================================================================================
 
 [SteamShell]
-SettingsSchemaVersion=21                                   ; Internal schema used for safe settings upgrades
+SettingsSchemaVersion=22                                   ; Internal schema used for safe settings upgrades
 
 [Setup]
 SetupState=Pending                                         ; Pending | InProgress | Complete
@@ -2578,8 +2578,8 @@ GameLogIntervalMs=3000                                      ; Rate limit for TOP
 GameLogIncludeTitles=true                                   ; Include window titles in the log
 GameLogRejectNearCandidates=true                            ; In DIAGNOSTIC, also log near-fullscreen rejects
 GameLogRejectMinAreaPercent=0.85                            ; Only log rejects with >= this % of screen area
-GameLogRotateMaxKB=256                                      ; Rotate log when it exceeds this many KB
-GameLogRotateBackups=2                                      ; Keep this many rotated backups
+LogRotateMaxKB=256                                          ; Rotate log when it exceeds this many KB
+LogRotateBackups=2                                          ; Keep this many rotated backups
 
 [MousePark]
 MouseParkEdge=Right                                        ; Right | Left vertical edge of the active display
@@ -2851,6 +2851,23 @@ GetRetiredIniKeys() {
     ] {
         if TryReadIniRaw("WindowEngine", engineKey, &retiredEngineValue)
             retired.Push(Map("section", "WindowEngine", "key", engineKey))
+    }
+
+    ; Schema 22 drops the "Game" prefix from the two rotation keys. Rotation was
+    ; never game-log-specific -- the same two values size and count the backups
+    ; of the shell's own log and the elevated helper's log, neither of which is a
+    ; game log. XFE had already named them without the prefix, so the products
+    ; and the helper disagreed about what one setting was called, and the helper
+    ; carried a branch on --product= for no reason but the spelling.
+    for _, rotateKey in ["RotateMaxKB", "RotateBackups"] {
+        if TryReadIniRaw("Logging", "GameLog" rotateKey, &legacyRotateValue) {
+            retired.Push(Map(
+                "section", "Logging",
+                "key", "GameLog" rotateKey,
+                "value", legacyRotateValue,
+                "replacementSection", "Logging",
+                "replacementKey", "Log" rotateKey))
+        }
     }
 
     ; OFF is now the single logging disable state. The old boolean duplicated
@@ -3516,8 +3533,8 @@ LoadSettings() {
     GameLogIncludeTitles := ReadBool("Logging", "GameLogIncludeTitles", true)
     GameLogRejectNearCandidates := ReadBool("Logging", "GameLogRejectNearCandidates", true)
     GameLogRejectMinAreaPercent := ReadNumber("Logging", "GameLogRejectMinAreaPercent", 0.85, 0.10, 1.00)
-    LogRotateMaxKB := ReadInt("Logging", "GameLogRotateMaxKB", 256, 32, 8192)
-    LogRotateBackups := ReadInt("Logging", "GameLogRotateBackups", 2, 0, 10)
+    LogRotateMaxKB := ReadInt("Logging", "LogRotateMaxKB", 256, 32, 8192)
+    LogRotateBackups := ReadInt("Logging", "LogRotateBackups", 2, 0, 10)
 
     MouseParkRightOffsetPx := ReadInt("MousePark", "MouseParkRightOffsetPx", 50, 0, 5000)
     MouseParkYPercent := ReadNumber("MousePark", "MouseParkYPercent", 0.50, 0.0, 1.0)

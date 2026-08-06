@@ -819,16 +819,15 @@ LoadConfiguration() {
     if !FileExist(SettingsPath)
         return false
     ; Same keys and bounds the main tree uses, so both logs rotate together.
-    ; The two trees name them differently, and reading standalone's keys out of
-    ; XFE's INI would silently fall back to the defaults rather than honouring
-    ; what the user configured.
-    if (HelperProduct = "xfe") {
-        LogMaxBytes := ReadInt("Companion", "LogRotateMaxKB", 256, 32, 8192) * 1024
-        LogBackups := ReadInt("Companion", "LogRotateBackups", 2, 0, 10)
-    } else {
-        LogMaxBytes := ReadInt("Logging", "GameLogRotateMaxKB", 256, 32, 8192) * 1024
-        LogBackups := ReadInt("Logging", "GameLogRotateBackups", 2, 0, 10)
-    }
+    ; One read rather than a branch on --product=: the two trees used to keep
+    ; these in different sections under differently-prefixed names, and reading
+    ; one product's keys out of the other's INI would have fallen back to the
+    ; defaults rather than honouring what the user configured. Both name them
+    ; this way now, so there is nothing left to branch on. The old spellings are
+    ; deliberately not written out here -- a retired name in a comment is still a
+    ; match for a rule looking for it in code.
+    LogMaxBytes := ReadInt("Logging", "LogRotateMaxKB", 256, 32, 8192) * 1024
+    LogBackups := ReadInt("Logging", "LogRotateBackups", 2, 0, 10)
     ; Main owns the Quick Menu chord. When the user disables the menu those
     ; buttons stop being reserved there, so they must stop being reserved here.
     EnableQuickMenu := ReadBool("QuickMenu", "Enable", true)

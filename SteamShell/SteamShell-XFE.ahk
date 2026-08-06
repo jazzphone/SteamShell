@@ -47,7 +47,7 @@ SetTitleMatchMode 2
 CoordMode "Mouse", "Screen"
 
 global AppVersion := "1.9.9"
-global SettingsSchemaVersion := 17
+global SettingsSchemaVersion := 18
 global IniPath := A_ScriptDir "\SteamShell-XFE.ini"
 global LogPath := A_ScriptDir "\SteamShell-XFE.log"
 global ScriptPid := DllCall("GetCurrentProcessId", "UInt")
@@ -493,10 +493,8 @@ global _ShortcutCap := ""
 DefaultSettings() {
     return Map(
         "Companion", Map(
-            "SettingsSchemaVersion", 17,
-            "HeartbeatSeconds", 60,
-            "LogRotateMaxKB", 256,
-            "LogRotateBackups", 2
+            "SettingsSchemaVersion", 18,
+            "HeartbeatSeconds", 60
         ),
         ; Schema 12. Standalone keeps its cross-cutting feature switches in
         ; [Features] rather than beside the settings they gate, and a user who
@@ -618,7 +616,14 @@ DefaultSettings() {
             "GameLogMode", "OFF",
             "GameLogTopN", 3,
             "GameLogIntervalMs", 3000,
-            "GameLogIncludeTitles", "true"
+            "GameLogIncludeTitles", "true",
+            ; Schema 18. These were in [Companion] under these same names, and
+            ; standalone had them in [Logging] under GameLog-prefixed ones. They
+            ; size and count backups of the companion log AND the elevated
+            ; helper's log, so neither the "Companion" section nor the "Game"
+            ; prefix described them. Both products name them this way now.
+            "LogRotateMaxKB", 256,
+            "LogRotateBackups", 2
         ),
         ; Schema 12. These five carry standalone's own names, so they now carry
         ; standalone's section as well. The rest of the cleanup tuning stayed in
@@ -811,7 +816,13 @@ MigrateSectionsToStandaloneLayout() {
         ["Cursor", "EnableMouseParkOnBoot", "Features", "EnableMouseParkOnBoot"],
         ["Cursor", "HideDelayMs", "Timing", "MouseHideDelay"],
         ["Cursor", "ParkEdge", "MousePark", "MouseParkEdge"],
-        ["Cursor", "ParkYPercent", "MousePark", "MouseParkYPercent"]]
+        ["Cursor", "ParkYPercent", "MousePark", "MouseParkYPercent"],
+        ; Schema 18. Log rotation is not companion-specific and not
+        ; game-specific: one pair of values sizes this log and the elevated
+        ; helper's. [Logging] is where both now live, under these names, which
+        ; lets the helper read one key regardless of --product=.
+        ["Companion", "LogRotateMaxKB", "Logging", "LogRotateMaxKB"],
+        ["Companion", "LogRotateBackups", "Logging", "LogRotateBackups"]]
     marker := "__STEAMSHELL_XFE_MISSING__"
     moved := 0
     for _, move in moves {
@@ -954,8 +965,8 @@ LoadSettings() {
     ; the heartbeat is the only proof the process is still alive, and a 60s gap
     ; is long enough to hide a death for the whole test.
     HeartbeatSeconds := ReadInt("Companion", "HeartbeatSeconds", 60, 5, 3600)
-    LogRotateMaxKB := ReadInt("Companion", "LogRotateMaxKB", 256, 32, 8192)
-    LogRotateBackups := ReadInt("Companion", "LogRotateBackups", 2, 0, 10)
+    LogRotateMaxKB := ReadInt(MovedSettingSection("Logging", "Companion", "LogRotateMaxKB"), "LogRotateMaxKB", 256, 32, 8192)
+    LogRotateBackups := ReadInt(MovedSettingSection("Logging", "Companion", "LogRotateBackups"), "LogRotateBackups", 2, 0, 10)
     EnableQuickMenu := ReadBool("QuickMenu", "Enable", true)
     EnableGameDetectionMenu := ReadBool("QuickMenu", "ShowGameDetection", true)
     QuickMenuMainOrderRaw := ReadText("QuickMenu", "MainOrder", QuickMenuMainOrderRaw)
