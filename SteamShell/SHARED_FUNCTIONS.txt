@@ -116,6 +116,7 @@ CaptureGameCandidates
 ChangeQuickMenuTaskPage
 CommitRtssPendingFrameCap
 ConfirmPrimaryDisplayMode
+ControllerBindingSharedAction
 CopyHealthReport
 CycleDefaultAudioOutput
 CycleDisplayFrequency
@@ -135,6 +136,7 @@ EnsureElevatedRtssDoneEvent
 EnsureElevatedRtssEvent
 EnsureGdiPlus
 EnsureRtssRunning
+ExecuteControllerBinding
 FormatHealthReport
 FrequenciesForResolution
 GetActiveAudioOutputDevices

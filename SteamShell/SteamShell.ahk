@@ -4862,57 +4862,24 @@ ControllerHandleElevatedForeground(buttons, lt, rt, pressed, released, now, chor
     }
 }
 
-ExecuteControllerBinding(key) {
-    v := GetBindingValue(key)
-    if (v = "" || v = "Builtin:None")
-    return
-
-    if (SubStr(v, 1, 5) = "Send:") {
-    send := SubStr(v, 6)
-    if (send != "")
-    SendChordSafe(send)
-    return
-    }
-
-    if (SubStr(v, 1, 8) != "Builtin:")
-    return
-
-    act := SubStr(v, 9)
-    switch act {
-        case "LeftClick":
-        try Click("Left")
-        case "RightClick":
-        try Click("Right")
-        case "Enter":
-        try SendInput("{Enter}")
-        case "Esc":
-        try SendInput("{Esc}")
-        case "AltF4":
-        ; Use explicit chord send for reliability
-        SendChordSafe("!{F4}")
-        case "TabTip":
-        OpenTouchKeyboard()
-        case "OSK":
-        OpenOSK()
-        case "WinG":
-        SendChordSafe("#g")
-        case "StartMenu":
-        try SendInput("{LWin}")
-    case "Explorer":
-        pid := 0
-        LaunchInteractiveApp(
-            A_WinDir "\explorer.exe", "", A_WinDir,
-            "Normal", &pid, "File Explorer")
-        case "CtrlAltTab":
-        SendChordSafe("^!{Tab}")
-        case "TaskManager":
-        SendChordSafe("^+{Esc}")
-        case "QuickMenu":
-        ToggleQuickMenu()
+; Per-tree seam required by SteamShell-Shared.ahk: the builtin actions only
+; this product has.
+;
+; Explorer goes through LaunchInteractiveApp for the same reason
+; OpenTouchKeyboard does. This program can end up elevated -- Setup takeover,
+; or the user's own choice -- and a child launched from an elevated shell
+; INHERITS that token. An elevated File Explorer is a privilege escalation the
+; user never asked for and cannot see, so the launch is de-elevated rather than
+; convenient. The companion runs at normal integrity and has nothing to drop.
+ProductControllerBindingAction(action) {
+    switch action {
+        case "Explorer":
+            pid := 0
+            LaunchInteractiveApp(
+                A_WinDir "\explorer.exe", "", A_WinDir,
+                "Normal", &pid, "File Explorer")
         case "ControlPanel":
-        ShowControlPanel()
-        default:
-        ; unknown builtin - ignore
+            ShowControlPanel()
     }
 }
 

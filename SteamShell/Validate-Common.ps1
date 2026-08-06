@@ -1108,6 +1108,73 @@ function Assert-SharedParity {
     # an empty call at run time. And nothing may leave the shared file that is
     # not on this list, because that is the half that keeps the seam from
     # growing back.
+    # Every offerable binding must do something, and everything it does must
+    # have a name.
+    #
+    # ControllerBindingPretty is what the binding UI lists. An action it labels
+    # but nothing executes is a choice the user can make that silently does
+    # nothing -- the same shape as the Quick Menu row whose action no handler
+    # answered. An action that executes but has no label shows the user its raw
+    # internal name instead of words.
+    #
+    # Both directions, because they fail differently and neither is visible in a
+    # build: the first is a dead binding, the second is a cosmetic leak, and the
+    # only thing either costs at compile time is nothing at all.
+    $sharedText = Get-Content -LiteralPath (
+        Join-Path $projectRoot "SteamShell-Shared.ahk") -Raw
+    $sharedActionBody = [regex]::Match(
+        $sharedText,
+        '(?ms)^ControllerBindingSharedAction\(action\)\s*\{.*?^\}\s*$').Value
+    $sharedActions = @([regex]::Matches($sharedActionBody, 'case\s+"(\w+)"') |
+        ForEach-Object { $_.Groups[1].Value })
+    Assert-True ($sharedActions.Count -ge 10) (
+        "ControllerBindingSharedAction could not be read; every controller " +
+        "binding would be reported as unreachable.")
+    foreach ($tree in @("SteamShell.ahk", "SteamShell-XFE.ahk")) {
+        $treeText = Get-Content -LiteralPath (Join-Path $projectRoot $tree) -Raw
+        $seamBody = [regex]::Match(
+            $treeText,
+            '(?ms)^ProductControllerBindingAction\(action\)\s*\{.*?^\}\s*$').Value
+        Assert-True ($seamBody) (
+            "$tree defines no ProductControllerBindingAction; the actions only " +
+            "it implements would be unreachable.")
+        $executable = @($sharedActions) +
+            @([regex]::Matches($seamBody, 'case\s+"(\w+)"') |
+                ForEach-Object { $_.Groups[1].Value }) + @("None")
+        $prettyBody = [regex]::Match(
+            $treeText,
+            '(?ms)^ControllerBindingPretty\(key\)\s*\{.*?^\}\s*$').Value
+        Assert-True ($prettyBody) (
+            "$tree defines no ControllerBindingPretty; binding labels cannot be checked.")
+        foreach ($action in ($executable | Sort-Object -Unique)) {
+            Assert-True ($prettyBody -match ('"' + [regex]::Escape($action) + '"')) (
+                "$tree executes controller binding '$action' but " +
+                "ControllerBindingPretty gives it no label, so the binding UI " +
+                "would show its raw internal name.")
+        }
+        # The reverse. Labelled actions are the KEYS: standalone writes them as
+        # `case "X":` and the companion as the odd-numbered entries of a Map, so
+        # each is read the way that tree actually spells them.
+        if ($tree -eq "SteamShell.ahk") {
+            $labelled = @([regex]::Matches($prettyBody, 'case\s+"(\w+)"') |
+                ForEach-Object { $_.Groups[1].Value })
+        } else {
+            $labelMap = [regex]::Match($prettyBody, '(?s)labels\s*:=\s*Map\((.*?)\n\s*\)').Groups[1].Value
+            $tokens = @([regex]::Matches($labelMap, '"([^"]*)"') |
+                ForEach-Object { $_.Groups[1].Value })
+            $labelled = @(for ($i = 0; $i -lt $tokens.Count; $i += 2) { $tokens[$i] })
+        }
+        Assert-True ($labelled.Count -ge 10) (
+            "$tree: the ControllerBindingPretty label set could not be read, so " +
+            "a label with no action behind it would go unnoticed.")
+        foreach ($label in ($labelled | Sort-Object -Unique)) {
+            Assert-True ($executable -contains $label) (
+                "$tree offers controller binding '$label' in " +
+                "ControllerBindingPretty, but nothing executes it: choosing it " +
+                "would bind a button that does nothing.")
+        }
+    }
+
     # A shared Quick Menu row steps these, so both trees must accept the same
     # range. A bound only one tree has makes the row lie: it shows the value it
     # just wrote while the other tree's reader clamps it away on the next reload,
@@ -1131,7 +1198,9 @@ function Assert-SharedParity {
         "PersistRtssCustomFrameCap", "ProductBestGameExe",
         "ProductCenterGui", "ProductDataDir", "ProductElevatedHelperAlive",
         "ProductHealthResults", "ProductIdentity",
-        "ProductApplyQuickMenuSetting", "ProductSettingBool",
+        "OpenOSK", "OpenTouchKeyboard",
+        "ProductApplyQuickMenuSetting", "ProductControllerBindingAction",
+        "ProductSettingBool",
         "ProductSettingsScrollBar", "ProductSettingsViewportHeight",
         "ProductTrayBaseTip", "ProductTrayItems", "ProductVersionText",
         "QuickMenuActivateSelected", "QuickMenuAdjustSelected",

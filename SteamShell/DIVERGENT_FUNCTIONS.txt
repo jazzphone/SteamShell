@@ -94,7 +94,6 @@ HasLongBinding: three-line wrapper passing each program's ControllerMap to Contr
 QuickMenuHideThenSteamMenu: the companion resolves the shortcut through SendSteamMenu rather than reading SteamMenuShortcut, so the two take their value from different places
 MouseWatchDisabled: standalone stands the whole pass down while Explorer is allowed, because the desktop shell owns the cursor then; the companion has no desktop shell and gates only on the setting
 MouseWatchHoldsCursorVisible: asked after movement tracking rather than before it, so it declines hiding without stopping the cursor reappearing -- the companion holds it for a pointer-driven Settings window, standalone holds it for nothing
-ExecuteControllerBinding: the builtin ACTION SET is per-product, the same divergence recorded for ControllerBindingPretty -- the companion has TaskView, WindowsDesktop and Settings, standalone has ControlPanel and launches Explorer through its de-elevation path. Phase 4a's table should absorb both.
 SendChordSafe: three-line wrapper over SendChordReleasingModifiers in SteamShell-Common.ahk; the shared copy also declines while the companion is disabled, which the helper has no concept of
 
 # ------------------------------------------------------------------------------

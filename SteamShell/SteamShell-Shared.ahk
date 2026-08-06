@@ -3730,6 +3730,78 @@ QuickMenuToggleTable() {
     return table
 }
 
+; The builtin controller actions both products perform identically.
+;
+; Twelve of the sixteen. What is left is not refactoring residue: the companion
+; has TaskView, WindowsDesktop and Settings, the shell has its own Control
+; Panel, and Explorer differs in HOW rather than whether -- which is the whole
+; reason the action set stayed per-product until there was a table to hold it.
+;
+; SendInput for a single key and SendChordSafe for anything with a modifier.
+; That distinction is deliberate and was already in both trees: a chord sent
+; without releasing the physical modifiers the user is still holding arrives as
+; a different chord.
+;
+; Returns true when the action was handled.
+ControllerBindingSharedAction(action) {
+    switch action {
+        case "LeftClick":
+            try Click("Left")
+        case "RightClick":
+            try Click("Right")
+        case "Enter":
+            try SendInput("{Enter}")
+        case "Esc":
+            try SendInput("{Esc}")
+        case "StartMenu":
+            try SendInput("{LWin}")
+        case "AltF4":
+            SendChordSafe("!{F4}")
+        case "WinG":
+            SendChordSafe("#g")
+        case "CtrlAltTab":
+            SendChordSafe("^!{Tab}")
+        case "TaskManager":
+            SendChordSafe("^+{Esc}")
+        case "TabTip":
+            OpenTouchKeyboard()
+        case "OSK":
+            OpenOSK()
+        case "QuickMenu":
+            ToggleQuickMenu()
+        default:
+            return false
+    }
+    return true
+}
+
+; Run whatever a controller button is bound to.
+;
+; The parsing skeleton -- empty, Builtin:None, a Send: shortcut, a Builtin:
+; action -- was duplicated in both trees and is the same in both. Only the
+; action SET differed, so only the action set is asked per-product now.
+;
+; An unknown action is ignored rather than logged. Bindings are hand-editable
+; and a typo should cost a button that does nothing, not a log line on every
+; press of it.
+ExecuteControllerBinding(key) {
+    value := GetBindingValue(key)
+    if (value = "" || value = "Builtin:None")
+        return
+    if (SubStr(value, 1, 5) = "Send:") {
+        shortcut := SubStr(value, 6)
+        if (shortcut != "")
+            SendChordSafe(shortcut)
+        return
+    }
+    if (SubStr(value, 1, 8) != "Builtin:")
+        return
+    action := SubStr(value, 9)
+    if ControllerBindingSharedAction(action)
+        return
+    ProductControllerBindingAction(action)
+}
+
 ; How many task-switcher rows fit on one page.
 ;
 ; Eight rather than "as many as the control pool holds". The pool is 14 and the

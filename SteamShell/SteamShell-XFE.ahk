@@ -4833,52 +4833,22 @@ XInputResolveController(&state) {
     return false
 }
 
-ExecuteControllerBinding(key) {
-    value := GetBindingValue(key)
-    if (value = "" || value = "Builtin:None")
-        return
-    if (SubStr(value, 1, 5) = "Send:") {
-        shortcut := SubStr(value, 6)
-        if (shortcut != "")
-            SendChordSafe(shortcut)
-        return
-    }
-    if (SubStr(value, 1, 8) != "Builtin:")
-        return
-    action := SubStr(value, 9)
+; Per-tree seam required by SteamShell-Shared.ahk: the builtin actions only
+; this product has.
+;
+; Explorer is a plain Run here. The companion runs at normal integrity, so
+; there is no token to drop and nothing to route around -- the shell's
+; de-elevating launch would be ceremony rather than safety.
+ProductControllerBindingAction(action) {
     switch action {
-        case "LeftClick":
-            try Click("Left")
-        case "RightClick":
-            try Click("Right")
-        case "Enter":
-            try SendInput("{Enter}")
-        case "Esc":
-            try SendInput("{Esc}")
-        case "AltF4":
-            SendChordSafe("!{F4}")
-        case "TabTip":
-            OpenTouchKeyboard()
-        case "OSK":
-            OpenOSK()
-        case "WinG":
-            SendChordSafe("#g")
-        case "StartMenu":
-            try SendInput("{LWin}")
         case "Explorer":
             try Run("explorer.exe")
-        case "CtrlAltTab":
-            SendChordSafe("^!{Tab}")
-        case "TaskManager":
-            SendChordSafe("^+{Esc}")
         case "TaskView":
             SendChordSafe("#{Tab}")
         case "WindowsDesktop":
             ; Win+D. The previous Win+F11 is not a Windows shortcut at all, so
             ; this action had never done anything.
             SendChordSafe("#d")
-        case "QuickMenu":
-            ToggleQuickMenu()
         case "Settings":
             ShowSettings()
     }
