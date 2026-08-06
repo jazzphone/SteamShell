@@ -5414,10 +5414,6 @@ RawInputReadState(&state) {
 ;
 ;   product   "both", "standalone" or "xfe" -- who shows the row
 ;   type      checkbox | choice | edit | note
-;   companionField  the id the companion's populate/save still use, where it
-;                   differs from Section.Key. Temporary: it exists only until
-;                   the companion derives both from section and key, and every
-;                   one of them is a name somebody has to keep in step by hand.
 SettingsCategoryRows(category) {
     static table := Map(
         ; Category names follow the shell's. The companion calls its logging page
@@ -5656,22 +5652,19 @@ SettingsCategoryRows(category) {
                 "section", "Controller", "key", "ControllerChordHoldMs",
                 "label", "Mapping long-press threshold (ms)",
                 "default", "500", "fieldType", "integer", "min", 100, "max", 3000),
-            ; Schema 13 moved these out of [Cursor]; the companion's field IDS
-            ; never followed, which is why companionField says so out loud rather
-            ; than the two trees quietly disagreeing about where they live.
+            ; Schema 13 moved these out of [Cursor] and the companion's field
+            ; ids did not follow, so it looked them up under names that matched
+            ; neither the section nor the key. They match now, in both trees.
             Map("product", "both", "type", "checkbox",
                 "section", "Features", "key", "EnableAutoHideCursor",
-                "companionField", "Cursor.EnableAutoHide",
                 "label", "Automatically hide an idle mouse cursor",
                 "default", "true"),
             Map("product", "both", "type", "edit",
                 "section", "Timing", "key", "MouseHideDelay",
-                "companionField", "Cursor.HideDelayMs",
                 "label", "Cursor hide delay (ms)",
                 "default", "1000", "fieldType", "integer", "min", 0, "max", 60000),
             Map("product", "both", "type", "checkbox",
                 "section", "Features", "key", "EnableMouseParkOnBoot",
-                "companionField", "Cursor.EnableMouseParkOnBoot",
                 "label", "Park the mouse at the display edge once during startup",
                 "default", "true"),
             ; The companion parks on events the shell has no equivalent for, and
@@ -5680,11 +5673,9 @@ SettingsCategoryRows(category) {
             ; table says so too.
             Map("product", "xfe", "type", "checkbox",
                 "section", "Cursor", "key", "ParkOnGameStart",
-                "companionField", "Cursor.ParkOnGameStart",
                 "label", "Park when a game enters fullscreen", "default", "true"),
             Map("product", "xfe", "type", "checkbox",
                 "section", "Cursor", "key", "ParkOnSteamReturn",
-                "companionField", "Cursor.ParkOnSteamReturn",
                 "label", "Park after returning to Steam", "default", "true"),
             Map("product", "standalone", "type", "checkbox",
                 "section", "Features", "key", "EnableMouseParkOnFocusChange",
@@ -5692,12 +5683,10 @@ SettingsCategoryRows(category) {
                 "default", "true"),
             Map("product", "both", "type", "choice",
                 "section", "MousePark", "key", "MouseParkEdge",
-                "companionField", "Cursor.ParkEdge",
                 "label", "Mouse parking edge",
                 "choices", ["Right", "Left"], "default", "Right"),
             Map("product", "both", "type", "checkbox",
                 "section", "Features", "key", "EnableAutoMouseMode",
-                "companionField", "Controller.EnableAutoMouseMode",
                 "label", "Enable automatic mouse mode (master switch)",
                 "default", "true"),
             ; The shell can put the whole Windows desktop in automatic mouse

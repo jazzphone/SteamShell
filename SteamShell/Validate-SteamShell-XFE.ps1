@@ -1865,8 +1865,8 @@ Assert-True (
 # fields to be trustworthy and said so, rather than passing while checking a
 # third of the window.
 #
-# Table rows are keyed the way this tree looks them up: companionField where a
-# row carries one, Section.Key otherwise.
+# Table rows are keyed Section.Key, which is exactly how this tree looks a field
+# up now -- the row, the populate and the save all say the same string.
 $registeredFieldKeys = [regex]::Matches(
     $source,
     'Settings(?:AddCheckboxRow|AddEditRow|AddChoiceRow|AddShortcutRow|AddPathRow)' +
@@ -1875,11 +1875,9 @@ $registeredFieldKeys = [regex]::Matches(
 $tableRows = [regex]::Matches(
     $source,
     'Map\("product", "(both|xfe)", "type", "(?!note|section)(\w+)",\s*\r?\n\s*' +
-    '"section", "([^"]+)", "key", "([^"]+)",\s*\r?\n?\s*' +
-    '(?:"companionField", "([^"]+)",)?')
+    '"section", "([^"]+)", "key", "([^"]+)"')
 $registeredFieldKeys += @($tableRows | ForEach-Object {
-    if ($_.Groups[5].Success) { $_.Groups[5].Value }
-    else { $_.Groups[3].Value + "." + $_.Groups[4].Value }
+    $_.Groups[3].Value + "." + $_.Groups[4].Value
 })
 $registeredFieldKeys = @($registeredFieldKeys | Sort-Object -Unique)
 Assert-True ($registeredFieldKeys.Count -gt 55) (

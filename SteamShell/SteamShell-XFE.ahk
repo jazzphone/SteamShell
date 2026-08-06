@@ -6085,10 +6085,11 @@ SettingsRegisterField(category, key, control, eventName := "Change") {
 ; ORDER of a list kept somewhere else -- and two of those lists were in the
 ; opposite order from the shell's.
 ;
-; companionField is honoured where a row carries one: this tree's populate and
-; save still look fields up by an id that predates schema 13's section moves, so
-; the id has to stay what they expect until they derive it from section and key
-; like the shell does. The table records that debt rather than hiding it.
+; A field is identified by Section.Key, the same string its populate and its
+; save use. It used to be identified by an id that predated schema 13's section
+; moves -- "Cursor.EnableAutoHide" for a setting living at [Features]
+; EnableAutoHideCursor -- so the row, the populate and the save agreed only
+; because three hand-written names happened to match.
 SettingsAddSharedRows(guiObj, category, &y, tableKey := "") {
     for _, row in SettingsCategoryRows(tableKey != "" ? tableKey : category) {
         if !SettingsRowAppliesTo(row, "xfe")
@@ -6101,9 +6102,7 @@ SettingsAddSharedRows(guiObj, category, &y, tableKey := "") {
             SettingsAddSectionRow(guiObj, category, row["label"], &y)
             continue
         }
-        field := row.Has("companionField")
-            ? row["companionField"]
-            : row["section"] "." row["key"]
+        field := row["section"] "." row["key"]
         label := SettingsRowLabel(row, "xfe")
         switch row["type"] {
             case "checkbox":
@@ -6421,7 +6420,7 @@ SettingsPopulate() {
         ReadInt("Companion", "HeartbeatSeconds", 60, 5, 3600))
     SetFieldValue("Controller.EnableControllerMouseMode",
         ReadBool("Controller", "EnableControllerMouseMode", true))
-    SetFieldValue("Controller.EnableAutoMouseMode",
+    SetFieldValue("Features.EnableAutoMouseMode",
         ReadBool(MovedSettingSection("Features", "Controller", "EnableAutoMouseMode"), "EnableAutoMouseMode", true))
     SetFieldValue("Controller.AutoMouseExeList",
         ReadText("Controller", "AutoMouseExeList", "explorer.exe"))
@@ -6480,12 +6479,12 @@ SettingsPopulate() {
         ReadInt("Controller", "ControllerMouseSpeed", 100, 10, 300))
     SetFieldValue("Controller.ControllerChordHoldMs",
         ReadInt("Controller", "ControllerChordHoldMs", 500, 200, 3000))
-    SetFieldValue("Cursor.EnableAutoHide", ReadBool(MovedSettingSection("Features", "Cursor", "EnableAutoHideCursor"), "EnableAutoHideCursor", true))
-    SetFieldValue("Cursor.HideDelayMs", ReadInt(MovedSettingSection("Timing", "Cursor", "MouseHideDelay"), "MouseHideDelay", 1000, 250, 10000))
-    SetFieldValue("Cursor.EnableMouseParkOnBoot", ReadBool(MovedSettingSection("Features", "Cursor", "EnableMouseParkOnBoot"), "EnableMouseParkOnBoot", true))
+    SetFieldValue("Features.EnableAutoHideCursor", ReadBool(MovedSettingSection("Features", "Cursor", "EnableAutoHideCursor"), "EnableAutoHideCursor", true))
+    SetFieldValue("Timing.MouseHideDelay", ReadInt(MovedSettingSection("Timing", "Cursor", "MouseHideDelay"), "MouseHideDelay", 1000, 250, 10000))
+    SetFieldValue("Features.EnableMouseParkOnBoot", ReadBool(MovedSettingSection("Features", "Cursor", "EnableMouseParkOnBoot"), "EnableMouseParkOnBoot", true))
     SetFieldValue("Cursor.ParkOnGameStart", ReadBool("Cursor", "ParkOnGameStart", true))
     SetFieldValue("Cursor.ParkOnSteamReturn", ReadBool("Cursor", "ParkOnSteamReturn", true))
-    SelectChoiceByText("Cursor.ParkEdge",
+    SelectChoiceByText("MousePark.MouseParkEdge",
         ReadText(MovedSettingSection("MousePark", "Cursor", "MouseParkEdge"),
             "MouseParkEdge", "right"), ["Right", "Left"])
     SetFieldValue("RTSS.EnableIntegration", ReadBool("RTSS", "EnableIntegration", true))
@@ -6577,7 +6576,7 @@ SaveSettings(*) {
         ["Controller", "EnableControllerMouseMode",
             GetFieldValue("Controller.EnableControllerMouseMode") ? "true" : "false"],
         ["Features", "EnableAutoMouseMode",
-            GetFieldValue("Controller.EnableAutoMouseMode") ? "true" : "false"],
+            GetFieldValue("Features.EnableAutoMouseMode") ? "true" : "false"],
         ["Controller", "AutoMouseExeList",
             GetFieldText("Controller.AutoMouseExeList", "explorer.exe")],
         ["Controller", "Backend",
@@ -6624,16 +6623,16 @@ SaveSettings(*) {
         ["Controller", "ControllerChordHoldMs",
             GetFieldValue("Controller.ControllerChordHoldMs", 500)],
         ["Features", "EnableAutoHideCursor",
-            GetFieldValue("Cursor.EnableAutoHide") ? "true" : "false"],
-        ["Timing", "MouseHideDelay", GetFieldValue("Cursor.HideDelayMs", 1000)],
+            GetFieldValue("Features.EnableAutoHideCursor") ? "true" : "false"],
+        ["Timing", "MouseHideDelay", GetFieldValue("Timing.MouseHideDelay", 1000)],
         ["Features", "EnableMouseParkOnBoot",
-            GetFieldValue("Cursor.EnableMouseParkOnBoot") ? "true" : "false"],
+            GetFieldValue("Features.EnableMouseParkOnBoot") ? "true" : "false"],
         ["Cursor", "ParkOnGameStart",
             GetFieldValue("Cursor.ParkOnGameStart") ? "true" : "false"],
         ["Cursor", "ParkOnSteamReturn",
             GetFieldValue("Cursor.ParkOnSteamReturn") ? "true" : "false"],
         ["MousePark", "MouseParkEdge",
-            GetFieldText("Cursor.ParkEdge", "Right")],
+            GetFieldText("MousePark.MouseParkEdge", "Right")],
         ["RTSS", "EnableIntegration",
             GetFieldValue("RTSS.EnableIntegration") ? "true" : "false"],
         ["RTSS", "Path", GetFieldValue("RTSS.Path")],
