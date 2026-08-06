@@ -28,6 +28,20 @@
 #
 # Delete a line in the same commit that deletes its row. An entry with no row,
 # and a row with no entry, both fail the build.
+#
+# What this file does NOT see
+# ---------------------------
+# Ids, not actions. The companion dispatches on the ACTION a row carries, and
+# for most rows the action and the id are the same word -- but only by
+# convention. The MAIN page's Mouse Mode row had id qPersistentMouse and action
+# "toggle:mouseMode", nothing answered to mouseMode, and the row rendered,
+# selected and did nothing. Both directions of the check above were satisfied
+# the whole time: the row existed and so did its entry here.
+#
+# So the companion's toggle actions are now built from the row id, and
+# Validate-SteamShell-XFE.ps1 enumerates every literal "toggle:<name>" it can
+# find and requires each to be either qPersistentMouse or a QuickMenuToggleTable
+# id. A row inventory cannot check the wiring behind a row; that rule can.
 
 
 # ----------------------------------------------------------------------------

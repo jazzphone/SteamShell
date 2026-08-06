@@ -6436,8 +6436,13 @@ QuickMenuGetRows() {
                 "tasks", MenuRow("tasks", "Task Switcher", "", "page:TASKS"),
                 "gamebar", MenuRow("gameBar", "Game Bar", "", "gameBar"),
                 "keyboard", MenuRow("openKeyboard", "Open Keyboard", "", "openKeyboard"),
+                ; The action is the row id. It used to be "toggle:mouseMode",
+                ; which nothing answered to -- the lookup returned nothing, the
+                ; toggle returned early, and the row rendered and selected and
+                ; did nothing at all. Deriving the action from the id is what
+                ; stops that being expressible.
                 "mousemode", MenuRow("qPersistentMouse", "Mouse Mode", "",
-                    "toggle:mouseMode", true),
+                    "toggle:qPersistentMouse", true),
                 "settings", MenuRow("settings", "Settings", "", "page:SETTINGS"),
                 "system", MenuRow("system", "System", "", "page:SYSTEM"))
             added := Map()
@@ -6610,113 +6615,126 @@ OnOffText(value) {
 ; toggle from the Quick Menu writes the INI immediately and then updates the
 ; live global, so it takes effect at once AND survives a restart. The full
 ; Settings window's Save button is not involved.
-QuickMenuToggleMeta(id) {
+; The live value behind a QuickMenuToggleTable row, by ROW ID.
+;
+; The product seam standalone already had. AutoHotkey v2 cannot read a global by
+; a name held in a variable, so the shared table carries the section and the key
+; but not the current state, and each product answers for its own globals here.
+;
+; This tree used to answer with a QuickMenuToggleMeta() that returned section,
+; key, label AND value from one `switch` -- the same routine as the shared table
+; plus this function, under a different name, which is why neither the
+; fingerprint gate nor DIVERGENT_FUNCTIONS.txt could see the duplicate.
+ProductSettingBool(id) {
     global EnableGameFocusLite, EnableSteamAssistLite, EnableLauncherCleanupLite
     global AssistSuspendOnShellOverlay
     global EnableViewSteamActions, EnableViewTapAction, EnableViewHoldAction
-    global EnablePersistentMouseMode
     switch id {
-        case "gameFocus":
-            return Map("section", "Assist", "key", "EnableGameFocusLite",
-                "label", "Game Focus Lite", "value", EnableGameFocusLite)
-        case "steamAssist":
-            return Map("section", "Assist", "key", "EnableSteamAssistLite",
-                "label", "Steam Assist Lite", "value", EnableSteamAssistLite)
-        case "launcherCleanup":
-            return Map("section", "Assist", "key", "EnableLauncherCleanupLite",
-                "label", "Launcher Cleanup Lite", "value", EnableLauncherCleanupLite)
-        case "shellOverlay":
-            return Map("section", "Assist", "key", "SuspendOnShellOverlay",
-                "label", "Pause Assist On FSE Switcher",
-                "value", AssistSuspendOnShellOverlay)
-        case "viewActions":
-            return Map("section", "Steam", "key", "EnableViewButtonActions",
-                "label", "View Button Steam Actions", "value", EnableViewSteamActions)
-        case "viewTap":
-            return Map("section", "Steam", "key", "EnableViewTapAction",
-                "label", "View Tap Action", "value", EnableViewTapAction)
-        case "viewHold":
-            return Map("section", "Steam", "key", "EnableViewHoldAction",
-                "label", "View Hold Action", "value", EnableViewHoldAction)
-        case "qPersistentMouse":
-            return Map("section", "Controller", "key", "EnablePersistentMouseMode",
-                "label", "Mouse Mode", "value", EnablePersistentMouseMode)
+        case "gameFocus": return EnableGameFocusLite
+        case "steamAssist": return EnableSteamAssistLite
+        case "launcherCleanup": return EnableLauncherCleanupLite
+        case "shellOverlay": return AssistSuspendOnShellOverlay
+        case "viewActions": return EnableViewSteamActions
+        case "viewTap": return EnableViewTapAction
+        case "viewHold": return EnableViewHoldAction
     }
-    return 0
+    return false
 }
 
-QuickMenuToggleSetting(id) {
-    global EnableGameFocusLite, EnableSteamAssistLite, EnableLauncherCleanupLite
-    global AssistSuspendOnShellOverlay
-    global EnableViewSteamActions, EnableViewTapAction, EnableViewHoldAction
+; Flips one Quick Menu switch and makes it stick.
+;
+; `label` comes from the row the user is standing on rather than from a table:
+; the row already carries the words shown on screen, and a second copy beside
+; the section and key is a second thing to keep in step.
+;
+; The live globals are NOT assigned here. This used to write the INI and then
+; hand-assign each global in a `switch` over the same ids -- so every new row
+; cost two edits in two places, and forgetting the second gave a row that
+; toggled, persisted, logged "-> ON" and changed nothing until the next restart.
+; LoadSettings() re-reads all of them from the file that was just written, which
+; is what Reload and Save & Apply already do, so the id list exists once.
+QuickMenuToggleSetting(id, label := "") {
     global EnableControllerMouseMode, EnablePersistentMouseMode
     global IniPath
-    meta := QuickMenuToggleMeta(id)
-    if !IsObject(meta)
+    if (label = "")
+        label := id
+    if (id = "qPersistentMouse") {
+        QuickMenuTogglePersistentMouse(label)
         return
-    next := !meta["value"]
+    }
+    if !QuickMenuToggleTable().Has(id)
+        return
+    entry := QuickMenuToggleTable()[id]
+    next := !ProductSettingBool(id)
     ; Persistence is the transaction boundary. Do not change the live state or
     ; claim success if the portable INI is read-only or otherwise unwritable.
+    try {
+        IniWrite(next ? "true" : "false", IniPath, entry["section"], entry["key"])
+    } catch as err {
+        LogLine("Quick Menu: could not save " label " (" err.Message ").", "Warning")
+        ShowNotification("Could not save " label, "Warning")
+        return
+    }
+    LoadSettings()
+    ; If the full Settings window happens to be open behind the Quick Menu,
+    ; update its matching control too. Otherwise a later Save there could write
+    ; the stale pre-toggle value back over this persisted couch change.
+    SetFieldValue(entry["section"] "." entry["key"], next)
+    LogLine("Quick Menu: " label " -> " OnOffText(next) ".")
+    ; The assist timer only exists while something needs it, so enabling the
+    ; first assist feature has to create it and disabling the last has to stop
+    ; it. Re-applying the timers is idempotent and does that in one place.
+    if (entry["section"] = "Assist")
+        ApplyRuntimeTimers()
+    ShowNotification(label ": " OnOffText(next))
+}
+
+; Mouse Mode is not in QuickMenuToggleTable because turning it on has to turn
+; the controller-mouse master on with it -- one row, two keys -- and a failure
+; part-way has to leave neither written. Standalone keeps it out of the table
+; for the same reason.
+QuickMenuTogglePersistentMouse(label) {
+    global IniPath, EnablePersistentMouseMode, EnableControllerMouseMode
+    next := !EnablePersistentMouseMode
     enabledControllerMaster := false
     try {
-        if (id = "qPersistentMouse" && next && !EnableControllerMouseMode) {
+        if (next && !EnableControllerMouseMode) {
             IniWrite("true", IniPath, "Controller", "EnableControllerMouseMode")
             enabledControllerMaster := true
         }
         IniWrite(next ? "true" : "false",
-            IniPath, meta["section"], meta["key"])
+            IniPath, "Controller", "EnablePersistentMouseMode")
     } catch as err {
         if enabledControllerMaster
             try IniWrite("false", IniPath, "Controller", "EnableControllerMouseMode")
-        LogLine("Quick Menu: could not save " meta["label"] " ("
-            . err.Message ").", "Warning")
-        ShowNotification("Could not save " meta["label"], "Warning")
+        LogLine("Quick Menu: could not save " label " (" err.Message ").", "Warning")
+        ShowNotification("Could not save " label, "Warning")
         return
     }
-    switch id {
-        case "gameFocus":
-            EnableGameFocusLite := next
-        case "steamAssist":
-            EnableSteamAssistLite := next
-        case "launcherCleanup":
-            EnableLauncherCleanupLite := next
-        case "shellOverlay":
-            AssistSuspendOnShellOverlay := next
-        case "viewActions":
-            EnableViewSteamActions := next
-        case "viewTap":
-            EnableViewTapAction := next
-        case "viewHold":
-            EnableViewHoldAction := next
-        case "qPersistentMouse":
-            EnablePersistentMouseMode := next
-            if enabledControllerMaster {
-                EnableControllerMouseMode := true
-                SetFieldValue("Controller.EnableControllerMouseMode", true)
-            }
-    }
-    ; If the full Settings window happens to be open behind the Quick Menu,
-    ; update its matching control too. Otherwise a later Save there could write
-    ; the stale pre-toggle value back over this persisted couch change.
-    SetFieldValue(meta["section"] "." meta["key"], next)
-    LogLine("Quick Menu: " meta["label"] " -> " OnOffText(next) ".")
-    ; The assist timer only exists while something needs it, so enabling the
-    ; first assist feature has to create it and disabling the last has to stop
-    ; it. Re-applying the timers is idempotent and does that in one place.
-    if (meta["section"] = "Assist")
-        ApplyRuntimeTimers()
-    ShowNotification(meta["label"] ": " OnOffText(next))
+    LoadSettings()
+    SetFieldValue("Controller.EnablePersistentMouseMode", next)
+    if enabledControllerMaster
+        SetFieldValue("Controller.EnableControllerMouseMode", true)
+    LogLine("Quick Menu: " label " -> " OnOffText(next) ".")
+    ShowNotification(label ": " OnOffText(next))
 }
 
 ; Rows for the Quick Menu's Settings page: the switches worth reaching from the
 ; couch, without opening the full Settings window on a TV.
 QuickMenuSettingsRows() {
     rows := []
-    for _, id in ["gameFocus", "steamAssist", "launcherCleanup", "shellOverlay",
-        "viewActions", "viewTap", "viewHold"] {
-        meta := QuickMenuToggleMeta(id)
-        rows.Push(MenuRow("toggle:" id, meta["label"], OnOffText(meta["value"]),
-            "toggle:" id, true))
+    ; Label beside the id, the way standalone's row builders state theirs. The
+    ; words belong to the row; the section and key belong to the shared table.
+    for _, entry in [
+        ["gameFocus", "Game Focus Lite"],
+        ["steamAssist", "Steam Assist Lite"],
+        ["launcherCleanup", "Launcher Cleanup Lite"],
+        ["shellOverlay", "Pause Assist On FSE Switcher"],
+        ["viewActions", "View Button Steam Actions"],
+        ["viewTap", "View Tap Action"],
+        ["viewHold", "View Hold Action"]] {
+        rows.Push(MenuRow("toggle:" entry[1], entry[2],
+            OnOffText(ProductSettingBool(entry[1])), "toggle:" entry[1], true))
     }
     rows.Push(MenuRow("accentColor", "Accent Color", QuickMenuAccentValueText(),
         "accentColor", true))
@@ -7639,7 +7657,8 @@ QuickMenuActivateSelected() {
         return
     }
     if (SubStr(action, 1, 7) = "toggle:") {
-        QuickMenuToggleSetting(SubStr(action, 8))
+        QuickMenuToggleSetting(SubStr(action, 8),
+            QuickMenuRows[QuickMenuSelected]["label"])
         QuickMenuRefresh()
         return
     }
@@ -7757,7 +7776,8 @@ QuickMenuAdjustSelected(direction) {
     ; A two-state row has nothing to step through, so Left and Right both simply
     ; flip it -- the same thing A does. Direction is deliberately ignored.
     if (SubStr(action, 1, 7) = "toggle:") {
-        QuickMenuToggleSetting(SubStr(action, 8))
+        QuickMenuToggleSetting(SubStr(action, 8),
+            QuickMenuRows[QuickMenuSelected]["label"])
         QuickMenuRefresh()
         return
     }

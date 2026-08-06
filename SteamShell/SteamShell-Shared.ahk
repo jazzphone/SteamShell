@@ -3711,7 +3711,22 @@ QuickMenuToggleTable() {
         "qSteamRefocus", Map("section", "Features", "key", "EnableSteamRefocusMode"),
         "qGameAssist", Map("section", "Features", "key", "EnableGameForegroundAssist"),
         "qAlwaysFocus", Map("section", "Features", "key", "EnableAlwaysFocus"),
-        "qRtssIntegration", Map("section", "RTSS", "key", "EnableIntegration"))
+        "qRtssIntegration", Map("section", "RTSS", "key", "EnableIntegration"),
+        ; The companion's own rows. They were a separate table under a separate
+        ; name -- section, key, label and live value returned together from one
+        ; `switch` -- which is the same routine this is, so neither the
+        ; fingerprint gate nor DIVERGENT_FUNCTIONS.txt could see the pair.
+        ;
+        ; Only the plain booleans are here. qPersistentMouse is not, in either
+        ; product: turning it on has to turn the controller-mouse master on with
+        ; it, and a row that writes two keys is not a row this table describes.
+        "gameFocus", Map("section", "Assist", "key", "EnableGameFocusLite"),
+        "steamAssist", Map("section", "Assist", "key", "EnableSteamAssistLite"),
+        "launcherCleanup", Map("section", "Assist", "key", "EnableLauncherCleanupLite"),
+        "shellOverlay", Map("section", "Assist", "key", "SuspendOnShellOverlay"),
+        "viewActions", Map("section", "Steam", "key", "EnableViewButtonActions"),
+        "viewTap", Map("section", "Steam", "key", "EnableViewTapAction"),
+        "viewHold", Map("section", "Steam", "key", "EnableViewHoldAction"))
     return table
 }
 

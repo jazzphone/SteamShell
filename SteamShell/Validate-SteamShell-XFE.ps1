@@ -809,10 +809,10 @@ Assert-True (
     "Keyboard or Windows Settings does not dismiss the Quick Menu before opening.")
 Assert-True (
     $source -match
-        '(?s)QuickMenuToggleMeta\(id\).*?case\s+"qPersistentMouse":.*?' +
+        '(?s)QuickMenuTogglePersistentMouse\(label\)\s*\{.*?' +
         'EnablePersistentMouseMode' -and
     $source -match
-        '(?s)QuickMenuToggleSetting\(id\).*?enabledControllerMaster.*?' +
+        '(?s)QuickMenuTogglePersistentMouse\(label\)\s*\{.*?enabledControllerMaster.*?' +
         'EnableControllerMouseMode' -and
     $source -match
         '(?s)mappingActive\s*:=\s*viewDown\s*\|\|\s*autoMouse.*?' +
@@ -1176,8 +1176,41 @@ Assert-True (
 # Quick Menu toggles must persist. Writing only the live global would make a
 # setting appear to work and then silently revert on the next start.
 Assert-True (
-    $source -match '(?s)QuickMenuToggleSetting\([^)]*\)\s*\{.*?try\s*\{.*?IniWrite\(.*?\}\s*catch as err.*?SetFieldValue\(meta\["section"\] "\." meta\["key"\], next\)') (
+    $source -match '(?s)QuickMenuToggleSetting\([^)]*\)\s*\{.*?try\s*\{.*?IniWrite\(.*?\}\s*catch as err.*?SetFieldValue\(entry\["section"\] "\." entry\["key"\], next\)') (
     "Quick Menu toggles must persist transactionally and sync the full Settings control.")
+
+# ...and the file that was just written is what the live globals are re-read
+# from. The toggle used to write the INI and then hand-assign each global in a
+# second `switch` over the same row ids, so every new row cost two edits in two
+# places -- and the failure when the second was forgotten was silent: the row
+# toggled, persisted, logged "-> ON" and changed nothing until the next start.
+# LoadSettings() re-reads every global from disk, which is what Reload and
+# Save & Apply already do, so the id list exists exactly once.
+Assert-True (
+    $source -match '(?s)QuickMenuToggleSetting\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?LoadSettings\(\)' -and
+    $source -match '(?s)QuickMenuTogglePersistentMouse\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?LoadSettings\(\)' -and
+    $source -notmatch '(?s)QuickMenuToggleSetting\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?case\s+"gameFocus":') (
+    "Quick Menu toggles must re-read their live values from the INI they just " +
+    "wrote, not hand-assign each global a second time.")
+
+# Every toggle row's action must be its own id.
+#
+# The Mouse Mode row on MAIN carried the action "toggle:mouseMode" while the
+# handler answered to "qPersistentMouse". Nothing failed: the lookup returned
+# nothing, the toggle returned early, and the row rendered and selected and did
+# nothing at all. QUICKMENU_ROWS.txt could not see it because it records row IDS
+# and dispatch happens on row ACTIONS -- so the id is what the action must be
+# built from, and any literal toggle action naming something that is neither a
+# table id nor qPersistentMouse is the bug coming back.
+$toggleActions = [regex]::Matches($source, 'MenuRow\([^)]*?"(toggle:[A-Za-z]+)"') |
+    ForEach-Object { $_.Groups[1].Value.Substring(7) } | Sort-Object -Unique
+foreach ($toggleAction in $toggleActions) {
+    Assert-True (
+        $toggleAction -eq 'qPersistentMouse' -or
+        $source -match ('"' + [regex]::Escape($toggleAction) + '", Map\("section"')) (
+        "Quick Menu toggle action '$toggleAction' reaches no handler: it is " +
+        "neither qPersistentMouse nor a QuickMenuToggleTable id.")
+}
 Assert-True (
     $source -match '(?s)QuickMenuToggleSetting\([^)]*\)\s*\{.*?ApplyRuntimeTimers\(\)') (
     "Toggling an assist feature must re-apply the timers so it starts or stops.")
