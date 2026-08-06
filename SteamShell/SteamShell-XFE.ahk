@@ -249,13 +249,13 @@ global StartupPrograms := []
 
 global EnableAutoHideCursor := true
 global MouseHideDelay := 1000
-global ParkOnStartup := true
+global EnableMouseParkOnBoot := true
 global ParkOnGameStart := true
 global ParkOnSteamReturn := true
 ; Which side of the screen the cursor is parked against. Right by default: on a
 ; TV the right edge is where a cursor that briefly reappears is least noticeable,
 ; and nothing in Xbox FSE puts controls there.
-global ParkEdge := "right"
+global MouseParkEdge := "right"
 global ParkYPercent := 0.50
 global ForegroundPollMs := 500
 global EnableRTSSIntegration := true
@@ -808,7 +808,7 @@ MigrateSectionsToStandaloneLayout() {
         ; causes) rather than a differently-named version of ParkOnSteamReturn
         ; (specifically Steam returning to the front).
         ["Cursor", "EnableAutoHide", "Features", "EnableAutoHideCursor"],
-        ["Cursor", "ParkOnStartup", "Features", "EnableMouseParkOnBoot"],
+        ["Cursor", "EnableMouseParkOnBoot", "Features", "EnableMouseParkOnBoot"],
         ["Cursor", "HideDelayMs", "Timing", "MouseHideDelay"],
         ["Cursor", "ParkEdge", "MousePark", "MouseParkEdge"],
         ["Cursor", "ParkYPercent", "MousePark", "MouseParkYPercent"]]
@@ -928,8 +928,8 @@ LoadSettings() {
     global AssistSuspendOnShellOverlay, AssistShellOverlayProcesses
     global EnableStartupPrograms, StartupProgramDelayMs, StartupProgramStaggerMs
     global StartupLaunchDeElevated, StartupWindowMode
-    global EnableAutoHideCursor, MouseHideDelay, ParkOnStartup
-    global ParkOnGameStart, ParkOnSteamReturn, ParkEdge, ParkYPercent
+    global EnableAutoHideCursor, MouseHideDelay, EnableMouseParkOnBoot
+    global ParkOnGameStart, ParkOnSteamReturn, MouseParkEdge, ParkYPercent
     global ForegroundPollMs
     global EnableRTSSIntegration, RtssPath, RtssUseDllIntegration
     global RtssOverlayControlMode
@@ -1057,11 +1057,19 @@ LoadSettings() {
         AssistShellOverlayProcesses)
     EnableAutoHideCursor := ReadBool(MovedSettingSection("Features", "Cursor", "EnableAutoHideCursor"), "EnableAutoHideCursor", true)
     MouseHideDelay := ReadInt(MovedSettingSection("Timing", "Cursor", "MouseHideDelay"), "MouseHideDelay", 1000, 250, 10000)
-    ParkOnStartup := ReadBool(MovedSettingSection("Features", "Cursor", "EnableMouseParkOnBoot"), "EnableMouseParkOnBoot", true)
+    EnableMouseParkOnBoot := ReadBool(MovedSettingSection("Features", "Cursor", "EnableMouseParkOnBoot"), "EnableMouseParkOnBoot", true)
     ParkOnGameStart := ReadBool("Cursor", "ParkOnGameStart", true)
     ParkOnSteamReturn := ReadBool("Cursor", "ParkOnSteamReturn", true)
-    ParkEdge := StrLower(Trim(ReadText(MovedSettingSection("MousePark", "Cursor", "MouseParkEdge"), "MouseParkEdge", "right"))) = "left"
-        ? "left" : "right"
+    ; A STRING, not a boolean. This read `... = "left"`, which assigns the RESULT
+    ; of that comparison -- so MouseParkEdge held 1 or 0 and every later test of
+    ; `MouseParkEdge = "left"` compared a number against a word and was always false.
+    ; The cursor parked on the right edge no matter what the setting said, and
+    ; the assertion covering it passed because it matched the TEXT of the
+    ; comparison rather than the type of the variable.
+    MouseParkEdge := StrLower(Trim(ReadText(
+        MovedSettingSection("MousePark", "Cursor", "MouseParkEdge"), "MouseParkEdge", "right")))
+    if (MouseParkEdge != "left" && MouseParkEdge != "right")
+        MouseParkEdge := "right"
     ParkYPercent := ReadNumber(MovedSettingSection("MousePark", "Cursor", "MouseParkYPercent"), "MouseParkYPercent", 0.50, 0.05, 0.95)
     ForegroundPollMs := ReadInt("Cursor", "ForegroundPollMs", 500, 250, 5000)
     EnableRTSSIntegration := ReadBool("RTSS", "EnableIntegration", true)
@@ -1692,7 +1700,7 @@ MouseWatchHoldsCursorVisible() {
 ; The inset is 2px rather than 0: at the exact edge some surfaces read the
 ; pointer as having left the window entirely and drop their hover state.
 ParkCursor(*) {
-    global ParkEdge, ParkYPercent, LastMouseX, LastMouseY, LastMouseMoveTick
+    global MouseParkEdge, ParkYPercent, LastMouseX, LastMouseY, LastMouseMoveTick
     global EnableAutoHideCursor, MouseHidden
     static INSET := 2
     targetX := 0
@@ -1703,7 +1711,7 @@ ParkCursor(*) {
     if hwnd {
         try {
             WinGetPos(&wx, &wy, &ww, &wh, "ahk_id " hwnd)
-            targetX := ParkEdge = "left"
+            targetX := MouseParkEdge = "left"
                 ? wx + Min(INSET, Max(0, ww - 1))
                 : wx + Max(0, ww - 1 - INSET)
             targetY := wy + Round(wh * ParkYPercent)
@@ -1713,7 +1721,7 @@ ParkCursor(*) {
     if !placed {
         MouseGetPos(&mx, &my)
         GetMonitorWorkAreaForPoint(mx, my, &left, &top, &right, &bottom)
-        targetX := ParkEdge = "left" ? left + INSET : right - 1 - INSET
+        targetX := MouseParkEdge = "left" ? left + INSET : right - 1 - INSET
         targetY := top + Round((bottom - top) * ParkYPercent)
     }
     DllCall("SetCursorPos", "Int", targetX, "Int", targetY)
@@ -8078,7 +8086,7 @@ ShowSettings(*) {
         "Automatically hide an idle mouse cursor", &y)
     SettingsAddEditRow(settings, category, "Cursor.HideDelayMs",
         "Cursor hide delay (ms)", &y, true)
-    SettingsAddCheckboxRow(settings, category, "Cursor.ParkOnStartup",
+    SettingsAddCheckboxRow(settings, category, "Cursor.EnableMouseParkOnBoot",
         "Park the mouse at the display edge once during startup", &y)
     SettingsAddCheckboxRow(settings, category, "Cursor.ParkOnGameStart",
         "Park when a game enters fullscreen", &y)
@@ -8982,7 +8990,7 @@ SettingsPopulate() {
         ReadInt("Controller", "ControllerChordHoldMs", 500, 200, 3000))
     SetFieldValue("Cursor.EnableAutoHide", ReadBool(MovedSettingSection("Features", "Cursor", "EnableAutoHideCursor"), "EnableAutoHideCursor", true))
     SetFieldValue("Cursor.HideDelayMs", ReadInt(MovedSettingSection("Timing", "Cursor", "MouseHideDelay"), "MouseHideDelay", 1000, 250, 10000))
-    SetFieldValue("Cursor.ParkOnStartup", ReadBool(MovedSettingSection("Features", "Cursor", "EnableMouseParkOnBoot"), "EnableMouseParkOnBoot", true))
+    SetFieldValue("Cursor.EnableMouseParkOnBoot", ReadBool(MovedSettingSection("Features", "Cursor", "EnableMouseParkOnBoot"), "EnableMouseParkOnBoot", true))
     SetFieldValue("Cursor.ParkOnGameStart", ReadBool("Cursor", "ParkOnGameStart", true))
     SetFieldValue("Cursor.ParkOnSteamReturn", ReadBool("Cursor", "ParkOnSteamReturn", true))
     SetParkEdgeChoice("Cursor.ParkEdge", ReadText(MovedSettingSection("MousePark", "Cursor", "MouseParkEdge"), "MouseParkEdge", "right"))
@@ -9162,7 +9170,7 @@ SaveSettings(*) {
             GetFieldValue("Cursor.EnableAutoHide") ? "true" : "false"],
         ["Timing", "MouseHideDelay", GetFieldValue("Cursor.HideDelayMs", 1000)],
         ["Features", "EnableMouseParkOnBoot",
-            GetFieldValue("Cursor.ParkOnStartup") ? "true" : "false"],
+            GetFieldValue("Cursor.EnableMouseParkOnBoot") ? "true" : "false"],
         ["Cursor", "ParkOnGameStart",
             GetFieldValue("Cursor.ParkOnGameStart") ? "true" : "false"],
         ["Cursor", "ParkOnSteamReturn",
@@ -10233,7 +10241,7 @@ XfeInitializeInteractiveIdentity()
 SyncElevatedRtssHelperWithSettings()
 LogLine("Started SteamShell XFE Companion " AppVersion
     . " (PID " ScriptPid ", " (A_IsAdmin ? "administrator" : "standard user") ").")
-if ParkOnStartup
+if EnableMouseParkOnBoot
     SetTimer(ParkCursor, -1000)
 if EnableStartupPrograms
     SetTimer(RunStartupPrograms, -StartupProgramDelayMs)

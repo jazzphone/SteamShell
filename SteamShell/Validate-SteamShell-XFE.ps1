@@ -1365,15 +1365,28 @@ Assert-True ($sample -match '(?m)^WindowMode=Hidden$') (
 # Cursor parking. The right edge is the default because a cursor that briefly
 # reappears is least visible there on a TV.
 # MouseParkEdge since schema 13, which is standalone's name for the same
-# setting. The global behind it is still ParkEdge, which the ParkCursor
-# assertion below pins.
+# setting; the global carries that name too, which the ParkCursor assertion
+# below pins.
 Assert-True ($sample -match '(?m)^MouseParkEdge=right(?:\s*;.*)?$') (
     "The sample cursor park edge must default to the right.")
 Assert-True ($sample -match '(?m)^ParkOnGameStart=true$') (
     "Game-entry cursor parking must be enabled by default.")
+# The park edge is a STRING, and that is the assertion -- not the spelling of the
+# comparison.
+#
+# This rule used to match only the text `ParkEdge = "left"` inside ParkCursor. It
+# passed for as long as the setting was stored as `StrLower(...) = "left"`, which
+# assigns the RESULT of that comparison: the variable held 1 or 0, every later
+# test against "left" compared a number to a word, and the cursor parked on the
+# right edge whatever the user chose. A rule that matches a spelling cannot see a
+# type, so both halves are pinned now.
 Assert-True (
-    $source -match '(?ms)^ParkCursor\(\*\)\s*\{(?:(?!\n\})[\s\S])*?ParkEdge = "left"') (
-    "ParkCursor must honour the configured park edge.")
+    $source -match '(?ms)^ParkCursor\(\*\)\s*\{(?:(?!\n\})[\s\S])*?MouseParkEdge = "left"' -and
+    $source -match '(?s)MouseParkEdge\s*:=\s*StrLower\(' -and
+    $source -match 'MouseParkEdge != "left" && MouseParkEdge != "right"' -and
+    $source -notmatch 'MouseParkEdge\s*:=[^\r\n]*\)\s*=\s*"left"') (
+    "ParkCursor must honour the configured park edge, and the edge must be stored " +
+    "as the word rather than as the result of comparing it to one.")
 Assert-True (
     $source -match '(?s)ForegroundWindowLooksGameLike\(.*?AssistWindowLooksLikeGame\(' -and
     $source -match '(?s)ObserveForeground\(\).*?ParkOnGameStart.*?ParkCursorIfStillForeground\.Bind\(hwnd') (
