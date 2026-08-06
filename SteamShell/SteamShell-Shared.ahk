@@ -3730,6 +3730,45 @@ QuickMenuToggleTable() {
     return table
 }
 
+; How many task-switcher rows fit on one page.
+;
+; Eight rather than "as many as the control pool holds". The pool is 14 and the
+; companion used to fill it -- Loop Min(count, 13) -- which is not paging but
+; truncation: a fourteenth window simply could not be reached, and nothing said
+; so. Eight leaves room for Back and the two page rows on every page, so the
+; count never depends on which page you are looking at.
+QuickMenuTaskPageSize() {
+    return 8
+}
+
+; The slice of QuickMenuTaskWindows the current page shows.
+;
+; Clamps the page as it reads it: windows close while the menu is open, so the
+; page a user was on can stop existing between one repaint and the next.
+QuickMenuTaskSlice(total, &firstIndex, &lastIndex, &pageCount) {
+    global QuickMenuTaskPage
+    pageSize := QuickMenuTaskPageSize()
+    pageCount := Max(1, Ceil(total / pageSize))
+    QuickMenuTaskPage := ClampInt(QuickMenuTaskPage, 1, pageCount)
+    firstIndex := ((QuickMenuTaskPage - 1) * pageSize) + 1
+    lastIndex := Min(total, firstIndex + pageSize - 1)
+}
+
+; Wraps at both ends, like the accent list: with two page rows on screen there
+; is no affordance for "this one does nothing now", so a dead Next reads as a
+; broken row rather than as the end of the list.
+ChangeQuickMenuTaskPage(direction) {
+    global QuickMenuTaskPage, QuickMenuTaskWindows, QuickMenuSelected
+    pageCount := Max(1, Ceil(QuickMenuTaskWindows.Length / QuickMenuTaskPageSize()))
+    QuickMenuTaskPage += direction
+    if (QuickMenuTaskPage < 1)
+        QuickMenuTaskPage := pageCount
+    if (QuickMenuTaskPage > pageCount)
+        QuickMenuTaskPage := 1
+    QuickMenuSelected := 1
+    QuickMenuBuildGui()
+}
+
 ; The value column for the settings rows both products build.
 ;
 ; These read globals directly rather than through a seam because every one of

@@ -113,6 +113,7 @@ BuildProductTrayMenu
 CachedInstallationVerdict
 CancelPendingRtssFrameCap
 CaptureGameCandidates
+ChangeQuickMenuTaskPage
 CommitRtssPendingFrameCap
 ConfirmPrimaryDisplayMode
 CopyHealthReport
@@ -174,8 +175,10 @@ QuickMenuAccentPresetHex
 QuickMenuActivateShared
 QuickMenuAccentPresetNames
 QuickMenuAccentValueText
+QuickMenuAdjustSharedSetting
 QuickMenuApplyAccent
 QuickMenuConfirm
+QuickMenuCycleSharedSetting
 QuickMenuDestroyWindow
 QuickMenuDisplayReflow
 QuickMenuGameDetectionValue
@@ -199,10 +202,10 @@ QuickMenuRowsClick
 QuickMenuSelectFirst
 QuickMenuSelectLast
 QuickMenuSetRedraw
-QuickMenuTitleText
-QuickMenuAdjustSharedSetting
-QuickMenuCycleSharedSetting
 QuickMenuSettingValueText
+QuickMenuTaskPageSize
+QuickMenuTaskSlice
+QuickMenuTitleText
 QuickMenuToggleTable
 ReadBool
 ReadInt

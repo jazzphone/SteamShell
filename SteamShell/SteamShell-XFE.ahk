@@ -434,6 +434,7 @@ global QuickMenuAudioDevices := []
 global QuickMenuPreviousExe := ""
 global QuickMenuPreviousHwnd := 0
 global QuickMenuTaskWindows := []
+global QuickMenuTaskPage := 1
 global QuickMenuConfirmAction := ""
 global QuickMenuConfirmUntilTick := 0
 ; Pending display selection. Chosen with the Resolution and Refresh rows and
@@ -6419,7 +6420,7 @@ QuickMenuGetRows() {
     global QuickMenuDisplayModes
     global RtssOverlayControlMode, RtssFrameLimiterControlMode
     global EnableRTSSIntegration, RtssPath
-    global QuickMenuPreviousExe, QuickMenuTaskWindows
+    global QuickMenuPreviousExe, QuickMenuTaskWindows, QuickMenuTaskPage
     global SteamMenuShortcut, SteamQuickAccessShortcut, SteamOverlayShortcut
     global DisplaySelectedWidth, DisplaySelectedHeight, DisplaySelectedFrequency
     global DisplaySelectedScalePercent
@@ -6498,10 +6499,22 @@ QuickMenuGetRows() {
             if (QuickMenuTaskWindows.Length = 0) {
                 rows.Push(MenuRow("tasksUnavailable", "No Switchable Windows", "", "none"))
             } else {
-                ; The control pool holds 14 rows and Back takes one.
-                Loop Min(QuickMenuTaskWindows.Length, 13) {
-                    item := QuickMenuTaskWindows[A_Index]
-                    rows.Push(MenuRow("taskWindow:" item["hwnd"], ShortenText(item["title"], 34), "", "taskWindow:" item["hwnd"]))
+                ; Paged, not truncated. This used to be Loop Min(count, 13) to
+                ; fit the control pool, which meant a fourteenth window could not
+                ; be reached and nothing on screen said so.
+                QuickMenuTaskSlice(QuickMenuTaskWindows.Length,
+                    &firstIndex, &lastIndex, &pageCount)
+                Loop lastIndex - firstIndex + 1 {
+                    item := QuickMenuTaskWindows[firstIndex + A_Index - 1]
+                    rows.Push(MenuRow("taskWindow:" item["hwnd"],
+                        ShortenText(item["title"], 34), "", "taskWindow:" item["hwnd"]))
+                }
+                if (pageCount > 1) {
+                    pageText := QuickMenuTaskPage " / " pageCount
+                    rows.Push(MenuRow("taskPrev", "Previous Page", pageText,
+                        "taskPrev", true))
+                    rows.Push(MenuRow("taskNext", "Next Page", pageText,
+                        "taskNext", true))
                 }
             }
         case "AUDIO":
@@ -7622,7 +7635,7 @@ QuickMenuRender() {
 QuickMenuHint() {
     global QuickMenuPage
     if (QuickMenuPage = "TASKS")
-        return "D-Pad Move  •  A Switch To  •  X Close  •  B Back"
+        return "D-Pad Move  •  A Switch To  •  X Close  •  Left/Right Page  •  B Back"
     if (QuickMenuPage = "DISPLAY")
         return "D-Pad Move  •  Left/Right Change  •  A Select  •  B Back"
     if (QuickMenuPage = "RTSS")
@@ -7692,11 +7705,22 @@ QuickMenuActivateSelected() {
         ActivateSwitchableWindow(Round(SubStr(action, 12) + 0))
         return
     }
+
     if (SubStr(action, 1, 7) = "toggle:") {
         QuickMenuToggleSetting(SubStr(action, 8),
             QuickMenuRows[QuickMenuSelected]["label"])
         QuickMenuRefresh()
         return
+    }
+    ; A steps in the row's own direction; Left and Right step in theirs. Both
+    ; rebuild the menu, so neither falls through to the refresh at the end.
+    switch action {
+        case "taskPrev":
+            ChangeQuickMenuTaskPage(-1)
+            return
+        case "taskNext":
+            ChangeQuickMenuTaskPage(1)
+            return
     }
     ; Actions both products implement identically.
     ;
@@ -7822,6 +7846,10 @@ QuickMenuAdjustSelected(direction) {
         return
     }
     switch action {
+        ; Left and Right both page, in the direction pressed, from either row.
+        case "taskPrev", "taskNext":
+            ChangeQuickMenuTaskPage(direction)
+            return
         case "audioOutput":
             CycleDefaultAudioOutput(direction)
         case "volume":

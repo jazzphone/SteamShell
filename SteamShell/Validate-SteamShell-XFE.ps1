@@ -797,6 +797,27 @@ Assert-True (
     $source -match 'case "system": return "Power & Diagnostics"' -and
     $source -notmatch 'MenuRow\("layoutPage"') (
     "The main Quick Menu rows, order, or title capitalization have regressed.")
+# The task switcher must PAGE, not truncate.
+#
+# It used to build `Loop Min(QuickMenuTaskWindows.Length, 13)` to fit the row
+# control pool. That is not a shortened list, it is a list with no end marker: a
+# fourteenth window could not be reached and nothing on screen said one existed.
+# The failure is silent by construction, which is why the truncating form is
+# forbidden by name rather than the paging form merely being required.
+Assert-True (
+    $source -match '(?s)case\s+"TASKS":(?:(?!\n\s{8}case )[\s\S])*?QuickMenuTaskSlice\(' -and
+    $source -match '(?s)case\s+"TASKS":(?:(?!\n\s{8}case )[\s\S])*?"taskPrev"' -and
+    $source -match '(?s)case\s+"TASKS":(?:(?!\n\s{8}case )[\s\S])*?"taskNext"' -and
+    $source -notmatch 'Loop Min\(QuickMenuTaskWindows\.Length' -and
+    # Both page rows must reach the pager from both A and Left/Right, or one of
+    # them renders as a row that does nothing -- the exact shape the Mouse Mode
+    # row failed in.
+    $source -match '(?s)case\s+"taskPrev":\s*\r?\n\s*ChangeQuickMenuTaskPage\(-1\)' -and
+    $source -match '(?s)case\s+"taskNext":\s*\r?\n\s*ChangeQuickMenuTaskPage\(1\)' -and
+    $source -match '(?s)case\s+"taskPrev",\s*"taskNext":\s*\r?\n\s*ChangeQuickMenuTaskPage\(direction\)') (
+    "The companion task switcher must page through its windows rather than " +
+    "truncate the list at the size of the control pool.")
+
 Assert-True (
     $source -match
         '(?s)case\s+"openKeyboard":.*?HideQuickMenu\(\).*?' +

@@ -178,6 +178,8 @@ xfe sleep
 xfe steamMenu
 xfe steamQuickAccess
 xfe system
+xfe taskNext
+xfe taskPrev
 xfe tasks
 xfe tasksUnavailable
 xfe volume

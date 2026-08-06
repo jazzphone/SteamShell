@@ -5391,11 +5391,8 @@ QuickMenuGetDefinitions() {
         if (PinnedForegroundHwnd && DllCall("IsWindow", "Ptr", PinnedForegroundHwnd))
             rows.Push(Map("id", "taskRelease", "label", "Release Focus Lock"))
 
-        pageSize := 8
-        pageCount := Max(1, Ceil(QuickMenuTaskWindows.Length / pageSize))
-        QuickMenuTaskPage := ClampInt(QuickMenuTaskPage, 1, pageCount)
-        firstIndex := ((QuickMenuTaskPage - 1) * pageSize) + 1
-        lastIndex := Min(QuickMenuTaskWindows.Length, firstIndex + pageSize - 1)
+        QuickMenuTaskSlice(QuickMenuTaskWindows.Length,
+            &firstIndex, &lastIndex, &pageCount)
         if (QuickMenuTaskWindows.Length = 0) {
             rows.Push(Map("id", "tasksUnavailable", "label", "No Application Windows Found"))
         } else {
@@ -6534,18 +6531,6 @@ OpenQuickMenuTaskPage() {
     QuickMenuTaskWindows := GetTaskSwitcherWindows()
     QuickMenuTaskPage := 1
     QuickMenuPage := "TASKS"
-    QuickMenuSelected := 1
-    QuickMenuBuildGui()
-}
-
-ChangeQuickMenuTaskPage(direction) {
-    global QuickMenuTaskPage, QuickMenuTaskWindows, QuickMenuSelected
-    pageCount := Max(1, Ceil(QuickMenuTaskWindows.Length / 8))
-    QuickMenuTaskPage += direction
-    if (QuickMenuTaskPage < 1)
-        QuickMenuTaskPage := pageCount
-    if (QuickMenuTaskPage > pageCount)
-        QuickMenuTaskPage := 1
     QuickMenuSelected := 1
     QuickMenuBuildGui()
 }
