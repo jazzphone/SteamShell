@@ -236,10 +236,15 @@ Assert-True (
         '"GameForegroundAssist",\s*"GameMinScoreToActivate".*?' +
         '"Responsive \(55\)".*?"Balanced \(60\)".*?"Conservative \(70\)"') (
     "Full Settings foreground-sensitivity presets are incomplete.")
+# Counted in the shared page table, which is where the row is defined now, and
+# scoped to a SETTINGS row: the bare section/key pair also appears in
+# QuickMenuToggleTable, which describes the same setting for the Quick Menu.
+# Two rows for one switch is the failure this catches; one definition makes it
+# hard to express, and the count keeps it that way.
 $windowManagementEditorFields = [regex]::Matches(
     $source,
-    '(?s)SettingsEditorAddCheckbox\(\s*category,\s*"Features",\s*' +
-    '"EnableWindowManagement"')
+    '(?s)"type", "checkbox",\s*\r?\n\s*' +
+    '"section", "Features", "key", "EnableWindowManagement"')
 Assert-True ($windowManagementEditorFields.Count -eq 1) (
     "Full Settings must expose exactly one Window Management toggle.")
 Assert-True (
@@ -256,9 +261,24 @@ Assert-True (
 # Every persistent field exposed by the full settings editor must have a
 # corresponding embedded/sample INI key. This catches renamed keys that would
 # otherwise appear to save successfully and then silently reload a default.
-$editorFieldMatches = [regex]::Matches(
+# Both sources. Most rows are defined in the shared page table now, so matching
+# only the literal builder calls dropped this from 88 bindings to 7 -- it would
+# have kept passing while checking almost nothing, which is the failure mode this
+# whole file exists to avoid.
+#
+# Rows carrying "standalone" or "both" are the ones this product draws; an "xfe"
+# row is not a binding here and must not be counted as one.
+$editorFieldMatches = @([regex]::Matches(
     $source,
-    '(?s)SettingsEditorAdd(?:Checkbox|TextField|NumberField|Choice|MappedChoice|PathField|ShortcutField|ExeListField)\(\s*category,\s*"([^"]+)"\s*,\s*"([^"]+)"')
+    '(?s)SettingsEditorAdd(?:Checkbox|TextField|NumberField|Choice|MappedChoice|PathField|ShortcutField|ExeListField)\(\s*category,\s*"([^"]+)"\s*,\s*"([^"]+)"'))
+$editorFieldMatches += @([regex]::Matches(
+    $source,
+    '(?s)"product", "(?:both|standalone)", "type", "(?!note|section)\w+",\s*\r?\n\s*' +
+    '"section", "([^"]+)", "key", "([^"]+)"'))
+Assert-True ($editorFieldMatches.Count -ge 80) (
+    "The Settings binding scan found too few bindings to be trustworthy; it " +
+    "reads the builder calls and the shared page table, and one of them stopped " +
+    "matching.")
 $duplicateEditorBindings = $editorFieldMatches |
     Group-Object {
         $_.Groups[1].Value.ToLowerInvariant() + "." +
