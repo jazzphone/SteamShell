@@ -5367,6 +5367,27 @@ RawInputReadState(&state) {
 ; ==============================================================================
 ; Settings page definition
 ; ==============================================================================
+; Selects the entry in a choice control whose WORDS match the stored value.
+;
+; Both products need this and neither may use the index. A list's order lives
+; somewhere other than the value it stores, so selecting by position ties the
+; two together and they drift -- which is exactly how the companion's control
+; modes ended up inverted from the shell's, and why the controller index
+; dropdown wrote 1-4 into a setting that means 0-3.
+;
+; Case-insensitive, falling back to the first entry, because the INI is
+; hand-editable and a value matching no entry has to land somewhere predictable.
+SettingsSelectChoiceByText(ctrl, value, choices) {
+    wanted := StrLower(Trim(value))
+    for _, choice in choices {
+        if (StrLower(choice) = wanted) {
+            try ctrl.Text := choice
+            return
+        }
+    }
+    try ctrl.Choose(1)
+}
+
 ; What a Settings page CONTAINS, defined once for both products.
 ;
 ; EVERY page, from both products, with "product" deciding who draws each row.

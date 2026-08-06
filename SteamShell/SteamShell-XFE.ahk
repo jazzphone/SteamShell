@@ -6507,16 +6507,8 @@ SetFieldValue(key, value) {
 ; must land somewhere predictable rather than nowhere.
 SelectChoiceByText(key, value, choices) {
     global SettingsFields
-    if !SettingsFields.Has(key)
-        return
-    wanted := StrLower(Trim(value))
-    for _, choice in choices {
-        if (StrLower(choice) = wanted) {
-            try SettingsFields[key].Text := choice
-            return
-        }
-    }
-    try SettingsFields[key].Choose(1)
+    if SettingsFields.Has(key)
+        SettingsSelectChoiceByText(SettingsFields[key], value, choices)
 }
 
 ; Matches the dropdown order: 1 Auto, 2 XInput, 3 GameInput, 4 RawInput.

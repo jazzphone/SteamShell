@@ -10128,6 +10128,48 @@ SettingsEditorMarkDirty(*) {
 ; The rows come from SettingsCategoryRows in SteamShell-Shared.ahk; only the
 ; drawing is here. Unifying the drawing is the next step, and it is checkable
 ; precisely because the same table has to produce the same rows through it.
+; Fills every registered field from the INI, after the pages are built.
+;
+; The builders used to read as they created each control, which is why the same
+; setting was named twice on the way in -- once to build the row, once to read
+; it -- and why a builder could not be shared with the companion, whose rows are
+; filled by a loop. They create and register now; this fills.
+;
+; movedFrom is honoured for rows that carry it: schema migrations moved several
+; settings between sections, and a read-only portable INI never gets migrated,
+; so the old section still has to be consulted.
+;
+; mapped-choice and exe-list are NOT here, and cannot be. Both SHAPE the control
+; from the stored value -- one adds a "Custom (x)" entry when the value matches
+; no preset, the other builds a list item per entry -- so they read at creation
+; and are the two builders this product does not share.
+SettingsEditorPopulateFields() {
+    global SettingsEditorFields
+    for _, field in SettingsEditorFields {
+        if (field["type"] = "mapped-choice" || field["type"] = "exe-list")
+            continue
+        if !field.Has("default")
+            continue
+        ; movedFrom is NOT consulted here. It records where a setting used to
+        ; live in the COMPANION -- schema 13 moved several out of [Cursor] --
+        ; and this product has always kept them where they are now. Reading the
+        ; companion's old section from the shell's INI would find nothing and
+        ; return the default over a value the user had set.
+        section := field["section"]
+        ctrl := field["ctrl"]
+        if (field["type"] = "bool")
+            ctrl.Value := ReadBool(section, field["key"],
+                ToBool(field["default"], false))
+        else if (field["type"] = "choice")
+            SettingsSelectChoiceByText(ctrl,
+                IniReadS(section, field["key"], field["default"]),
+                field["choices"])
+        else
+            ctrl.Value := IniReadS(section, field["key"], field["default"])
+    }
+}
+
+
 SettingsEditorAddSharedRows(category, &y, tableKey := "") {
     for _, row in SettingsCategoryRows(tableKey != "" ? tableKey : category) {
         if !SettingsRowAppliesTo(row, "standalone")
@@ -10192,12 +10234,11 @@ SettingsEditorAddNote(category, text, &y, height := 34) {
 SettingsEditorAddCheckbox(category, section, key, label, &y, defaultValue := "false") {
     global SettingsGui, SettingsEditorFields
     ctrl := SettingsGui.AddCheckbox("x255 y" y " w690 h25", label)
-    ctrl.Value := ReadBool(section, key, ToBool(defaultValue, false))
     ctrl.OnEvent("Click", SettingsEditorMarkDirty)
     SettingsEditorRegisterControl(category, ctrl)
     field := Map(
         "category", category, "section", section, "key", key,
-        "label", label, "type", "bool", "ctrl", ctrl,
+        "label", label, "type", "bool", "default", defaultValue, "ctrl", ctrl,
         "controls", [ctrl])
     SettingsEditorFields.Push(field)
     y += 31
@@ -10211,7 +10252,7 @@ SettingsEditorAddTextField(category, section, key, label, &y, defaultValue := ""
     options := "x575 y" y " w370"
     if (rows > 1)
         options .= " r" rows " WantTab"
-    initialValue := IniReadS(section, key, defaultValue)
+    initialValue := ""
     if (fieldType = "percent") {
         storedDefault := ToFloat(defaultValue, 0.0)
         initialValue := FormatSettingsFloat(
@@ -10223,7 +10264,7 @@ SettingsEditorAddTextField(category, section, key, label, &y, defaultValue := ""
     SettingsEditorRegisterControl(category, ctrl)
     field := Map(
         "category", category, "section", section, "key", key,
-        "label", label, "type", fieldType, "ctrl", ctrl,
+        "label", label, "type", fieldType, "default", defaultValue, "ctrl", ctrl,
         "min", minValue, "max", maxValue,
         "controls", [labelCtrl, ctrl])
     SettingsEditorFields.Push(field)
@@ -10406,7 +10447,7 @@ SettingsEditorAddChoice(category, section, key, label, choices, &y, defaultValue
     global SettingsGui, SettingsEditorFields
     labelCtrl := SettingsGui.AddText("x255 y" (y + 4) " w315 h24", label)
     ctrl := SettingsGui.AddDropDownList("x575 y" y " w320", choices)
-    current := IniReadS(section, key, defaultValue)
+    current := defaultValue
     selectedIndex := 1
     for index, choice in choices {
         if (StrLower(choice) = StrLower(current)) {
@@ -10420,7 +10461,7 @@ SettingsEditorAddChoice(category, section, key, label, choices, &y, defaultValue
     SettingsEditorRegisterControl(category, ctrl)
     field := Map(
         "category", category, "section", section, "key", key,
-        "label", label, "type", "choice", "ctrl", ctrl,
+        "label", label, "type", "choice", "default", defaultValue, "ctrl", ctrl,
         "choices", choices, "controls", [labelCtrl, ctrl])
     SettingsEditorFields.Push(field)
     y += 34
@@ -10474,11 +10515,11 @@ SettingsEditorAddMappedChoice(category, section, key, label, choices, values, &y
 SettingsEditorAddPathField(category, section, key, label, &y, prompt, filter, defaultValue := "") {
     global SettingsGui, SettingsEditorFields
     labelCtrl := SettingsGui.AddText("x255 y" (y + 4) " w180 h24", label)
-    ctrl := SettingsGui.AddEdit("x440 y" y " w400", IniReadS(section, key, defaultValue))
+    ctrl := SettingsGui.AddEdit("x440 y" y " w400", "")
     browseButton := SettingsGui.AddButton("x850 y" (y - 1) " w92 h27", "Browse…")
     field := Map(
         "category", category, "section", section, "key", key,
-        "label", label, "type", "path", "ctrl", ctrl)
+        "label", label, "type", "path", "default", defaultValue, "ctrl", ctrl)
     ctrl.OnEvent("Change", SettingsEditorMarkDirty)
     browseButton.OnEvent("Click", SettingsEditorBrowsePath.Bind(field, prompt, filter))
     SettingsEditorRegisterControl(category, labelCtrl)
@@ -10492,11 +10533,11 @@ SettingsEditorAddPathField(category, section, key, label, &y, prompt, filter, de
 SettingsEditorAddShortcutField(category, section, key, label, &y, defaultValue := "") {
     global SettingsGui, SettingsEditorFields
     labelCtrl := SettingsGui.AddText("x255 y" (y + 4) " w315 h24", label)
-    ctrl := SettingsGui.AddEdit("x575 y" y " w245", IniReadS(section, key, defaultValue))
+    ctrl := SettingsGui.AddEdit("x575 y" y " w245", "")
     recordButton := SettingsGui.AddButton("x830 y" (y - 1) " w112 h27", "Record…")
     field := Map(
         "category", category, "section", section, "key", key,
-        "label", label, "type", "text", "ctrl", ctrl,
+        "label", label, "type", "text", "default", defaultValue, "ctrl", ctrl,
         "controls", [labelCtrl, ctrl, recordButton])
     ctrl.OnEvent("Change", SettingsEditorMarkDirty)
     recordButton.OnEvent("Click", SettingsEditorRecordShortcut.Bind(field))
@@ -14502,6 +14543,10 @@ ShowSettingsEditor(*) {
     OnMessage(0x020A, SettingsEditorMouseWheel)
     OnMessage(0x0115, SettingsEditorVerticalScroll)
 
+    ; Before the dependency pass, which decides what is greyed out from what the
+    ; fields now hold. Running it against empty controls would grey the wrong
+    ; rows until something changed.
+    SettingsEditorPopulateFields()
     SettingsEditorReportLayoutAudit()
     SettingsEditorRefreshDependencies()
     SettingsEditorShowCategory(1)

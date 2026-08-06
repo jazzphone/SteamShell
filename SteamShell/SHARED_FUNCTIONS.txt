@@ -305,6 +305,7 @@ SettingsRowAppliesTo
 SettingsRowChoices
 SettingsRowDefault
 SettingsRowLabel
+SettingsSelectChoiceByText
 SettingsUpdateScrollBar
 SharedNotify
 ShouldLogRateLimited
