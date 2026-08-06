@@ -5380,6 +5380,19 @@ RawInputReadState(&state) {
 ; ==============================================================================
 ; What a Settings page CONTAINS, defined once for both products.
 ;
+; CATEGORIES BOTH PRODUCTS BUILD, and only those. Individual rows may be
+; standalone-only or xfe-only -- that is what "product" is for -- but a page only
+; one product has does not belong here, and the reason is not tidiness.
+;
+; The companion COMPILES this file, so every string in it ships inside the
+; companion. Validate-SteamShell-XFE.ps1 forbids a list of shell and geometry
+; responsibilities by name, scanning string literals deliberately, because a
+; responsibility named in a string can act. Moving the shell's own pages in here
+; put GameMinScoreToActivate into the companion and failed that boundary --
+; correctly. A single-product page also has no second product to drift against,
+; which is the only thing this table exists to prevent, so it was cost without
+; benefit.
+;
 ; The two Settings windows are separate implementations -- ProductSettingsScrollBar
 ; records why -- and separate implementations of the same screen drift. They had:
 ; rows one product offered and the other did not, the same setting under
