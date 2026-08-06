@@ -891,6 +891,13 @@ def check_powershell_scope_colons():
                      f'{bare.group(1)} -ne "", -gt 0, -eq $true.')
 
 
+def _match_or_empty(pattern, text):
+    """The matched span, or "" -- so a subject the validator builds by regex can
+    be rebuilt here without a missing match becoming an exception."""
+    found = re.search(pattern, text)
+    return found.group() if found else ""
+
+
 def main():
     sources = {name: read_source(name) for name in ALL_FILES}
     maps = {name: function_map(text) for name, text in sources.items()}
@@ -1219,6 +1226,18 @@ def main():
             "buildscript": (decode_like_powershell(
                 (ROOT / "Build-SteamShell.ps1").read_bytes())
                 if (ROOT / "Build-SteamShell.ps1").exists() else ""),
+            # The two spec sources concatenated, which is what the companion's
+            # validator means by $populateBody now: filling the window is a loop
+            # over specs, so "is this field populated?" is "does it have a spec?".
+            # Built the same way there, so a rule reading it is replayed against
+            # the same string rather than skipped.
+            "populatebody": (
+                _match_or_empty(
+                    r"(?sm)^SettingsCompanionFieldSpecs\(\)\s*\{[\s\S]*?\n    \]",
+                    source)
+                + _match_or_empty(
+                    r"(?sm)^SettingsCategoryRows\(category\)\s*\{[\s\S]*?return table",
+                    source)),
         }
         # Subjects that are loop-local values rather than a file: each is a
         # per-iteration string the validator built itself, so there is nothing

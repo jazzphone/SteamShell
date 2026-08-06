@@ -6542,118 +6542,18 @@ SettingsPopulateFields() {
 }
 
 SettingsPopulate() {
-    global SettingsFields, SettingsDirty, RtssPath
+    global SettingsFields, SettingsDirty
     if (SettingsFields.Count = 0)
         return
-    SetFieldValue("QuickMenu.Enable", ReadBool("QuickMenu", "Enable", true))
-    SetFieldValue("QuickMenu.ShowGameDetection", ReadBool("QuickMenu", "ShowGameDetection", true))
-    SetFieldValue("QuickMenu.ChordHoldMs", ReadInt("QuickMenu", "ChordHoldMs", 500, 250, 3000))
-    SetFieldText("QuickMenu.AccentColor", ReadText("QuickMenu", "AccentColor", "Purple"))
-    SetFieldValue("QuickMenu.AccentColorCustom", ReadText("QuickMenu", "AccentColorCustom", "107C10"))
-    SetFieldValue("Companion.HeartbeatSeconds",
-        ReadInt("Companion", "HeartbeatSeconds", 60, 5, 3600))
-    SetFieldValue("Controller.EnableControllerMouseMode",
-        ReadBool("Controller", "EnableControllerMouseMode", true))
-    SetFieldValue("Features.EnableAutoMouseMode",
-        ReadBool(MovedSettingSection("Features", "Controller", "EnableAutoMouseMode"), "EnableAutoMouseMode", true))
-    SetFieldValue("Controller.AutoMouseExeList",
-        ReadText("Controller", "AutoMouseExeList", "explorer.exe"))
-    SelectChoiceByText("Controller.Backend",
-        ReadText("Controller", "Backend", "auto"),
-        ["Auto", "XInput", "GameInput", "RawInput"])
-    SetFieldValue("Controller.DiagnosticLogging",
-        ReadBool("Controller", "DiagnosticLogging", false))
-    SetFieldValue("Controller.RawInputProbe",
-        ReadBool("Controller", "RawInputProbe", false))
-    SetFieldValue("StartupPrograms.Enable", ReadBool("StartupPrograms", "Enable", true))
-    SetFieldValue("StartupPrograms.DelayMs",
-        ReadInt("StartupPrograms", "DelayMs", 2000, 0, 600000))
-    SetFieldValue("StartupPrograms.StaggerMs",
-        ReadInt("StartupPrograms", "StaggerMs", 1200, 0, 30000))
-    SelectChoiceByText("StartupPrograms.WindowMode",
-        ReadText("StartupPrograms", "WindowMode", "Hidden"),
-        ["Normal", "Minimized", "Hidden"])
-    SetFieldValue("StartupPrograms.LaunchDeElevated",
-        ReadBool("StartupPrograms", "LaunchDeElevated", true))
+    ; Every field, from its own spec. This was 111 lines naming all fifty-eight a
+    ; second time -- once as a row, once as a read -- and the two agreed only
+    ; while somebody kept them in step. They did not always: the controller index
+    ; was read as a number after its row became a dropdown, and two settings were
+    ; read here with bounds their own LoadSettings had stopped using.
+    SettingsPopulateFields()
+    ; Not fields: a list and a status line, filled from elsewhere.
     SettingsRefreshStartupProgramsList()
     SettingsRefreshLogonTaskStatus()
-    SetFieldValue("Assist.EnableGameFocusLite",
-        ReadBool("Assist", "EnableGameFocusLite", true))
-    SetFieldValue("Assist.EnableSteamAssistLite",
-        ReadBool("Assist", "EnableSteamAssistLite", true))
-    SetFieldValue("Assist.EnableLauncherCleanupLite",
-        ReadBool("Assist", "EnableLauncherCleanupLite", true))
-    SetFieldValue("Assist.SuspendOnShellOverlay",
-        ReadBool("Assist", "SuspendOnShellOverlay", true))
-    SetFieldValue("Steam.MenuShortcut", ReadText("Steam", "MenuShortcut", "^1"))
-    SetFieldValue("Steam.QuickAccessShortcut",
-        ReadText("Steam", "QuickAccessShortcut", "^2"))
-    SetFieldValue("Steam.OverlayShortcut", ReadText("Steam", "OverlayShortcut", "+{Tab}"))
-    SetFieldValue("Steam.EnableViewButtonActions",
-        ReadBool("Steam", "EnableViewButtonActions", true))
-    SetFieldValue("Steam.EnableViewTapAction", ReadBool("Steam", "EnableViewTapAction", true))
-    SetFieldValue("Steam.EnableViewHoldAction", ReadBool("Steam", "EnableViewHoldAction", true))
-    SetFieldValue("Steam.ViewHoldMs", ReadInt("Steam", "ViewHoldMs", 500, 200, 5000))
-    SetFieldValue("Steam.ViewHoldInGameMs",
-        ReadInt("Steam", "ViewHoldInGameMs", 1000, 200, 5000))
-    SetFieldValue("Assist.TickIntervalMs",
-        ReadInt("Assist", "TickIntervalMs", 2000, 500, 30000))
-    SetFieldValue("Assist.CpuThresholdPercent",
-        ReadInt("Assist", "CpuThresholdPercent", 12, 0, 100))
-    SetFieldValue("Assist.ForegroundStableSec",
-        ReadInt("Assist", "ForegroundStableSec", 30, 5, 600))
-    SetFieldValue("LauncherCleanup.CooldownSec",
-        ReadInt(MovedSettingSection("LauncherCleanup", "Assist", "CooldownSec"), "CooldownSec", 300, 30, 7200))
-    SetFieldValue("LauncherCleanup.HardKill", ReadBool(MovedSettingSection("LauncherCleanup", "Assist", "HardKill"), "HardKill", true))
-    ; A dropdown since this row moved to the shared table, and a DropDownList's
-    ; .Value is a 1-BASED INDEX, not the number on screen. Setting it from the
-    ; stored 0-3 selected nothing for controller 0 and the wrong entry for the
-    ; rest, and saving it back wrote 1-4. Selected by text like every other
-    ; choice row.
-    SelectChoiceByText("Controller.ControllerIndex",
-        ReadInt("Controller", "ControllerIndex", 0, 0, 3), ["0", "1", "2", "3"])
-    SetFieldValue("Controller.ControllerDeadzone",
-        ReadInt("Controller", "ControllerDeadzone", 3000, 0, 32000))
-    SetFieldValue("Controller.ControllerMouseSpeed",
-        ReadInt("Controller", "ControllerMouseSpeed", 100, 1, 300))
-    SetFieldValue("Controller.ControllerChordHoldMs",
-        ReadInt("Controller", "ControllerChordHoldMs", 500, 100, 3000))
-    SetFieldValue("Features.EnableAutoHideCursor", ReadBool(MovedSettingSection("Features", "Cursor", "EnableAutoHideCursor"), "EnableAutoHideCursor", true))
-    SetFieldValue("Timing.MouseHideDelay", ReadInt(MovedSettingSection("Timing", "Cursor", "MouseHideDelay"), "MouseHideDelay", 1000, 0, 60000))
-    SetFieldValue("Features.EnableMouseParkOnBoot", ReadBool(MovedSettingSection("Features", "Cursor", "EnableMouseParkOnBoot"), "EnableMouseParkOnBoot", true))
-    SetFieldValue("Cursor.ParkOnGameStart", ReadBool("Cursor", "ParkOnGameStart", true))
-    SetFieldValue("Cursor.ParkOnSteamReturn", ReadBool("Cursor", "ParkOnSteamReturn", true))
-    SelectChoiceByText("MousePark.MouseParkEdge",
-        ReadText(MovedSettingSection("MousePark", "Cursor", "MouseParkEdge"),
-            "MouseParkEdge", "right"), ["Right", "Left"])
-    SetFieldValue("RTSS.EnableIntegration", ReadBool("RTSS", "EnableIntegration", true))
-    SetFieldValue("RTSS.Path", ReadText("RTSS", "Path", RtssPath))
-    SetFieldValue("RTSS.UseDllIntegration",
-        ReadBool("RTSS", "UseDllIntegration", true))
-    SelectChoiceByText("RTSS.OverlayControlMode",
-        ReadText("RTSS", "OverlayControlMode", "separate"),
-        ["Toggle", "Separate"])
-    SetFieldValue("RTSS.OverlayOnShortcut", ReadText("RTSS", "OverlayOnShortcut", "^+1"))
-    SetFieldValue("RTSS.OverlayOffShortcut", ReadText("RTSS", "OverlayOffShortcut", "^+2"))
-    SetFieldValue("RTSS.OverlayToggleShortcut", ReadText("RTSS", "OverlayToggleShortcut", "^+o"))
-    SelectChoiceByText("RTSS.FrameLimiterControlMode",
-        ReadText("RTSS", "FrameLimiterControlMode", "separate"),
-        ["Toggle", "Separate"])
-    SetFieldValue("RTSS.PresetFrameCap", ReadInt("RTSS", "PresetFrameCap", 158, 0, 1000))
-    SetFieldValue("RTSS.FrameLimiterOnShortcut",
-        ReadText("RTSS", "FrameLimiterOnShortcut", "^+5"))
-    SetFieldValue("RTSS.FrameLimiterOffShortcut",
-        ReadText("RTSS", "FrameLimiterOffShortcut", "^+6"))
-    SetFieldValue("RTSS.CustomFrameCapShortcut",
-        ReadText("RTSS", "CustomFrameCapShortcut", "^+f"))
-    ; RestoreFrameLimitOnStartup was a dead control: the checkbox existed and was
-    ; registered as a field, but nothing populated it and nothing saved it, so it
-    ; always drew unchecked and clearing it did nothing. Found while adding the
-    ; checkbox beside it; fixed here and in SaveSettings.
-    SetFieldValue("RTSS.RestoreFrameLimitOnStartup",
-        ReadBool("RTSS", "RestoreFrameLimitOnStartup", true))
-    SetFieldValue("RTSS.EnableElevatedFrameCapWrites",
-        ReadBool("RTSS", "EnableElevatedFrameCapWrites", false))
     SettingsDirty := false
     SettingsUpdateStatus()
 }

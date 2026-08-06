@@ -1888,12 +1888,31 @@ $registeredFieldKeys += @($tableRows | ForEach-Object {
 $registeredFieldKeys = @($registeredFieldKeys | Sort-Object -Unique)
 Assert-True ($registeredFieldKeys.Count -gt 55) (
     "The Settings field scan found too few fields to be trustworthy.")
-$populateBody = [regex]::Match(
-    $source, '(?sm)^SettingsPopulate\(\)\s*\{(?:(?!\n\})[\s\S])*\n\}').Value
+# Populating is a loop over specs now, so "is this field populated?" is "does
+# this field have a spec?". SettingsPopulateFields walks SettingsAllFieldSpecs,
+# which is the shared page table plus SettingsCompanionFieldSpecs -- so the two
+# spec sources together ARE the populate body for this purpose.
+#
+# The question has not changed and neither has the failure it catches: a field
+# the window builds and nothing fills draws its default every time and quietly
+# discards what the user set. RTSS.RestoreFrameLimitOnStartup was exactly that.
+Assert-True (
+    $source -match '(?sm)^SettingsPopulate\(\)\s*\{(?:(?!\n\})[\s\S])*?SettingsPopulateFields\(\)' -and
+    $source -match '(?sm)^SettingsPopulateFields\(\)\s*\{(?:(?!\n\})[\s\S])*?SettingsAllFieldSpecs\(\)') (
+    "SettingsPopulate must fill the window from the field specs; a hand-written " +
+    "read per field is the duplication that let a row and its read disagree.")
+$populateBody = ([regex]::Match(
+    $source, '(?sm)^SettingsCompanionFieldSpecs\(\)\s*\{[\s\S]*?\n    \]').Value +
+    [regex]::Match(
+        $source, '(?sm)^SettingsCategoryRows\(category\)\s*\{[\s\S]*?return table').Value)
 $saveBody = [regex]::Match(
     $source, '(?sm)^SaveSettings\(\*\)\s*\{(?:(?!\n\})[\s\S])*\n\}').Value
 $unpopulated = @(
-    $registeredFieldKeys | Where-Object { -not $populateBody.Contains('"' + $_ + '"') })
+    $registeredFieldKeys | Where-Object {
+        $parts = $_ -split '\.', 2
+        -not ($populateBody -match
+            ('"section", "' + [regex]::Escape($parts[0]) + '", "key", "' +
+             [regex]::Escape($parts[1]) + '"')) })
 $unsaved = @(
     $registeredFieldKeys | Where-Object { -not $saveBody.Contains('"' + $_ + '"') })
 Assert-True ($unpopulated.Count -eq 0) (
