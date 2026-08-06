@@ -542,6 +542,48 @@ def check_quickmenu_rows(sources):
                  "QUICKMENU_ROWS.txt does not record. Add it, so the inventory "
                  "stays the list of rows that actually exist.")
 
+        # Direction 0: every row has a VALUE mapping.
+        #
+        # Added because its absence cost a Windows build. Validate-SteamShell.ps1
+        # has always checked this; the replay did not, so moving seven settings
+        # cases out of QuickMenuValue and into the shared file looked green here
+        # and failed there with "Quick Menu row has no value mapping:
+        # qAccentColor".
+        #
+        # The shape of that bug is worth keeping in mind: the PowerShell check
+        # slices QuickMenuValue's BODY out of the file, so an answer that moves
+        # into SteamShell-Shared.ahk leaves the slice while never leaving
+        # $source. Consolidation therefore reads as regression unless the check
+        # is told where the answer went -- which is why the shared value
+        # function is consulted here explicitly rather than by scanning
+        # everything.
+        #
+        # Standalone only. The companion resolves each row's value when it
+        # builds the row, so there is no separate mapping to be missing.
+        if (product == "standalone"):
+            # Containment rather than case labels, matching the PowerShell
+            # rule: not every answer in QuickMenuValue is a `case`. gameScoreBack
+            # is an `if` with a comment explaining why it cannot be a back row,
+            # and a labels-only version of this check reported it as missing.
+            values_text = function_body(text, "QuickMenuValue")
+            value_ids = switch_case_labels(
+                function_body(shared, "QuickMenuSettingValueText"))
+            value_ids |= set(re.findall(
+                r'"(q\w+)",\s*Map\("section",', shared))
+            # Rows whose value column is deliberately empty.
+            value_ids |= {"desktop", "restart", "shutdown", "sleep"}
+            for row in sorted(built):
+                if f'"{row}"' in values_text:
+                    continue
+                if row in value_ids or row in navigating or row in inert:
+                    continue
+                if row.startswith(ROW_ID_FAMILIES):
+                    continue
+                fail(f"{filename}: the Quick Menu row '{row}' has no value "
+                     "mapping. It would render with an empty value column. "
+                     "Answer it in QuickMenuValue, in the shared "
+                     "QuickMenuSettingValueText, or from QuickMenuToggleTable.")
+
         # Direction 1: every row reaches an ACTIVATE path.
         #
         # Deliberately not "reaches any handler". Coverage as an OR across the

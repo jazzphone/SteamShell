@@ -749,10 +749,14 @@ function Assert-QuickMenuRows {
     }
 
     if (-not $Quiet) {
-        Write-Host ("Quick Menu rows: {0} recorded across {1} products; every row reaches an " +
-            "activate path and every handler has a row." -f
-            (@($recorded.Values | ForEach-Object { $_.Count }) | Measure-Object -Sum).Sum,
-            $recorded.Count)
+        # Parenthesised because -f binds tighter than +: without them the format
+        # operator applied to the SECOND string, which has no placeholders, and
+        # the line printed the literal "{0}" and "{1}" it was meant to fill.
+        $rowTotal = (@($recorded.Values | ForEach-Object { $_.Count }) |
+            Measure-Object -Sum).Sum
+        Write-Host (("Quick Menu rows: {0} recorded across {1} products; every row " +
+            "reaches an activate path and every handler has a row.") -f
+            $rowTotal, $recorded.Count)
     }
 }
 

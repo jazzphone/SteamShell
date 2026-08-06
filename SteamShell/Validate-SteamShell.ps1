@@ -1488,6 +1488,26 @@ $sharedActionIds = @(
 Assert-True ($sharedActionIds.Count -ge 12) (
     "QuickMenuActivateShared could not be read; the rows it dispatches would " +
     "be reported as having no activation mapping.")
+# The same, for the VALUE direction. QuickMenuSettingValueText answers the
+# settings rows both products build -- the numbers and named states beside the
+# plain on/off ones the toggle table already covers -- so its cases are value
+# coverage exactly as QuickMenuActivateShared's are activation coverage.
+#
+# $valuesText is a SLICE of QuickMenuValue's body, not the whole file, so a case
+# that moves into the shared file leaves that slice even though it never leaves
+# $source. That is not a rule this check can be exempted from; it is a rule that
+# has to learn where the answer moved to. Without this it reads a deliberate
+# consolidation as a regression, which is what the note above the page/back sets
+# already records happening once.
+$sharedValueIds = @(
+    [regex]::Matches(
+        [regex]::Match($source, '(?ms)^QuickMenuSettingValueText\(id\)\s*\{.*?^\}\s*$').Value,
+        '(?m)^\s*case\s+([^:\n]+):') |
+        ForEach-Object { [regex]::Matches($_.Groups[1].Value, '"([^"]+)"') } |
+        ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique)
+Assert-True ($sharedValueIds.Count -ge 8) (
+    "QuickMenuSettingValueText could not be read; the rows it answers for would " +
+    "be reported as having no value mapping.")
 # Settings rows are dispatched through shared predicates rather than named cases,
 # because AutoHotkey v2 caps a Case at 20 values. Their pipe-separated id lists
 # count as activation coverage.
@@ -1516,7 +1536,8 @@ Assert-True (
 foreach ($id in $quickMenuIds) {
     if ($blankValueIds -notcontains $id -and
         $backDispatchedIds -notcontains $id -and
-        $tableDispatchedIds -notcontains $id) {
+        $tableDispatchedIds -notcontains $id -and
+        $sharedValueIds -notcontains $id) {
         Assert-True ($valuesText.Contains('"' + $id + '"')) (
             "Quick Menu row has no value mapping: $id")
     }
