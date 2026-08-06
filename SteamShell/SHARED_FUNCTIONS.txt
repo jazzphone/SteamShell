@@ -200,6 +200,9 @@ QuickMenuSelectFirst
 QuickMenuSelectLast
 QuickMenuSetRedraw
 QuickMenuTitleText
+QuickMenuAdjustSharedSetting
+QuickMenuCycleSharedSetting
+QuickMenuSettingValueText
 QuickMenuToggleTable
 ReadBool
 ReadInt

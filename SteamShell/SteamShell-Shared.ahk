@@ -3730,6 +3730,117 @@ QuickMenuToggleTable() {
     return table
 }
 
+; The value column for the settings rows both products build.
+;
+; These read globals directly rather than through a seam because every one of
+; them exists under the SAME NAME in both trees: they are one setting each, not
+; two products' versions of an idea. The plain booleans go through
+; ProductSettingBool, which is the one lookup shared code genuinely cannot do.
+;
+; Returns "" for an id it does not own, so each product falls through to its own
+; rows -- the shell's qSplash and qTaskbar read globals the companion does not
+; have, and naming them here would declare them into a tree that never assigns
+; them.
+QuickMenuSettingValueText(id) {
+    global ControllerMouseSpeed, MouseHideDelay, MouseParkEdge
+    global RtssOverlayControlMode, RtssFrameLimiterControlMode, RtssPresetFrameCap
+    global EnablePersistentMouseMode
+    if QuickMenuToggleTable().Has(id)
+        return ProductSettingBool(id) ? "ON" : "OFF"
+    switch id {
+        case "qPersistentMouse":
+            return EnablePersistentMouseMode ? "ON" : "OFF"
+        case "qMouseSpeed":
+            return ControllerMouseSpeed
+        case "qMouseHideDelay":
+            return MouseHideDelay = 0 ? "IMMEDIATE" : Format("{:.1f} SEC", MouseHideDelay / 1000)
+        case "qParkEdge":
+            return StrUpper(MouseParkEdge)
+        case "qOverlayMode":
+            return StrUpper(RtssOverlayControlMode)
+        case "qLimiterMode":
+            return StrUpper(RtssFrameLimiterControlMode)
+        case "qFrameCap":
+            return RtssPresetFrameCap > 0 ? RtssPresetFrameCap " FPS" : "NOT SET"
+        case "qAccentColor":
+            return QuickMenuAccentValueText()
+    }
+    return ""
+}
+
+; The three settings rows that flip between two named states rather than on and
+; off. Not in QuickMenuToggleTable: that table's rows all write "true"/"false",
+; and these write a word the value column shows back.
+;
+; Returns true when the id was handled.
+QuickMenuCycleSharedSetting(id) {
+    global MouseParkEdge, RtssOverlayControlMode, RtssFrameLimiterControlMode
+    switch id {
+        case "qParkEdge":
+            return ProductApplyQuickMenuSetting("MousePark", "MouseParkEdge",
+                MouseParkEdge = "right" ? "Left" : "Right")
+        case "qOverlayMode":
+            return ProductApplyQuickMenuSetting("RTSS", "OverlayControlMode",
+                RtssOverlayControlMode = "toggle" ? "Separate" : "Toggle")
+        case "qLimiterMode":
+            return ProductApplyQuickMenuSetting("RTSS", "FrameLimiterControlMode",
+                RtssFrameLimiterControlMode = "toggle" ? "Separate" : "Toggle")
+    }
+    return false
+}
+
+; Left/Right on a settings row that holds a number or a list position.
+;
+; Returns true when the id was handled.
+QuickMenuAdjustSharedSetting(id, direction) {
+    global ControllerMouseSpeed, MouseHideDelay, RtssPresetFrameCap
+    global QuickMenuAccentName
+    switch id {
+        case "qAccentColor":
+            ; Wraps at both ends. A color list has no meaningful first or last,
+            ; and stopping at Teal would make the default feel like a dead end.
+            names := QuickMenuAccentPresetNames()
+            index := 1
+            for candidateIndex, candidateName in names {
+                if (StrLower(candidateName) = StrLower(QuickMenuAccentName)) {
+                    index := candidateIndex
+                    break
+                }
+            }
+            index += direction
+            if (index < 1)
+                index := names.Length
+            else if (index > names.Length)
+                index := 1
+            return ProductApplyQuickMenuSetting("QuickMenu", "AccentColor", names[index])
+        case "qMouseSpeed":
+            return ProductApplyQuickMenuSetting("Controller", "ControllerMouseSpeed",
+                ClampInt(ControllerMouseSpeed + (direction * 5), 5, 200))
+        case "qMouseHideDelay":
+            ; Snap to the nearest listed value first. The setting accepts any
+            ; number -- the full Settings window and a hand-edited INI can both
+            ; produce one that is not on this list -- and stepping from wherever
+            ; it happens to be would otherwise move by an unpredictable amount.
+            choices := [0, 500, 1000, 2000, 3000, 5000, 10000]
+            choiceIndex := 1
+            smallestDistance := 0x7FFFFFFF
+            for index, candidate in choices {
+                distance := Abs(candidate - MouseHideDelay)
+                if (distance < smallestDistance) {
+                    smallestDistance := distance
+                    choiceIndex := index
+                }
+            }
+            choiceIndex := ClampInt(choiceIndex + direction, 1, choices.Length)
+            return ProductApplyQuickMenuSetting("Timing", "MouseHideDelay",
+                choices[choiceIndex])
+        case "qFrameCap":
+            return ProductApplyQuickMenuSetting("RTSS", "PresetFrameCap",
+                ClampInt(RtssPresetFrameCap + direction, 0, 1000))
+    }
+    return false
+}
+
 ; The Quick Menu actions both products implement identically.
 ;
 ; Fourteen of the thirty ids both trees handle had byte-identical bodies; these

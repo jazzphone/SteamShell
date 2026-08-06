@@ -1176,7 +1176,12 @@ Assert-True (
 # Quick Menu toggles must persist. Writing only the live global would make a
 # setting appear to work and then silently revert on the next start.
 Assert-True (
-    $source -match '(?s)QuickMenuToggleSetting\([^)]*\)\s*\{.*?try\s*\{.*?IniWrite\(.*?\}\s*catch as err.*?SetFieldValue\(entry\["section"\] "\." entry\["key"\], next\)') (
+    $source -match '(?s)ProductApplyQuickMenuSetting\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?SharedPersistSettings\((?:(?!\n\})[\s\S])*?SetFieldValue\(section "\." key' -and
+    # AutoHotkey v2 reads the STRING "false" as a non-empty string, so it is
+    # TRUE. Handing the persisted word straight to a checkbox would tick every
+    # box it had just cleared, and the Quick Menu would look right while the
+    # Settings window behind it disagreed.
+    $source -match '(?s)SetFieldValue\(section "\." key,\s*\r?\n?\s*value = "true" \? true : \(value = "false" \? false : value\)\)') (
     "Quick Menu toggles must persist transactionally and sync the full Settings control.")
 
 # ...and the file that was just written is what the live globals are re-read
@@ -1187,7 +1192,7 @@ Assert-True (
 # LoadSettings() re-reads every global from disk, which is what Reload and
 # Save & Apply already do, so the id list exists exactly once.
 Assert-True (
-    $source -match '(?s)QuickMenuToggleSetting\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?LoadSettings\(\)' -and
+    $source -match '(?s)ProductApplyQuickMenuSetting\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?LoadSettings\(\)' -and
     $source -match '(?s)QuickMenuTogglePersistentMouse\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?LoadSettings\(\)' -and
     $source -notmatch '(?s)QuickMenuToggleSetting\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?case\s+"gameFocus":') (
     "Quick Menu toggles must re-read their live values from the INI they just " +
@@ -1484,9 +1489,19 @@ Assert-True (
 
 # Persisting is the transaction boundary: the palette must not repaint in a
 # color the portable INI could not record.
+#
+# The boundary moved rather than disappeared. Cycling the accent is a shared
+# qAccentColor settings row now, so the write goes through
+# ProductApplyQuickMenuSetting, which returns early when SharedPersistSettings
+# reports failure and only then calls LoadSettings() -- and LoadSettings is
+# where QuickMenuApplyAccent is reached. Both halves are pinned, because the
+# repaint being a consequence of the reload is exactly what makes the ordering
+# hold without a second explicit call.
 Assert-True (
     $source -match
-        '(?s)CycleQuickMenuAccent\(direction\)\s*\{.*?try\s*\{\s*\r?\n\s*IniWrite\(chosen,.*?catch as err.*?return\s*\r?\n\s*\}\s*\r?\n\s*QuickMenuApplyAccent\(') (
+        '(?s)ProductApplyQuickMenuSetting\([^)]*\)\s*\{\s*\r?\n\s*if !SharedPersistSettings\((?:(?!\n\})[\s\S])*?return false\s*\r?\n\s*\}\s*\r?\n\s*LoadSettings\(\)' -and
+    $source -match
+        '(?sm)^LoadSettings\(\)\s*\{(?:(?!\n\})[\s\S])*?QuickMenuApplyAccent\(') (
     "The Quick Menu accent repaints before confirming it was persisted.")
 
 Assert-True ($sample -match '(?m)^AccentColor=Purple') (

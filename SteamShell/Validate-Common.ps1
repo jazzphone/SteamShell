@@ -1104,6 +1104,21 @@ function Assert-SharedParity {
     # an empty call at run time. And nothing may leave the shared file that is
     # not on this list, because that is the half that keeps the seam from
     # growing back.
+    # A shared Quick Menu row steps these, so both trees must accept the same
+    # range. A bound only one tree has makes the row lie: it shows the value it
+    # just wrote while the other tree's reader clamps it away on the next reload,
+    # which looks like a setting that will not stick rather than like a bug.
+    foreach ($bounded in @(
+        @{ Key = "ControllerMouseSpeed"; Pattern = '"ControllerMouseSpeed", 100, 1, 300' },
+        @{ Key = "MouseHideDelay"; Pattern = '"MouseHideDelay", 1000, 0, 60000' })) {
+        foreach ($tree in @("SteamShell.ahk", "SteamShell-XFE.ahk")) {
+            $treeText = Get-Content -LiteralPath (Join-Path $projectRoot $tree) -Raw
+            Assert-True ($treeText -match [regex]::Escape($bounded.Pattern)) (
+                "$tree must read $($bounded.Key) with the same bounds as the other " +
+                "tree; a shared Quick Menu row steps it and cannot respect two ranges.")
+        }
+    }
+
     $sharedSeamAllowed = @(
         "LogLine", "SharedPersistSettings",
         "HideQuickMenu", "ShowQuickMenu",
@@ -1112,6 +1127,7 @@ function Assert-SharedParity {
         "PersistRtssCustomFrameCap", "ProductBestGameExe",
         "ProductCenterGui", "ProductDataDir", "ProductElevatedHelperAlive",
         "ProductHealthResults", "ProductIdentity",
+        "ProductApplyQuickMenuSetting", "ProductSettingBool",
         "ProductSettingsScrollBar", "ProductSettingsViewportHeight",
         "ProductTrayBaseTip", "ProductTrayItems", "ProductVersionText",
         "QuickMenuActivateSelected", "QuickMenuAdjustSelected",

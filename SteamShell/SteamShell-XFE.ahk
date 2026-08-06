@@ -1006,7 +1006,12 @@ LoadSettings() {
     ControllerIndex := ReadInt("Controller", "ControllerIndex", 0, 0, 3)
     ControllerPollIntervalMs := ReadInt("Controller", "ControllerPollIntervalMs", 16, 8, 100)
     ControllerDeadzone := ReadInt("Controller", "ControllerDeadzone", 3000, 1000, 16000)
-    ControllerMouseSpeed := ReadInt("Controller", "ControllerMouseSpeed", 100, 10, 300)
+    ; Bounds match standalone's deliberately: this is one setting, and the Quick
+    ; Menu row that steps it is shared. A range the row can leave -- or one the
+    ; row cannot reach -- makes the row lie, showing a value the next reload
+    ; clamps away. Widened rather than narrowed so no configured value is ever
+    ; silently reduced.
+    ControllerMouseSpeed := ReadInt("Controller", "ControllerMouseSpeed", 100, 1, 300)
     ControllerMouseFastMultiplier := ReadNumber("Controller", "ControllerMouseFastMultiplier", 2.5, 1, 6)
     ControllerScrollIntervalMs := ReadInt("Controller", "ControllerScrollIntervalMs", 80, 20, 500)
     ControllerScrollStep := ReadInt("Controller", "ControllerScrollStep", 1, 1, 10)
@@ -1067,7 +1072,11 @@ LoadSettings() {
     AssistShellOverlayProcesses := ReadText("Assist", "ShellOverlayProcesses",
         AssistShellOverlayProcesses)
     EnableAutoHideCursor := ReadBool(MovedSettingSection("Features", "Cursor", "EnableAutoHideCursor"), "EnableAutoHideCursor", true)
-    MouseHideDelay := ReadInt(MovedSettingSection("Timing", "Cursor", "MouseHideDelay"), "MouseHideDelay", 1000, 250, 10000)
+    ; 0 rather than a 250ms floor, and 60000 rather than 10000: the shared Quick
+    ; Menu row offers IMMEDIATE, and a floor the row can step below makes the row
+    ; lie -- it would read IMMEDIATE while the next reload clamped the value back
+    ; up to 250 and the cursor kept waiting.
+    MouseHideDelay := ReadInt(MovedSettingSection("Timing", "Cursor", "MouseHideDelay"), "MouseHideDelay", 1000, 0, 60000)
     EnableMouseParkOnBoot := ReadBool(MovedSettingSection("Features", "Cursor", "EnableMouseParkOnBoot"), "EnableMouseParkOnBoot", true)
     ParkOnGameStart := ReadBool("Cursor", "ParkOnGameStart", true)
     ParkOnSteamReturn := ReadBool("Cursor", "ParkOnSteamReturn", true)
@@ -6462,12 +6471,21 @@ QuickMenuGetRows() {
                     rows.Push(available[requiredName])
             }
         case "SETTINGS":
-            ; The switches worth reaching from a controller. Everything else
-            ; still lives in the full Settings window at the bottom of the page.
+            ; A hub, the way the shell's is. The rows outgrew one screen once
+            ; the settings the companion already honoured but could not reach
+            ; from a controller were given rows of their own.
             rows.Push(MenuRow("back", "Back", "", "back"))
-            for _, row in QuickMenuSettingsRows()
-                rows.Push(row)
+            rows.Push(MenuRow("settingsCompanion", "Companion + Assist", "",
+                "page:SETTINGS_COMPANION"))
+            rows.Push(MenuRow("settingsInput", "Controller + Cursor", "",
+                "page:SETTINGS_INPUT"))
+            rows.Push(MenuRow("settingsRtss", "RTSS + Performance", "",
+                "page:SETTINGS_RTSS"))
             rows.Push(MenuRow("windowsSettings", "Windows Settings", "", "windowsSettings"))
+        case "SETTINGS_COMPANION", "SETTINGS_INPUT", "SETTINGS_RTSS":
+            rows.Push(MenuRow("back", "Back To Settings", "", "page:SETTINGS"))
+            for _, row in QuickMenuSettingsRows(QuickMenuPage)
+                rows.Push(row)
             ; settingsEditor, not settings: the MAIN page already owns "settings"
             ; as the row that opens this page, and two different rows sharing one
             ; id only worked while each row carried its own value and action.
@@ -6629,6 +6647,8 @@ ProductSettingBool(id) {
     global EnableGameFocusLite, EnableSteamAssistLite, EnableLauncherCleanupLite
     global AssistSuspendOnShellOverlay
     global EnableViewSteamActions, EnableViewTapAction, EnableViewHoldAction
+    global EnableControllerMouseMode, EnableAutoHideCursor
+    global EnableMouseParkOnBoot, EnableRTSSIntegration
     switch id {
         case "gameFocus": return EnableGameFocusLite
         case "steamAssist": return EnableSteamAssistLite
@@ -6637,6 +6657,13 @@ ProductSettingBool(id) {
         case "viewActions": return EnableViewSteamActions
         case "viewTap": return EnableViewTapAction
         case "viewHold": return EnableViewHoldAction
+        ; The four the shell already had rows for. The settings exist here and
+        ; are honoured here; until now there was simply no way to reach them
+        ; from a controller.
+        case "qControllerMouse": return EnableControllerMouseMode
+        case "qAutoHideCursor": return EnableAutoHideCursor
+        case "qParkBoot": return EnableMouseParkOnBoot
+        case "qRtssIntegration": return EnableRTSSIntegration
     }
     return false
 }
@@ -6654,38 +6681,28 @@ ProductSettingBool(id) {
 ; LoadSettings() re-reads all of them from the file that was just written, which
 ; is what Reload and Save & Apply already do, so the id list exists once.
 QuickMenuToggleSetting(id, label := "") {
-    global EnableControllerMouseMode, EnablePersistentMouseMode
-    global IniPath
     if (label = "")
         label := id
     if (id = "qPersistentMouse") {
         QuickMenuTogglePersistentMouse(label)
         return
     }
+    ; The rows that flip between two named states rather than on and off.
+    if QuickMenuCycleSharedSetting(id) {
+        LogLine("Quick Menu: " label " -> " QuickMenuSettingValueText(id) ".")
+        ShowNotification(label ": " QuickMenuSettingValueText(id))
+        return
+    }
     if !QuickMenuToggleTable().Has(id)
         return
     entry := QuickMenuToggleTable()[id]
     next := !ProductSettingBool(id)
-    ; Persistence is the transaction boundary. Do not change the live state or
-    ; claim success if the portable INI is read-only or otherwise unwritable.
-    try {
-        IniWrite(next ? "true" : "false", IniPath, entry["section"], entry["key"])
-    } catch as err {
-        LogLine("Quick Menu: could not save " label " (" err.Message ").", "Warning")
-        ShowNotification("Could not save " label, "Warning")
+    ; Persistence is the transaction boundary. Do not claim success, or report a
+    ; new state, if the portable INI is read-only or otherwise unwritable.
+    if !ProductApplyQuickMenuSetting(entry["section"], entry["key"],
+        next ? "true" : "false")
         return
-    }
-    LoadSettings()
-    ; If the full Settings window happens to be open behind the Quick Menu,
-    ; update its matching control too. Otherwise a later Save there could write
-    ; the stale pre-toggle value back over this persisted couch change.
-    SetFieldValue(entry["section"] "." entry["key"], next)
     LogLine("Quick Menu: " label " -> " OnOffText(next) ".")
-    ; The assist timer only exists while something needs it, so enabling the
-    ; first assist feature has to create it and disabling the last has to stop
-    ; it. Re-applying the timers is idempotent and does that in one place.
-    if (entry["section"] = "Assist")
-        ApplyRuntimeTimers()
     ShowNotification(label ": " OnOffText(next))
 }
 
@@ -6721,61 +6738,58 @@ QuickMenuTogglePersistentMouse(label) {
 
 ; Rows for the Quick Menu's Settings page: the switches worth reaching from the
 ; couch, without opening the full Settings window on a TV.
-QuickMenuSettingsRows() {
+QuickMenuSettingsRows(page := "SETTINGS") {
     rows := []
     ; Label beside the id, the way standalone's row builders state theirs. The
     ; words belong to the row; the section and key belong to the shared table.
-    for _, entry in [
-        ["gameFocus", "Game Focus Lite"],
-        ["steamAssist", "Steam Assist Lite"],
-        ["launcherCleanup", "Launcher Cleanup Lite"],
-        ["shellOverlay", "Pause Assist On FSE Switcher"],
-        ["viewActions", "View Button Steam Actions"],
-        ["viewTap", "View Tap Action"],
-        ["viewHold", "View Hold Action"]] {
-        rows.Push(MenuRow("toggle:" entry[1], entry[2],
-            OnOffText(ProductSettingBool(entry[1])), "toggle:" entry[1], true))
+    ;
+    ; Split across the same pages the shell uses, and in the same order, because
+    ; the point of these rows is that someone who configured one product finds
+    ; the same switch in the same place in the other. The companion's own assist
+    ; and View-button rows stay on the first page: they have no shell equivalent
+    ; to sit beside.
+    if (page = "SETTINGS_COMPANION") {
+        for _, entry in [
+            ["gameFocus", "Game Focus Lite"],
+            ["steamAssist", "Steam Assist Lite"],
+            ["launcherCleanup", "Launcher Cleanup Lite"],
+            ["shellOverlay", "Pause Assist On FSE Switcher"],
+            ["viewActions", "View Button Steam Actions"],
+            ["viewTap", "View Tap Action"],
+            ["viewHold", "View Hold Action"]]
+            rows.Push(QuickMenuSettingRow(entry[1], entry[2]))
+        rows.Push(QuickMenuSettingRow("qAccentColor", "Quick Menu Accent"))
+        return rows
     }
-    rows.Push(MenuRow("accentColor", "Accent Color", QuickMenuAccentValueText(),
-        "accentColor", true))
+    if (page = "SETTINGS_INPUT") {
+        for _, entry in [
+            ["qControllerMouse", "Controller Mouse"],
+            ["qMouseSpeed", "Controller Mouse Speed"],
+            ["qPersistentMouse", "Mouse Mode"],
+            ["qAutoHideCursor", "Auto-Hide Cursor"],
+            ["qMouseHideDelay", "Cursor Hide Delay"],
+            ["qParkBoot", "Park Mouse On Boot"],
+            ["qParkEdge", "Mouse Parking Edge"]]
+            rows.Push(QuickMenuSettingRow(entry[1], entry[2]))
+        return rows
+    }
+    if (page = "SETTINGS_RTSS") {
+        for _, entry in [
+            ["qRtssIntegration", "RTSS Integration"],
+            ["qOverlayMode", "Overlay Controls"],
+            ["qLimiterMode", "Frame Limiter Controls"],
+            ["qFrameCap", "Preset Frame Cap"]]
+            rows.Push(QuickMenuSettingRow(entry[1], entry[2]))
+        return rows
+    }
     return rows
 }
 
-; Steps the accent to the next preset and persists it. Wraps at both ends: a
-; color list has no meaningful first or last, and stopping at Teal would make
-; the default feel like a dead end.
-CycleQuickMenuAccent(direction) {
-    global IniPath, QuickMenuAccentName, QuickMenuAccentCustomHex
-    names := QuickMenuAccentPresetNames()
-    index := 1
-    for candidateIndex, candidateName in names {
-        if (StrLower(candidateName) = StrLower(QuickMenuAccentName)) {
-            index := candidateIndex
-            break
-        }
-    }
-    index += direction
-    if (index < 1)
-        index := names.Length
-    else if (index > names.Length)
-        index := 1
-    chosen := names[index]
-    ; Persistence is the transaction boundary, matching QuickMenuToggleSetting:
-    ; do not repaint in a color the INI could not record.
-    try {
-        IniWrite(chosen, IniPath, "QuickMenu", "AccentColor")
-    } catch as err {
-        LogLine("Quick Menu: could not save accent color (" err.Message ").",
-            "Warning")
-        ShowNotification("Could not save accent color", "Warning")
-        return
-    }
-    QuickMenuApplyAccent(chosen, QuickMenuAccentCustomHex)
-    ; If the full Settings window is open behind the Quick Menu, update its
-    ; control too, or a later Save there would write the stale value back.
-    SetFieldText("QuickMenu.AccentColor", chosen)
-    LogLine("Quick Menu: accent -> " chosen ".")
-    ShowNotification("Accent: " QuickMenuAccentValueText())
+; One settings row. The action IS the id -- see the note beside the Mouse Mode
+; row on MAIN for what happens when it is allowed to be anything else.
+QuickMenuSettingRow(id, label) {
+    return MenuRow("toggle:" id, label, QuickMenuSettingValueText(id),
+        "toggle:" id, true)
 }
 
 ShortText(text, maxChars) {
@@ -7143,6 +7157,28 @@ SyncElevatedRtssHelperWithSettings() {
 ; started from an existing desktop, so direct writes are appropriate. Standalone
 ; implements the same name transactionally, because it is the Windows shell.
 ; Shared code calls this and does not have to know which.
+; Per-tree seam required by SteamShell-Shared.ahk: persist one Quick Menu
+; setting AND make it live. This tree writes directly and then re-reads, which
+; is what Reload and Save & Apply already do; the shell stages a copy first
+; because a half-written INI is a machine that boots into nothing.
+ProductApplyQuickMenuSetting(section, key, value) {
+    if !SharedPersistSettings([Map("section", section, "key", key, "value", value)]) {
+        ShowNotification("The setting could not be saved", "Warning")
+        return false
+    }
+    LoadSettings()
+    ApplyRuntimeTimers()
+    ; If the full Settings window is open behind the Quick Menu, update its
+    ; control too, or a later Save there writes the stale value back over this.
+    ;
+    ; Normalised first: these arrive as the words written to the INI, and in
+    ; AutoHotkey v2 the STRING "false" is a non-empty string and therefore TRUE.
+    ; Handing it straight to a checkbox would tick every box it just cleared.
+    SetFieldValue(section "." key,
+        value = "true" ? true : (value = "false" ? false : value))
+    return true
+}
+
 SharedPersistSettings(changes) {
     global IniPath
     for _, item in changes {
@@ -7680,8 +7716,6 @@ QuickMenuActivateSelected() {
         case "back":
             QuickMenuGoBack()
             return
-        case "accentColor":
-            QuickMenuAdjustSelected(1)
         case "mute":
             try {
                 SoundSetMute(-1)
@@ -7773,8 +7807,14 @@ QuickMenuAdjustSelected(direction) {
     if (QuickMenuRows.Length = 0)
         return
     action := QuickMenuRows[QuickMenuSelected]["action"]
-    ; A two-state row has nothing to step through, so Left and Right both simply
-    ; flip it -- the same thing A does. Direction is deliberately ignored.
+    ; Numbers and list positions step; two-state rows have nothing to step
+    ; through, so for those Left and Right both simply flip it -- the same thing
+    ; A does, and the direction is deliberately ignored.
+    if (SubStr(action, 1, 7) = "toggle:"
+        && QuickMenuAdjustSharedSetting(SubStr(action, 8), direction)) {
+        QuickMenuRefresh()
+        return
+    }
     if (SubStr(action, 1, 7) = "toggle:") {
         QuickMenuToggleSetting(SubStr(action, 8),
             QuickMenuRows[QuickMenuSelected]["label"])
@@ -7810,8 +7850,6 @@ QuickMenuAdjustSelected(direction) {
             }
         case "rtssFrameLimitCustom":
             AdjustRtssCustomFrameCap(direction)
-        case "accentColor":
-            CycleQuickMenuAccent(direction)
     }
     QuickMenuRefresh()
 }

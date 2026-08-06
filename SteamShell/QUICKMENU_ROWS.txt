@@ -130,7 +130,8 @@ standalone windowsSettings
 # ----------------------------------------------------------------------------
 
 # Reached through a variable rather than a literal row: the HDR row picks its
-# action from live state, and the accent row is adjusted rather than activated.
+# action from live state. The accent row used to be listed here too; it is a
+# qAccentColor settings row now, shared with the shell.
 xfe audioMenu
 xfe audioOutput
 xfe back
@@ -169,6 +170,9 @@ xfe rtssStart
 xfe setControllerMappings
 xfe settingsEditor
 xfe settings
+xfe settingsCompanion
+xfe settingsInput
+xfe settingsRtss
 xfe shutdown
 xfe sleep
 xfe steamMenu
@@ -180,4 +184,3 @@ xfe volume
 xfe windowsSettings
 
 xfe dynamic:hdr
-xfe dynamic:accentColor

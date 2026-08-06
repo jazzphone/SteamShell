@@ -3580,7 +3580,7 @@ LauncherCleanupAudioPeakThreshold := ReadNumber("LauncherCleanup", "AudioPeakThr
     ControllerIndex := ReadInt("Controller", "ControllerIndex", 0, 0, 3)
     ControllerPollIntervalMs := ReadInt("Controller", "ControllerPollIntervalMs", 16, 5, 200)
     ControllerDeadzone := ReadInt("Controller", "ControllerDeadzone", 3000, 0, 32000)
-    ControllerMouseSpeed := ReadInt("Controller", "ControllerMouseSpeed", 100, 1, 200)
+    ControllerMouseSpeed := ReadInt("Controller", "ControllerMouseSpeed", 100, 1, 300)
     ControllerMouseFastMultiplier := ReadNumber("Controller", "ControllerMouseFastMultiplier", 2.5, 1.0, 10.0)
     ControllerScrollIntervalMs := ReadInt("Controller", "ControllerScrollIntervalMs", 80, 10, 1000)
     ControllerScrollStep := ReadInt("Controller", "ControllerScrollStep", 1, 1, 10)
@@ -5952,9 +5952,11 @@ QuickMenuValue(id) {
     if (QuickMenuConfirmAction = id && A_TickCount < QuickMenuConfirmUntilTick)
         return "SELECT AGAIN TO CONFIRM"
 
-    ; Plain on/off rows answer from the table rather than from a case each.
-    if QuickMenuToggleTable().Has(id)
-        return ProductSettingBool(id) ? "ON" : "OFF"
+    ; The settings rows both products build -- plain on/off from the table, plus
+    ; the numbers and named states beside them. Shell-only rows fall through.
+    sharedValue := QuickMenuSettingValueText(id)
+    if (sharedValue != "")
+        return sharedValue
 
     if (SubStr(id, 1, 7) = "layout:")
         return GetControllerLayoutText(SubStr(id, 8))
@@ -6047,8 +6049,6 @@ QuickMenuValue(id) {
             return "Win + G"
         case "openKeyboard":
             return "Open Touch Keyboard"
-        case "qPersistentMouse":
-            return EnablePersistentMouseMode ? "ON" : "OFF"
         case "windowsSettings":
             return "Open Windows Settings"
         case "taskRelease":
@@ -6088,24 +6088,10 @@ QuickMenuValue(id) {
             return EnableSplashScreen ? "ON  •  NEXT BOOT" : "OFF  •  NEXT BOOT"
         case "qTaskbar":
             return EnableTaskbarHiding ? "ON  •  NEXT BOOT" : "OFF  •  NEXT BOOT"
-        case "qMouseSpeed":
-            return ControllerMouseSpeed
-        case "qMouseHideDelay":
-            return MouseHideDelay = 0 ? "IMMEDIATE" : Format("{:.1f} SEC", MouseHideDelay / 1000)
-        case "qParkEdge":
-            return StrUpper(MouseParkEdge)
         case "qWindowManagement":
             return EnableWindowManagement ? "ON  •  COORDINATED" : "OFF  •  COORDINATED"
         case "qFocusPaused":
             return FocusAssistancePaused ? "PAUSED" : "ACTIVE"
-        case "qOverlayMode":
-            return StrUpper(RtssOverlayControlMode)
-        case "qLimiterMode":
-            return StrUpper(RtssFrameLimiterControlMode)
-        case "qFrameCap":
-            return RtssPresetFrameCap > 0 ? RtssPresetFrameCap " FPS" : "NOT SET"
-        case "qAccentColor":
-            return QuickMenuAccentValueText()
         case "settings":
             return "Features & Configuration"
         case "system":
@@ -6350,6 +6336,14 @@ QuickMenuHandleController(pressed, released := 0, lx := 0, ly := 0, buttons := 0
     }
 }
 
+; Per-tree seam required by SteamShell-Shared.ahk: persist one Quick Menu
+; setting AND make it live. The shell stages a copy and swaps the INI in only
+; once every write succeeded; the companion writes directly. Both are correct
+; for their program, and the shared settings rows must not care which.
+ProductApplyQuickMenuSetting(section, key, value) {
+    return PersistQuickMenuSetting(section, key, value)
+}
+
 PersistQuickMenuSetting(section, key, value) {
     global EnableAutoHideCursor, MouseHidden
     if !CommitIniChanges([Map("section", section, "key", key, "value", value)]) {
@@ -6424,6 +6418,9 @@ ToggleQuickMenuSetting(id) {
             ProductSettingBool(id) ? "false" : "true")
         return
     }
+    ; The rows that flip between two named states rather than on and off.
+    if QuickMenuCycleSharedSetting(id)
+        return
     global EnableSplashScreen, EnableTaskbarHiding, EnableDesktopBlackout
     global EnableControllerMouseMode, EnablePersistentMouseMode, EnableAutoHideCursor
     global EnableMouseParkOnBoot, EnableMouseParkOnFocusChange, MouseParkEdge
@@ -6451,65 +6448,21 @@ ToggleQuickMenuSetting(id) {
             ApplyRuntimeTimers()
             SyncControlPanel()
             ShowNotification("Mouse Mode: " (next ? "On" : "Off"), "Success")
-        case "qParkEdge":
-            PersistQuickMenuSetting("MousePark", "MouseParkEdge", MouseParkEdge = "right" ? "Left" : "Right")
         case "qWindowManagement":
             PersistQuickMenuSetting("Features", "EnableWindowManagement", EnableWindowManagement ? "false" : "true")
         case "qFocusPaused":
             FocusAssistancePaused := !FocusAssistancePaused
-        case "qOverlayMode":
-            PersistQuickMenuSetting("RTSS", "OverlayControlMode"
-                , RtssOverlayControlMode = "toggle" ? "Separate" : "Toggle")
-        case "qLimiterMode":
-            PersistQuickMenuSetting("RTSS", "FrameLimiterControlMode"
-                , RtssFrameLimiterControlMode = "toggle" ? "Separate" : "Toggle")
     }
     QuickMenuRefresh()
 }
 
 AdjustQuickMenuSetting(id, direction) {
-    global SettingsPath, ControllerMouseSpeed, MouseHideDelay, RtssPresetFrameCap
-    global QuickMenuAccentName
-    switch id {
-        case "qAccentColor":
-            ; Wraps at both ends. A color list has no meaningful first or last, and
-            ; stopping at Teal would make the default feel like a dead end.
-            names := QuickMenuAccentPresetNames()
-            index := 1
-            for candidateIndex, candidateName in names {
-                if (StrLower(candidateName) = StrLower(QuickMenuAccentName)) {
-                    index := candidateIndex
-                    break
-                }
-            }
-            index += direction
-            if (index < 1)
-                index := names.Length
-            else if (index > names.Length)
-                index := 1
-            PersistQuickMenuSetting("QuickMenu", "AccentColor", names[index])
-        case "qMouseSpeed":
-            nextValue := ClampInt(ControllerMouseSpeed + (direction * 5), 5, 200)
-            PersistQuickMenuSetting("Controller", "ControllerMouseSpeed", nextValue)
-        case "qMouseHideDelay":
-            choices := [0, 500, 1000, 2000, 3000, 5000, 10000]
-            choiceIndex := 1
-            smallestDistance := 0x7FFFFFFF
-            for index, candidate in choices {
-                distance := Abs(candidate - MouseHideDelay)
-                if (distance < smallestDistance) {
-                    smallestDistance := distance
-                    choiceIndex := index
-                }
-            }
-            choiceIndex := ClampInt(choiceIndex + direction, 1, choices.Length)
-            PersistQuickMenuSetting("Timing", "MouseHideDelay", choices[choiceIndex])
-        case "qFrameCap":
-            nextValue := ClampInt(RtssPresetFrameCap + direction, 0, 1000)
-            PersistQuickMenuSetting("RTSS", "PresetFrameCap", nextValue)
-        default:
-            ToggleQuickMenuSetting(id)
-            return
+    ; Every adjustable settings row is shared; the shell has no numeric row of
+    ; its own. Anything else is a plain toggle, and Left/Right flip it the same
+    ; way A does.
+    if !QuickMenuAdjustSharedSetting(id, direction) {
+        ToggleQuickMenuSetting(id)
+        return
     }
     QuickMenuRefresh()
 }
