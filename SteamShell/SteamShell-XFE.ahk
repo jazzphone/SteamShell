@@ -5686,9 +5686,9 @@ SettingsAddButtonRow(settings, category, [
         "Game CPU threshold (%, 0 = window shape only)", &y, true)
     SettingsAddEditRow(settings, category, "Assist.ForegroundStableSec",
         "Settle time before cleanup (s)", &y, true)
-    SettingsAddEditRow(settings, category, "Assist.CooldownSec",
+    SettingsAddEditRow(settings, category, "LauncherCleanup.CooldownSec",
         "Minimum time between cleanups (s)", &y, true)
-    SettingsAddCheckboxRow(settings, category, "Assist.HardKill",
+    SettingsAddCheckboxRow(settings, category, "LauncherCleanup.HardKill",
         "Force close launchers that ignore a polite close request", &y)
     SettingsAddNoteRow(settings, category,
         "Process lists are edited in the INI under [Assist]. Assistance always "
@@ -6468,9 +6468,9 @@ SettingsPopulate() {
         ReadInt("Assist", "CpuThresholdPercent", 12, 0, 100))
     SetFieldValue("Assist.ForegroundStableSec",
         ReadInt("Assist", "ForegroundStableSec", 30, 5, 600))
-    SetFieldValue("Assist.CooldownSec",
+    SetFieldValue("LauncherCleanup.CooldownSec",
         ReadInt(MovedSettingSection("LauncherCleanup", "Assist", "CooldownSec"), "CooldownSec", 300, 30, 7200))
-    SetFieldValue("Assist.HardKill", ReadBool(MovedSettingSection("LauncherCleanup", "Assist", "HardKill"), "HardKill", true))
+    SetFieldValue("LauncherCleanup.HardKill", ReadBool(MovedSettingSection("LauncherCleanup", "Assist", "HardKill"), "HardKill", true))
     SetFieldValue("Controller.ControllerIndex",
         ReadInt("Controller", "ControllerIndex", 0, 0, 3))
     SetFieldValue("Controller.ControllerDeadzone",
@@ -6602,8 +6602,8 @@ SaveSettings(*) {
         ["Assist", "TickIntervalMs", GetFieldValue("Assist.TickIntervalMs", 2000)],
         ["Assist", "CpuThresholdPercent", GetFieldValue("Assist.CpuThresholdPercent", 12)],
         ["Assist", "ForegroundStableSec", GetFieldValue("Assist.ForegroundStableSec", 30)],
-        ["LauncherCleanup", "CooldownSec", GetFieldValue("Assist.CooldownSec", 300)],
-        ["LauncherCleanup", "HardKill", GetFieldValue("Assist.HardKill") ? "true" : "false"],
+        ["LauncherCleanup", "CooldownSec", GetFieldValue("LauncherCleanup.CooldownSec", 300)],
+        ["LauncherCleanup", "HardKill", GetFieldValue("LauncherCleanup.HardKill") ? "true" : "false"],
         ["Assist", "SuspendOnShellOverlay",
             GetFieldValue("Assist.SuspendOnShellOverlay") ? "true" : "false"],
         ["Steam", "MenuShortcut", GetFieldValue("Steam.MenuShortcut")],
