@@ -3705,12 +3705,12 @@ LauncherCleanupAudioPeakThreshold := ReadNumber("LauncherCleanup", "AudioPeakThr
     ControllerMouseFastMultiplier := ReadNumber("Controller", "ControllerMouseFastMultiplier", 2.5, 1.0, 10.0)
     ControllerScrollIntervalMs := ReadInt("Controller", "ControllerScrollIntervalMs", 80, 10, 1000)
     ControllerScrollStep := ReadInt("Controller", "ControllerScrollStep", 1, 1, 10)
-    ControllerChordHoldMs := ReadInt("Controller", "ControllerChordHoldMs", 500, 100, 2000)
+    ControllerChordHoldMs := ReadInt("Controller", "ControllerChordHoldMs", 500, 100, 3000)
 
     EnableQuickMenu := ReadBool("QuickMenu", "Enable", true)
     EnableGameDetectionMenu := ReadBool("QuickMenu", "ShowGameDetection", true)
     GameScoreMaxRows := ReadInt("QuickMenu", "GameScoreMaxRows", 8, 1, 20)
-    QuickMenuChordHoldMs := ReadInt("QuickMenu", "ChordHoldMs", 500, 300, 3000)
+    QuickMenuChordHoldMs := ReadInt("QuickMenu", "ChordHoldMs", 500, 250, 3000)
     TaskForceCloseHoldMs := ReadInt("QuickMenu", "TaskForceCloseHoldMs", 1200, 600, 3000)
     QuickMenuMainOrderRaw := IniReadS(
         "QuickMenu", "MainOrder",

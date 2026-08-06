@@ -1006,7 +1006,7 @@ LoadSettings() {
     RawInputStaleMs := ReadInt("Controller", "RawInputStaleMs", 5000, 500, 60000)
     ControllerIndex := ReadInt("Controller", "ControllerIndex", 0, 0, 3)
     ControllerPollIntervalMs := ReadInt("Controller", "ControllerPollIntervalMs", 16, 8, 100)
-    ControllerDeadzone := ReadInt("Controller", "ControllerDeadzone", 3000, 1000, 16000)
+    ControllerDeadzone := ReadInt("Controller", "ControllerDeadzone", 3000, 0, 32000)
     ; Bounds match standalone's deliberately: this is one setting, and the Quick
     ; Menu row that steps it is shared. A range the row can leave -- or one the
     ; row cannot reach -- makes the row lie, showing a value the next reload
@@ -1016,7 +1016,7 @@ LoadSettings() {
     ControllerMouseFastMultiplier := ReadNumber("Controller", "ControllerMouseFastMultiplier", 2.5, 1, 6)
     ControllerScrollIntervalMs := ReadInt("Controller", "ControllerScrollIntervalMs", 80, 20, 500)
     ControllerScrollStep := ReadInt("Controller", "ControllerScrollStep", 1, 1, 10)
-    ControllerChordHoldMs := ReadInt("Controller", "ControllerChordHoldMs", 500, 200, 3000)
+    ControllerChordHoldMs := ReadInt("Controller", "ControllerChordHoldMs", 500, 100, 3000)
     SteamMenuShortcut := ReadText("Steam", "MenuShortcut", "^1")
     SteamQuickAccessShortcut := ReadText("Steam", "QuickAccessShortcut", "^2")
     SteamOverlayShortcut := ReadText("Steam", "OverlayShortcut", "+{Tab}")
@@ -1026,7 +1026,7 @@ LoadSettings() {
     ViewHoldMs := ReadInt("Steam", "ViewHoldMs", 500, 200, 5000)
     ViewHoldInGameMs := ReadInt("Steam", "ViewHoldInGameMs", 1000, 200, 5000)
     EnableStartupPrograms := ReadBool("StartupPrograms", "Enable", true)
-    StartupProgramDelayMs := ReadInt("StartupPrograms", "DelayMs", 2000, 0, 120000)
+    StartupProgramDelayMs := ReadInt("StartupPrograms", "DelayMs", 2000, 0, 600000)
     StartupProgramStaggerMs := ReadInt("StartupPrograms", "StaggerMs", 1200, 0, 30000)
     StartupLaunchDeElevated := ReadBool("StartupPrograms", "LaunchDeElevated", true)
     StartupWindowMode := NormalizeWindowMode(
@@ -6407,6 +6407,121 @@ SettingsCategoryCount() {
     return SettingsCategoryTable().Length
 }
 
+; The fields this tree builds on its own pages, described the way the shared
+; page table describes the rest.
+;
+; SettingsPopulate used to state every field twice over: once as a row and once
+; as a hand-written read, and the two agreed only because somebody kept them in
+; step. Forty of the fifty-eight already carry their section, key, type and
+; default in SettingsCategoryRows; these eighteen are the rest, and with them
+; one loop can fill the window.
+;
+; movedFrom names the section a setting used to live in, so the read can still
+; find a value a migration has not moved yet -- a read-only portable INI never
+; gets migrated, and the setting has to keep working where it lies.
+;
+; Not in SteamShell-Shared.ahk deliberately: these are the companion's own
+; pages, and the shared table is for categories both products build.
+SettingsCompanionFieldSpecs() {
+    static specs := [
+        Map("section", "Assist", "key", "CpuThresholdPercent",
+            "type", "edit", "default", 12,
+            "min", 0, "max", 100),
+        Map("section", "Assist", "key", "EnableGameFocusLite",
+            "type", "checkbox", "default", true),
+        Map("section", "Assist", "key", "EnableLauncherCleanupLite",
+            "type", "checkbox", "default", true),
+        Map("section", "Assist", "key", "EnableSteamAssistLite",
+            "type", "checkbox", "default", true),
+        Map("section", "Assist", "key", "ForegroundStableSec",
+            "type", "edit", "default", 30,
+            "min", 5, "max", 600),
+        Map("section", "Assist", "key", "SuspendOnShellOverlay",
+            "type", "checkbox", "default", true),
+        Map("section", "Assist", "key", "TickIntervalMs",
+            "type", "edit", "default", 2000,
+            "min", 500, "max", 30000),
+        Map("section", "Controller", "key", "AutoMouseExeList",
+            "type", "edit", "default", "explorer.exe"),
+        Map("section", "LauncherCleanup", "key", "CooldownSec",
+            "type", "edit", "default", 300,
+            "min", 30, "max", 7200,
+            "movedFrom", "Assist"),
+        Map("section", "LauncherCleanup", "key", "HardKill",
+            "type", "checkbox", "default", true,
+            "movedFrom", "Assist"),
+        Map("section", "Steam", "key", "EnableViewButtonActions",
+            "type", "checkbox", "default", true),
+        Map("section", "Steam", "key", "EnableViewHoldAction",
+            "type", "checkbox", "default", true),
+        Map("section", "Steam", "key", "EnableViewTapAction",
+            "type", "checkbox", "default", true),
+        Map("section", "Steam", "key", "MenuShortcut",
+            "type", "edit", "default", "^1"),
+        Map("section", "Steam", "key", "OverlayShortcut",
+            "type", "edit", "default", "+{Tab}"),
+        Map("section", "Steam", "key", "QuickAccessShortcut",
+            "type", "edit", "default", "^2"),
+        Map("section", "Steam", "key", "ViewHoldInGameMs",
+            "type", "edit", "default", 1000,
+            "min", 200, "max", 5000),
+        Map("section", "Steam", "key", "ViewHoldMs",
+            "type", "edit", "default", 500,
+            "min", 200, "max", 5000)
+    ]
+    return specs
+}
+
+; Every field in the window, shared rows and companion rows together.
+SettingsAllFieldSpecs() {
+    static all := unset
+    if IsSet(all)
+        return all
+    all := []
+    for _, category in SettingsCategoryNames() {
+        for _, row in SettingsCategoryRows(category) {
+            if (!row.Has("section") || !SettingsRowAppliesTo(row, "xfe"))
+                continue
+            all.Push(row)
+        }
+    }
+    for _, spec in SettingsCompanionFieldSpecs()
+        all.Push(spec)
+    return all
+}
+
+; Fills the window from the INI, from the specs rather than from a list.
+;
+; Reads exactly what the old hand-written version read: ReadBool for a checkbox,
+; ReadInt with its bounds for a numeric row, ReadText otherwise, and the moved
+; section where a row names one.
+SettingsPopulateFields() {
+    for _, row in SettingsAllFieldSpecs() {
+        key := row["section"] "." row["key"]
+        section := row.Has("movedFrom")
+            ? MovedSettingSection(row["section"], row["movedFrom"], row["key"])
+            : row["section"]
+        type := row["type"]
+        if (type = "checkbox") {
+            ; Both spellings, because the two sources spell it differently: the
+            ; shared table stores "true" as a string, these specs carry the
+            ; literal. AutoHotkey compares the string "true" against the number
+            ; 1 as text, so neither test alone covers both.
+            enabled := (row["default"] = true || row["default"] = "true")
+            SetFieldValue(key, ReadBool(section, row["key"], enabled))
+        } else if (type = "choice") {
+            SelectChoiceByText(key,
+                ReadText(section, row["key"], row["default"]),
+                row.Has("xfeChoices") ? row["xfeChoices"] : SettingsRowChoices(row))
+        } else if (row.Has("min")) {
+            SetFieldValue(key, ReadInt(section, row["key"],
+                row["default"], row["min"], row["max"]))
+        } else {
+            SetFieldValue(key, ReadText(section, row["key"], row["default"]))
+        }
+    }
+}
+
 SettingsPopulate() {
     global SettingsFields, SettingsDirty, RtssPath
     if (SettingsFields.Count = 0)
@@ -6433,7 +6548,7 @@ SettingsPopulate() {
         ReadBool("Controller", "RawInputProbe", false))
     SetFieldValue("StartupPrograms.Enable", ReadBool("StartupPrograms", "Enable", true))
     SetFieldValue("StartupPrograms.DelayMs",
-        ReadInt("StartupPrograms", "DelayMs", 2000, 0, 120000))
+        ReadInt("StartupPrograms", "DelayMs", 2000, 0, 600000))
     SetFieldValue("StartupPrograms.StaggerMs",
         ReadInt("StartupPrograms", "StaggerMs", 1200, 0, 30000))
     SelectChoiceByText("StartupPrograms.WindowMode",
@@ -6474,11 +6589,11 @@ SettingsPopulate() {
     SetFieldValue("Controller.ControllerIndex",
         ReadInt("Controller", "ControllerIndex", 0, 0, 3))
     SetFieldValue("Controller.ControllerDeadzone",
-        ReadInt("Controller", "ControllerDeadzone", 3000, 1000, 16000))
+        ReadInt("Controller", "ControllerDeadzone", 3000, 0, 32000))
     SetFieldValue("Controller.ControllerMouseSpeed",
         ReadInt("Controller", "ControllerMouseSpeed", 100, 10, 300))
     SetFieldValue("Controller.ControllerChordHoldMs",
-        ReadInt("Controller", "ControllerChordHoldMs", 500, 200, 3000))
+        ReadInt("Controller", "ControllerChordHoldMs", 500, 100, 3000))
     SetFieldValue("Features.EnableAutoHideCursor", ReadBool(MovedSettingSection("Features", "Cursor", "EnableAutoHideCursor"), "EnableAutoHideCursor", true))
     SetFieldValue("Timing.MouseHideDelay", ReadInt(MovedSettingSection("Timing", "Cursor", "MouseHideDelay"), "MouseHideDelay", 1000, 250, 10000))
     SetFieldValue("Features.EnableMouseParkOnBoot", ReadBool(MovedSettingSection("Features", "Cursor", "EnableMouseParkOnBoot"), "EnableMouseParkOnBoot", true))

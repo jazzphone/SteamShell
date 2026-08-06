@@ -1179,14 +1179,51 @@ function Assert-SharedParity {
     # range. A bound only one tree has makes the row lie: it shows the value it
     # just wrote while the other tree's reader clamps it away on the next reload,
     # which looks like a setting that will not stick rather than like a bug.
-    foreach ($bounded in @(
-        @{ Key = "ControllerMouseSpeed"; Pattern = '"ControllerMouseSpeed", 100, 1, 300' },
-        @{ Key = "MouseHideDelay"; Pattern = '"MouseHideDelay", 1000, 0, 60000' })) {
+    # Derived from the shared page table rather than listed, so a row added there
+    # is covered without anybody remembering to add it here too.
+    #
+    # A numeric Settings row states the range it accepts. If a tree's own read
+    # clamps harder, the row accepts a value the next reload throws away -- the
+    # user types it, it saves, and it comes back different, with nothing
+    # failing. Five rows disagreed this way at once when the table was written,
+    # including one range that no tree allowed at all.
+    #
+    # Where the two trees genuinely disagreed the union was taken, never the
+    # intersection: widening accepts every value somebody has already
+    # configured, narrowing silently reduces it.
+    $sharedText = Get-Content -LiteralPath (
+        Join-Path $projectRoot "SteamShell-Shared.ahk") -Raw
+    $tableStart = $sharedText.IndexOf("SettingsCategoryRows(category) {")
+    $tableEnd = $sharedText.IndexOf("return table.Has(category)", $tableStart)
+    $tableText = $sharedText.Substring($tableStart, $tableEnd - $tableStart)
+    $boundedRows = [regex]::Matches(
+        $tableText,
+        '(?s)"product", "(\w+)",.{0,80}?"section", "(\w+)", "key", "(\w+)",' +
+        '.{0,300}?"min", (\d+), "max", (\d+)')
+    Assert-True ($boundedRows.Count -ge 10) (
+        "The shared page table's numeric rows could not be read, so a Settings " +
+        "row accepting a value its own product clamps away would go unnoticed.")
+    foreach ($row in $boundedRows) {
+        $product = $row.Groups[1].Value
+        $section = $row.Groups[2].Value
+        $key = $row.Groups[3].Value
+        $low = $row.Groups[4].Value
+        $high = $row.Groups[5].Value
         foreach ($tree in @("SteamShell.ahk", "SteamShell-XFE.ahk")) {
+            if ($product -eq "standalone" -and $tree -ne "SteamShell.ahk") { continue }
+            if ($product -eq "xfe" -and $tree -ne "SteamShell-XFE.ahk") { continue }
             $treeText = Get-Content -LiteralPath (Join-Path $projectRoot $tree) -Raw
-            Assert-True ($treeText -match [regex]::Escape($bounded.Pattern)) (
-                "$tree must read $($bounded.Key) with the same bounds as the other " +
-                "tree; a shared Quick Menu row steps it and cannot respect two ranges.")
+            $flat = $treeText -replace '\s+', ' '
+            $read = [regex]::Match(
+                $flat,
+                'ReadInt\( ?(?:MovedSettingSection\([^)]*\)|"' + [regex]::Escape($section) +
+                '") ?, ?"' + [regex]::Escape($key) + '" ?, ?[^,]+, ?(\d+) ?, ?(\d+)\)')
+            if (-not $read.Success) { continue }
+            Assert-True (
+                $read.Groups[1].Value -eq $low -and $read.Groups[2].Value -eq $high) (
+                "${tree}: $section.$key is read with bounds " +
+                "$($read.Groups[1].Value)-$($read.Groups[2].Value) but its Settings row " +
+                "offers $low-$high. The row would accept a value the next reload clamps away.")
         }
     }
 
