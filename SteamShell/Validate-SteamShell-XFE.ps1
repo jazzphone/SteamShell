@@ -1994,10 +1994,14 @@ Assert-True (
 
 # The row builders take the cursor BY REFERENCE and advance it. Passing it by
 # value compiles perfectly and silently stacks every row on the same line.
+# Six of these live in SteamShell-Shared.ahk now and are the shell's builders,
+# adopted whole; SectionRow and ButtonRow are still this tree's own. The rule is
+# the same for all of them, and so is the failure.
 foreach ($builder in @(
-    "SettingsAddCheckboxRow", "SettingsAddEditRow", "SettingsAddChoiceRow",
-    "SettingsAddShortcutRow", "SettingsAddPathRow", "SettingsAddNoteRow",
-    "SettingsAddSectionRow", "SettingsAddButtonRow")) {
+    "SettingsAddCheckbox", "SettingsAddTextField", "SettingsAddChoice",
+    "SettingsAddShortcutField", "SettingsAddPathField", "SettingsAddNote",
+    "SettingsAddSectionRow", "SettingsAddButtonRow",
+    "SettingsAddRowsForCategory")) {
     Assert-True (
         $source -match "(?m)^$builder\([^\r\n]*&y") (
         "Settings row builder $builder no longer takes the page cursor by reference.")

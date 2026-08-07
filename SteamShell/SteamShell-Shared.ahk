@@ -7879,9 +7879,7 @@ SettingsAddShortcutField(guiObj, category, section, key, label, &y, defaultValue
 
 ; Explanatory text under a control, not bound to any setting.
 ;
-; The companion has had SettingsAddNoteRow since it needed one; this is the same
-; row for this tree's Settings surface, which is a separate implementation.
-; Registered with the category like every other control so it shows and hides
+; Registered with its category like every other control, so it shows and hides
 ; with the page rather than surviving on top of the next one.
 SettingsAddNote(guiObj, category, text, &y, height := 34) {
     layout := SettingsLayout()
