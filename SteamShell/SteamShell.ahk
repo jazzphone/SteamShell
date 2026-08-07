@@ -7081,11 +7081,18 @@ PollController() {
     ; itself through WM_INPUT, so standing this poll down costs it nothing and
     ; stops everything else acting on the same buttons.
     ;
-    ; Not just the automatic mouse. The wizard asks for L3 and R3 by name and
-    ; L3+R3 is the Quick Menu chord, so it can throw the Quick Menu on top of
-    ; itself while asking for the buttons that do it. Mappings fire from the same
-    ; presses for the same reason. The companion has had this guard since it
-    ; wrote the wizard; the shell only just gained the wizard and never got it.
+    ; Not just the automatic mouse. SettingsEditorControllerActive() answers true
+    ; for ANY window this process owns that is active, which is deliberate and
+    ; which the learner's window satisfies -- so the poll treated the wizard as a
+    ; surface to navigate: the right stick drove the pointer across it and the
+    ; D-pad moved focus between its own buttons, while the wizard was asking for
+    ; a D-pad direction. It could not be completed.
+    ;
+    ; The chords are the same story. It asks for L3 and R3 by name and L3+R3 is
+    ; the Quick Menu chord, so it can throw the Quick Menu on top of itself while
+    ; asking for the buttons that do it. The companion has had this guard since
+    ; it wrote the wizard; the shell only just gained the wizard and not the
+    ; guard with it.
     ;
     ; Edge state is cleared rather than left, or every button held when the
     ; wizard opened fires its mapping the moment it closes.
