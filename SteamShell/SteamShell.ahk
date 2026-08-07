@@ -7017,6 +7017,7 @@ ResetControllerHoldState(
 }
 
 PollController() {
+    global LearnActive
     global EnableControllerMouseMode, ControllerIndex, ControllerDeadzone
     global ControllerNeedsFreshBaseline
     global ControllerMouseSpeed, ControllerMouseFastMultiplier
@@ -7076,6 +7077,29 @@ PollController() {
     inPoll := true
     try {
 
+    ; The learner owns the controller while its wizard is open. It reads the pad
+    ; itself through WM_INPUT, so standing this poll down costs it nothing and
+    ; stops everything else acting on the same buttons.
+    ;
+    ; Not just the automatic mouse. The wizard asks for L3 and R3 by name and
+    ; L3+R3 is the Quick Menu chord, so it can throw the Quick Menu on top of
+    ; itself while asking for the buttons that do it. Mappings fire from the same
+    ; presses for the same reason. The companion has had this guard since it
+    ; wrote the wizard; the shell only just gained the wizard and never got it.
+    ;
+    ; Edge state is cleared rather than left, or every button held when the
+    ; wizard opened fires its mapping the moment it closes.
+    if LearnActive {
+        prevButtons := 0
+        prevViewDown := false
+        quickChordSince := 0
+        quickChordFired := false
+        settingsChordSince := 0
+        settingsChordFired := false
+        ResetControllerHoldState(
+            &prevViewDown, downTick, longFired, prevTrigDown, btnDefs)
+        return
+    }
     settingsControllerActive := SettingsEditorControllerActive()
     settingsPrimaryActive := SettingsEditorPrimaryActive()
     isControllerTestActive := ControllerTestActive()

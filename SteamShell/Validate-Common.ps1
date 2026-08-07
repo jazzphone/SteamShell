@@ -1175,6 +1175,26 @@ function Assert-SharedParity {
         }
     }
 
+    # The controller poll stands down entirely while the learner is open.
+    #
+    # The wizard reads the pad through WM_INPUT, so it loses nothing -- and every
+    # button it asks for has a meaning to the poll. It asks for L3 and R3 by
+    # name, and L3+R3 is the Quick Menu chord, so without this the wizard throws
+    # the Quick Menu on top of itself while asking for the buttons that do it.
+    #
+    # Edge state must be cleared on the way out, or every button held when the
+    # wizard opened fires its mapping the moment it closes.
+    foreach ($tree in @("SteamShell.ahk", "SteamShell-XFE.ahk")) {
+        $treeText = Get-Content -LiteralPath (Join-Path $projectRoot $tree) -Raw
+        Assert-True (
+            $treeText -match
+                '(?ms)^PollController\(\)\s*\{[\s\S]*?if LearnActive \{' +
+                '(?:(?!\n    \})[\s\S])*?Reset\w*State\(' +
+                '(?:(?!\n    \})[\s\S])*?return') (
+            "${tree}: the controller poll must stand down while the learner is " +
+            "open, and clear its edge state on the way out.")
+    }
+
     # A learning session stands the automatic mouse down, in both products.
     #
     # The wizard asks for one button at a time and reads the controller itself.
