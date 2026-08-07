@@ -1248,11 +1248,11 @@ function Assert-SharedParity {
         "OpenOSK", "OpenTouchKeyboard",
         "ProductApplyQuickMenuSetting", "ProductControllerBindingAction",
         "ProductControllerLearnConsumesReport", "ProductSetDialogActive",
-        ; Only SettingsRegisterBuiltField is CALLED from the shared file. The
-        ; browse, record and mark-dirty seams are passed as callbacks, and the
-        ; reachability check covers those by requiring a bare reference to
-        ; resolve in both trees -- which is the check that caught the shell's
-        ; own browse handler being wired into a companion that does not define it.
+        # Only SettingsRegisterBuiltField is CALLED from the shared file. The
+        # browse, record and mark-dirty seams are passed as callbacks, and the
+        # reachability check covers those by requiring a bare reference to
+        # resolve in both trees -- which is the check that caught the shell's
+        # own browse handler being wired into a companion that does not define it.
         "SettingsProductAddSectionRow", "SettingsProductWireDependency",
         "SettingsRegisterBuiltField",
         "RevealWindow",

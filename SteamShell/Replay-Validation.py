@@ -872,6 +872,19 @@ def check_powershell_scope_colons():
                      "rejects at PARSE time, taking the whole validator with "
                      f"it. Write \"${{{match.group(1)}}}:\" instead.")
 
+            # A line starting with ";" is an AutoHotkey comment. PowerShell has
+            # no such thing -- ";" is a statement separator -- so this file
+            # silently stops being what its author meant, usually inside an
+            # array literal where it takes the rest of the file with it.
+            #
+            # Easy to write because four of the five files here ARE AutoHotkey,
+            # and the comment style is the only thing that differs at a glance.
+            if line.lstrip().startswith(";"):
+                fail(f"{name}:{number} begins with \";\", which is an "
+                     "AutoHotkey comment. PowerShell reads it as a statement "
+                     "separator and the parse fails from here to the end of "
+                     "the file. Use \"#\".")
+
             # Assert-True declares [bool]$Condition, and PowerShell's parameter
             # binder will not coerce a String to Boolean -- it accepts only
             # booleans and numbers. So `Assert-True ($body)` where $body holds
