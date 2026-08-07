@@ -6056,7 +6056,12 @@ SettingsRegisterBuiltField(category, field) {
     global SettingsFields
     SettingsFields[field["section"] "." field["key"]] := field["ctrl"]
     for _, ctrl in field["controls"]
-        SettingsTrackControl(category, ctrl)
+        SettingsProductTrackControl(category, ctrl)
+}
+
+; Per-tree seam: a control belongs to a category, and shows and hides with it.
+SettingsProductTrackControl(category, ctrl) {
+    SettingsTrackControl(category, ctrl)
 }
 
 SettingsProductMarkDirty(*) {

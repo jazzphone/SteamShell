@@ -1175,6 +1175,43 @@ function Assert-SharedParity {
         }
     }
 
+    # Every field handed to SettingsRegisterBuiltField must list its controls.
+    #
+    # The seam iterates field["controls"] to bind each control to its category.
+    # A field Map without that key does not degrade -- AutoHotkey throws "Item
+    # has no value" and the Settings window fails to open. That is exactly what
+    # happened when the shell's builders moved to the shared file and the path
+    # field's Map, which never had a "controls" entry because the old code
+    # registered its three controls one at a time, was left to be iterated.
+    #
+    # And a control that is never tracked never hides, so it survives the page
+    # it was drawn on and lands on top of the next one. The note row lost its
+    # tracking the same way and failed silently rather than loudly.
+    $sharedBuilders = [regex]::Matches(
+        $sharedText,
+        '(?ms)^(SettingsAdd\w+)\((?:(?!\n\})[\s\S])*?\n\}')
+    Assert-True ($sharedBuilders.Count -ge 6) (
+        "The shared Settings row builders could not be read, so a field that " +
+        "registers no controls would go unnoticed.")
+    foreach ($builder in $sharedBuilders) {
+        $body = $builder.Groups[0].Value
+        $name = $builder.Groups[1].Value
+        if ($body -notmatch 'SettingsRegisterBuiltField\(') {
+            # Not a field row. It still draws something, so it must hand that
+            # something to the category tracker.
+            if ($body -match 'guiObj\.Add') {
+                Assert-True ($body -match 'SettingsProductTrackControl\(') (
+                    "Settings builder ${name} draws a control and never tracks " +
+                    "it against its category; it would survive its own page.")
+            }
+            continue
+        }
+        Assert-True ($body -match '"controls", \[') (
+            "Settings builder ${name} registers a field with no ""controls"" " +
+            "entry. SettingsRegisterBuiltField iterates it, so the Settings " +
+            "window throws on openrather than degrading.")
+    }
+
     # A shared Quick Menu row steps these, so both trees must accept the same
     # range. A bound only one tree has makes the row lie: it shows the value it
     # just wrote while the other tree's reader clamps it away on the next reload,
@@ -1253,7 +1290,8 @@ function Assert-SharedParity {
         # reachability check covers those by requiring a bare reference to
         # resolve in both trees -- which is the check that caught the shell's
         # own browse handler being wired into a companion that does not define it.
-        "SettingsProductAddSectionRow", "SettingsProductWireDependency",
+        "SettingsProductAddSectionRow", "SettingsProductTrackControl",
+        "SettingsProductWireDependency",
         "SettingsRegisterBuiltField",
         "RevealWindow",
         "ProductSettingBool",

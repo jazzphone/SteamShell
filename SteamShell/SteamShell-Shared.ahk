@@ -7851,7 +7851,8 @@ SettingsAddPathField(guiObj, category, section, key, label, &y, prompt, filter, 
     browseButton := guiObj.AddButton("x" layout["pathButtonX"] " y" (y - 1) " w92 h27", "Browse…")
     field := Map(
         "category", category, "section", section, "key", key,
-        "label", label, "type", "path", "default", defaultValue, "ctrl", ctrl)
+        "label", label, "type", "path", "default", defaultValue, "ctrl", ctrl,
+        "controls", [labelCtrl, ctrl, browseButton])
     ctrl.OnEvent("Change", SettingsProductMarkDirty)
     browseButton.OnEvent("Click", SettingsProductBrowsePath.Bind(field, prompt, filter))
     SettingsRegisterBuiltField(category, field)
@@ -7883,7 +7884,12 @@ SettingsAddShortcutField(guiObj, category, section, key, label, &y, defaultValue
 ; with the page rather than surviving on top of the next one.
 SettingsAddNote(guiObj, category, text, &y, height := 34) {
     layout := SettingsLayout()
-    ctrl := guiObj.AddText("x" layout["contentX"] " y" y " w690 h" height " +Wrap", text)
+    ctrl := guiObj.AddText("x" layout["contentX"] " y" y
+        . " w" layout["contentWidth"] " h" height " +Wrap", text)
+    ; Tracked, though it is not a field. A control that belongs to no category
+    ; never hides, so it survives the page it was drawn on and sits on top of
+    ; the next one.
+    SettingsProductTrackControl(category, ctrl)
     y += height + 6
     return ctrl
 }

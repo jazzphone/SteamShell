@@ -10176,7 +10176,12 @@ SettingsRegisterBuiltField(category, field) {
     global SettingsEditorFields
     SettingsEditorFields.Push(field)
     for _, ctrl in field["controls"]
-        SettingsEditorRegisterControl(category, ctrl)
+        SettingsProductTrackControl(category, ctrl)
+}
+
+; Per-tree seam: a control belongs to a category, and shows and hides with it.
+SettingsProductTrackControl(category, ctrl) {
+    SettingsEditorRegisterControl(category, ctrl)
 }
 
 ; Per-tree seam: what this product calls "the settings changed".
