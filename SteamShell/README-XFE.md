@@ -34,7 +34,7 @@ original validated process identities. Existing `[StartupSplash]` settings are
 backed up and retired automatically.
 
 0.1.18 came out of the August 2026 cross-tree audit at settings schema 5. It
-It adds log rotation (`[Companion] LogRotateMaxKB` / `LogRotateBackups`), moves
+It adds log rotation (`[Logging] LogRotateMaxKB` / `LogRotateBackups`), moves
 per-button-edge controller logging behind the existing `DiagnosticLogging`
 flag, restores left-stick Quick Menu navigation, and discovers a stock RTSS
 install when `[RTSS] Path` is unset. Missing keys are added to an existing INI

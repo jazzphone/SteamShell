@@ -84,15 +84,18 @@ two-folder layout they were locked with.
   nothing else, and a second reason to port has since appeared: a controller in
   DirectInput mode — measured on an 8BitDo Ultimate 2 — **is not an XInput device
   at all**, so standalone does not see a degraded controller, it sees nothing.
-  XFE reads it today through RawInput plus a learned profile. Porting RawInput,
-  the profile store, and the Learn Controller wizard is therefore an open
-  decision rather than a closed one.
 
-  If it is taken, standalone's `LT+RT+LB+RB+L3+R3` Settings chord **must** be
-  ported to XFE's `LB+RB+L3+R3` at the same time. Non-XInput backends commonly
-  report both triggers on one shared axis where they cancel out, which would make
-  that chord physically unreachable — on the one controller the port exists for,
-  and it is the only keyboardless route to Full Settings.
+  **Taken, August 2026.** RawInput, the profile store and the Learn Controller
+  wizard are in `SteamShell-Shared.ahk` and both products use them. See *RawInput
+  and the Learner, ported* below.
+
+  The Settings chord condition attached to this port was **missed when the port
+  was made and fixed afterwards**, which is the argument for writing conditions
+  down: standalone required `LT+RT+LB+RB+L3+R3`, and non-XInput backends report
+  both triggers on one shared axis where they cancel out, so that chord is
+  physically unreachable on the very controller the port exists for — and it is
+  the only keyboardless route to Full Settings. Standalone now uses XFE's
+  `LB+RB+L3+R3`, triggers ignored rather than forbidden.
 - XFE Game Focus Lite, Steam Assist Lite, and Launcher Cleanup Lite. Standalone
   already has the coordinated Window Engine and full Launcher Cleanup.
 - XFE task-switcher activation rules and Steam-return workarounds. Standalone
@@ -182,7 +185,8 @@ see the correction below.) These were not, and have been corrected in both trees
   configuration does not reproduce it.
 - **Log rotation.** Standalone had it; XFE had none at all, while logging one
   line per controller button edge unconditionally. XFE now has the same rotation
-  (`[Companion] LogRotateMaxKB`/`LogRotateBackups`, schema 5) and the per-edge
+  (`[Companion] LogRotateMaxKB`/`LogRotateBackups`, schema 5 — moved to
+  `[Logging]` in schema 18, see below) and the per-edge
   line moved behind the `DiagnosticLogging` flag that already gated the
   timer-driven diagnostic tick. Standalone's rotation no longer measures the
   file on every line.
@@ -637,13 +641,25 @@ a mismatch; giving the companion a `[SteamShell]` section would be the error.
 The figures above are the record of individual audits and are left as they were
 written. These are the numbers now:
 
-| | |
-|---|---|
-| Defined once in `SteamShell-Common.ahk` (all three programs) | **90** |
-| Defined once in `SteamShell-Shared.ahk` (both trees) | **103** |
-| Same-named functions still defined in both trees | **69** |
-| ...of those, below 0.70 raw similarity | **35** |
-| ...of those, still 0.90+ once naming and formatting are ignored | **0** |
+| | Aug 2026 (first pass) | now |
+|---|---|---|
+| Defined once in `SteamShell-Common.ahk` (all three programs) | 90 | **106** |
+| Defined once in `SteamShell-Shared.ahk` (both trees) | 103 | **237** |
+| Same-named functions still defined in both trees | 69 | **61** |
+| ...of those, declared divergent with a reason | — | **20** |
+| ...of those, still 0.90+ once naming and formatting are ignored | 0 | **2** |
+
+Both remaining 0.90+ pairs are seams declared in `DIVERGENT_FUNCTIONS.txt`:
+`ProductIdentity`, where each product names itself, and
+`ProductControllerLearnConsumesReport`, where the shared RawInput handler asks
+each tree whether its learner wants a report. Neither is drift; both are the
+mechanism working.
+
+**This table went stale exactly the way the ones above it did**, and it said it
+could not. The figures were written at the end of one consolidation pass and
+were wrong within a month — Shared more than doubled. `Report-StructuralDrift`
+does hold the last row honest on every build, which is why that row is the only
+one that was still right. A number in prose is a number nobody recomputes.
 
 The last row is the one that matters, and the reason it is zero: every function
 that was the same code wearing different names or indentation is now defined
@@ -695,12 +711,102 @@ Two things XFE has and standalone does not, where the intent applies to both.
 Recorded here because they are *ports*, not consolidation, and should not be
 mistaken for drift:
 
-- **RawInput controller backend.** Standalone reads XInput only. A controller in
-  DirectInput mode is not an XInput device, which is the reason XFE exists — and
-  the shell has the same blind spot for the same users.
+- ~~**RawInput controller backend.**~~ Ported August 2026. Both products read
+  the backend from `SteamShell-Shared.ahk`; standalone gained `[Controller]
+  Backend`, the RawInput probe, and Learn Controller in its own Settings.
 - **Steam View button tap/hold.** Standalone already has `MenuShortcut` and
   `OverlayShortcut`, so the intent is fully present; only the tap/hold
   resolution and its two hold thresholds are missing.
+
+
+
+### Log rotation named once
+
+Both products rotate the same way and named it differently: `[Companion]
+LogRotateMaxKB` in the companion, `[Logging] GameLogRotateMaxKB` in the shell.
+Rotation was never game-specific — the same two values size and count the
+backups of the shell's log, the companion's log, and the elevated HELPER's log,
+and only one of those is a game log.
+
+The cost was not cosmetic. The helper serves both products and branched on
+`--product=` to read one setting under two spellings, and that branch is only as
+correct as the strings it hard-codes: read the wrong product's key and it falls
+back to a default rather than what the user configured, which shows as a log
+growing without bound rather than as anything failing.
+
+Both now use `[Logging] LogRotateMaxKB` and `LogRotateBackups`. The helper reads
+them once. Schema 22 in the shell and 18 in the companion carry existing values
+across.
+
+### RawInput and the Learner, ported
+
+Taken August 2026, and the reasoning that had it listed as "still divergent by
+feature" was wrong in an instructive way.
+
+It was recorded as XFE-only because of why XFE BUILT it: XInput and GameInput
+both read all zeros inside Xbox FSE. That is why it exists, and it is not what
+it does. The registration passes `RIDEV_INPUTSINK`, so reports arrive whether or
+not the program owns the foreground, and it registers both the gamepad and
+joystick usages because controllers vary in which they report. That is general
+HID gamepad support, and it answers a question the shell has more sharply than
+the companion does: a controller XInput cannot see left the SHELL with no input
+at all, on a machine with no taskbar and no Start menu to fall back to.
+
+Twenty functions and about 700 lines of backend, then thirty-nine and about
+1,200 of wizard, moved to `SteamShell-Shared.ahk` rather than being copied. The
+wizard moved whole, GUI included: it is a self-contained dialog rather than a
+page of either Settings window, so nothing about it belonged to one tree.
+
+Backend SELECTION stays per-product, because the shell has no GameInput. Its
+`ControllerReadState` tries RawInput and falls through — `RawInputReadState`
+answers false whenever no report has arrived inside `RawInputStaleMs` — so a
+machine whose pad XInput already handles never takes the new path.
+
+Three things had to follow it and did not, all found later:
+
+- The Settings chord, above. Written down as a condition, missed anyway.
+- The controller poll must stand down while the wizard is open. XFE has had that
+  guard since it wrote the wizard, with a comment listing what happens without
+  it: A opens the touch keyboard, Y opens Game Bar, L3+R3 throws the Quick Menu
+  on top. The shell gained the wizard and not the guard, and the wizard was
+  unfinishable — the D-pad moved focus between its own buttons while it asked
+  for a D-pad direction, because `SettingsEditorControllerActive()` answers true
+  for any window this process owns.
+- The RawInput arrival counter logged every two seconds regardless of the probe
+  setting. Survivable in a companion that registers only inside Xbox FSE;
+  not survivable in a shell that runs all the time and now registers by default.
+
+### The Settings windows, unified
+
+The two Settings surfaces were separate implementations of the same screen, and
+`ProductSettingsScrollBar` recorded that as "revisit when Phase 4c unifies
+settings". This is that.
+
+| | where it lives now |
+|---|---|
+| What every page contains | `SettingsCategoryRows` in Shared — all ten categories, each row tagged `both`, `standalone` or `xfe` |
+| Where every control sits | `SettingsLayout` in Shared — one set of columns, the shell's |
+| The row builders | Shared — the shell's, moved intact, with the window passed in |
+| Walking a category | one adapter, taking the product |
+| Filling the window | from the row specs, both products |
+| Writing it back | from the same specs |
+
+Six seams remain, each answering something only a product knows: where a field
+is recorded, what "changed" means, what Browse and Record do, whether a switch
+greys other rows, whether the product has section headings, and whether a
+learner wants a report.
+
+One row is hand-placed and cannot move: the shell's foreground-sensitivity
+choice, keyed `GameMinScoreToActivate`. The companion compiles Shared and
+forbids that name — it is a shell responsibility, and a name in a string still
+counts. The boundary stayed as written rather than being widened to admit it.
+
+What the unification found, which is the argument for doing it: two choice lists
+in opposite orders where only one product read the index, so merging them would
+have silently inverted overlay and frame-limiter control mode; five numeric rows
+whose stated range disagreed with what the code accepted, one of them a range no
+tree allowed at all; and a controller-index row that became a dropdown while its
+save still read `.Value`, writing 1-4 into a setting that means 0-3.
 
 ### Merging the runtimes entirely — recommended against
 

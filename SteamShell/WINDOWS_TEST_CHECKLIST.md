@@ -186,7 +186,8 @@ uncompiled script on the HTPC before replacing the current shell executable.
   Administrators owner.
 - Confirm `SteamShell-Helper.log` is written beside `SteamShell-Helper.exe` and
   not in the writable data folder, and that it rotates at
-  `[Logging] GameLogRotateMaxKB` into the configured number of backups.
+  `[Logging] LogRotateMaxKB` into the configured number of backups. (Renamed in
+  schema 22; the GameLog-prefixed value is carried across on upgrade.)
 - Open Quick Menu over Steam and use the controller. Confirm Steam does not react
   in the background. Repeat in Explorer and normal-integrity Settings.
 - Put elevated Task Manager in front. Confirm the main log records no duplicate
@@ -1584,3 +1585,62 @@ inside Setup Assistant are all new.
 - Confirm the Quick Menu title still reads "SteamShell  ›  <page>".
 - Hold the d-pad on Volume, Custom FPS and Controller Mouse Speed; each must
   repeat.
+
+## Settings is drawn by shared code now
+
+Both products' Settings windows are built from one table, one set of columns and
+one set of row builders. Nothing below is a new feature; it is the same window
+built by code it was not built by before, so the failures to look for are
+visual and per-row.
+
+- Open every category in both products. Every row must have its label on the
+  left, its control at the same x on every page, and nothing clipped at the
+  right edge or overlapping the row below.
+- Confirm the status line does not say a layout warning was recorded. If it
+  does, the log names the control and the page.
+- Path rows (Steam executable, RTSS executable) must show their **Browse**
+  button, and it must open a file dialog. This is the row whose controls were
+  registered by hand before the move and crashed the window when they were not.
+- Shortcut rows must show **Record**, and recording must write the chord into
+  the field.
+- Note rows must wrap fully — no clipped last line — and must disappear when you
+  change category rather than staying on top of the next page.
+- Change a value on every KIND of row (checkbox, dropdown, number, shortcut,
+  path), Save & Apply, close, reopen. Every one must come back as set. Dropdowns
+  are the ones to watch: they are saved by their text now, not their position.
+- In the companion, check the Startup Programs list and the Advanced page's
+  logon-task status line specifically; both were still positioned for the old
+  narrower window.
+- On the shell's Focus & Windows and Launcher Cleanup pages, toggle the switches
+  that gate other rows — game assistance, window management, require-no-game,
+  CPU/audio, download guard. The rows they gate must grey out immediately, not
+  after reopening the window.
+
+## Controller: backend, learner, and the chords
+
+Standalone gained the RawInput backend and the Learn Controller wizard. The
+first test matters most: a controller that already worked must be unaffected.
+
+- With an XInput controller and `[Controller] Backend=Auto`, confirm nothing
+  changed — mouse mode, mappings, chords, Quick Menu all as before. RawInput
+  stays silent and XInput answers, which is the whole safety argument.
+- Health Check must name which backend answered rather than reporting no
+  controller when one is working over RawInput.
+- With a non-XInput controller: set `RawInputProbe=true` and confirm the log
+  reports WM_INPUT arriving. If the report length is not 16 bytes the log says
+  so and points at Learn Controller.
+- Run Learn Controller to completion and Save. Confirm the profile file appears
+  beside the settings file, and that the pad then works without the wizard open.
+- **While the wizard is open, the controller must do nothing else.** No pointer
+  movement, no D-pad moving focus between the wizard's own buttons, no Quick
+  Menu when it asks for L3 and R3. This made the wizard unfinishable.
+- After closing the wizard, confirm a button that was held during it does not
+  fire its mapping.
+- **Settings chord is now LB + RB + L3 + R3, held** — no triggers. Confirm it
+  opens Full Settings, and that holding the old six-button combination still
+  works. The triggers were removed because a shared trigger axis makes them
+  cancel out, which put Full Settings out of reach on exactly the controllers
+  the backend was added for.
+- With the probe off, confirm the log is NOT filling with "RawInput probe: N
+  WM_INPUT message(s)". That line is every two seconds when it is on.
+

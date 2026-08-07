@@ -7169,7 +7169,7 @@ PollController() {
     if (Abs(ry) < ControllerDeadzone)
     ry := 0
 
-    ; Controller chord: LT+RT+LB+RB+L3+R3 opens Full Settings (works even without
+    ; Controller chord: LB+RB+L3+R3 opens Full Settings (works even without
     ; holding View/Back). This is the emergency route on a handheld with no
     ; keyboard, so it stays reachable from anywhere the poll still runs.
     ;
@@ -7189,8 +7189,24 @@ PollController() {
     ; The triggers are readable here because standalone reads XInput directly. If
     ; a DirectInput or winmm backend is ever added they share one axis and cancel
     ; out; XFE's chord already drops them for exactly that reason.
-    settingsComboNow := ((lt > 30) && (rt > 30)
-        && (buttons & 0x0100) && (buttons & 0x0200)
+    ; Settings chord: LB + RB + L3 + R3, held. The triggers are deliberately NOT
+    ; part of this test.
+    ;
+    ; This required LT and RT as well, which is unreachable on the controllers
+    ; the RawInput backend exists for: they report both triggers on ONE combined
+    ; axis, where pressing both cancels out, so "LT and RT are both down" can
+    ; never be true. It is the only keyboardless route to Full Settings, so on
+    ; the very controller the port was made for, Full Settings became
+    ; unreachable.
+    ;
+    ; XFE_PARITY_NOTES.md said so before the port was made -- "if it is taken,
+    ; standalone's chord MUST be ported to XFE's at the same time" -- and the
+    ; port was made without it. This is that.
+    ;
+    ; Pressing the old six-button combination still satisfies this one: the
+    ; triggers are ignored rather than forbidden. The hold requirement is what
+    ; keeps the looser chord from firing during play.
+    settingsComboNow := ((buttons & 0x0100) && (buttons & 0x0200)
         && (buttons & 0x0040) && (buttons & 0x0080))
     if (settingsComboNow
         && !QuickMenuVisible

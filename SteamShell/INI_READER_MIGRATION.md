@@ -1,7 +1,10 @@
 # Proposed: typed INI readers for standalone SteamShell
 
 **Status: DONE.** Left in place as the record of why, and of the two things it
-got wrong about its own scope.
+got wrong about its own scope. Kept rather than retired because it explains a
+design that is still load-bearing — the typed readers now serve both trees and
+the elevated helper — and because the one deliberate exception it names is
+enforced by an assertion that would otherwise have no explanation attached.
 
 - **89 sites migrated**, not the 47 it estimated: 42 int, 8 float, 39 bool. The
   bool sites were never counted here.
@@ -20,7 +23,8 @@ got wrong about its own scope.
   computed expression rather than a literal. A typed reader takes one default
   and cannot say "read that other key first". The validator now names this exact
   exception, so a second one cannot appear quietly.
-- The 55 bare `IniReadS` sites are untouched. They state one default and read a
+- The bare `IniReadS` sites are untouched (55 then, 52 now — three were removed
+  by later work rather than migrated). They state one default and read a
   string, so they never had the defect; migrating them means choosing bounds per
   setting, which is judgement rather than correctness.
 

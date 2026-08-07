@@ -59,7 +59,7 @@ in a temporary copy and replace the live INI only after every change succeeds.
 - Hold View/Back and hold Start : Open File Explorer
 - The mapped Task Manager action uses Windows' native Ctrl+Shift+Esc shortcut. If Windows elevates Task Manager,
   the separate elevated helper supplies safe controller mouse actions while the main shell stays normal.
-- LT + RT + LB + RB + L3 + R3, **held** : Emergency/fallback Full Settings chord. The hold matches the Quick Menu's
+- LB + RB + L3 + R3, **held** : Emergency/fallback Full Settings chord. The hold matches the Quick Menu's
   L3 + R3 chord so a stray grip during play cannot throw Full Settings over a running game. It is declined while the
   Quick Menu, Full Settings, the controller test, or the Steam recovery screen already has controller input — each of
   those offers its own route to Settings.
@@ -630,6 +630,32 @@ The Focus and Launcher Cleanup categories use executable-list editors rather tha
 Launcher Cleanup includes its background-helper list and a read-only preview of currently running cleanup targets.
 Controller & Cursor includes a live controller test; inputs are captured instead of forwarded through mappings,
 and a three-second centered-stick sample can calculate and apply a conservative deadzone.
+
+It also chooses the **input backend**, and this is what makes a non-XInput
+controller usable at all. `[Controller] Backend` is `Auto` by default: RawInput
+is read whenever HID reports are arriving and XInput otherwise, so a controller
+XInput already handles is unaffected and keeps using XInput. A controller XInput
+cannot see — a pad in DirectInput mode is not an XInput device — previously left
+SteamShell with no input whatsoever, on a machine where SteamShell has replaced
+the shell and there is no taskbar to fall back to.
+
+RawInput reaches any HID gamepad, but the built-in layout only decodes 16-byte
+reports. **Learn Controller** teaches it any other pad: it captures a neutral
+baseline, filters bits that jitter at rest, and prompts for each button, D-pad
+direction, stick axis and trigger. Profiles are stored beside the settings file
+as `<settings>-Controllers.ini`, keyed by VID/PID, and are validated against the
+saved report length before use. The wizard is reachable from Settings and from
+the notification-area menu — deliberately both, because the user who needs it is
+the one whose controller does not work yet.
+
+While the wizard is open the controller poll stands down entirely. It reads the
+pad itself, and every button it asks for otherwise means something: L3+R3 is the
+Quick Menu chord, and the D-pad would move focus between the wizard's own
+buttons while it is asking for a D-pad direction.
+
+`[Controller] RawInputProbe` logs raw HID reports for diagnosis, and
+`DiagnosticLogging` logs every XInput slot on change. Both are off by default and
+neither writes to the log when off.
 
 Focus & Windows exposes the user-facing Steam refocus, game assistance, foreground-sensitivity preset,
 AlwaysFocus, coordinated window-management toggle, maximize-width percentage, and exclusion controls. Foreground

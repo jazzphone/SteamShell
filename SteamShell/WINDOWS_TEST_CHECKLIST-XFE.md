@@ -138,8 +138,10 @@ so this section comes first.
 
 ## Additions in 0.1.18
 
-- Confirm migration to settings schema 5 adds `Companion.LogRotateMaxKB` and
-  `LogRotateBackups` without replacing existing values. Use a low threshold and
+- Confirm migration to settings schema 5 adds the rotation keys and
+  keeps existing values. Schema 18 later moved them from `[Companion]` to
+  `[Logging]`, matching the shell, so the helper reads one key whichever product
+  started it. Use a low threshold and
   verify rotation reaches multi-digit backups such as `.log.10`.
 - With `DiagnosticLogging=false`, press and release controller buttons and
   confirm per-edge input lines are absent. Enable it and confirm they appear.
@@ -1440,3 +1442,49 @@ is a cap written to the wrong program's profile and reported as saved.
 - Confirm the Quick Menu title still reads "SteamShell XFE  ›  <page>".
 - Hold the d-pad on Volume and Custom FPS; both must still repeat.
 - Scroll the Settings window with the wheel and confirm it behaves as before.
+
+## Settings is drawn by the shell's code now
+
+The companion's six row builders were deleted; it draws with the shell's, from
+the shared table, on the shell's columns in a 980-pixel window. It was 900. Every
+page moved.
+
+- Open every category. Labels at x255, controls at x575, nothing clipped at the
+  right edge, nothing overlapping.
+- The window is wider than it was. Confirm the category list, the divider beside
+  it, and the Save & Apply / Close buttons all sit correctly.
+- **Startup Programs**: the program list was still positioned for the old
+  narrower window. **Advanced**: so was the logon-task status line. Both should
+  now align with the rows above them.
+- Button rows were on their own hardcoded grid at x300 and stopped 75 pixels
+  short of the right edge. Confirm every button row starts level with the rows
+  above it: Customize Quick Menu, the startup-program buttons, and the nine
+  diagnostic buttons on Advanced.
+- Section headings on the RTSS page (Overlay, Frame Limiter) must still appear.
+  They are companion-only rows in a shared table.
+- The RTSS path row's **Browse** button and every shortcut row's **Record**
+  button must work; both are reached through a per-product seam now.
+- Change a value on every kind of row, Save & Apply, close, reopen.
+
+## Choice rows are saved by text, not by position
+
+Five dropdowns changed how they persist. A wrong mapping here writes a different
+setting than the one shown, silently.
+
+- Input backend, Startup window mode, Mouse parking edge, Overlay control mode,
+  Frame limiter control mode. Set each to a NON-default, Save & Apply, close,
+  reopen, and confirm each reads back what you chose.
+- Open the INI and confirm the values are words (`Toggle`, `Left`, `Hidden`) and
+  not numbers. A number means something read the control's index again.
+- Overlay and Frame limiter control mode are the two whose lists were in the
+  opposite order from the shell's. If either behaves as the other setting, the
+  order and the storage disagree.
+
+## Log rotation moved section
+
+- `LogRotateMaxKB` and `LogRotateBackups` are `[Logging]` now, not `[Companion]`.
+  Confirm an existing INI is migrated on first start and the values survive.
+- Confirm the companion's log still rotates, and that the elevated helper's log
+  rotates with the same settings. The helper used to branch on which product
+  started it; it now reads one key.
+

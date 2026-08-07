@@ -360,7 +360,7 @@ SteamShell uses XInput for Xbox-compatible controller input.
 - **View/Back + Start, short press:** open the Windows Start menu.
 - **View/Back + Start, long press:** open File Explorer.
 - Hold **L3 + R3** to open or close the Quick Menu.
-- Hold **LT + RT + LB + RB + L3 + R3** to open SteamShell Settings.
+- Hold **LB + RB + L3 + R3** to open SteamShell Settings. (Still works if you also hold the triggers; they are ignored rather than forbidden.)
 - Default controller deadzone: **4000**.
 
 Mappings are configurable and can target built-in actions or recorded keyboard shortcuts. Long-press actions are separated from normal presses to avoid accidental activation.
@@ -773,11 +773,13 @@ Earlier revisions of this document asserted, in order, that Xbox FSE's backgroun
 
 ## Implemented: learned RawInput controller profiles (0.1.8)
 
-The built-in fallback remains specific to the ROG Ally's 16-byte report, but it is no longer the only RawInput layout the companion can decode. **Settings → Controller & Cursor → Learn Controller** records an empirical profile for the HID gamepad the user actually operates.
+The built-in fallback remains specific to the ROG Ally's 16-byte report, but it is no longer the only RawInput layout that can be decoded. **Settings → Controller & Cursor → Learn Controller** records an empirical profile for the HID gamepad the user actually operates.
 
 The wizard captures a neutral baseline, filters bits that jitter at rest, and prompts for each button, D-pad direction, stick axis, and trigger. It supports active-high and active-low buttons, masked hats that may share a byte with buttons, four independent D-pad bits, 8-bit axes, 16-bit little- and big-endian axes, measured travel, separate triggers, and shared trigger axes. Axis width and byte order are chosen from the whole movement path rather than one endpoint, because a 16-bit low byte wraps repeatedly during travel and otherwise looks like a stronger 8-bit field.
 
-Profiles live in `SteamShell-XFE-Controllers.ini`, keyed by VID/PID plus interface and collection where available. They are validated against the saved report length before use and take precedence over the Ally fallback. Cancelling the wizard or having no profile changes nothing about existing input behavior.
+Profiles live beside the settings file as `<settings>-Controllers.ini`, keyed by VID/PID plus interface and collection where available. They are validated against the saved report length before use and take precedence over the Ally fallback. Cancelling the wizard or having no profile changes nothing about existing input behavior.
+
+**Both products, since August 2026.** The backend, the profile store and the wizard live in `SteamShell-Shared.ahk`; this section's "the companion" was true when it was written. Standalone needed it more sharply than the companion did: a controller XInput cannot see left the *shell* with no input at all, on a machine with no taskbar and no Start menu to fall back to. Standalone's Settings chord moved from `LT+RT+LB+RB+L3+R3` to `LB+RB+L3+R3` at the same time, because non-XInput backends commonly report both triggers on one shared axis where they cancel out — making the old chord unreachable on exactly the controllers the backend exists for, and it is the only keyboardless route to Full Settings.
 
 | Controller | Desktop | Inside Xbox FSE |
 |---|---|---|
@@ -1178,7 +1180,7 @@ These files are normally created beside the applicable executable and are not pr
 
 | Application | Settings | Controller profiles | Log |
 |---|---|---|---|
-| SteamShell 1.7 | `SteamShellSettings.ini` | — | `SteamShell.log` |
+| SteamShell 1.7 | `SteamShellSettings.ini` | `SteamShellSettings-Controllers.ini` | `SteamShell.log` |
 | SteamShell-XFE | `SteamShell-XFE.ini` | `SteamShell-XFE-Controllers.ini` | `SteamShell-XFE.log` |
 
 Backup, migration, diagnostic ZIP, and temporary transaction files may also be created during settings maintenance or troubleshooting.
