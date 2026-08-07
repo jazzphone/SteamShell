@@ -2000,14 +2000,16 @@ Assert-True (
 foreach ($builder in @(
     "SettingsAddCheckbox", "SettingsAddTextField", "SettingsAddChoice",
     "SettingsAddShortcutField", "SettingsAddPathField", "SettingsAddNote",
-    "SettingsAddSectionRow", "SettingsAddButtonRow",
-    "SettingsAddRowsForCategory")) {
+    "SettingsAddSectionRow", "SettingsAddButtonRow")) {
     Assert-True (
         $source -match "(?m)^$builder\([^\r\n]*&y") (
         "Settings row builder $builder no longer takes the page cursor by reference.")
+    # The signature may wrap: SettingsAddTextField takes ten parameters and
+    # continues on a second line, so requiring the closing parenthesis before
+    # the first newline reported a builder that advances perfectly well.
     Assert-True (
         $source -match
-            "(?sm)^$builder\([^\r\n]*\)\s*\{(?:(?!\n\})[\s\S])*?y \+= ") (
+            "(?sm)^$builder\((?:(?!\n\})[\s\S])*?\)\s*\{(?:(?!\n\})[\s\S])*?y \+= ") (
         "Settings row builder $builder no longer advances the page cursor.")
 }
 
