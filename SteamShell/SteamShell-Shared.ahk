@@ -7717,7 +7717,10 @@ SettingsAddRowsForCategory(guiObj, category, product, &y, tableKey := "") {
     for _, row in SettingsCategoryRows(tableKey != "" ? tableKey : category) {
         if !SettingsRowAppliesTo(row, product)
             continue
-        label := SettingsRowLabel(row, product)
+        ; A note carries "text", not "label", so asking every row for a label
+        ; before knowing its type throws on the first note. Only ask for what a
+        ; row actually has.
+        label := row.Has("label") ? SettingsRowLabel(row, product) : ""
         value := SettingsRowDefault(row, product)
         switch row["type"] {
             case "checkbox":

@@ -911,10 +911,61 @@ def _match_or_empty(pattern, text):
     return found.group() if found else ""
 
 
+
+# A Settings row must carry the keys its own type is indexed by.
+#
+# Two crashes came from this shape in one build: a field Map with no "controls"
+# for the seam to iterate, and a note row asked for a "label" it does not have.
+# Neither degrades -- AutoHotkey throws "Item has no value" and the Settings
+# window does not open -- and neither is visible by reading the table, because
+# the missing key is only named somewhere else.
+SETTINGS_ROW_KEYS = {
+    "checkbox": ("section", "key", "label"),
+    "choice": ("section", "key", "label"),
+    "edit": ("section", "key", "label"),
+    "shortcut": ("section", "key", "label"),
+    "path": ("section", "key", "label", "prompt", "filter"),
+    "note": ("text",),
+    "section": ("label",),
+}
+
+
+def check_settings_row_keys(sources):
+    shared = sources["SteamShell-Shared.ahk"]
+    start = shared.find("SettingsCategoryRows(category) {")
+    end = shared.find("return table.Has(category)", start)
+    if start < 0 or end < 0:
+        fail("SettingsCategoryRows could not be read; no Settings row would be "
+             "checked for the keys its type is indexed by.")
+        return
+    rows = re.split(r"\n            (?=Map\(\"product\")", shared[start:end])
+    checked = 0
+    for row in rows:
+        kind = re.search(r'"type", "(\w+)"', row)
+        if not kind:
+            continue
+        checked += 1
+        keys = set(re.findall(r'"(\w+)",', row))
+        named = re.search(r'"key", "([^"]+)"', row)
+        label = named.group(1) if named else kind.group(1)
+        for required in SETTINGS_ROW_KEYS.get(kind.group(1), ()):
+            if required not in keys:
+                fail(f"Settings row '{label}' is a {kind.group(1)} and carries "
+                     f"no \"{required}\". The row builder indexes it, so the "
+                     "Settings window throws rather than drawing it wrong.")
+        if kind.group(1) == "choice" and not (
+                {"choices", "choicesFrom", "xfeChoices"} & keys):
+            fail(f"Settings row '{label}' is a choice with no list of choices.")
+    if checked < 90:
+        fail(f"Only {checked} Settings rows were read from the shared table; "
+             "the scan is not seeing the table and would pass on nothing.")
+
+
 def main():
     sources = {name: read_source(name) for name in ALL_FILES}
     maps = {name: function_map(text) for name, text in sources.items()}
     check_powershell_scope_colons()
+    check_settings_row_keys(sources)
     check_quickmenu_rows(sources)
     check_schema_versions()
     check_cross_name_duplicates(sources)
