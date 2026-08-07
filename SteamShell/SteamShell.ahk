@@ -7098,7 +7098,6 @@ PollController() {
     ; wizard opened fires its mapping the moment it closes.
     if LearnActive {
         prevButtons := 0
-        prevViewDown := false
         quickChordSince := 0
         quickChordFired := false
         settingsChordSince := 0
