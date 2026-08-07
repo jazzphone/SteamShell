@@ -14301,9 +14301,12 @@ ShowSettingsEditor(*) {
     ; The rows themselves are defined once, in SteamShell-Shared.ahk, so this
     ; page and the companion's cannot describe the same settings differently.
     SettingsAddRowsForCategory(SettingsGui, category, "standalone", &y)
-    SettingsEditorAddActionButton(category, "Open Controller Mapping…", ShowControllerMappingWindow, 255, y + 5, 260)
-    SettingsEditorAddActionButton(category, "Test / Calibrate Controller…", ShowControllerTest, 525, y + 5, 260)
-    SettingsEditorAddActionButton(category, "Learn Controller…", ShowControllerLearner, 795, y + 5, 260)
+    ; Three across the content width, not two-plus-one hanging off the edge.
+    ; 255 + 690 is where the content ends, so 260-wide buttons at 255, 525 and
+    ; 795 put the third one 75 pixels past the window.
+    SettingsEditorAddActionButton(category, "Open Controller Mapping…", ShowControllerMappingWindow, 255, y + 5, 220)
+    SettingsEditorAddActionButton(category, "Test / Calibrate Controller…", ShowControllerTest, 490, y + 5, 220)
+    SettingsEditorAddActionButton(category, "Learn Controller…", ShowControllerLearner, 725, y + 5, 220)
     autoMouseY := y + 48
     SettingsEditorAddExeListField(
         category, "Controller", "AutoMouseExeList",
