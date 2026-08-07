@@ -5638,7 +5638,8 @@ ShowSettings(*) {
     y := SettingsFirstRowY()
     SettingsAddRowsForCategory(settings, category, "xfe", &y)
     StartupProgramsList := settings.AddListBox(
-        "x300 y" y " w570 h180")
+        "x" SettingsLayout()["contentX"] " y" y
+        . " w" SettingsLayout()["contentWidth"] " h180")
     SettingsTrackControl(category, StartupProgramsList)
     y += 190
     SettingsAddButtonRow(settings, category, [
@@ -5684,7 +5685,8 @@ ShowSettings(*) {
         ["Probe Screen", SettingsProbeScreen],
         ["Check Logon Task", SettingsCheckLogonTask],
         ["Re-arm Controller", RearmControllerInput]], &y)
-    LogonTaskStatusCtrl := settings.AddText("x300 y" y " w570 h20 +Wrap", "")
+    LogonTaskStatusCtrl := settings.AddText("x" SettingsLayout()["contentX"]
+        . " y" y " w" SettingsLayout()["contentWidth"] " h20 +Wrap", "")
     SettingsTrackControl(category, LogonTaskStatusCtrl)
     y += 28
     SettingsAddRowsForCategory(settings, category, "xfe", &y, "Advanced & Logging")
@@ -6129,9 +6131,19 @@ SetFieldText(key, value) {
 ; Up to three buttons on one flowing line. entries is an array of
 ; [label, callback] pairs; more than three wraps onto the next line.
 SettingsAddButtonRow(guiObj, category, entries, &y) {
-    static COLUMNS := [300, 496, 692]
-    static BUTTON_WIDTH := 178
-    static LINE_HEIGHT := 42
+    ; Columns derived from the layout, not stated. They used to be [300, 496,
+    ; 692] with 178-wide buttons, which was correct for a 900-pixel window whose
+    ; content began at 300 -- and silently wrong the moment the content moved to
+    ; 255 and widened to 690, leaving every button row indented past the rows
+    ; above it and stopping short of the right edge.
+    layout := SettingsLayout()
+    gap := 15
+    buttonWidth := (layout["contentWidth"] - gap * 2) // 3
+    COLUMNS := [layout["contentX"],
+        layout["contentX"] + buttonWidth + gap,
+        layout["contentX"] + (buttonWidth + gap) * 2]
+    BUTTON_WIDTH := buttonWidth
+    LINE_HEIGHT := 42
     index := 0
     for _, entry in entries {
         column := Mod(index, COLUMNS.Length)
