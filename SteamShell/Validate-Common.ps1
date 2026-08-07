@@ -1175,6 +1175,28 @@ function Assert-SharedParity {
         }
     }
 
+    # A learning session stands the automatic mouse down, in both products.
+    #
+    # The wizard asks for one button at a time and reads the controller itself.
+    # Anything else acting on the same pad fights it: the pointer moves under
+    # the user, or a mapping fires from the very button being taught.
+    #
+    # The guard must come FIRST, before the persistent-mode check.
+    # AutoMouseModeActive returns true unconditionally when Mouse Mode is on, so
+    # a guard placed after it is unreachable in exactly the configuration where
+    # this was reported.
+    foreach ($tree in @("SteamShell.ahk", "SteamShell-XFE.ahk")) {
+        $treeText = Get-Content -LiteralPath (Join-Path $projectRoot $tree) -Raw
+        Assert-True (
+            $treeText -match
+                '(?ms)^AutoMouseModeActive\(\)\s*\{(?:(?!\n\})[\s\S])*?' +
+                'if LearnActive\s*\r?\n\s*return false(?:(?!\n\})[\s\S])*?' +
+                'if EnablePersistentMouseMode') (
+            "${tree}: AutoMouseModeActive must stand down while the controller " +
+            "learner is open, and must test that before persistent Mouse Mode, " +
+            "which returns true unconditionally.")
+    }
+
     # Every field handed to SettingsRegisterBuiltField must list its controls.
     #
     # The seam iterates field["controls"] to bind each control to its category.

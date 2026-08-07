@@ -7726,10 +7726,21 @@ RecordShortcutChord() {
 
 AutoMouseModeActive() {
     global EnableAutoMouseMode, EnablePersistentMouseMode, AutoMouseExeSet, ScriptPid
+    global LearnActive
     static cachedResult := false
     static cachedTick := 0
     ; All kill switches are checked ahead of the cache so tray/Settings changes
     ; take effect on the next poll rather than up to 250 ms later.
+    ; A learning session owns the controller. Nothing else may act on it while
+    ; the wizard is asking for one button at a time -- the pointer moving under
+    ; the user, or a mapping firing from the very button being taught, is the
+    ; wizard fighting itself.
+    ;
+    ; FIRST, ahead of the persistent-mode check: persistent mode returns true
+    ; unconditionally, so anything after it is unreachable while Mouse Mode is
+    ; on, which is exactly when this was reported.
+    if LearnActive
+        return false
     if EnablePersistentMouseMode
         return true
     if !EnableAutoMouseMode
