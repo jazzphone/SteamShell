@@ -10037,7 +10037,9 @@ SettingsEditorAuditLayout() {
     global SettingsEditorControlPositions
     issues := []
     contentLeft := 245
-    contentRight := 945
+    ; From the layout, not restated. This was 945 written out, which happened to
+    ; be right and would silently stop being right the moment a column moved.
+    contentRight := SettingsLayout()["contentX"] + SettingsLayout()["contentWidth"]
     for _, category in SettingsEditorCategories {
         if !SettingsEditorCategoryControls.Has(category) {
             issues.Push(category ": category has no registered controls.")

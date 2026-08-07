@@ -4645,8 +4645,13 @@ RawInputProbeMessage(wParam, lParam, msg, hwnd) {
     ; Count arrivals BEFORE any filtering. Without this, a message that is
     ; received and then discarded during parsing is indistinguishable from a
     ; message that never arrived.
+    ;
+    ; COUNTED always, LOGGED only when the probe is switched on. A controller
+    ; sends these at over 100 Hz, so a line every two seconds is a line every
+    ; two seconds forever -- which is what it became once the shell started
+    ; registering for RawInput by default, burying everything else in the log.
     arrivals++
-    if (A_TickCount - lastArrivalLog >= 2000) {
+    if (EnableRawInputProbe && A_TickCount - lastArrivalLog >= 2000) {
         lastArrivalLog := A_TickCount
         LogLine("RawInput probe: " arrivals " WM_INPUT message(s) received so far.")
     }
