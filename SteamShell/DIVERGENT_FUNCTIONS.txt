@@ -79,15 +79,26 @@ ControllerBindingPretty: resolution logic is shared; the LABELS are deliberately
 
 RunViaDesktopShell: standalone carries an A_IsAdmin contingency ladder for the case where it has been started elevated; the companion has no such case and calls ShellExecute directly
 OpenTouchKeyboard: standalone reaches TabTip through LaunchInteractiveApp so that IF it has been started elevated the token is not inherited; the companion has no such path
+OpenWindowsSettings: the same contingency as the two above -- standalone opens ms-settings: through LaunchInteractiveApp so an inherited admin token is not handed to the Settings app, the companion calls RunViaDesktopShell and falls back to Run. Recorded here rather than left out because the gate scores this pair 0.00 and would never have asked: five lines against five lines, sharing no calls at all, which is what a genuine privilege divergence looks like to a call-sequence comparison. Absence from this file was not evidence it had been considered.
 
 # ------------------------------------------------------------------------------
 # PERMANENT -- helper wrappers over one shared implementation
 # ------------------------------------------------------------------------------
-# SteamShell-Helper.ahk cannot #Include SteamShell-Shared.ahk, so these four names
+# SteamShell-Helper.ahk cannot #Include SteamShell-Shared.ahk, so those names
 # necessarily exist in both. They are no longer two implementations: each is a
 # three-line wrapper binding its own global to the single definition in
 # SteamShell-Common.ahk. The name is duplicated; the behaviour cannot drift,
 # which is what the Integer()-against-Round() split proved was worth ending.
+#
+# The heading said "these four names" while ten entries sat under it, and only
+# six of those are helper wrappers at all -- ProductQuickMenuBlockedReason,
+# QuickMenuHideThenSteamMenu and MouseWatchDisabled are ordinary tree pairs that
+# happen to be small. No count is stated now, for the same reason the seam counts
+# came out of the two file headers: a number in prose is a number nothing reads,
+# and this one had been wrong long enough to be quoted.
+#
+# Entries below are therefore of two kinds -- Shared-or-Common against Helper,
+# and tree against tree. The reason on each line says which.
 
 ReadBool: three-line wrapper binding IniPath or SettingsPath to ReadIniBool in SteamShell-Common.ahk
 ReadInt: three-line wrapper binding IniPath or SettingsPath to ReadIniInt in SteamShell-Common.ahk
@@ -132,3 +143,68 @@ RecordShortcutChord: each tree wires up its own handler family, named its own wa
 ControllerReadState: what is left after the slot-discovery port, and it is one thing -- GameInput. Both trees now try RawInput first, decline to fall back when RawInput was asked for by name, and finish at the shared XInputResolveController; the shell's body is a strict subset of the companion's because the companion also tries a GameInput backend in between and records which backend answered in ActiveInputBackend. Sharing needs InitGameInput, GameInputReadState, ShutdownGameInput and SetActiveBackend in both trees, which is a new input backend in the product that runs as the shell and wants hardware behind it rather than a review. The scan itself is already shared and was the part that mattered: reading only the configured index meant a pad Steam Input moved between slots stopped answering mid-session.
 AutoMouseModeActive: the companion has no desktop mode, and that is an ARCHITECTURAL rule rather than an omission. Validate-SteamShell-XFE.ps1 asserts -notmatch 'EnableDesktopAutoMouseMode\s*:=' and -notmatch 'DesktopAutoMouseExcludeExeSet', in its own words so that reintroducing the mode 'is a decision someone has to take deliberately'. Sharing standalone's body required declaring both names in the companion, which is precisely what that rule forbids. The reason was already written down -- in the validator rather than in a comment.
 
+# ------------------------------------------------------------------------------
+# MEASURED at the 0.45 bar -- pairs the old 0.75 threshold never asked about
+# ------------------------------------------------------------------------------
+# Lowering the gate's bar from 0.75 to 0.45 surfaced a set of pairs that had been
+# defined in both trees the whole time. Nothing had ever required a reason, so
+# none of them had one. They are written up below; OpenWindowsSettings came out
+# of the same sweep and is filed under the privilege boundary above, where it
+# belongs by subject rather than by score.
+#
+# (No count is stated. The first draft of this paragraph said "these eleven" over
+# ten entries, which is the defect two file headers and a section heading in this
+# very file have already been corrected for. The list is the count.)
+#
+# Read before being written up, not scored and filed. The split is not what the
+# numbers suggested: two were drift and were FIXED rather than recorded
+# (TrayOpenQuickMenu's WinActivate, and QuickMenuHandleController's restatement of
+# QuickMenuGoBack), and the two largest are one routine each, written twice,
+# sitting comfortably under the old bar.
+#
+# The scores below are the reason each entry exists, not the reason it is allowed.
+
+ApplyRuntimeTimers: 0.47, and genuinely two programs. Both stop every timer and then start the ones their settings enable, which is the whole of the similarity; the timers themselves have almost nothing in common. The shell drives MonitorShell, WindowEngineTick, the taskbar guard, the desktop blackout and launcher cleanup, and gates all of it on DesktopMode and SafeMode -- states the companion does not have. The companion drives AssistTick, Heartbeat, ObserveForeground and the controller diagnostic tick, and gates on CompanionDisabled. Sharing the stop-then-start skeleton would mean naming every timer of both products in one body. NOTE, not drift: the companion also calls RawInputProbeStart and registers PowerBroadcastMessage here, so it re-arms RawInput on every settings reload; the shell arms it once from its auto-execute section. Both work, and the companion's is the more robust of the two if RawInput registration is ever lost at runtime.
+ExportDiagnosticBundle: 0.47. The envelope is identical -- timestamped temp directory, sanitised text files, zip to the desktop -- and the contents are per-product facts, which is what a diagnostic bundle is for. The shell reports CurrentShell out of the registry, which the companion has no business reading. MEASURED CONCERN rather than a clean divergence: the companion's bundle also carries Elevated, ScreenDPI, PrimaryDisplayScale, PrimaryDisplayHDR, screen resolution, the active input backend, the XInput slot and capability mask, and the RawInput device and registration state -- and the shell's carries none of those. That is enrichment that landed on one side. The shell is the product where an unreadable controller means a machine the user cannot drive, so it is the side that needs the input diagnostics more. The envelope should become one shared function taking a per-product facts map, which fixes the asymmetry and the duplication together.
+LoadControllerMappings: 0.62, and mostly one routine. Both seed the defaults, then read the same twenty-two Button.Short/Button.Long keys, normalise a bare value to "Send:", and fill ControllerMapDisplay from the .Display key or SendToPretty. That loop is duplicated and should be shared. What is NOT shared is the tail: the shell rewrites a legacy Start.Short/Start.Long pair from QuickMenu/ControlPanel to StartMenu/Explorer and commits it, a one-time migration for its own older settings files that the companion never shipped and must not perform. Sharing the loop and leaving the migration behind it in the shell is the merge; it was not done here because it touches the settings file on startup and wants a run on real INIs first.
+LoadSettings: 0.26, and the low score is honest for once. The shell reads 94 keys and the companion 82, with only 33 in common, and every one of them assigns a global that Common is forbidden to declare and Shared would have to declare into both trees. The shell owns WindowManagement, GameForegroundAssist, AlwaysFocus, LauncherCleanup, MousePark, Splash and Timing; the companion owns Assist, Companion, StartupPrograms, Steam and RTSS. The 33 shared keys are a real consolidation target and the shared settings spec already tags every row "both", "standalone" or "xfe", so the data to drive it exists -- but a shared reader would still need somewhere to put the values, which is the same wall ProductSettingBool documents.
+PollController: 0.61, AND THE LARGEST DUPLICATE IN THE CODEBASE. About 350 lines on each side, and the core is one routine: the same static button table, the same edge detection, the same long-press and chord timers, the same deadzone, the same mouse move and scroll. Most of the 0.39 difference is renaming -- prevButtons/previousButtons, btnDefs/buttonDefinitions, prevTrigDown/triggerDown -- which is exactly the tidying this file's header says the fingerprint was designed to see through, and it still scored low enough to hide under the old bar for the entire life of the gate. The genuine differences are bolted onto the ends: the shell has a settings chord and ControllerTestGui, the companion has CompanionDisabled, EnablePersistentMouseMode, the diagnostic trigger pair and ActiveInputBackend. Those are additions to a common loop, not two loops. This is the merge with the most value and the most risk in the project: it is the input path of a program that runs as the Windows shell, so it needs hardware behind it and not a review.
+QuickMenuEnsureContentFits: 0.65, one routine with an unported improvement and one real difference. Both measure the status control against the client area and grow the window when the content overflows. The companion returns early when it already fits; the shell falls through and re-centres the window on every call, which is a move the user can see for no reason. The companion also logs what it grew and by how much, and says when the work area clamped it -- the shell logs nothing, so on the product where the Quick Menu is the only interface a clipped row has no diagnostic at all. The real difference is where the work area comes from: the shell asks the monitor of QuickMenuPreviousHwnd, the companion its stored QuickMenuMonitorIndex, and those are different pieces of state rather than two ways of saying one thing. Adopt the early return and the log into the shell; keep the monitor lookup per tree.
+QuickMenuHandleController: 0.78, and the only one of the eleven that was already above the old bar -- it was simply never listed. Genuine: the shell owns a TASKS page with select-to-lock, tap-X-to-close and hold-X-to-force-close, so it takes a `released` mask and keeps three more statics that the companion has no page to use them on. The B-button branch was NOT genuine and is gone: it restated the MAIN-page test that shared QuickMenuGoBack already makes, and now calls it bare as the companion always did.
+ReloadSettings: 0.42. Same three opening moves -- reload the file, re-arm the timers, rebuild the Quick Menu if it is open -- and then each product resynchronises what it owns. The shell reapplies SafeMode overrides, syncs the elevated input helper, un-hides the cursor if auto-hide was switched off, and refreshes the Control Panel and the Always Focus lists. The companion clears the GameInput failure latch so the backend can be retried without a restart, syncs the elevated RTSS helper, and repopulates its Settings window. Nothing here is shared logic wearing two names. Minor drift worth noting: the same event notifies at "Success" in the shell and "Info" in the companion.
+TrayOpenQuickMenu: was 0.50 and will now score higher, because the drift it was hiding has been fixed -- the shell raised the menu with WinActivate while the companion used ForceForegroundWindow, and the shell now uses ForceForegroundWindow like every other Quick Menu path in its own tree. What remains is one line: the companion refuses while CompanionDisabled, a state the shell does not have. THE ENTRY THAT JUSTIFIES THE NEW BAR -- nine lines, a real focus bug, and 0.50.
+TrayOpenSettings: two lines each, calling ShowSettingsEditor and ShowSettings. The two Settings surfaces are separate implementations, which ProductSettingsScrollBar already records; this is that same divergence seen from the tray. It merges when they do, and not before.
+
+# ------------------------------------------------------------------------------
+# WHAT THIS FILE STILL CANNOT SEE
+# ------------------------------------------------------------------------------
+# Lowering the bar to 0.45 closed one blind spot. It does not close the other,
+# and the other is the one that produced the worse bug.
+#
+# THE GATE COMPARES FUNCTIONS. The same reasoning written INLINE in both trees is
+# not below the threshold -- it is unreachable by any check in this file, at any
+# threshold, because there is no pair to score.
+#
+# GameShapeFactsForWindow was exactly that. Both trees built the facts map for the
+# shared GameWindowShapeVerdict inline: the companion per-monitor, the shell
+# against A_Screen* only. So a fullscreen game on a second monitor was measured
+# against the first monitor's size at an origin of (1920, 0), failed the position
+# tolerance, and scored as borderless or was rejected outright -- in the product
+# that is the Windows shell. A comment in the companion recorded this as
+# deliberate, in the form of an assertion about the OTHER tree: "the shell can
+# assume the game is on A_Screen*". It cannot. It centres its own GUIs per
+# monitor and resolves a monitor index for the foreground window.
+#
+# It is one shared function now. The general rule it earned:
+#
+#   A SHARED ARBITER FED BY TWO PRIVATE ARGUMENT BUILDERS IS A DUPLICATE WITH
+#   EXTRA STEPS. Sharing the function that decides is worth little if each tree
+#   assembles what it decides on, and nothing in this file will ever notice.
+#
+# Worth auditing on the same basis, none of them yet checked: every other shared
+# function that takes a facts or weights map assembled by its caller.
+#
+# And the rule that covers both blind spots: a divergence is only intentional if
+# someone wrote down WHY. A comment in one tree asserting something about the
+# other tree is the weakest form of that -- it reads as a decision, it is checked
+# by nothing, and it ages into a false statement without anyone editing it.

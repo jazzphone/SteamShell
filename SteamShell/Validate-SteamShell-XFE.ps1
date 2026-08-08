@@ -933,10 +933,40 @@ Assert-True (
     "The RawInput device lock must be handed over when the locked device goes quiet.")
 # Resume must be detected without relying on WM_POWERBROADCAST, which is not
 # reliably delivered under modern standby -- the state a handheld sleeps into.
+#
+# This used to assert the SHAPE the detector happened to have: a Heartbeat body
+# mentioning LastHeartbeatStamp and RawInputReregister. The detector moved into
+# ControllerResumeGapCheck in SteamShell-Shared.ahk and is now driven from
+# PollController in both products, so the old pattern failed while the guarantee
+# was intact and had in fact got stronger -- it fires within about 30 seconds
+# instead of 150, and the shell gained it, having previously had no wall-clock
+# resume detection at all.
+#
+# So the assertion is rewritten against the GUARANTEE rather than the shape, and
+# it is stricter than what it replaces on the one point that actually matters:
+#
+#   WALL CLOCK, NOT A_TickCount. The tick counter does not advance through
+#   suspend, so a gap check written on ticks sees nothing and silently reports
+#   that the machine never slept. The old assertion did not test this at all --
+#   a rewrite to A_TickCount would have kept it passing and killed the feature.
+#
+# Also asserts the detector is CALLED. A resume detector that is defined and
+# never driven is the same as not having one, and #Include means a stale call
+# site fails nothing at load time.
+$resumeGap = [regex]::Match(
+    $source, '(?ms)^ControllerResumeGapCheck\([^)]*\)\s*\{.*?^}')
 Assert-True (
     $source -match 'OnMessage\(0x0218, PowerBroadcastMessage\)' -and
-    $source -match '(?s)Heartbeat\(\)\s*\{.*?LastHeartbeatStamp.*?RawInputReregister') (
-    "Resume recovery must have a heartbeat-gap fallback, not only the power broadcast.")
+    $resumeGap.Success -and
+    $resumeGap.Value -match 'A_Now' -and
+    $resumeGap.Value -match 'DateDiff' -and
+    $resumeGap.Value -match 'RawInputReregister' -and
+    $source -match
+        '(?ms)^PollController\(\)\s*\{(?:(?!\n\})[\s\S])*?ControllerResumeGapCheck\(') (
+    "Resume recovery must have a wall-clock gap fallback driven from the " +
+    "controller poll, not only the power broadcast. ControllerResumeGapCheck " +
+    "must compare A_Now via DateDiff -- A_TickCount does not advance through " +
+    "suspend -- and must re-register RawInput.")
 Assert-True ($source -match 'RearmControllerInput') (
     "A manual controller re-arm path must exist for when input is dead and the Quick Menu cannot be opened.")
 

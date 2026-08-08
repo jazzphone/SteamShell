@@ -152,6 +152,7 @@ ControllerLearnSteps
 ControllerLearnTick
 ControllerLearnUpdateUi
 ControllerLearnValidateDpad
+ControllerResumeGapCheck
 ControllerProfileAxisRaw
 ControllerProfileAxisSpan
 ControllerProfileLengthKey
@@ -165,6 +166,7 @@ CycleDisplayResolution
 CycleDisplayScale
 CycleRtssFrameCap
 DeleteControllerProfileForActiveDevice
+DeviceChangeMessage
 DisplayChangeSafetyTick
 DistinctDisplayResolutions
 ElevatedHelperLocationIsProtected
@@ -181,6 +183,7 @@ EnsureRtssRunning
 ExecuteControllerBinding
 FormatHealthReport
 FrequenciesForResolution
+GameShapeFactsForWindow
 GetActiveAudioOutputDevices
 GetDefaultQuickMenuOrder
 GetBindingValue
@@ -222,6 +225,7 @@ PersistRtssFrameCapSelection
 PersistRtssFrameCapStateNow
 PositionGuiCentered
 QueueQuickMenuDisplayReflow
+PowerBroadcastMessage
 QuickMenuAccentPresetHex
 QuickMenuActivateShared
 QuickMenuAccentPresetNames
@@ -277,6 +281,7 @@ ReadBool
 ReadInt
 ReadNumber
 ReadText
+RearmControllerInput
 ReassertTrayIcon
 RefreshQuickMenuLayoutManager
 RecordShortcutCancel
@@ -348,3 +353,5 @@ WaitForElevatedRtssRequest
 WaitForVerifiedElevatedHelper
 XInputGetState
 XInputResolveController
+
+XInputScanGate

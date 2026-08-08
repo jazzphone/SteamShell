@@ -3835,7 +3835,14 @@ TrayOpenQuickMenu(*) {
     global QuickMenuVisible, QuickMenuGui
     if QuickMenuVisible {
         try QuickMenuGui.Show()
-        try WinActivate("ahk_id " QuickMenuGui.Hwnd)
+        ; ForceForegroundWindow, like every other place this tree raises the Quick
+        ; Menu. This was the one WinActivate left, and it is the weaker primitive:
+        ; WinActivate loses to the foreground lock a fullscreen game holds, which
+        ; is the exact situation someone reaching for the tray icon is in. The
+        ; companion already used the hardened call here; the shell did not, and
+        ; nothing measured the pair because a nine-line tray handler scores far
+        ; below the fingerprint gate's threshold.
+        try ForceForegroundWindow(QuickMenuGui.Hwnd)
         return
     }
     ShowQuickMenu()
@@ -6316,10 +6323,13 @@ QuickMenuHandleController(pressed, released := 0, lx := 0, ly := 0, buttons := 0
         return
     }
     if (pressed & 0x2000) { ; B
-        if (QuickMenuPage != "MAIN")
-            QuickMenuGoBack()
-        else
-            HideQuickMenu()
+        ; QuickMenuGoBack already hides on MAIN -- that test is its first three
+        ; lines. Guarding the call with the same test restated the decision in a
+        ; second place; the two agreed, so this is a de-duplication rather than a
+        ; fix, and it leaves one copy to keep correct instead of two. The
+        ; companion has always called it bare.
+        QuickMenuGoBack()
+        return
     }
 }
 
@@ -6911,6 +6921,7 @@ PollController() {
     global MouseHidden
     global SettingsEditorDialogActive
     global ControllerTestGui
+    global ControllerPollIntervalMs
 
     static state := Buffer(16, 0)
     static prevButtons := 0
@@ -6965,6 +6976,13 @@ PollController() {
 
     if (inPoll)
     return
+    ; Before the reentrancy guard: this is a wall-clock check, not controller
+    ; work, and it must still run on the tick where a resume is first noticed.
+    ;
+    ; This is the shell's ONLY resume detection. WM_POWERBROADCAST is registered
+    ; as well, but an ROG Ally sleeps into modern standby, where it is not
+    ; reliably delivered -- which the companion established on the hardware.
+    ControllerResumeGapCheck(ControllerPollIntervalMs / 1000)
     inPoll := true
     try {
 
@@ -8271,7 +8289,13 @@ MonitorShell() {
 
     ; Deliberately unpooled: Steam-exit detection drives desktop restoration and
     ; must not observe a cached result.
-    steamRunning := ProcessExist("steam.exe") != 0
+    ;
+    ; Still unpooled. ProcessRunningByHandle caches a HANDLE, not an answer -- it
+    ; asks the kernel whether that exact process has exited, every call, and only
+    ; skips re-walking the process table to find it again. That is a stronger
+    ; signal than the name lookup it replaces, which could not tell a still-running
+    ; Steam from a Steam that exited and was relaunched under a new PID.
+    steamRunning := ProcessRunningByHandle("steam.exe")
 
     ; Startup and steady state are judged by deliberately different signals.
     ;
@@ -8637,12 +8661,22 @@ GetProcessCpuSample(pid) {
         if (previous["creation"] = creation) {
             elapsedMs := now - previous["sampleTick"]
             cpuDelta := totalCpu100ns - previous["totalCpu100ns"]
-            usage := elapsedMs > 0 && cpuDelta >= 0
+            ; A contradictory reading is not a reading.
+            ;
+            ; GameWindowCpuVerdict is careful that an unknown CPU "is not evidence
+            ; either way and never rejects". A NEGATIVE delta was not getting that
+            ; treatment: usage fell back to previous["usage"] -- 0.0 on the first
+            ; sample of a process -- while known stayed true, because elapsedMs is
+            ; always positive here, the interval check above having already passed.
+            ; With GameAllowZeroCpuAsCandidate off that is a confident report of
+            ; zero CPU, and the live game it describes is rejected CPU_ZERO_STRICT.
+            cpuUsable := elapsedMs > 0 && cpuDelta >= 0
+            usage := cpuUsable
                 ? CalculateProcessCpuPercent(cpuDelta, elapsedMs)
                 : previous["usage"]
             sample := Map(
                 "usage", usage,
-                "known", elapsedMs > 0,
+                "known", cpuUsable,
                 "creation", creation,
                 "totalCpu100ns", totalCpu100ns,
                 "sampleTick", now,
@@ -8824,6 +8858,10 @@ WindowEngineEvaluateGame(snapshot, forceRun, &allowActivate, &skipReason) {
     candidates := []
     rejects := []
     audioMap := 0
+    ; Built once per tick rather than twice per window. Every entry is read from a
+    ; global that cannot change inside this loop, and the companion already hoists
+    ; its equivalent -- this was the only side still paying for it per candidate.
+    weights := WindowEngineScoreWeights()
 
     for _, item in snapshot {
         minimizedLegacyGame := WindowEngineIsMinimizedLegacyGameSurface(item)
@@ -8848,15 +8886,14 @@ WindowEngineEvaluateGame(snapshot, forceRun, &allowActivate, &skipReason) {
         h := item["h"]
         area := item["area"]
         ; Shape verdict from SteamShell-Common.ahk, so the companion reaches the
-        ; same answer from the same numbers. CPU is still sampled only after this
-        ; passes, and audio only after CPU passes -- that laziness is why the
-        ; scorer is two calls rather than one.
+        ; same answer from the same numbers -- which now means the same ARGUMENTS
+        ; too, built by GameShapeFactsForWindow. Sharing the arbiter while each
+        ; tree assembled its own facts map is what let this side stay
+        ; primary-monitor-only long after the companion was fixed.
+        ; CPU is still sampled only after this passes, and audio only after CPU
+        ; passes -- that laziness is why the scorer is two calls rather than one.
         shapeVerdict := GameWindowShapeVerdict(
-            Map("w", w, "h", h, "x", x, "y", y,
-                "screenW", A_ScreenWidth, "screenH", A_ScreenHeight,
-                "titleLength", StrLen(title),
-                "minimizedLegacy", minimizedLegacyGame),
-            WindowEngineScoreWeights())
+            GameShapeFactsForWindow(item, minimizedLegacyGame), weights)
         nearFS := shapeVerdict["nearFS"]
         if (!shapeVerdict["accepted"]) {
             if (EnableGameScoreLogging && GameLogMode = "DIAGNOSTIC"
@@ -8875,8 +8912,7 @@ WindowEngineEvaluateGame(snapshot, forceRun, &allowActivate, &skipReason) {
         cpuSample := GetProcessCpuSample(item["pid"])
         cpu := cpuSample["usage"]
         cpuKnown := cpuSample["known"]
-        cpuVerdict := GameWindowCpuVerdict(
-            score, cpu, cpuKnown, WindowEngineScoreWeights())
+        cpuVerdict := GameWindowCpuVerdict(score, cpu, cpuKnown, weights)
         score := cpuVerdict["score"]
         if (!cpuVerdict["accepted"]) {
             if (EnableGameScoreLogging && GameLogMode = "DIAGNOSTIC"
@@ -12176,6 +12212,8 @@ ProductHealthResults() {
 
 ExportDiagnosticBundle(*) {
     global HealthCheckResults, SettingsPath, LogPath, SteamShellVersion, ShellRegKey
+    global ControllerBackend, ActiveControllerIndex
+    global RawInputProbeActive, RawInputDevice, RawInputLastReportTick
     global HealthCheckGui, SettingsEditorStatusCtrl
     stamp := FormatTime(A_Now, "yyyyMMdd-HHmmss")
     tempDir := A_Temp "\SteamShell-Diagnostics-" stamp
@@ -12190,11 +12228,41 @@ ExportDiagnosticBundle(*) {
 
         currentShell := ""
         try currentShell := RegRead(ShellRegKey, "Shell")
+        ; Display and input state, which this bundle did not carry and the
+        ; companion's always has.
+        ;
+        ; The asymmetry was backwards: this is the product that replaces the
+        ; Windows shell, so an input failure here is a machine the user cannot
+        ; drive, and the bundle collected for exactly that situation said nothing
+        ; about the input stack. It now answers the first three questions anyone
+        ; would ask after a post-resume failure -- which backend was live, which
+        ; slot answered, and whether RawInput was still registered.
+        displayScale := GetPrimaryDisplayScale()
+        displayScaleText := IsObject(displayScale)
+            ? displayScale["percent"] "%"
+            : "unavailable"
+        hdr := GetPrimaryHdrState()
+        hdrText := !IsObject(hdr)
+            ? "unavailable"
+            : (!hdr["supported"] ? "unsupported" : (hdr["enabled"] ? "on" : "off"))
+        rawInputAge := RawInputLastReportTick
+            ? (A_TickCount - RawInputLastReportTick) "ms ago"
+            : "never"
         systemInfo := "SteamShellVersion=" SteamShellVersion "`r`n"
             . "Generated=" NowStamp() "`r`n"
             . "OSVersion=" A_OSVersion "`r`n"
             . "Is64BitOS=" (A_Is64bitOS ? "true" : "false") "`r`n"
             . "Compiled=" (A_IsCompiled ? "true" : "false") "`r`n"
+            . "Elevated=" (A_IsAdmin ? "true" : "false") "`r`n"
+            . "Screen=" A_ScreenWidth "x" A_ScreenHeight "`r`n"
+            . "ScreenDPI=" A_ScreenDPI " (" Round(A_ScreenDPI / 96.0 * 100) "%)`r`n"
+            . "PrimaryDisplayScale=" displayScaleText "`r`n"
+            . "PrimaryDisplayHDR=" hdrText "`r`n"
+            . "BackendSetting=" ControllerBackend "`r`n"
+            . "XInputSlot=" ActiveControllerIndex "`r`n"
+            . "RawInputRegistered=" (RawInputProbeActive ? "true" : "false") "`r`n"
+            . "RawInputDevice=0x" Format("{:X}", RawInputDevice) "`r`n"
+            . "RawInputLastReport=" rawInputAge "`r`n"
             . "ScriptPath=" A_ScriptFullPath "`r`n"
             . "CurrentShell=" currentShell "`r`n"
         FileAppend(
@@ -14086,7 +14154,7 @@ ShowSetupAssistant(*) {
         SetupAssistantGui.AddGroupBox("xm y+14 w720 h128", "2. Applications")
         SetupAssistantGui.AddText(
             "xp+14 yp+25 w680 h24 +Wrap",
-            "Steam is required. RTSS is optional. Default Program Files locations are detected automatically.")
+            "Steam is required. RTSS is optional. Default Program Files locations are detected.")
         SetupAssistantGui.AddText("xp y+9 w55 h24", "Steam")
         SetupAssistantGui.AddEdit(
             "x+8 yp-3 w480 h27 ReadOnly vSetupSteamPath", "")
@@ -14528,6 +14596,12 @@ ShowSettingsEditor(*) {
         ["Restore Category Defaults…", SettingsEditorResetCategory],
         ["Reset All Settings…", SettingsEditorResetAll],
         ["Restart in Safe Mode", RestartSteamShellInSafeMode],
+        ; Diagnostic, not recovery, and placed accordingly: a user whose
+        ; controller has stopped answering cannot navigate here with it. What it
+        ; buys is a one-click answer to WHICH failure happened -- if input returns,
+        ; the problem was the stale device handle or the RawInput registration
+        ; rather than the backend -- while you still have a mouse to press it with.
+        ["Re-arm Controller Input", RearmControllerInput],
         ["Setup Assistant…", ShowSetupAssistant]], &actionY, 2)
 
     ; Common bottom controls
@@ -17586,6 +17660,9 @@ HasGameLikeWindow(excludeSet) {
     ignore["gameoverlayui.exe"] := true
     ignore["steamshell.exe"] := true
 
+    ; Hoisted for the same reason as the scoring loop's: nothing in the weights
+    ; map can change while this loop runs.
+    weights := WindowEngineScoreWeights()
     for _, item in WindowEngineGetFreshSnapshot() {
         minimizedLegacyGame := WindowEngineIsMinimizedLegacyGameSurface(item)
         legacySurface := WindowEngineIsLegacyApplicationSurface(item)
@@ -17601,11 +17678,8 @@ HasGameLikeWindow(excludeSet) {
         ; Only the shape matters here -- no score is computed, so no CPU or
         ; audio is sampled and the fast path stays fast.
         if GameWindowShapeVerdict(
-            Map("w", item["w"], "h", item["h"], "x", item["x"], "y", item["y"],
-                "screenW", A_ScreenWidth, "screenH", A_ScreenHeight,
-                "titleLength", StrLen(item["title"]),
-                "minimizedLegacy", minimizedLegacyGame),
-            WindowEngineScoreWeights())["accepted"]
+            GameShapeFactsForWindow(item, minimizedLegacyGame),
+            weights)["accepted"]
             return true
     }
     return false
@@ -18263,6 +18337,12 @@ Hotkey("^!+g", (*) => ForceGameAssistOnce())
 Hotkey("^!+p", (*) => ShowControlPanel())
 Hotkey("^!+q", (*) => ToggleQuickMenu())
 Hotkey("^!+s", (*) => ShowSettingsEditor())
+; Same chord the companion uses. This is the re-arm path that is actually
+; reachable when the thing that broke is the controller: the Settings button
+; needs navigating to, and on a handheld there is nothing but the pad to navigate
+; with. A keyboard is not always present either, but when one is, this is one
+; keystroke instead of a restart.
+Hotkey("^!+i", RearmControllerInput)
 RegisterQuickMenuKeys()
 
 ; Registers for WM_INPUT and starts decoding HID reports. Safe to call whichever
@@ -18270,6 +18350,27 @@ RegisterQuickMenuKeys()
 ; and when it is, RawInput still yields to XInput on its own if no reports
 ; arrive. A controller that already worked keeps working.
 RawInputProbeStart()
+
+; Sleep and resume. Registered unconditionally, like RawInputProbeStart above:
+; PowerBroadcastMessage only resets a device lock and re-registers RawInput, both
+; of which are no-ops when RawInput was never armed.
+;
+; This tree had no resume path of any kind -- the handler, the lock reset and the
+; re-registration were all written in the companion and none of them were ever
+; called here. The shell got by on RawInputClaimDevice's handover, which re-locks
+; on the first report from a re-enumerated device; that covers a stale handle and
+; does nothing at all for a registration that did not come back.
+;
+; Not sufficient on its own, and deliberately not the only trigger: an ROG Ally
+; sleeps into modern standby, where this message is not reliably delivered. The
+; wall-clock detector in PollController is the one that actually fires there.
+OnMessage(0x0218, PowerBroadcastMessage)
+
+; Device arrival and removal, so a controller plugged in while the XInput sweep
+; is backed off is picked up on the next poll rather than up to 250ms later.
+; Purely an accelerator: if the broadcast never arrives the backoff expires by
+; itself and nothing depends on this having worked.
+OnMessage(0x0219, DeviceChangeMessage)
 
 if SafeMode && !FirstRunSetupMode
     SetTimer(ShowSettingsEditor, -400)

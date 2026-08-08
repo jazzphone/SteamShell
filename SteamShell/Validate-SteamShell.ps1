@@ -3796,6 +3796,53 @@ Assert-True (
     "Automatic four-slot XInput discovery is missing, or ControllerReadState " +
     "went back to reading only the configured index.")
 
+# The four-slot sweep is RATE-LIMITED, and the fast path is not.
+#
+# XInputGetState against an empty slot goes down to the device stack rather than
+# returning a cached state, and the sweep above runs on every poll where the
+# cached slot does not answer -- which, with no controller attached, is every
+# poll. At a 16 ms interval that was roughly 250 of those calls a second.
+#
+# Both halves are asserted because either one alone is a bug. Without the gate
+# the cost comes back; without the fast path ahead of the gate, a CONNECTED
+# controller would be throttled too, which would put input latency behind a
+# backoff interval -- far worse than the cost this removes.
+Assert-True (
+    $source -match '(?ms)^XInputScanGate\([^)]*\)\s*\{.*?nextAllowedTick' -and
+    $source -match
+        '(?ms)^XInputResolveController\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?XInputGetState\(ActiveControllerIndex(?:(?!\n\})[\s\S])*?XInputScanGate\(\)') (
+    "The all-slots XInput sweep must be rate-limited by XInputScanGate, and the " +
+    "cached-slot read must happen BEFORE the gate so a connected controller is " +
+    "never throttled.")
+
+# Resume must be detected without relying on WM_POWERBROADCAST, which is not
+# reliably delivered under modern standby -- the state a handheld sleeps into.
+#
+# The same assertion the companion carries, and it is here because this tree had
+# NO resume path at all: the power handler, the device-lock reset and the
+# re-registration were written in the companion, and not one of them was ever
+# called from the shell. It got by on RawInputClaimDevice's handover, which
+# recovers a stale device handle and does nothing for a registration that did not
+# come back.
+#
+# WALL CLOCK, NOT A_TickCount, is the load-bearing detail: the tick counter does
+# not advance through suspend, so a gap check written on ticks silently reports
+# that the machine never slept.
+$resumeGap = [regex]::Match(
+    $source, '(?ms)^ControllerResumeGapCheck\([^)]*\)\s*\{.*?^}')
+Assert-True (
+    $source -match 'OnMessage\(0x0218, PowerBroadcastMessage\)' -and
+    $resumeGap.Success -and
+    $resumeGap.Value -match 'A_Now' -and
+    $resumeGap.Value -match 'DateDiff' -and
+    $resumeGap.Value -match 'RawInputReregister' -and
+    $source -match
+        '(?ms)^PollController\(\)\s*\{(?:(?!\n\})[\s\S])*?ControllerResumeGapCheck\(') (
+    "Resume recovery must have a wall-clock gap fallback driven from the " +
+    "controller poll, not only the power broadcast. ControllerResumeGapCheck " +
+    "must compare A_Now via DateDiff -- A_TickCount does not advance through " +
+    "suspend -- and must re-register RawInput.")
+
 # Cross-tree parity. Both trees and the shared file are in this folder, so there
 # is no "skipped when the sibling is absent" path any more -- that existed only
 # because a frozen release snapshot used to hold one tree. A snapshot is the

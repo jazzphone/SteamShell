@@ -1172,6 +1172,9 @@ ApplyRuntimeTimers() {
     ; Sleep/resume. OnMessage with the same callback twice is a no-op, so this is
     ; safe to re-apply on every reload alongside the timers.
     OnMessage(0x0218, PowerBroadcastMessage)
+    ; Device arrival and removal, so a controller plugged in while the XInput
+    ; sweep is backed off is picked up on the next poll. Purely an accelerator.
+    OnMessage(0x0219, DeviceChangeMessage)
     if EnableAutoHideCursor
         SetTimer(MouseWatch, 250)
     SetTimer(ObserveForeground, ForegroundPollMs)
@@ -1309,46 +1312,21 @@ ReloadSettings(*) {
 }
 
 Heartbeat() {
-    global AppVersion, HeartbeatSeconds, LastHeartbeatStamp
+    global AppVersion, LastHeartbeatStamp
     now := A_Now
-    if (LastHeartbeatStamp != "") {
-        elapsed := 0
-        try elapsed := DateDiff(now, LastHeartbeatStamp, "Seconds")
-        ; A heartbeat that arrives far later than it was scheduled for means the
-        ; machine was asleep in between.
-        ;
-        ; This is the resume detector that depends on nothing being delivered to
-        ; us. WM_POWERBROADCAST is handled as well, but it is not reliably sent
-        ; under modern standby -- which is the state a ROG Ally actually sleeps
-        ; into, so the broadcast cannot be the only trigger.
-        if (elapsed > HeartbeatSeconds * 2 + 30) {
-            LogLine("Power: heartbeat gap of " elapsed "s (expected about "
-                . HeartbeatSeconds "s). Treating this as a resume and re-arming "
-                . "controller input.")
-            RawInputResetDeviceLock("resume inferred from heartbeat gap")
-            SetTimer(RawInputReregister, -1000)
-        }
-    }
+    ; The resume detector that depends on nothing being delivered to us moved to
+    ; ControllerResumeGapCheck in SteamShell-Shared.ahk, and PollController drives
+    ; it in both products now. It used to live here, which meant the shell -- with
+    ; no heartbeat of its own -- had no wall-clock resume detection at all.
+    ;
+    ; Driving it from the controller poll rather than from here also makes it
+    ; self-gating: the check runs exactly when something is reading the pad, and
+    ; the cadence it reports is the poll interval rather than a 60-second beat, so
+    ; a resume is now noticed within seconds instead of within minutes.
     LastHeartbeatStamp := now
     LogLine("Heartbeat: XFE companion " AppVersion " is responsive.")
 }
 
-; Forces controller input to be re-acquired: RawInput forgets its device handle
-; and re-registers, and XInput re-resolves its slot on the next poll.
-;
-; Exposed manually as well as automatically because it is the fastest way to
-; confirm what a post-sleep failure actually was. If this restores input, the
-; problem is the stale device handle or the registration -- not the backend.
-RearmControllerInput(*) {
-    global ActiveControllerIndex
-    LogLine("Controller: manual re-arm requested.")
-    RawInputResetDeviceLock("manual re-arm")
-    ; -1 makes XInputResolveController rescan all four slots rather than trusting
-    ; the slot it last succeeded on.
-    ActiveControllerIndex := -1
-    RawInputReregister()
-    ShowNotification("Controller input re-armed")
-}
 
 OnCompanionExit(exitReason, exitCode) {
     ReleaseControllerMouseButtons()
@@ -1949,31 +1927,6 @@ SetActiveBackend(backend) {
     LogLine("Controller backend is now " backend ".")
 }
 
-; Sleep and resume.
-;
-; The controller is re-enumerated across a suspend and returns with a new device
-; handle, so the decoder is told to forget the one it locked onto before the
-; machine slept.
-PowerBroadcastMessage(wParam, lParam, msg, hwnd) {
-    static PBT_APMSUSPEND := 0x04
-    static PBT_APMRESUMESUSPEND := 0x07
-    static PBT_APMRESUMEAUTOMATIC := 0x12
-    if (wParam = PBT_APMSUSPEND) {
-        LogLine("Power: system suspending.")
-        RawInputResetDeviceLock("system suspending")
-        return true
-    }
-    if (wParam = PBT_APMRESUMESUSPEND || wParam = PBT_APMRESUMEAUTOMATIC) {
-        LogLine("Power: resumed from sleep; re-arming controller input.")
-        RawInputResetDeviceLock("system resumed")
-        ; XInput re-resolves its own slot on the next poll, so only RawInput needs
-        ; help here. Delayed, because the HID stack is still re-enumerating at the
-        ; moment the resume notification arrives.
-        SetTimer(RawInputReregister, -2500)
-        return true
-    }
-    return true
-}
 
 
 ; ==============================================================================
@@ -2936,33 +2889,19 @@ XfeBestGameWindow() {
             continue
         if (protectedSet.Has(item["exe"]) || launcherSet.Has(item["exe"]))
             continue
-        ; Per MONITOR, not the primary screen. The shell can assume the game is
-        ; on A_Screen*; a companion under Xbox FSE cannot, and the inventory
-        ; already carries the handle needed to ask.
-        ; An exclusive-fullscreen game that minimized itself when Steam took
-        ; focus. Its geometry is meaningless, so the shape test is bypassed
-        ; entirely -- GameWindowShapeVerdict treats minimizedLegacy as nearFS --
-        ; and the monitor lookup below would be answering about coordinates that
-        ; are off-screen by design.
+        ; Per MONITOR, not the primary screen -- and now through the shared
+        ; GameShapeFactsForWindow, because the shell needs exactly this and was
+        ; silently doing without it. The comment that used to sit here said the
+        ; shell "can assume the game is on A_Screen*"; it cannot, and asserting
+        ; that in a companion-only comment is what kept the fix on one side.
+        ;
+        ; One behaviour change comes with the move: an unreadable monitor no
+        ; longer skips the window, it falls back to the primary. Dropping the
+        ; candidate turned a failed MonitorGet into a game this scorer cannot see,
+        ; which is the worse and quieter of the two outcomes.
         minimizedLegacy := WindowEngineIsMinimizedLegacyGameSurface(item)
-        left := 0, top := 0, screenW := A_ScreenWidth, screenH := A_ScreenHeight
-        if !minimizedLegacy {
-            monitorIndex := GetMonitorIndexForWindow(item["hwnd"])
-            try MonitorGet(monitorIndex, &left, &top, &right, &bottom)
-            catch
-                continue
-            screenW := right - left
-            screenH := bottom - top
-            if (screenW <= 0 || screenH <= 0)
-                continue
-        }
         shapeVerdict := GameWindowShapeVerdict(
-            Map("w", item["w"], "h", item["h"],
-                "x", item["x"] - left, "y", item["y"] - top,
-                "screenW", screenW, "screenH", screenH,
-                "titleLength", StrLen(item["title"]),
-                "minimizedLegacy", minimizedLegacy),
-            weights)
+            GameShapeFactsForWindow(item, minimizedLegacy), weights)
         if (!shapeVerdict["accepted"])
             continue
         ; Sampled only after the shape passes, and audio only after CPU passes.
@@ -6964,6 +6903,7 @@ PollController() {
     global SettingsVisible, SettingsDialogActive, LearnActive
     global CompanionDisabled, ControllerNeedsFreshBaseline
     global EnableControllerDiagnostics
+    global ControllerPollIntervalMs
 
     static state := Buffer(16, 0)
     static previousButtons := 0
@@ -6994,6 +6934,9 @@ PollController() {
 
     if inPoll
         return
+    ; Before the reentrancy guard: this is a wall-clock check, not controller
+    ; work, and it must still run on the tick where a resume is first noticed.
+    ControllerResumeGapCheck(ControllerPollIntervalMs / 1000)
     inPoll := true
     try {
         for definition in buttonDefinitions {

@@ -1,5 +1,146 @@
 # SteamShell changelog
 
+## Unreleased — the multi-monitor scorer, resume recovery in the shell, and the gate that could not see either
+
+A review pass that started on correctness and ended up moving four functions into
+the shared file. Everything below is in **both** products unless it says otherwise.
+
+### A fullscreen game on a second monitor scored as if it were on the first
+
+`GameWindowShapeVerdict` is shared so the two products reach the same answer from
+the same numbers. The companion fed it monitor-relative geometry; the shell fed it
+raw desktop coordinates and `A_Screen*`. A game at `x=1920` therefore failed the
+position tolerance, dropped from the fullscreen score to the borderless one, and
+was rejected outright when the second monitor was the larger of the two.
+
+A comment in the companion recorded this as deliberate — *"the shell can assume
+the game is on `A_Screen*`"* — and the shell cannot: it centres its own GUIs per
+monitor and resolves a monitor index for the foreground window. The normalisation
+is now one shared function, `GameShapeFactsForWindow`, used by both trees at all
+three call sites.
+
+**A shared arbiter fed by two private argument builders is a duplicate with extra
+steps**, and no check in this project could see it, because it was never a
+function pair.
+
+### Batched controller reports were being thrown away
+
+`WM_INPUT` can carry several reports in one message. The handler read the count,
+used it to size the hex log, and decoded only the first — under a comment saying
+"decode EVERY report ... dropping reports here would drop input." On a change-only
+device such as the Ally's pad, a coalesced press is not a late press, it is a
+press that never arrives. The learner read the same stream and lost presses the
+same way. All reports in a batch are now decoded, bounded by the delivered buffer
+size rather than by the header's claim.
+
+### The shell had no resume recovery at all
+
+The power handler, the device-lock reset and the RawInput re-registration were
+written in the companion, and **not one of them was ever called from the shell**.
+It survived on `RawInputClaimDevice`'s hand-over, which recovers a stale device
+handle and does nothing for a registration that did not come back.
+
+- `PowerBroadcastMessage` moved to `SteamShell-Shared.ahk`; both trees register it.
+- The heartbeat-gap detector moved out of the companion's `Heartbeat` into shared
+  `ControllerResumeGapCheck`, driven from `PollController` in both products. The
+  companion got faster as a side effect: a 60-second heartbeat with a
+  `HeartbeatSeconds * 2 + 30` threshold meant a resume took up to 150 seconds to
+  notice, and it is now about 30.
+- `RearmControllerInput` moved to Shared. The shell gains it on
+  `Ctrl+Alt+Shift+I` and in **Settings → Advanced**, matching the companion.
+
+**Wall clock, not `A_TickCount`.** The tick counter does not advance through
+suspend, so a gap check written on ticks sees nothing and reports that the machine
+never slept. Both validators now assert this specifically; the assertion they
+replaced did not, and a rewrite to `A_TickCount` would have kept it passing.
+
+### The XInput sweep cost 250 calls a second with no controller attached
+
+`XInputGetState` against an empty slot goes down to the device stack rather than
+returning a cached state. The all-slots sweep ran on every poll where the cached
+slot did not answer — which, with nothing attached, is every poll: roughly 250 of
+those calls per second at a 16 ms interval.
+
+The cached-slot read now happens first and is never throttled; the sweep is rate
+limited to 250 ms and cancelled by `WM_DEVICECHANGE`, by resume, and by a manual
+re-arm. A connected controller is unaffected, and a slot move from a healthy state
+still recovers on the same tick, because a controller that answers never consumes
+the limiter.
+
+| state | before | after |
+| --- | --- | --- |
+| connected, stable | ~63 calls/s | ~63 calls/s |
+| nothing connected | ~250–315 calls/s | ~16 calls/s |
+
+### Smaller correctness fixes
+
+- **A negative CPU delta reported a confident zero.** `usage` fell back to the
+  previous sample — `0.0` on a process's first reading — while `known` stayed
+  true, so `GameWindowCpuVerdict` rejected a live game as `CPU_ZERO_STRICT`. A
+  contradictory reading is now treated as no reading, like an unreadable one.
+- **Two device maps were keyed on an unstable handle.** `RawInputDeviceKey`'s own
+  header says handles change across sleep and re-plugging, so both suppression
+  maps grew per re-enumeration and the "ignoring N-byte reports" warning re-fired
+  after every resume. Keyed on the stable identity now.
+- **`CleanIniValue` truncated any value containing a space and `#`.** An Always
+  Focus or whitelist entry of `Portal #2` was saved and re-read as `Portal`. `;`
+  still starts a trailing comment; `#` only does so at the start of a value.
+- **`SortCandidatesByScoreAreaDesc` claimed a stability it did not have.**
+  Selection sort with a swap is unstable. Ties on score *and* area now break on
+  `hwnd`, which makes the ordering fully determined and the comment true.
+- **`GetLastLines` returned one blank line for empty input**, because
+  `StrSplit("", "\n")` yields one empty element rather than none.
+- **`ProcessExist("steam.exe")` twice a second** walked the whole process table to
+  answer one boolean. `ProcessRunningByHandle` holds a `SYNCHRONIZE` handle and
+  asks the kernel whether *that exact process* exited — still unpooled, and
+  strictly more accurate, since the name lookup could not tell a running Steam
+  from one that exited and relaunched under a new PID. Falls back to
+  `ProcessExist` on any doubt.
+- **`WindowEngineScoreWeights()` was rebuilt twice per window per tick.** Hoisted,
+  matching what the companion already did.
+- The shell's diagnostic bundle now carries elevation, screen geometry, DPI,
+  display scale, HDR state, backend, XInput slot and RawInput registration state
+  — everything the companion's has collected for months, on the product where an
+  input failure means a machine the user cannot drive.
+
+### The duplicate gate was blind below 0.75
+
+Two copies of one routine drift apart in structure as well as in text, so **the
+longer a duplicate goes unmerged the lower it scores** — the metric loses
+confidence exactly as the problem gets worse.
+
+The bar is now **0.45**, which surfaced eleven undocumented pairs. Two were drift
+and were fixed rather than recorded: `TrayOpenQuickMenu` raised the Quick Menu
+with `WinActivate` while the companion used the hardened `ForceForegroundWindow`
+this tree already uses in every other Quick Menu path, and
+`QuickMenuHandleController` restated a page test that shared `QuickMenuGoBack`
+already makes. The rest are written up in `DIVERGENT_FUNCTIONS.txt`, read rather
+than scored — including `PollController`, which is ~350 lines of one input loop
+written twice and had been sitting at 0.61.
+
+Two supporting fixes made that possible:
+
+- **The stale-entry check was stricter than its own error message.** It required
+  membership in the flagged set, so documenting a genuinely divergent pair that
+  scored *below* the threshold failed the build. A privilege-boundary divergence
+  scores 0.00 precisely because the two versions share no calls, so the file
+  could not hold the knowledge that is hardest to recover. Required and permitted
+  are now separate questions.
+- **The per-product seam is exempt.** `$sharedSeamAllowed` already records that
+  those functions differ; making them declare it twice is how the counts in this
+  project keep going wrong.
+
+### Counts in prose, for the third time
+
+Both file headers stated the seam was 24 functions. It was 36. The
+`DIVERGENT_FUNCTIONS.txt` helper-wrapper heading said "these four names" over ten
+entries. And the Common header promised *"the check that fails when it is wrong"*,
+which did not exist — which is why nobody noticed the drift.
+
+The numbers are gone from the prose rather than corrected a third time, and
+`Assert-SharedParity` now fails when the seam list changes size without the
+expectation beside it being updated.
+
 ## Unreleased — the controller learner, audited end to end
 
 Found while mapping an 8BitDo Ultimate 2 in DirectInput mode, where the gyro is

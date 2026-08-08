@@ -51,6 +51,7 @@ in a temporary copy and replace the live INI only after every change succeeds.
 - Ctrl+Alt+Shift+P : Open Control Panel
 - Ctrl+Alt+Shift+Q : Open the controller-first Quick Menu
 - Ctrl+Alt+Shift+S : Open the persistent Settings editor
+- Ctrl+Alt+Shift+I : Re-arm controller input (recovery and diagnosis after sleep)
 
 ## Controller shortcuts
 
@@ -66,6 +67,43 @@ in a temporary copy and replace the live INI only after every change succeeds.
 
 Every View/Back mapping, including these Start actions, can be reassigned in the Controller Mapping window. Quick
 Menu and Control Panel remain available as optional built-in actions but are unassigned by default.
+
+## Controller input after sleep
+
+SteamShell recovers controller input across a suspend without help. It is worth
+knowing how, because the failure it guards against is silent.
+
+RawInput locks onto one device handle so a headset or a remote cannot feed
+nonsense into the decoder. Those handles are **not stable**: Windows re-enumerates
+HID devices across a suspend and the same controller comes back with a different
+one. Three layers cover that:
+
+1. **Device hand-over.** If the locked device has been quiet for over a second and
+   a different one is producing usable reports, the decoder adopts it. This
+   depends on no notification from Windows, so it is the layer that does the work.
+   A device that is actively reporting is never displaced.
+2. **`WM_POWERBROADCAST`.** Releases the lock and re-asserts the RawInput
+   registration on resume — the one failure hand-over cannot fix, because a lost
+   registration produces no report to adopt.
+3. **A wall-clock gap check**, run from the controller poll. **Modern standby does
+   not reliably deliver the power broadcast**, and modern standby is what a
+   handheld sleeps into, so layer 2 cannot be the only trigger. The check compares
+   `A_Now`, not a tick counter — the tick counter does not advance through
+   suspend, so a gap measured on ticks sees nothing at all.
+
+**Manual recovery:** `Ctrl+Alt+Shift+I`, or **Settings → Advanced → Re-arm
+Controller Input**. It releases the lock, re-registers RawInput and forces an
+XInput rescan.
+
+It is a diagnostic as much as a recovery, and the honest limitation is reaching
+it: a user whose controller has stopped answering cannot navigate to a button with
+the controller, and a handheld has no keyboard. What it buys is a one-click answer
+to *which* failure you had — if input returns, the cause was the stale handle or
+the registration rather than the backend.
+
+Reconnecting a controller while the machine is running needs none of this.
+RawInput is registered by **usage page**, not by device, so a reconnected pad
+starts producing reports immediately and hand-over adopts it within a second.
 
 ### The View/Back button's own action
 

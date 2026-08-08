@@ -1510,6 +1510,26 @@ function Assert-SharedParity {
         "QuickMenuBuildGui", "QuickMenuCloseSelected",
         "QuickMenuMouseChoose",
         "QuickMenuRefresh", "QuickMenuValue")
+    # The seam's SIZE is asserted, not just its contents.
+    #
+    # Both file headers used to state a count in prose -- "three", then "24" --
+    # while the list itself grew to 28 and then 36. Twice the number was wrong,
+    # and the second time the Common header actively promised "the check that
+    # fails when it is wrong", which did not exist. Nothing read those numbers,
+    # so nothing could contradict them.
+    #
+    # This is that check. Growing the seam is allowed and sometimes correct; doing
+    # it WITHOUT noticing is what produced two wrong headers, so the number has to
+    # be restated here, next to the list, where changing one and not the other
+    # fails the build. Update the expectation in the same commit that changes the
+    # list, and say in the message why the seam needed to move.
+    $sharedSeamExpectedCount = 36
+    Assert-True ($sharedSeamAllowed.Count -eq $sharedSeamExpectedCount) (
+        "The shared seam has $($sharedSeamAllowed.Count) entries but " +
+        "`$sharedSeamExpectedCount says $sharedSeamExpectedCount. If the seam " +
+        "genuinely needed to change, update the expectation in the same commit " +
+        "and record why in the message. If it did not, a tree function has been " +
+        "added to the allowlist that should have stayed out of SteamShell-Shared.ahk.")
     foreach ($name in $sharedSeamAllowed) {
         foreach ($pair in @(
             @{ Name = "SteamShell.ahk"; Table = $standalone },
@@ -1689,9 +1709,25 @@ function Assert-SharedParity {
         }
     }
     $flagged = @{}
+    # The seam is exempt, and has to be once the bar is this low.
+    #
+    # $sharedSeamAllowed IS the record that these differ per product -- that is
+    # the entire mechanism, asserted in both directions a few hundred lines above.
+    # At 0.75 the gate happened not to reach most of them; at 0.45 it demands a
+    # second declaration in DIVERGENT_FUNCTIONS.txt for HideQuickMenu,
+    # QuickMenuRefresh, QuickMenuValue, QuickMenuActivateSelected,
+    # QuickMenuAdjustSelected and ProductSettingsViewportHeight, all of which
+    # Shared calls precisely so the two products can answer differently.
+    #
+    # Double-booking one fact in two lists is how the counts in this project keep
+    # going wrong. One list, checked where it is used.
+    $seamExempt = @{}
+    foreach ($seamName in $sharedSeamAllowed) { $seamExempt[$seamName.ToLowerInvariant()] = $true }
+
     $gateFailures = @()
     foreach ($name in ($standalone.Keys | Sort-Object)) {
         if (-not $companion.ContainsKey($name)) { continue }
+        if ($seamExempt.ContainsKey($name.ToLowerInvariant())) { continue }
         $left = Get-AhkCallFingerprint -Body $standalone[$name]
         $right = Get-AhkCallFingerprint -Body $companion[$name]
         $score = Get-SequenceSimilarity -Left $left -Right $right
@@ -1701,7 +1737,30 @@ function Assert-SharedParity {
             $subset = (Test-IsSubsequence -Small $left -Big $right) -or
                       (Test-IsSubsequence -Small $right -Big $left)
         }
-        if ($score -lt 0.75 -and -not $subset) { continue }
+        # 0.45, lowered from 0.75.
+        #
+        # 0.75 was chosen to keep the gate quiet, and quiet is what it was about
+        # the drift that mattered. TrayOpenQuickMenu scored 0.50: nine lines, in
+        # which the shell raised the Quick Menu with WinActivate while the
+        # companion used ForceForegroundWindow -- the hardened primitive this tree
+        # uses in every other Quick Menu path, and the one that wins against the
+        # foreground lock a fullscreen game holds. An unported fix, invisible for
+        # as long as the bar sat above it.
+        #
+        # A LOW SCORE IS NOT EVIDENCE OF INTENT. This file's own header already
+        # makes that argument about text similarity; it applies just as well to
+        # the call sequence, which is only a better proxy, not a true one. Two
+        # copies of one routine drift apart in structure as well as in text, so
+        # the longer a duplicate goes unmerged the LOWER it scores -- the metric
+        # loses confidence exactly as the problem gets worse.
+        #
+        # 0.45 is where the remaining pairs separate into "same routine, renamed"
+        # and "different routine, same name". PollController sits at 0.61 and is
+        # 350 lines of one input loop written twice; ReadSettings-style pairs sit
+        # near 0.26 and genuinely are two different functions. Below 0.45 the
+        # matches were all the second kind, so the bar goes where the evidence
+        # changes character rather than where the output is comfortable.
+        if ($score -lt 0.45 -and -not $subset) { continue }
         $key = $name.ToLowerInvariant()
         $flagged[$key] = $true
         if (-not $divergent.ContainsKey($key)) {
@@ -1743,10 +1802,28 @@ function Assert-SharedParity {
     foreach ($name in $helper.Keys) {
         if ($shared.ContainsKey($name)) { $helperWrappers[$name.ToLowerInvariant()] = $true }
     }
+    # An entry is stale when the PAIR is gone, not when the pair scores low.
+    #
+    # This used to require membership in $flagged, which is only populated for
+    # pairs at or above the threshold -- so documenting a genuinely divergent pair
+    # that happens to score below it FAILED as stale. That is stricter than the
+    # message this assertion prints, which says "no longer diverge, or ... no
+    # longer defined in both trees", and it made the file unable to hold exactly
+    # the knowledge that is hardest to recover: OpenWindowsSettings scores 0.00
+    # because a privilege-boundary divergence shares no calls at all, and was
+    # therefore the one kind of entry the file rejected.
+    #
+    # Required and permitted are now separate questions. The threshold decides
+    # what MUST be explained; being a real pair in both trees decides what MAY be.
+    $treePairNames = @{}
+    foreach ($name in $standalone.Keys) {
+        if ($companion.ContainsKey($name)) { $treePairNames[$name.ToLowerInvariant()] = $true }
+    }
     $staleDivergent = @(
         $divergent.Keys |
             Where-Object {
-                -not $flagged.ContainsKey($_) -and -not $helperWrappers.ContainsKey($_) } |
+                -not $treePairNames.ContainsKey($_) -and
+                -not $helperWrappers.ContainsKey($_) } |
             Sort-Object)
     Assert-True ($staleDivergent.Count -eq 0) (
         "DIVERGENT_FUNCTIONS.txt lists functions whose two copies no longer " +

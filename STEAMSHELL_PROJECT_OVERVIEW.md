@@ -884,9 +884,15 @@ The general form: when a device "needs mode X", check what mode X actually puts 
 
 1. **Device hand-over.** If the locked device has been quiet for over a second and a different one is producing correctly shaped reports, the decoder adopts it. Depends on no notification from Windows, so this is the layer that does the work. An actively reporting device is never displaced, preserving the reason the lock exists.
 2. **`WM_POWERBROADCAST`.** Releases the lock and re-asserts the registration on resume — the one failure hand-over cannot fix, because a lost registration produces no report to adopt.
-3. **Heartbeat gap.** A heartbeat arriving far later than scheduled implies the machine slept. Necessary because **modern standby does not reliably deliver the power broadcast**, and modern standby is what a handheld sleeps into, so layer 2 cannot be the only trigger.
+3. **Wall-clock gap.** A periodic check arriving far later than scheduled implies the machine slept. Necessary because **modern standby does not reliably deliver the power broadcast**, and modern standby is what a handheld sleeps into, so layer 2 cannot be the only trigger.
 
 Plus a manual re-arm (`Ctrl+Alt+Shift+I` or Settings → Advanced) that releases the lock, re-registers, and forces an XInput rescan. It exists as much for diagnosis as for recovery: if it restores input, the cause is the lock or the registration rather than the backend.
+
+**August 2026 — this was companion-only, and nobody had noticed.** Layers 2 and 3 and the manual re-arm were written here and never called from `SteamShell.ahk`. The shell had layer 1 and nothing else, which covers a stale handle and does nothing for a registration that did not come back. All three now live in `SteamShell-Shared.ahk` and both products use them.
+
+Layer 3 also changed shape. It was a gap between 60-second heartbeats, with a `HeartbeatSeconds * 2 + 30` threshold — so a resume took up to 150 seconds to notice, and the shell, having no heartbeat, could not host it at all. It is now `ControllerResumeGapCheck`, driven from `PollController` in both trees, which reports the poll interval as its cadence and therefore fires in about 30 seconds.
+
+**`A_Now`, not `A_TickCount`, is the load-bearing detail.** The tick counter does not advance through suspend, so a gap check written on ticks sees no gap and silently reports that the machine never slept. Both validators now assert that specifically. The assertion this replaced checked only that a `Heartbeat` body mentioned two names — a rewrite to `A_TickCount` would have kept it green and killed the feature.
 
 **Lesson.** A cache keyed on an OS handle needs an invalidation story, and "the process is still running" is not one. The identity filter here was correct in purpose and wrong in lifetime, and its failure mode was silence — the same shape as several earlier problems on this backend.
 

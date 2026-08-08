@@ -460,6 +460,71 @@ uncompiled script on the HTPC before replacing the current shell executable.
 - Open Setup Assistant and confirm Steam/RTSS pickers, Controller Test, Health Check, portable mode, and installation
   actions stay in front and remain usable.
 
+## Sleep, resume and controller re-acquisition
+
+The failure this guards against is **silent** — input simply stops, with nothing
+logged unless these paths run. Test on the handheld, not on a desktop: the whole
+reason layer 3 exists is that modern standby does not reliably deliver the power
+broadcast, and a desktop that sleeps into S3 will pass while an Ally fails.
+
+- **Sleep and wake with a controller connected.** Confirm controller input works
+  again without a restart. The log must contain a `Power:` line — either
+  `resumed from sleep` (the broadcast arrived) or `wall-clock gap of Ns`
+  (it did not). **Seeing neither, with input working, means hand-over alone
+  recovered it and layers 2 and 3 were untested; try again from Xbox FSE or with
+  a longer sleep.**
+- **Repeat with the lid/sleep held for over a minute**, so the wall-clock gap
+  comfortably exceeds its ~30 second threshold.
+- **Repeat inside a fullscreen game**, where XInput reads zeros and RawInput is
+  the only backend that can answer. This is the case where a lost registration is
+  not masked by the `auto` fallback.
+- **Unplug and reconnect a controller while running.** Input must return within
+  about a second with no restart and no re-registration, because RawInput is
+  registered by usage page rather than by device. The log records
+  `adopting 0x…` from the hand-over.
+- **Press `Ctrl+Alt+Shift+I`** and confirm the notification appears, the log
+  records `Controller: manual re-arm requested`, and input still works
+  afterwards. Repeat from **Settings → Advanced → Re-arm Controller Input**.
+- **Confirm the shell has all of this**, not just the companion. Every item above
+  was companion-only before this pass; the point of the test is the shell.
+
+## Controller slot discovery and XInput cost
+
+- **With no controller attached**, leave the shell running and confirm the log
+  shows at most one `XInput: sweeping N slot(s)` line per minute — it is rate
+  limited — and that the machine is not visibly busier than with a pad attached.
+- **With a controller attached and working**, confirm that line does **not**
+  appear. If it appears repeatedly while input works, RawInput is answering and
+  XInput is being consulted anyway, which is worth investigating.
+- **Move the pad between slots mid-session** (Steam Input, or Xbox mode) and
+  confirm input recovers on the same tick, not after a visible pause. A connected
+  controller never consumes the sweep limiter, so there should be no delay at all.
+- **Plug a controller in while none is attached** and confirm it is picked up
+  immediately rather than up to 250 ms later — `WM_DEVICECHANGE` cancels the
+  backoff. If the broadcast is not delivered the delay is the only symptom, and it
+  is harmless.
+
+## Steam lifecycle detection
+
+- **Exit Steam deliberately** and confirm the desktop-restore path still triggers
+  exactly as before. `MonitorShell` now asks the kernel whether the tracked Steam
+  process exited rather than walking the process table by name; a false "exited"
+  here would restore the desktop out from under a running session.
+- **Exit Steam and relaunch it** without restarting SteamShell. The handle path is
+  strictly more accurate than the old name lookup here, which could not tell a
+  running Steam from one that exited and relaunched under a new PID.
+
+## Game detection across two monitors
+
+- **On a multi-monitor setup, run a fullscreen game on the SECOND monitor** and
+  confirm Game Foreground Assist finds it and scores it as fullscreen rather than
+  borderless. Before this pass the shell measured every window against the primary
+  monitor, so a game at `x=1920` failed the position tolerance outright.
+- **Repeat with the second monitor larger than the primary**, which is the case
+  that produced an outright `TOO_SMALL` rejection rather than a lower score.
+- Confirm the Game Detection page and the score table agree with what is actually
+  on screen.
+
 ## Controller
 
 - After a normal sign-in, confirm SteamShell shows **Elevated: No** in Task Manager

@@ -896,6 +896,82 @@ Both are recorded in `CROSS_NAME_DUPLICATES.txt`. The gap is written down rather
 than closed: comparing data tables structurally is a different check, and a weak
 version would be worse than knowing this one does not cover them.
 
+### August 2026, second pass: the bar itself was the blind spot
+
+The gate demanded a reason at **0.75 or above**. Everything below that was not
+judged and not recorded — it was simply not looked at.
+
+That threshold is wrong in a way worth stating plainly: **two copies of one
+routine drift apart in structure as well as in text, so the longer a duplicate
+goes unmerged the lower it scores.** The metric loses confidence exactly as the
+problem gets worse. A low score is evidence of nothing, which is the same argument
+this file already makes about text similarity.
+
+Lowered to **0.45**. Eleven pairs appeared, and reading them rather than scoring
+them found two that were drift:
+
+- **`TrayOpenQuickMenu`, 0.50, nine lines.** The shell raised the Quick Menu with
+  `WinActivate`; the companion used `ForceForegroundWindow`. That is the hardened
+  primitive — `SteamShell-Common.ahk`'s own header records that the shell's
+  version was the one kept — and the shell already used it at every *other* Quick
+  Menu site. `WinActivate` loses to the foreground lock a fullscreen game holds,
+  which is exactly the situation someone reaching for the tray icon is in. Fixed,
+  not recorded.
+- **`QuickMenuHandleController`, 0.78.** Above the old bar the whole time and
+  simply never listed. Its TASKS-page handling is genuine; its B-button branch
+  restated the MAIN-page test that shared `QuickMenuGoBack` already makes.
+
+`PollController` is the one to know about: **0.61, about 350 lines on each side,
+and one input loop written twice.** Most of the difference is renaming —
+`prevButtons`/`previousButtons`, `btnDefs`/`buttonDefinitions` — which is
+precisely the tidying the fingerprint was built to see through, and it still hid
+under the old bar for the gate's entire life. The genuine differences are bolted
+onto the ends. It is the largest consolidation left and the riskiest, being the
+input path of the product that runs as the shell.
+
+### The gate compares functions, so inline logic is invisible at any threshold
+
+Lowering the bar closes one blind spot. It cannot close this one.
+
+`GameWindowShapeVerdict` is shared **so both products reach the same answer from
+the same numbers**. Each tree then built the facts map inline — the companion
+per-monitor, the shell against `A_Screen*` only. A fullscreen game on a second
+monitor was measured against the first monitor's size at an origin of `(1920, 0)`,
+failed the position tolerance, and scored as borderless or was rejected outright.
+
+There was never a function pair, so no threshold would have found it.
+
+Worse, it was *recorded as deliberate* — in a companion-side comment asserting
+something about the other tree: "the shell can assume the game is on `A_Screen*`".
+It cannot; it centres its own GUIs per monitor and resolves a monitor index for
+the foreground window. It is one shared function now,
+`GameShapeFactsForWindow`.
+
+> **A shared arbiter fed by two private argument builders is a duplicate with
+> extra steps.** Sharing the function that decides is worth little if each tree
+> assembles what it decides on, and nothing in this project will notice.
+
+Everything else shared in this pass moved rather than being ported, for the same
+reason: `PowerBroadcastMessage`, `ControllerResumeGapCheck` and
+`RearmControllerInput` were all companion-only, all needed by the shell, and all
+name nothing per-product. Copying any of them would have created a divergent pair
+on the day it was written.
+
+### Two supporting fixes to the gate itself
+
+- **The stale-entry check was stricter than its own error message.** It required
+  membership in the flagged set, which is only populated *after* the threshold
+  test — so an entry for a genuinely divergent pair scoring below the bar failed
+  the build as stale. `OpenWindowsSettings` scores **0.00** because a
+  privilege-boundary divergence shares no calls at all, so the file was
+  structurally unable to hold exactly the knowledge that is hardest to recover.
+  The threshold now decides what *must* be explained; being a real pair decides
+  what *may* be.
+- **The per-product seam is exempt.** `$sharedSeamAllowed` is already the record
+  that those functions differ. At 0.45 the gate began demanding a second
+  declaration for six of them, and double-booking one fact in two lists is how
+  the counts in this project keep going wrong.
+
 ## A recorded reason is not evidence
 
 Two entries in `DIVERGENT_FUNCTIONS.txt` were re-read against the code rather than

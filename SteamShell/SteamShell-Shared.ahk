@@ -30,19 +30,24 @@
 ;
 ; The per-tree seam
 ; -----------------
-; Shared code calls back into the trees through 24 functions, and each tree MUST
-; define every one. THE LIST IS NOT HERE. It is $sharedSeamAllowed in
-; Validate-Common.ps1, and it is enforced in both directions: every name on it
-; must exist in both trees, and nothing may leave this file that is not on it.
+; Shared code calls back into the trees through a fixed set of functions, and
+; each tree MUST define every one. THE LIST IS NOT HERE, AND NEITHER IS ITS
+; LENGTH. Both are $sharedSeamAllowed in Validate-Common.ps1, and it is enforced
+; in both directions: every name on it must exist in both trees, and nothing may
+; leave this file that is not on it.
 ;
-; This paragraph used to name three functions. The real number was 28. That is
-; not a documentation slip -- it is the same failure SteamShell-Common.ahk's
+; This paragraph has now carried a wrong number twice. It named three functions
+; when the real count was 28; it was corrected to 24 and the list grew to 36. That
+; is not a documentation slip -- it is the same failure SteamShell-Common.ahk's
 ; header describes happening to THIS file once already ("documented two
 ; permitted callbacks and had grown to eight before anyone noticed, because
 ; nothing enumerated what actually left the file"). It was written about this
-; file, the remedy was applied only to Common, and the growth resumed. Prose
-; cannot hold a list that changes; a check can. So the list lives where it is
-; executed, and this paragraph says where to look instead of guessing.
+; file, the remedy was applied only to Common, and the growth resumed.
+;
+; Prose cannot hold a number that changes, and the second correction proved that
+; writing the CURRENT number down just resets the clock. So no count appears here
+; at all: the list lives where it is executed, and this paragraph says where to
+; look instead of guessing.
 ;
 ; SharedNotify was on that three-name list as something "each tree MUST define".
 ; It is defined HERE, and neither tree defines it. The trees each have a
@@ -2240,9 +2245,75 @@ SendRtssShortcut(shortcut, description, settingName) {
 ; a cold start; then the rest, so it is found regardless. The slot is logged when
 ; it changes, because "the controller moved" is otherwise indistinguishable from
 ; "the controller broke" in a log.
+; Rate limiter for the all-slots XInput sweep, and the way to cancel it.
+;
+; XInputGetState against a slot with nothing in it is the expensive call in this
+; program. It does not return from a cached state -- it goes down to the device
+; stack -- and Microsoft's own guidance is not to poll empty slots every frame.
+; The sweep below runs only when the slot that answered last time has stopped
+; answering, which sounds rare and is not: with no controller attached it is
+; EVERY poll, so a 16 ms timer was making 250 of those calls a second, all of
+; them returning "not connected".
+;
+; 250 ms is chosen against the bug the sweep exists to fix rather than against the
+; saving. The comment in each tree's ControllerReadState records that a pad Steam
+; Input moved to another slot "simply stopped answering" until the sweep was
+; added -- and a slot move is precisely the case where the fast path fails and the
+; sweep is what recovers it. So the cost of this limiter is dead input for up to
+; one interval after a slot move. A quarter second is under the threshold where
+; that reads as anything at all, and it still removes 98% of the calls.
+;
+; Reset cancels the wait outright, so an event that means "the hardware changed"
+; does not have to wait out a backoff measured for the case where nothing has.
+XInputScanGate(reset := false) {
+    static nextAllowedTick := 0
+    static FULL_SCAN_INTERVAL_MS := 250
+    if reset {
+        nextAllowedTick := 0
+        return true
+    }
+    if (nextAllowedTick && A_TickCount < nextAllowedTick)
+        return false
+    nextAllowedTick := A_TickCount + FULL_SCAN_INTERVAL_MS
+    return true
+}
+
+
+; Device arrival or removal. Cancels the sweep backoff so a controller that was
+; just plugged in is picked up on the next poll instead of up to 250 ms later.
+;
+; DBT_DEVNODES_CHANGED is broadcast to top-level windows without
+; RegisterDeviceNotification, so this needs no setup beyond the OnMessage. If it
+; never arrives -- a message-only window would not receive a broadcast -- nothing
+; breaks: the limiter simply expires on its own, which is why this is an
+; optimisation for the common case and not a mechanism anything depends on.
+DeviceChangeMessage(wParam, lParam, msg, hwnd) {
+    static DBT_DEVNODES_CHANGED := 0x0007
+    if (wParam = DBT_DEVNODES_CHANGED)
+        XInputScanGate(true)
+    return true
+}
+
+
 XInputResolveController(&state) {
     global ControllerIndex, ActiveControllerIndex
     static lastMissingLogTick := 0
+    static lastScanLogTick := 0
+
+    ; The slot that answered last time, every tick, ahead of the limiter. A
+    ; connected controller therefore costs exactly one call and is unaffected by
+    ; any of the above.
+    if (ActiveControllerIndex >= 0 && ActiveControllerIndex <= 3) {
+        if (XInputGetState(ActiveControllerIndex, &state) = 0)
+            return true
+    }
+
+    ; The fast path missed, so this is the sweep -- the expensive branch, and the
+    ; one that is rate-limited. Reporting false here means "no reading this tick",
+    ; which the callers already handle: RawInputReadState returns false the same
+    ; way whenever reports have gone stale.
+    if !XInputScanGate()
+        return false
 
     candidates := []
     seen := Map()
@@ -2258,6 +2329,16 @@ XInputResolveController(&state) {
         index := A_Index - 1
         if !seen.Has(index)
             candidates.Push(index)
+    }
+
+    ; What the sweep actually costs, on the record and rate-limited to once a
+    ; minute. Inferring this from the source is how it went unnoticed: the call
+    ; count is the poll rate times the candidate list, and neither number appears
+    ; anywhere near the other.
+    if (!lastScanLogTick || A_TickCount - lastScanLogTick >= 60000) {
+        lastScanLogTick := A_TickCount
+        LogLine("XInput: sweeping " candidates.Length " slot(s); the cached slot "
+            . "did not answer. At most one sweep every 250ms.", "Info")
     }
 
     for _, index in candidates {
@@ -3594,6 +3675,11 @@ NormalizeKeyForSend(keyName) {
 GetLastLines(text, maxLines, newestFirst := false) {
     if (maxLines <= 0)
     return ""
+    ; StrSplit("", "`n") yields one empty element, not none, so an empty log came
+    ; back as a single blank line -- a log viewer showing one blank row instead of
+    ; nothing, and a support bundle with a line in it that was never logged.
+    if (text = "")
+    return ""
     t := StrReplace(text, "`r`n", "`n")
     t := StrReplace(t, "`r", "`n")
     lines := StrSplit(t, "`n")
@@ -4889,6 +4975,126 @@ RawInputReregister() {
 }
 
 
+; Sleep and resume.
+;
+; The controller is re-enumerated across a suspend and returns with a new device
+; handle, so the decoder is told to forget the one it locked onto before the
+; machine slept.
+;
+; Shared, and it was companion-only until now. The shell registered RawInput once
+; from its auto-execute section and had NO resume path at all -- no power handler,
+; no lock reset, no re-registration, not one caller of either recovery function.
+; It survived on RawInputClaimDevice's handover, which re-locks on the first
+; report from a re-enumerated device and genuinely does cover the stale handle.
+; What handover cannot cover is a registration that did not come back, which is
+; the failure RawInputResumeVerify was written to name.
+;
+; Nothing in here is per-product: it drives three functions that were already in
+; this file. Copying it into the shell would have created a divergent pair the day
+; it was written, so it moves instead.
+PowerBroadcastMessage(wParam, lParam, msg, hwnd) {
+    static PBT_APMSUSPEND := 0x04
+    static PBT_APMRESUMESUSPEND := 0x07
+    static PBT_APMRESUMEAUTOMATIC := 0x12
+    if (wParam = PBT_APMSUSPEND) {
+        LogLine("Power: system suspending.")
+        RawInputResetDeviceLock("system suspending")
+        return true
+    }
+    if (wParam = PBT_APMRESUMESUSPEND || wParam = PBT_APMRESUMEAUTOMATIC) {
+        LogLine("Power: resumed from sleep; re-arming controller input.")
+        RawInputResetDeviceLock("system resumed")
+        ; A resume is a hardware change by any reasonable definition, so the
+        ; XInput sweep should not sit out a backoff interval measured for a
+        ; machine where nothing moved.
+        XInputScanGate(true)
+        ; XInput re-resolves its own slot on the next poll, so only RawInput needs
+        ; help here. Delayed, because the HID stack is still re-enumerating at the
+        ; moment the resume notification arrives.
+        SetTimer(RawInputReregister, -2500)
+        return true
+    }
+    return true
+}
+
+
+; Forces controller input to be re-acquired: RawInput forgets its device handle
+; and re-registers, and XInput re-resolves its slot on the next poll.
+;
+; Exposed manually as well as automatically because it is the fastest way to
+; confirm what a post-sleep failure actually was. If this restores input, the
+; problem is the stale device handle or the registration -- not the backend.
+;
+; Shared rather than ported. It was companion-only, and the shell -- which has no
+; desktop to fall back to and no keyboard on a handheld -- had no way to ask for
+; this at all short of a restart. Copying it would have created a divergent pair
+; over a body that names nothing per-product.
+;
+; Reaching it is the honest limitation, and the reason this is a diagnostic rather
+; than a recovery: a user whose controller has stopped answering cannot navigate
+; to a button with the controller. It earns its place by telling you WHICH failure
+; you had, in one click, while you still have input -- not by rescuing a session
+; that has already lost it.
+RearmControllerInput(*) {
+    global ActiveControllerIndex
+    LogLine("Controller: manual re-arm requested.")
+    RawInputResetDeviceLock("manual re-arm")
+    ; -1 makes XInputResolveController rescan all four slots rather than trusting
+    ; the slot it last succeeded on, and the gate reset stops that rescan waiting
+    ; out a backoff the user has just explicitly asked to skip.
+    ActiveControllerIndex := -1
+    XInputScanGate(true)
+    RawInputReregister()
+    ShowNotification("Controller input re-armed")
+}
+
+
+; Infers a resume from a gap in the wall clock, for callers already on a timer.
+;
+; WM_POWERBROADCAST is handled above and is NOT enough on its own. The companion
+; found that out on the hardware both products target: an ROG Ally sleeps into
+; modern standby, where the broadcast is not reliably delivered. A resume detector
+; that depends on being told is a detector that does not fire on the one device
+; this matters most on.
+;
+; WALL CLOCK, NOT A_TickCount, and that is the whole trick. The tick counter does
+; not advance through suspend, so tick arithmetic sees no gap at all and reports
+; that nothing happened. A_Now keeps counting because it is the actual date.
+;
+; Rate-limited on ticks so a caller polling every few milliseconds does not run a
+; DateDiff each time. After a resume the limiter costs at most one interval before
+; the check runs, which is well inside the 2500 ms the re-registration already
+; waits for the HID stack.
+;
+; Threshold is expectedIntervalSeconds * 2 + 30, carried over from the companion's
+; heartbeat: twice the cadence absorbs ordinary scheduling jitter, and the 30
+; seconds means a machine merely under heavy load is never mistaken for one that
+; slept.
+ControllerResumeGapCheck(expectedIntervalSeconds) {
+    static lastStamp := ""
+    static lastCheckTick := 0
+    if (A_TickCount - lastCheckTick < 5000 && lastStamp != "")
+        return false
+    lastCheckTick := A_TickCount
+    now := A_Now
+    if (lastStamp = "") {
+        lastStamp := now
+        return false
+    }
+    elapsed := 0
+    try elapsed := DateDiff(now, lastStamp, "Seconds")
+    lastStamp := now
+    if (elapsed <= expectedIntervalSeconds * 2 + 30)
+        return false
+    LogLine("Power: wall-clock gap of " elapsed "s (expected about "
+        . expectedIntervalSeconds "s). Treating this as a resume and re-arming "
+        . "controller input.")
+    RawInputResetDeviceLock("resume inferred from wall-clock gap")
+    SetTimer(RawInputReregister, -1000)
+    return true
+}
+
+
 ; Reports whether controller reports actually resumed.
 ;
 ; Without this, a failed recovery is silent, and silence has already cost several
@@ -5005,17 +5211,35 @@ RawInputProbeMessage(wParam, lParam, msg, hwnd) {
             hex .= Format("{:02X}", NumGet(data, HEADER_SIZE + 8 + A_Index - 1, "UChar")) " "
         hex := RTrim(hex)
 
-        ; The learning wizard sees reports first and consumes them: while it is
-        ; open, decoding as well would fire mappings from the very buttons being
-        ; pressed to teach the layout.
-        if ControllerLearnConsumesReport(data, HEADER_SIZE + 8, sizeHid, device) {
-            if !EnableRawInputProbe
-                return
-        } else {
-            ; Decode EVERY report, before any log rate-limiting. The cached state
-            ; is what the poll loop reads, so dropping reports here would drop
-            ; input.
-            RawInputDecodeReport(data, HEADER_SIZE + 8, sizeHid, device)
+        ; Decode EVERY report, before any log rate-limiting. The cached state is
+        ; what the poll loop reads, so dropping reports here would drop input.
+        ;
+        ; That sentence was already here, and the code under it decoded only the
+        ; FIRST report. RAWINPUT carries `count` reports of `sizeHid` bytes each
+        ; and Windows coalesces them under load, so every report after the first
+        ; in a batch was read out of the header, used to size the hex log, and
+        ; thrown away.
+        ;
+        ; It bites hardest on exactly the devices this decoder is built around.
+        ; RawInputDecodeReport notes that the Ally "sends no duplicate reports
+        ; while a digital control is held" -- so on a change-only device a
+        ; coalesced press is not a late press, it is a press that never arrives.
+        ; The learner reads the same stream and lost presses the same way, which
+        ; is a wizard that sits there while the user presses the button.
+        ;
+        ; The hex log stays on the first report only. That cap is deliberate and
+        ; is about log volume, not about decoding.
+        ; Trust the buffer, not the header. `count` and `sizeHid` are read out of
+        ; the packet, and the decoders index straight into memory from them, so
+        ; the number of reports is bounded by what was actually delivered.
+        available := (size - (HEADER_SIZE + 8)) // sizeHid
+        Loop Min(count, Max(0, available)) {
+            reportBase := HEADER_SIZE + 8 + (A_Index - 1) * sizeHid
+            ; The learning wizard sees reports first and consumes them: while it
+            ; is open, decoding as well would fire mappings from the very buttons
+            ; being pressed to teach the layout.
+            if !ControllerLearnConsumesReport(data, reportBase, sizeHid, device)
+                RawInputDecodeReport(data, reportBase, sizeHid, device)
         }
 
         if !EnableRawInputProbe
@@ -5103,11 +5327,19 @@ RawInputDecodeReport(data, base, length, device) {
     ; No identity available, so fall back to a profile keyed on report length.
     if (!IsObject(profile) && deviceKey = "")
         profile := LoadControllerProfile(ControllerProfileLengthKey(length))
+    ; Both suppression maps key on the STABLE identity, not the hDevice.
+    ;
+    ; RawInputDeviceKey's own header explains that handles change across sleep and
+    ; re-plugging, and RawInputClaimDevice exists entirely to cope with that. Keyed
+    ; on the handle, these two maps gained an entry per re-enumeration for the life
+    ; of the process, and the "ignoring N-byte reports" warning fired again after
+    ; every resume -- noise in the log from the map whose job is to suppress it.
+    identity := deviceKey != "" ? deviceKey : ControllerProfileLengthKey(length)
     if (IsObject(profile) && profile["length"] = length) {
         if !RawInputClaimDevice(device)
             return false
-        if !announcedProfile.Has(device) {
-            announcedProfile[device] := true
+        if !announcedProfile.Has(identity) {
+            announcedProfile[identity] := true
             LogLine("RawInput: decoding device 0x" Format("{:X}", device)
                 . " with learned profile '" profile["key"] "'.")
         }
@@ -5115,8 +5347,8 @@ RawInputDecodeReport(data, base, length, device) {
     }
 
     if (length != EXPECTED_LENGTH) {
-        if !warnedDevices.Has(device) {
-            warnedDevices[device] := true
+        if !warnedDevices.Has(identity) {
+            warnedDevices[identity] := true
             LogLine("RawInput: ignoring " length "-byte reports from device 0x"
                 . Format("{:X}", device) " (" RawInputDeviceKey(device) "). The "
                 . "built-in layout only understands " EXPECTED_LENGTH "-byte "
@@ -8076,26 +8308,36 @@ ShowControllerLearner(*) {
     learn.SetFont("s34 Bold", "Segoe UI")
     LearnCountdownCtrl := learn.AddText("x516 y16 w108 h64 +Right", "")
     learn.SetFont("s10 Norm", "Segoe UI")
-    LearnDetailCtrl := learn.AddText("x24 y88 w600 h24",
-        "Measuring idle input before device selection...")
-    LearnProgressCtrl := learn.AddText("x24 y116 w600 h24", "")
-    learn.AddText("x24 y148 w600 h56 +Wrap",
+    ; THREE lines, wrapped. This was h24 -- one line -- and the messages it
+    ; carries were rewritten into plain English, which made several of them two
+    ; lines. A Static clips at its own height rather than growing, so the second
+    ; line was simply cut in half on screen: "Anything you hold now will be
+    ; ignored for the rest of the wizard, so l"
+    ;
+    ; Sized from the longest string it can hold rather than from the one it is
+    ; created with, and given a third line of headroom because the friendly
+    ; control names are substituted in at run time and a wider font or a higher
+    ; DPI buys fewer characters per line than this was measured at.
+    LearnDetailCtrl := learn.AddText("x24 y88 w600 h54 +Wrap",
+        "Checking what the controller sends when nothing is being touched.")
+    LearnProgressCtrl := learn.AddText("x24 y146 w600 h24", "")
+    learn.AddText("x24 y178 w600 h56 +Wrap",
         "Press each button once. For sticks and triggers, move fully as prompted, "
         . "then release. Skip anything this controller does not have.")
-    skip := learn.AddButton("x24 y214 w130 h34", "Skip")
+    skip := learn.AddButton("x24 y244 w130 h34", "Skip")
     skip.OnEvent("Click", (*) => ControllerLearnSkip())
-    restart := learn.AddButton("x164 y214 w130 h34", "Start Over")
+    restart := learn.AddButton("x164 y244 w130 h34", "Start Over")
     restart.OnEvent("Click", (*) => ControllerLearnRestart())
-    save := learn.AddButton("x374 y214 w120 h34", "Save")
+    save := learn.AddButton("x374 y244 w120 h34", "Save")
     save.OnEvent("Click", (*) => ControllerLearnSave())
-    cancel := learn.AddButton("x504 y214 w120 h34", "Cancel")
+    cancel := learn.AddButton("x504 y244 w120 h34", "Cancel")
     cancel.OnEvent("Click", (*) => CloseControllerLearner())
     learn.OnEvent("Close", (*) => CloseControllerLearner())
     learn.OnEvent("Escape", (*) => CloseControllerLearner())
     LearnGui := learn
     foreground := 0
     try foreground := WinExist("A")
-    CenterGuiOnMonitorActual(learn, GetMonitorIndexForWindow(foreground), 648, 268)
+    CenterGuiOnMonitorActual(learn, GetMonitorIndexForWindow(foreground), 648, 298)
     try ForceForegroundWindow(learn.Hwnd)
     SetTimer(ControllerLearnIdentificationReady, -1200)
     LogLine("Learn: wizard opened.")
@@ -8175,6 +8417,60 @@ GetMonitorIndexForWindow(hwnd) {
     }
     MouseGetPos(&mx, &my)
     return GetMonitorWorkAreaForPoint(mx, my, &left, &top, &right, &bottom)
+}
+
+
+; The facts map GameWindowShapeVerdict scores, with geometry made relative to the
+; monitor the window is actually on.
+;
+; This existed only in the companion, guarded by a comment reasoning that "the
+; shell can assume the game is on A_Screen*; a companion under Xbox FSE cannot".
+; The shell cannot assume that either. It centres its own GUIs per monitor, it
+; resolves a monitor index for the foreground window, and its Always Focus list
+; is not restricted to the primary display -- so a fullscreen game on a second
+; monitor was measured against the FIRST monitor's size at an origin of (1920, 0).
+; Abs(x) <= positionTolerancePx then fails, nearFS comes out false, and the game
+; drops from the fullscreen score to the borderless one or is rejected TOO_SMALL
+; outright when the second monitor is the larger of the two.
+;
+; So the divergence was recorded as deliberate but was really an unported fix.
+; Defining the normalisation once is what stops that recurring: the shared verdict
+; is only shared if the numbers reaching it are built the same way, and a shared
+; arbiter fed by two private argument builders is a duplicate with extra steps.
+;
+; Requires the geometry keys both inventories carry: hwnd, x, y, w, h, title.
+;
+; A monitor that cannot be read falls back to the primary rather than dropping the
+; window. The companion used to `continue` here, which turns an unreadable monitor
+; into an invisible game -- the strictly worse of the two failures, and the one
+; that is silent.
+GameShapeFactsForWindow(item, minimizedLegacy) {
+    left := 0
+    top := 0
+    screenW := A_ScreenWidth
+    screenH := A_ScreenHeight
+    ; An exclusive-fullscreen game that minimized itself when Steam took focus.
+    ; Its geometry is meaningless -- GameWindowShapeVerdict treats minimizedLegacy
+    ; as nearFS -- and the monitor lookup would be answering about coordinates
+    ; that are off-screen by design.
+    if !minimizedLegacy {
+        try {
+            MonitorGet(GetMonitorIndexForWindow(item["hwnd"]),
+                &monLeft, &monTop, &monRight, &monBottom)
+            if (monRight - monLeft > 0 && monBottom - monTop > 0) {
+                left := monLeft
+                top := monTop
+                screenW := monRight - monLeft
+                screenH := monBottom - monTop
+            }
+        }
+    }
+    return Map(
+        "w", item["w"], "h", item["h"],
+        "x", item["x"] - left, "y", item["y"] - top,
+        "screenW", screenW, "screenH", screenH,
+        "titleLength", StrLen(item["title"]),
+        "minimizedLegacy", minimizedLegacy)
 }
 
 

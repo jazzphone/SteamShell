@@ -69,6 +69,7 @@ NormalizeStartupWindowMode
 NotifyRtssSettingsChanged
 NowStamp
 OpenCurrentProcessToken
+ProcessRunningByHandle
 QuickMenuAddRoundedPath
 QuickMenuArgb
 QuickMenuBottomMargin

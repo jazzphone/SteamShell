@@ -368,13 +368,25 @@ Three layers recover from this:
 2. **`WM_POWERBROADCAST`.** On resume the lock is released and the registration
    re-asserted, in case registration itself was lost — the one failure hand-over
    cannot fix, since there is no report to adopt.
-3. **Heartbeat gap.** A heartbeat arriving far later than scheduled means the
-   machine slept. This matters because **modern standby does not reliably deliver
-   the power broadcast**, and modern standby is what a ROG Ally sleeps into, so
-   layer 2 cannot be the only trigger.
+3. **Wall-clock gap.** A periodic check arriving far later than it was scheduled
+   for means the machine slept. This matters because **modern standby does not
+   reliably deliver the power broadcast**, and modern standby is what a ROG Ally
+   sleeps into, so layer 2 cannot be the only trigger.
+
+   Layer 3 used to be a gap between 60-second heartbeats, which meant a resume
+   could take up to 150 seconds to notice. It is now `ControllerResumeGapCheck`
+   in `SteamShell-Shared.ahk`, driven from the controller poll in both products,
+   so it reports the poll interval as its cadence and fires in about 30 seconds.
+   It compares `A_Now` rather than a tick counter, because **the tick counter does
+   not advance through suspend** — a gap measured on ticks sees nothing at all.
 
 XInput needs none of this: `XInputResolveController` rescans all four slots and
-re-resolves on its own. That is why, before this was fixed, the desktop kept
+re-resolves on its own. That sweep is rate limited to once every 250 ms, because
+`XInputGetState` against an empty slot goes down to the device stack rather than
+returning a cached state, and with nothing attached the sweep was running on every
+16 ms poll. The slot that answered last time is still read on every poll ahead of
+the limiter, so a connected controller is never throttled and a mid-session slot
+move still recovers on the same tick. That is why, before this was fixed, the desktop kept
 working after a wake while Xbox FSE did not — `auto` was quietly falling back to
 XInput, and RawInput stayed dead.
 

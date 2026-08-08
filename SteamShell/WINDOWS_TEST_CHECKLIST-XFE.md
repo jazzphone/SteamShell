@@ -1012,12 +1012,15 @@ Diagnosing a failure, in order:
 
 - **If the log shows no `adopting` line and no reports at all**, RawInput
   registration was lost rather than the handle changing. Look for
-  `Power: resumed from sleep` or `Power: heartbeat gap of Ns`, then
+  `Power: resumed from sleep` or `Power: wall-clock gap of Ns`, then
   `RawInput: registered...`, then `RawInput: NO reports since resume after 10s`.
-- **If neither a Power line nor a heartbeat-gap line appears**, no resume was
-  detected at all — expected under modern standby for the broadcast, but the
-  heartbeat gap should still catch it. Note the heartbeat interval; the gap
-  detector needs a sleep longer than roughly two intervals.
+- **If neither a Power line nor a wall-clock-gap line appears**, no resume was
+  detected at all — expected under modern standby for the broadcast, but the gap
+  check should still catch it. It is driven from the controller poll and fires on
+  a gap of roughly 30 seconds, so a very short sleep may legitimately produce
+  neither line. It also requires the poll to be running: with controller mouse,
+  the Quick Menu and Settings all disabled, nothing is reading the pad and nothing
+  checks for a resume.
 - **Press `Ctrl+Alt+Shift+I` (or Settings → Advanced → Re-arm Controller).**
   If that restores input, the cause is the device lock or the registration, not
   the backend — which is the whole point of having the manual path.

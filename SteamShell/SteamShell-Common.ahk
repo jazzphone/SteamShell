@@ -27,17 +27,22 @@
 ;
 ; SteamShell-Shared.ahk remains the tree-coupled half -- RTSS orchestration,
 ; Quick Menu painting, elevated-helper lifecycle -- and is #Included by the two
-; trees only. It reaches into the trees through the 24 functions enumerated in
+; trees only. It reaches into the trees through the functions enumerated in
 ; $sharedSeamAllowed, and cannot be shared further without dragging those
 ; concerns into the helper. That boundary is the finding, not a compromise:
 ; roughly half of what looked shareable orchestrates tree state, and half
 ; genuinely does not.
 ;
 ; This sentence said "eight" for as long as the shared file's own header said
-; "three", while the true count was 28. Neither number is written down here any
-; more than it has to be: the list is in Validate-Common.ps1 where it is
-; checked, and the count above will be corrected by the check that fails when
-; it is wrong.
+; "three", while the true count was 28. The sentence above then said "24" while
+; the list grew to 36, which is the same defect a second time.
+;
+; It also promised "the check that fails when it is wrong", and no such check
+; existed -- which is exactly why nobody noticed the second drift. So the counts
+; are gone from both headers rather than corrected a third time, and
+; Assert-SharedParity now fails when the seam list changes size without the
+; expectation beside it being updated. A number in prose is a number nothing
+; reads; the same number in the checker is a build failure.
 ;
 ; Functions only. No top-level code: this is inserted into three different
 ; auto-execute sections.
@@ -1294,11 +1299,79 @@ ApplyPrimaryHdrState(enabled) {
 ; blankUsesDefault distinguishes "the key is missing" from "the key is present
 ; and deliberately empty". Optional shortcuts and paths rely on the second
 ; meaning something, so a present-but-empty value must be allowed to stay empty.
+; "Is a process with this name running", answered from a held handle instead of a
+; walk of the process table.
+;
+; ProcessExist(name) enumerates every process on the machine to return one
+; boolean. That is fine occasionally and it was being asked twice a second
+; forever, against a table of several hundred entries on a normal desktop.
+;
+; The handle path is O(1) AND strictly more accurate. A SYNCHRONIZE handle to a
+; known PID signals the moment that exact process exits; the name walk can only
+; say whether SOMETHING called steam.exe exists, which is a different question the
+; instant Steam restarts. Windows will not recycle a PID while a handle to it is
+; open, so the handle cannot silently come to mean a different process.
+;
+; FALLS BACK ON ANY DOUBT. OpenProcess can be refused, and a caller that drives
+; something as disruptive as restoring the desktop shell must not read a refusal
+; as an exit. Every path that is not a clean, positive answer from the handle ends
+; at ProcessExist, which is the behaviour this replaces -- so the worst case is
+; the old cost, not a wrong answer.
+;
+; No globals, no calls outside this file: the handle lives in a static, keyed by
+; name so a second caller cannot disturb the first.
+ProcessRunningByHandle(exeName) {
+    static SYNCHRONIZE := 0x00100000
+    static WAIT_TIMEOUT := 0x00000102
+    static handles := Map()
+
+    exeName := StrLower(Trim(exeName))
+    if (exeName = "")
+        return false
+
+    if handles.Has(exeName) {
+        entry := handles[exeName]
+        waitResult := -1
+        try waitResult := DllCall("Kernel32\WaitForSingleObject",
+            "Ptr", entry["handle"], "UInt", 0, "UInt")
+        ; Still running: the only fast path, and the common one.
+        if (waitResult = WAIT_TIMEOUT)
+            return true
+        ; Signalled means exited. Anything else means the handle can no longer be
+        ; trusted. Both end the same way -- drop it and re-resolve below.
+        try DllCall("Kernel32\CloseHandle", "Ptr", entry["handle"])
+        handles.Delete(exeName)
+    }
+
+    pid := 0
+    try pid := ProcessExist(exeName)
+    if !pid
+        return false
+
+    handle := 0
+    try handle := DllCall("Kernel32\OpenProcess",
+        "UInt", SYNCHRONIZE, "Int", false, "UInt", pid, "Ptr")
+    ; The process is running either way -- ProcessExist just said so. Failing to
+    ; open it only costs the optimisation, so say true and try again next time.
+    if handle
+        handles[exeName] := Map("handle", handle, "pid", pid)
+    return true
+}
+
 CleanIniValue(v, default := "", blankUsesDefault := true) {
     v := Trim(v)
     if (v = "")
         return blankUsesDefault ? default : ""
-    pos := RegExMatch(v, "(^|\s)[;#]")
+    ; `;` starts a trailing comment anywhere; `#` only at the start of the value.
+    ;
+    ; The pattern was "(^|\s)[;#]", which treated any whitespace-preceded # as a
+    ; comment and truncated the value there. That is fine for an INI line written
+    ; by hand and wrong for the values this product actually stores: window titles
+    ; and executable lists. "Portal #2" in an Always Focus or whitelist entry was
+    ; silently saved and re-read as "Portal", matching a window that does not
+    ; exist. A leading # is still honoured, because that is a real convention and
+    ; costs nothing to keep.
+    pos := RegExMatch(v, "(^|\s);|^#")
     if (pos)
         v := pos = 1 ? "" : Trim(SubStr(v, 1, pos - 1))
     if (v = "")
@@ -1834,9 +1907,20 @@ GameWindowCpuVerdict(baseScore, cpu, cpuKnown, weights) {
     return Map("accepted", true, "reject", "", "score", score)
 }
 
-; Highest score first, larger window breaking a tie. Selection sort, kept as it
-; was written: these lists are a handful of windows, and an unstable sort over
-; equal scores would make the chosen game flap between two equal candidates.
+; Highest score first, larger window breaking a tie, lowest hwnd breaking that.
+;
+; Selection sort, kept as it was written: these lists are a handful of windows.
+; The comment here used to justify the choice by saying an unstable sort "would
+; make the chosen game flap between two equal candidates" -- but selection sort
+; with a swap IS unstable. Swapping cands[i] with cands[best] reorders everything
+; between them, so for candidates tied on score AND area the winner depended on an
+; input order this very loop was permuting, and the property the comment claimed
+; was the one thing it did not have.
+;
+; Rather than correct the comment, the tie is made total. hwnd is unique, stable
+; for the lifetime of a window, and already carried on every candidate, so the
+; ordering is now fully determined by the candidates themselves and the sort's
+; instability stops being observable. The claim above is true as written.
 SortCandidatesByScoreAreaDesc(cands) {
     n := cands.Length
     if (n < 2)
@@ -1846,14 +1930,18 @@ SortCandidatesByScoreAreaDesc(cands) {
         best := i
         bestScore := cands[i]["score"]
         bestArea := cands[i]["w"] * cands[i]["h"]
+        bestHwnd := cands[i]["hwnd"]
         j := i + 1
         while (j <= n) {
             s := cands[j]["score"]
             a := cands[j]["w"] * cands[j]["h"]
-            if (s > bestScore) || (s = bestScore && a > bestArea) {
+            hw := cands[j]["hwnd"]
+            if (s > bestScore) || (s = bestScore && a > bestArea)
+                || (s = bestScore && a = bestArea && hw < bestHwnd) {
                 best := j
                 bestScore := s
                 bestArea := a
+                bestHwnd := hw
             }
             j++
         }
