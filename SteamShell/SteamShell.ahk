@@ -7566,91 +7566,36 @@ WindowEngineTitleMatchesBpm(title) {
     return expected != "" && InStr(title, expected, false) != 0
 }
 
+; The shell's view of the shared inventory: everything it enumerates, in the
+; order it enumerated it, plus the hwnd index and the Big Picture flag.
+;
+; NO FILTERING HERE, deliberately. This engine keeps desktop and shell windows in
+; the snapshot and marks them, because AlwaysFocus and the Explorer guard both
+; need to see them; the companion drops them on the way out of its own wrapper.
+; That difference used to be buried in two separate enumerations.
+;
+; "bpm" is filled in here rather than in the shared builder because BpmTitle is a
+; shell setting. Partial matching, still: the pre-engine implementation used
+; SetTitleMatchMode 2 and titles carry suffixes.
 WindowEngineBuildSnapshot() {
     global WindowEngineSnapshot, WindowEngineSnapshotByHwnd
     global WindowEngineSnapshotBusy
     global WindowEngineLastSnapshotTick, WindowEngineLastWindowCount
-    global ScriptPid, BpmTitle
 
     if WindowEngineSnapshotBusy
         return WindowEngineSnapshot
     WindowEngineSnapshotBusy := true
-    snapshot := []
-    byHwnd := Map()
     try {
-    for hwnd in WinGetList() {
-        if !DllCall("User32\IsWindow", "Ptr", hwnd, "Int")
-            continue
-        if IsCloaked(hwnd)
-            continue
-
-        id := "ahk_id " hwnd
-        style := 0
-        exStyle := 0
-        try {
-            style := WinGetStyle(id) + 0
-        } catch {
-            continue
+        snapshot := SharedWindowInventoryBuild()
+        byHwnd := Map()
+        for _, item in snapshot {
+            item["bpm"] := WindowEngineTitleMatchesBpm(item["title"])
+            byHwnd[item["hwnd"]] := item
         }
-        try exStyle := WinGetExStyle(id) + 0
-        if !(style & 0x10000000) ; WS_VISIBLE
-            continue
-
-        pid := 0
-        title := ""
-        winClass := ""
-        proc := ""
-        minMax := 0
-        x := 0
-        y := 0
-        width := 0
-        height := 0
-        try {
-            pid := WinGetPID(id)
-            title := WinGetTitle(id)
-            winClass := WinGetClass(id)
-            proc := StrLower(WinGetProcessName(id))
-            minMax := WinGetMinMax(id)
-            WinGetPos(&x, &y, &width, &height, id)
-        } catch {
-            continue
-        }
-
-        classLower := StrLower(winClass)
-        isDesktop := classLower = "progman"
-            || classLower = "workerw"
-            || classLower = "shell_traywnd"
-            || classLower = "shell_secondarytraywnd"
-        item := Map(
-            "hwnd", hwnd,
-            "pid", pid,
-            "proc", proc,
-            "title", title,
-            "class", winClass,
-            "classLower", classLower,
-            "style", style,
-            "exStyle", exStyle,
-            "owner", DllCall(
-                "User32\GetWindow", "Ptr", hwnd, "UInt", 4, "Ptr"), ; GW_OWNER
-            "minMax", minMax,
-            "x", x,
-            "y", y,
-            "w", width,
-            "h", height,
-            "area", Max(0, width) * Max(0, height),
-            "scriptOwned", pid = ScriptPid,
-            "desktop", isDesktop,
-            "steam", proc = "steam.exe" || proc = "steamwebhelper.exe",
-            ; The pre-engine implementation used SetTitleMatchMode 2. Retain that
-            ; proven partial-title behavior instead of requiring exact equality.
-            "bpm", WindowEngineTitleMatchesBpm(title))
-        snapshot.Push(item)
-        byHwnd[hwnd] := item
-    }
-    WindowEngineSnapshot := snapshot
-    WindowEngineSnapshotByHwnd := byHwnd
-    WindowEngineLastSnapshotTick := A_TickCount
-    WindowEngineLastWindowCount := snapshot.Length
+        WindowEngineSnapshot := snapshot
+        WindowEngineSnapshotByHwnd := byHwnd
+        WindowEngineLastSnapshotTick := A_TickCount
+        WindowEngineLastWindowCount := snapshot.Length
     } finally {
         WindowEngineSnapshotBusy := false
     }

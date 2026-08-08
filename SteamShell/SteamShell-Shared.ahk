@@ -4067,6 +4067,134 @@ IsCloaked(hwnd) {
     }
 }
 
+; ==============================================================================
+; The window inventory
+; ==============================================================================
+; ONE enumeration of the visible top-level windows, with every fact either
+; product asks about each one attached to it.
+;
+; THIS IS THE LAYER THE CONSOLIDATION MISSED, and everything above it was built
+; twice as a result. The JUDGEMENT was shared -- GameWindowShapeVerdict,
+; GameWindowCpuVerdict, SortCandidatesByScoreAreaDesc and
+; WindowEngineIsLegacyApplicationSurface all live in SteamShell-Common.ahk --
+; while the inventory those functions judge stayed per-tree, as
+; WindowEngineBuildSnapshot in the shell and AssistInventoryBuild in the
+; companion. The two items were 21 keys each and 19 of them identical; the
+; companion already carried "proc" and "scriptOwned" as aliases of its own "exe"
+; and "ours", written in specifically so the shared detectors would accept them.
+; That is what a missing layer looks like from above.
+;
+; It also explains the Task Switcher existing twice under names that share no
+; word, and the companion enumerating windows three times per pass -- assist,
+; screen probe, switcher -- where the shell enumerates once and hands the result
+; to ten consumers.
+;
+; THE SUPERSET, NOT EITHER PRODUCT'S FILTERED VIEW. The two builders disagreed
+; about membership, not just about key names: the shell keeps desktop and shell
+; windows and marks them, the companion dropped them; the companion dropped tool
+; windows and degenerate rectangles, the shell kept them. Picking one of those
+; would silently change the other product. So the enumeration keeps everything
+; that is a visible, uncloaked top-level window and RECORDS the distinctions --
+; "desktop", "toolWindow", "degenerate" -- and each caller filters on the way
+; out. The filter is then a visible, testable line in the caller rather than a
+; difference buried in two enumerations nobody reads side by side.
+;
+; "bpm" is deliberately absent and defaults false. Big Picture matching needs
+; BpmTitle, which is a shell setting the companion does not have, and the shell's
+; wrapper fills it in afterwards through WindowEngineTitleMatchesBpm. A seam
+; would also have worked; a key the caller owns is cheaper and says the same
+; thing.
+SharedWindowInventoryBuild() {
+    global ScriptPid
+    static WS_VISIBLE := 0x10000000
+    static WS_EX_TOOLWINDOW := 0x00000080
+    static WS_EX_APPWINDOW := 0x00040000
+    static SHELL_CLASSES := Map(
+        "progman", true, "workerw", true,
+        "shell_traywnd", true, "shell_secondarytraywnd", true)
+
+    items := []
+    for hwnd in WinGetList() {
+        if !DllCall("User32\IsWindow", "Ptr", hwnd, "Int")
+            continue
+        if IsCloaked(hwnd)
+            continue
+
+        id := "ahk_id " hwnd
+        style := 0
+        exStyle := 0
+        ; The style read is the liveness test. A window that dies between
+        ; WinGetList and here throws, and there is nothing useful to record
+        ; about it.
+        try {
+            style := WinGetStyle(id) + 0
+        } catch {
+            continue
+        }
+        try exStyle := WinGetExStyle(id) + 0
+        if !(style & WS_VISIBLE)
+            continue
+
+        pid := 0
+        title := ""
+        winClass := ""
+        proc := ""
+        minMax := 0
+        x := 0
+        y := 0
+        width := 0
+        height := 0
+        try {
+            pid := WinGetPID(id)
+            title := WinGetTitle(id)
+            winClass := WinGetClass(id)
+            proc := StrLower(WinGetProcessName(id))
+            minMax := WinGetMinMax(id)
+            WinGetPos(&x, &y, &width, &height, id)
+        } catch {
+            continue
+        }
+
+        classLower := StrLower(winClass)
+        ; Both spellings of the two keys the trees named differently. Dropping
+        ; either one means auditing every consumer in both products for which
+        ; name it happened to use, and the aliases cost one Map entry each.
+        items.Push(Map(
+            "hwnd", hwnd,
+            "pid", pid,
+            "proc", proc,
+            "exe", proc,
+            "title", title,
+            "class", winClass,
+            "classLower", classLower,
+            "style", style,
+            "exStyle", exStyle,
+            "owner", DllCall(
+                "User32\GetWindow", "Ptr", hwnd, "UInt", 4, "Ptr"), ; GW_OWNER
+            "minMax", minMax,
+            "x", x,
+            "y", y,
+            "w", width,
+            "h", height,
+            "area", Max(0, width) * Max(0, height),
+            "scriptOwned", pid = ScriptPid,
+            "ours", pid = ScriptPid,
+            "desktop", SHELL_CLASSES.Has(classLower),
+            "steam", IsSteamProcess(proc),
+            ; A tool window that does not also declare itself an app window is a
+            ; palette or an overlay. Recorded rather than dropped: Steam Big
+            ; Picture is one of these under Xbox FSE, and the Task Switcher has
+            ; to keep it.
+            "toolWindow", (exStyle & WS_EX_TOOLWINDOW) && !(exStyle & WS_EX_APPWINDOW),
+            ; A MINIMIZED window reports off-screen coordinates, not a zero
+            ; rectangle, so this flag is about genuinely degenerate windows and
+            ; must not be widened to mean minimized. "minMax" is that question.
+            "degenerate", width <= 0 || height <= 0,
+            "bpm", false))
+    }
+    return items
+}
+
 SettingsEditorRepaint() {
     global SettingsGui
     if !IsSet(SettingsGui) || !IsObject(SettingsGui)

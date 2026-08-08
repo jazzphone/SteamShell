@@ -1678,9 +1678,12 @@ foreach ($predicateId in $predicateActionIds.Keys) {
         "Quick Menu settings dispatch references a row that no longer exists: $predicateId")
 }
 
+# Counted over the EFFECTIVE source, so it covers SteamShell-Shared.ahk too --
+# which is where the one enumeration now lives, as SharedWindowInventoryBuild.
+# WindowEngineBuildSnapshot is its caller and the shell's only entry point to it.
 $fullWindowScans = [regex]::Matches($source, 'WinGetList\(\)')
 Assert-True ($fullWindowScans.Count -eq 1) (
-    "Only WindowEngineBuildSnapshot may perform an unfiltered full-window enumeration.")
+    "Only SharedWindowInventoryBuild may perform an unfiltered full-window enumeration.")
 Assert-True ($source -notmatch 'Win32_PerfFormattedData_PerfProc_Process') (
     "The retired WMI process-CPU query has returned.")
 Assert-True ($source -notmatch 'SetTimer\((CheckWindows|SteamRefocusPolling)') (
