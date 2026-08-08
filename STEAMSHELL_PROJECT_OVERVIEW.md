@@ -1,16 +1,16 @@
 # SteamShell Project Overview
 
-**Document status:** August 1, 2026
+**Document status:** August 8, 2026
 
-**Stable SteamShell release:** 1.9.9 (locked at `releases/1.9.9/`)
+**Stable SteamShell release:** 2.0.0 (locked at `releases/2.0.0/`, with the verified installer)
 
-**SteamShell working tree:** 1.9.9, settings schema 20 (helper 1.9.9.4)
+**SteamShell working tree:** 2.0.0, settings schema 23 (helper 2.0.0.1)
 
-**Stable SteamShell-XFE release:** 1.9.9 (locked at `releases/1.9.9/`)
+**Stable SteamShell-XFE release:** 2.0.0 (locked at `releases/2.0.0/`)
 
-**SteamShell-XFE working tree:** 1.9.9, settings schema 16
+**SteamShell-XFE working tree:** 2.0.0, settings schema 18
 
-**Development line:** Coordinated 1.9.9 pre-2.0 checkpoint; earlier releases preserved as immutable checkpoints
+**Development line:** Coordinated 2.0.0 release; earlier releases preserved as immutable checkpoints
 
 ## Executive summary
 
@@ -19,7 +19,7 @@ SteamShell is a living-room Windows gaming project with two related, but intenti
 1. **SteamShell 1.7** is the complete home-theater PC shell. It launches Steam Big Picture, manages Windows Explorer and the taskbar, decides which game or application should be in front, provides controller-driven system controls, and restores the normal Windows desktop when the gaming session ends.
 2. **SteamShell-XFE** is an experimental companion for Microsoft's Xbox Full Screen Experience (Xbox FSE). Xbox FSE remains responsible for the shell, application presentation, and Home app lifecycle. The companion is intended to add SteamShell's useful controller controls without competing with Xbox FSE.
 
-SteamShell and SteamShell-XFE 1.9.9 are the coordinated locked stable release.
+SteamShell and SteamShell-XFE 2.0.0 are the coordinated locked stable release.
 The bundle is the major pre-2.0 architecture checkpoint. Standalone separates
 its normal-integrity shell UI and application launches from a narrowly scoped
 elevated helper. XFE continues to operate inside Xbox FSE while Xbox FSE retains
@@ -265,8 +265,8 @@ Coverage rather than title is the discriminator on purpose. It survives client u
 
 | Area | SteamShell 1.7 | SteamShell-XFE |
 |---|---|---|
-| Status | Locked release 1.9.9 | Locked release 1.9.9 |
-| Current working version | 1.9.9 | 1.9.9 |
+| Status | Locked release 2.0.0 | Locked release 2.0.0 |
+| Current working version | 2.0.0 | 2.0.0 |
 | Primary role | Complete Steam-centered Windows shell | Utility companion to Xbox FSE |
 | Owns the Windows shell | Yes, when installed or registered as the shell | No |
 | Launches and monitors Steam | Yes | No |
@@ -309,8 +309,8 @@ It coordinates the entire session:
 
 ## Current release state
 
-- **Stable release:** 1.9.9, frozen with XFE in `releases/1.9.9`
-- **Active source:** 1.9.9 in `SteamShell/`
+- **Stable release:** 2.0.0, frozen with XFE in `releases/2.0.0`
+- **Active source:** 2.0.0 in `SteamShell/`
 - **Runtime:** AutoHotkey v2, 64-bit
 - **Validated compiler baseline:** AutoHotkey v2.0.26 64-bit
 - **Settings schema:** 18

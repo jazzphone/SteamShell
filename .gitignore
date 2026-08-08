@@ -16,6 +16,18 @@ __pycache__/
 /current.staging-*/
 /current.backup-*/
 
+# 2.0.0 SHIPS ITS BINARY, so nothing under releases/2.0.0/current is ignored.
+#
+# That is a deliberate break from 1.9.9. This release stores the verified
+# installer alongside the source that produced it, and its RELEASE.md checksums
+# the executable, so excluding it would make the checksum table describe a file
+# the repository does not contain. Build output under releases/2.0.0/SteamShell
+# is still transient and is ignored below.
+/releases/2.0.0/SteamShell/dist/
+/releases/2.0.0/SteamShell/build/
+/releases/2.0.0/current.staging-*/
+/releases/2.0.0/current.backup-*/
+
 # Generated only when the self-contained 1.9.9 release bundle is rebuilt. That
 # bundle predates the single-folder layout and still has a SteamShell-XFE tree
 # of its own, so its paths are listed as they actually are.

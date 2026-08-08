@@ -1,0 +1,360 @@
+# Functions defined ONCE in SteamShell-Shared.ahk and compiled into both
+# SteamShell.ahk and SteamShell-XFE.ahk.
+#
+# The two trees are parallel, not one reference and one copy: changes that belong
+# to both are designed once and applied to both in the same pass. This file used
+# to be the record of which functions were supposed to stay byte-identical, and
+# Validate-SharedParity.ps1 failed the build when one drifted. That was a net
+# that caught falls. The functions now live in one file, so a shared function can
+# no longer drift -- there is no second copy to drift from.
+#
+# The checker's job changed to match. It now asserts that every name below is
+# defined exactly once in SteamShell-Shared.ahk and NOT defined in either tree,
+# so a well-meaning "fix" that pastes a shared function back into one tree fails
+# the build instead of silently shadowing the shared one.
+#
+# To make a shared function diverge again: move it back into both trees and
+# delete its name here, in the same commit, so the divergence is a recorded
+# decision rather than a surprise.
+#
+# Blank lines and # comments are ignored; one function name per line.
+#
+# ---------------------------------------------------------------------------
+# Deliberately NOT listed, so the reason is on the record:
+#
+#   OpenOSK / OpenWindowsSettings
+#       Standalone carries a contingency path for finding ITSELF elevated, and
+#       the companion does not.
+#
+#       This note used to say "standalone runs elevated for high-integrity
+#       controller input". That has not been true since the elevated helper
+#       arrived: both products run at normal integrity, both launch the SAME
+#       helper binary with --product=standalone or --product=xfe, and
+#       SteamShell.ahk's own health check reports A_IsAdmin as a WARNING -- "
+#       SteamShell.exe is elevated; Quick Menu focus isolation from Steam may
+#       not work correctly. Launch it normally."
+#
+#       What is still true is narrower. Standalone can END UP elevated -- an
+#       administrator Setup takeover re-launches it with an identity argument,
+#       and nothing stops a user starting it as admin -- and as the shell it
+#       must not hand that token to TabTip, Explorer or RTSS. So its launchers
+#       open with `if !A_IsAdmin` and do exactly what the companion does;
+#       everything below that branch is the contingency. Sharing them would
+#       compile CreateProcessWithStandardToken and
+#       DesktopShellMatchesInteractiveUser into a program that has neither,
+#       which is a LOAD-time failure.
+#
+# ---------------------------------------------------------------------------
+# ToggleQuickMenuHdrState USED TO BE LISTED ABOVE as a deliberate divergence:
+# standalone fell back to the Win+Alt+B chord when DisplayConfig could not
+# report Advanced Color state, XFE reported Unavailable, and XFE's validator
+# forbade that chord anywhere in its tree.
+#
+# The divergence was real in the source and unreachable in practice. BOTH trees
+# build a different row -- id "hdrUnavailable" -- when the state cannot be read,
+# and that row is display-only in both: standalone handles it in the value-text
+# switch and in neither the adjust nor the activate switch, and XFE gives it
+# action "none". The branch the two trees disagreed about could therefore only
+# run if HDR state became unreadable BETWEEN the menu being built and the button
+# being pressed.
+#
+# So the chord was deleted rather than ported, and the function is now shared.
+# XFE's assertion stays -- it is satisfied by the whole project no longer
+# containing the chord -- and standalone gained the matching rule. The evidence
+# behind XFE's original decision (0.1.9 drove this row with the chord alone and
+# no live state) is exactly why the rule was kept rather than relaxed.
+#
+# ---------------------------------------------------------------------------
+# Some entries here REVERSE an earlier decision, recorded so the reversal is not
+# mistaken for drift. XFE_PARITY_NOTES.md listed the elevated-helper functions
+# as ones that "should not be added later", on the grounds that XFE would never
+# have an elevated helper. XFE now has an opt-in, default-off RTSS helper, and
+# it verifies the same payload against the same expected version before
+# launching it. Three groups moved in:
+#
+#   SteamShellPathIsAdminOnlyWritable / ElevatedHelperLocationIsProtected
+#       The protection gate. Takes a path and an expected version and inspects
+#       owner, DACL and readability. Knows nothing about either program.
+#
+#   GetProcessTokenSecurity and the token helpers, QuoteWindowsCommandLineArg,
+#   StrRepeat
+#       "Is that process the same user, in the same session, at High
+#       integrity?" is the same question in both programs.
+#
+#   The ElevatedRtss* request channel
+#       Both trees ask the same helper for the same thing in the same words.
+#       ElevatedRtssRequestPath() was the exception here, kept per-tree because
+#       the two programs keep their data elsewhere. That was a reason to ask the
+#       product where its directory is, not to write the path builder twice: the
+#       copies differed in SteamShellDataDir against A_ScriptDir and in nothing
+#       else. ProductDataDir() is now that question, and the builder is shared.
+#
+# What did NOT move, and should not: deployment. Setup Assistant, the embedded
+# payload, installation modes, the protected on-demand task, and
+# HardenElevatedHelperDirectory remain standalone-only, because those are
+# properties of an installer rather than of a path. XFE never deploys the
+# helper; SteamShell.exe's Setup Assistant does, in XFE mode.
+#
+# Also NOT shared, deliberately: StartElevatedInputHelper (standalone) and
+# StartElevatedRtssHelper (XFE). They are different launches of the same binary
+# -- standalone passes --product=standalone and may use a protected on-demand
+# task; XFE passes --product=xfe and only ever uses explicit UAC, because its
+# install directory has no protected ancestor chain.
+# ---------------------------------------------------------------------------
+AddInstallationRecordHealthRow
+AdjustRtssCustomFrameCap
+ApplyDisplaySelection
+ApplyElevatedRtssFrameLimit
+ApplyElevatedRtssProfileFrameLimit
+ApplyRtssGlobalState
+ApplyTrayIconImage
+AutoMouseProcessMatches
+BuildProductTrayMenu
+CachedInstallationVerdict
+CancelPendingRtssFrameCap
+CaptureGameCandidates
+CenterGuiOnMonitorActual
+ChangeQuickMenuTaskPage
+CloseControllerLearner
+CommitRtssPendingFrameCap
+ConfirmPrimaryDisplayMode
+ControllerBindingSharedAction
+ControllerButtonBits
+ControllerLearnAccept
+ControllerLearnAxisStats
+ControllerLearnBeginSteps
+ControllerLearnBufferAxisRaw
+ControllerLearnByteFreeRunning
+ControllerLearnClassifyAnalog
+ControllerLearnCompleteAxis
+ControllerLearnConsumesReport
+ControllerLearnCopyReport
+ControllerLearnDpadButtons
+ControllerLearnExamine
+ControllerLearnFinish
+ControllerLearnFriendlyName
+ControllerLearnHatText
+ControllerLearnHighByteQuality
+ControllerLearnIdentificationReady
+ControllerLearnLargestExcursion
+ControllerLearnNextStep
+ControllerLearnRecordButton
+ControllerLearnRejectAxis
+ControllerLearnReleaseCheck
+ControllerLearnReport
+ControllerLearnReportAxisActive
+ControllerLearnResolveAxis
+ControllerLearnRestart
+ControllerLearnSave
+ControllerLearnSkip
+ControllerLearnStartCapture
+ControllerLearnSteps
+ControllerLearnTick
+ControllerLearnUpdateUi
+ControllerLearnValidateDpad
+ControllerResumeGapCheck
+ControllerProfileAxisRaw
+ControllerProfileAxisSpan
+ControllerProfileLengthKey
+ControllerProfilePath
+ControllerProfileRestCheck
+ControllerProfileRestCheckBegin
+CopyHealthReport
+CycleDefaultAudioOutput
+CycleDisplayFrequency
+CycleDisplayResolution
+CycleDisplayScale
+CycleRtssFrameCap
+DeleteControllerProfileForActiveDevice
+DeviceChangeMessage
+DisplayChangeSafetyTick
+DistinctDisplayResolutions
+ElevatedHelperLocationIsProtected
+ElevatedRtssDoneEventName
+ElevatedRtssEventName
+ElevatedRtssRequestPath
+ElevatedRtssWritesAvailable
+EnsureDisplayScaleSelection
+EnsureDisplaySelection
+EnsureElevatedRtssDoneEvent
+EnsureElevatedRtssEvent
+EnsureGdiPlus
+EnsureRtssRunning
+ExecuteControllerBinding
+FormatHealthReport
+FrequenciesForResolution
+GameShapeFactsForWindow
+GetActiveAudioOutputDevices
+GetDefaultQuickMenuOrder
+GetBindingValue
+GetDisplayApplyValue
+GetFrameCapLabel
+GetLastLines
+GetMonitorIndexForWindow
+GetMonitorWorkAreaForPoint
+GetPhysicalModsMap
+GetQuickMenuPreviousExe
+GetRtssAvailability
+GetRtssFrameCapState
+GetRtssFrameLimit
+GetRtssGlobalState
+GetRtssHooksApi
+GetRtssMenuStatus
+GuiLiteralText
+HasLongBinding
+HealthResult
+InitDefaultControllerMappings
+InitializeTrayMenu
+InitXInput
+InstallationRecordAlert
+IsCloaked
+IsRtssFrameCapPreset
+IsSteamProcess
+IsUsableProfileExe
+LoadControllerProfile
+LogGameCandidateTable
+LogLine
+LogRawLine
+LogRow
+LogSteamShellSetupRecordDrift
+MouseWatch
+NormalizeKeyForSend
+ParseQuickMenuMainOrder
+PersistRtssCustomFrameCap
+PersistRtssFrameCapSelection
+PersistRtssFrameCapStateNow
+PositionGuiCentered
+QueueQuickMenuDisplayReflow
+PowerBroadcastMessage
+QuickMenuAccentPresetHex
+QuickMenuActivateShared
+QuickMenuAccentPresetNames
+QuickMenuAccentValueText
+QuickMenuAdjustSharedSetting
+QuickMenuApplyAccent
+QuickMenuConfirm
+QuickMenuCycleSharedSetting
+QuickMenuDestroyWindow
+QuickMenuDisplayReflow
+QuickMenuGameDetectionValue
+QuickMenuGameScoreIds
+QuickMenuGameScoreLabel
+QuickMenuGameScoreValue
+QuickMenuGoBack
+QuickMenuHideThenSend
+QuickMenuKeyboardActive
+QuickMenuLayoutLabel
+QuickMenuLayoutMove
+QuickMenuLayoutRestoreDefault
+QuickMenuLayoutSave
+QuickMenuLayoutToggle
+QuickMenuMoveSelection
+QuickMenuNormalizeSelection
+QuickMenuPaintRows
+QuickMenuRowAcceptsRepeat
+QuickMenuRowIsInert
+QuickMenuRowValueText
+QuickMenuRowsClick
+QuickMenuSelectFirst
+QuickMenuSelectLast
+QuickMenuSetRedraw
+QuickMenuSettingValueText
+QuickMenuTaskPageSize
+QuickMenuTaskSlice
+QuickMenuTitleText
+QuickMenuToggleTable
+RawInputAxis
+RawInputClaimDevice
+RawInputDecodeReport
+RawInputDeviceKey
+RawInputDeviceName
+RawInputProbeEnumerate
+RawInputProbeMessage
+RawInputProbeStart
+RawInputProfileDecode
+RawInputReadState
+RawInputRegistered
+RawInputReregister
+RawInputResetDeviceLock
+RawInputResumeVerify
+ReadBool
+ReadInt
+ReadNumber
+ReadText
+RearmControllerInput
+ReassertTrayIcon
+RefreshQuickMenuLayoutManager
+RecordShortcutCancel
+RefreshHealthCheck
+RegisterQuickMenuKeys
+RegisterTaskbarCreatedListener
+RequestElevatedRtssFrameLimit
+ResolveRtssExecutablePath
+RestoreRtssFrameLimitTick
+RevealWindow
+RotateLogIfNeeded
+RtssFrameCapBlockedReason
+RtssFrameCapModeForFps
+RtssFrameCapValueText
+RtssFrameCapWritable
+RtssGlobalFrameLimit
+RtssProfileTargetExe
+RtssSaveProfileValueText
+SanitizeDiagnosticText
+SaveRtssFrameLimitToProfile
+SendChordSafe
+SendRtssShortcut
+SettingsAddButtonRow
+SettingsAddCheckbox
+SettingsAddChoice
+SettingsAddNote
+SettingsAddPathField
+SettingsAddRowsForCategory
+SettingsAddShortcutField
+SettingsAddSliderField
+SettingsAddTextField
+SettingsCategoryRows
+SettingsEditorRepaint
+SettingsEditorSetRedraw
+SettingsEditorGetScrollTrackPosition
+SendSteamOverlayChord
+SetQuickMenuHdrState
+SetRtssFrameLimiterState
+SetRtssGlobalFrameLimit
+SetRtssOverlayState
+SettingsLayout
+SettingsRefreshSliderReadouts
+SettingsRowAppliesTo
+SettingsRowChoices
+SettingsRowDefault
+SettingsRowLabel
+SettingsSelectChoiceByText
+SettingsSliderReadoutRegistry
+SettingsUpdateScrollBar
+SharedNotify
+ShouldLogRateLimited
+ShowControllerLearner
+ShowNotification
+ShowHealthCheck
+ShowQuickMenuLayoutManager
+ShutdownGdiPlus
+ShutdownRtssHooksApi
+SteamShellInstallationVerdict
+SteamShellSetupRecord
+SteamShellSetupRecordDrift
+StopElevatedHelper
+SystemCursor
+TaskbarCreatedHandler
+ToggleQuickMenuHdrState
+ToggleQuickMenu
+ToggleRtssFrameLimiter
+ToggleRtssOverlay
+TryInvokeTouchKeyboard
+VerifyElevatedHelperProcess
+ViewButtonReleased
+WaitForElevatedRtssRequest
+WaitForVerifiedElevatedHelper
+XInputGetState
+XInputResolveController
+
+XInputScanGate

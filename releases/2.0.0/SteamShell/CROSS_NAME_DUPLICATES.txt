@@ -1,0 +1,51 @@
+# Pairs of functions, one per tree, that are the same routine under two names
+# and are ALLOWED to stay that way -- each with the reason recorded beside it.
+#
+# Why this file exists
+# --------------------
+# SHARED_FUNCTIONS.txt records what is defined once. DIVERGENT_FUNCTIONS.txt
+# records what is deliberately written twice UNDER THE SAME NAME. Neither could
+# see a duplicate that had been renamed, because both compare functions by name
+# -- so a rename was the one form of drift this project had no check for.
+#
+# Seven pairs existed when the check was written, and none of them was a
+# decision anybody had made:
+#
+#   SetStatus / ShowNotification                three identical lines apiece,
+#                                               both wrapping SharedNotify
+#   GuiSafeLabel / GuiLiteralText               both StrReplace(text,"&","&&")
+#   IsCloakedWindow / IsCloaked                 same DWM attribute
+#   SettingsRepaint / SettingsEditorRepaint     line wrapping only
+#   SettingsSetRedraw / ...EditorSetRedraw      an entire settings-UI subsystem
+#   SettingsGetScrollTrackPosition / ...        hidden behind a prefix split
+#   GetRtssSummary / GetRtssMenuStatus          one local variable name
+#
+# All seven are shared now, which is why this file is empty. An entry here means
+# two names for one routine were kept ON PURPOSE, and says why.
+#
+# THE EIGHTH, AND WHAT IT SAYS ABOUT THIS CHECK
+# ---------------------------------------------
+# An audit pass found one more, months after the seven:
+#
+#   InitDefaultControllerMappings / DefaultControllerMappings
+#                                               the same 22 controller bindings
+#                                               and 3 display overrides, one
+#                                               written as subscript assignments
+#                                               and one as a Map() literal
+#
+# It is shared now, but it was not found BY this check, and it could not have
+# been. The check compares call sequences, and neither body calls anything worth
+# comparing -- one is 22 assignments, the other is a single Map(). A pure-DATA
+# function has no call sequence, so it is invisible here for the same reason it
+# is invisible to the name-keyed gate: nothing about it is a call, and the names
+# do not match.
+#
+# The gap is recorded rather than closed. Comparing data tables structurally is a
+# different check from comparing call sequences, and writing a weak version of it
+# would be worse than knowing this one does not cover them.
+#
+# Format
+# ------
+#   xfeName=standaloneName: the reason they must stay separate
+#
+# An entry with no reason fails the build, as in the other two manifests.
