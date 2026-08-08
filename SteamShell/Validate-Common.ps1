@@ -29,16 +29,28 @@ function Assert-True {
 
 # Every source read once per process, and the cost of doing so reported.
 #
-# These validators read the same handful of files over and over -- around forty
-# Get-Content calls between this file and each product's, over five sources of
-# which one is 750 KB. In place that is wasteful; on the UNC root this project is
-# actually developed from, every one of them is a network round trip.
+# THE CACHE SAVED NOTHING, AND THE COUNTER IS WHY THIS SAYS SO. Measured on the
+# UNC root this project is developed from:
 #
-# THE COUNTERS ARE THE POINT AS MUCH AS THE CACHE. The harness now times each
-# step, which said the two validators are 60% of the run once the build's own
-# copies are counted -- but not whether that is file I/O or regex. Guessing sent
-# one round of optimisation at the wrong target already. Get-ReadStats prints
-# both numbers, so the next run answers it instead of another argument.
+#     15 file reads (92 served from cache) in 508 ms
+#
+# Half a second out of a twenty-six second validator. Ninety-two avoided reads,
+# worth about two percent. The harness total moved 231.2s -> 235.9s, which is
+# run-to-run noise.
+#
+# So file I/O was never the cost, over SMB or otherwise, and the two guesses that
+# preceded this measurement -- first that the network dominated, then that the
+# repeated reads did -- were both wrong. What is left is CPU: .NET regex, roughly
+# 1,100 assertions, most of them (?s) patterns with .*? scanning an effective
+# source of about 1.5 MB once the includes are inlined. Making that faster means
+# running assertions against extracted function bodies instead of the whole file,
+# which is a rewrite of all 1,100, not a tuning pass.
+#
+# THE CACHE STAYS ANYWAY, and not out of sunk cost: it is correct, it costs
+# nothing, and the counter it carries is the record that stops the next person
+# re-running this experiment. Optimising I/O here is finished. If the number in
+# that line ever grows into seconds, something changed and it is worth looking
+# again.
 #
 # Single-shot processes, so there is no staleness question: nothing writes to a
 # source while a validator is reading it.

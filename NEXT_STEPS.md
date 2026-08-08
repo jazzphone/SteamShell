@@ -156,6 +156,32 @@ recorded as 0.61 when it is **0.31**; `TrayOpenQuickMenu` as 0.50 when it became
 Read scores out of `Replay-Validation.py`'s own `fingerprint`/`similarity`, or
 instrument its gate. Do not estimate.
 
+### The validation harness is CPU-bound, not I/O-bound
+
+Settled by measurement on 2026-08-08, after two wrong guesses. The full run is
+about 235s; the timing column in the summary breaks it down. What it is NOT:
+
+- **Not the UNC root.** `Get-ReadStats` reports *15 file reads (92 served from
+  cache) in 508 ms* against a 26s validator. Two percent.
+- **Not repeated reads.** Caching every source per process and caching
+  `Get-EffectiveSource` whole moved the total 231.2s -> 235.9s, i.e. nothing.
+- **Not the checks being numerous.** Running them ONCE instead of nine times is
+  already done, and the remaining runs are the ones that carry signal.
+
+It is .NET regex: ~1,100 assertions, most `(?s)` with `.*?`, each scanning an
+effective source of ~1.5 MB with the includes inlined. The only real fix is to
+run assertions against extracted function bodies rather than the whole file --
+a rewrite of all 1,100, not a tuning pass, and not obviously worth it for the
+~50s it might save.
+
+**Do not optimise the file I/O again.** The counter in each validator's pass line
+is there to say so; if it ever grows into seconds, something changed.
+
+The one cheap cut left: the first negative test in 5b still runs both validators
+(56.6s, of which ~46s is validation) to prove they work against a tree at a
+different path. Dropping it saves a fifth of the run and loses that one
+guarantee.
+
 ### `Replay-Validation.py` cannot see an assertion written against a property
 
 It replays `$source -match '...'`. It does **not** replay
