@@ -20,8 +20,9 @@
 #   SettingsGetScrollTrackPosition / ...        hidden behind a prefix split
 #   GetRtssSummary / GetRtssMenuStatus          one local variable name
 #
-# All seven are shared now, which is why this file is empty. An entry here means
-# two names for one routine were kept ON PURPOSE, and says why.
+# All seven are shared now. An entry here means two names for one routine were
+# kept ON PURPOSE, and says why; the file held nothing at all until the Task
+# Switcher pass below found a pair worth keeping apart.
 #
 # THE EIGHTH, AND WHAT IT SAYS ABOUT THIS CHECK
 # ---------------------------------------------
@@ -44,8 +45,44 @@
 # different check from comparing call sequences, and writing a weak version of it
 # would be worse than knowing this one does not cover them.
 #
+# THE NINTH, AND THE LARGEST
+# --------------------------
+# The whole Task Switcher:
+#
+#   GetSwitchableWindows / GetTaskSwitcherWindows
+#   ActivateSwitchableWindow / SelectTaskSwitcherWindow
+#   CloseSwitchableWindow / RequestCloseTaskSwitcherWindow
+#
+# Same Quick Menu row label, same page:TASKS, same question -- and names sharing
+# no word at all, so neither the gate nor a grep could pair them. A search for
+# the shell's identifier reported the feature MISSING from the companion, and an
+# architectural argument was built on top of that absence before anybody checked.
+#
+# Worse than invisible: the two copies had diverged in a way that mattered. The
+# companion's filter resolved Steam before the gates that reject it, because
+# Windows cloaks Steam Big Picture while Xbox FSE owns the screen and cloaking,
+# an empty title and no usable size each rejected it in turn. The shell's had a
+# legacy-surface waiver the companion lacked. Each copy carried a fix the other
+# needed.
+#
+# The LIST is shared now, as SharedTaskSwitcherWindows, carrying both fixes. The
+# activate and close pairs are recorded below instead: they are the same feature
+# under two names, and they genuinely differ, because what happens after a window
+# is chosen is where the two products stop agreeing.
+#
+# The lesson is the search habit rather than the check: look for the BEHAVIOUR --
+# the row id, the page constant, the log string -- not for one tree's identifier.
+#
 # Format
 # ------
 #   xfeName=standaloneName: the reason they must stay separate
 #
-# An entry with no reason fails the build, as in the other two manifests.
+# An entry with no reason fails the build, as in the other two manifests. An
+# entry does NOT have to have come from the detector: the two below score under
+# both thresholds and were written by hand, because the value of recording a pair
+# is highest exactly where no check can find it. The list is an allowlist, so a
+# hand-written entry costs nothing and answers the next person who greps one of
+# these two names and finds no twin.
+
+ActivateSwitchableWindow=SelectTaskSwitcherWindow: one-shot activation against a focus lock. The companion activates and stops -- if Xbox FSE puts something else in front afterwards, that is its call, and pinning a window would be this product fighting the thing it is a companion to. The shell IS the shell, so its version takes a lockFocus argument, records PinnedForegroundHwnd/Title/Exe for the focus engine to re-assert, releases any previous pin on a normal switch, and hands the cursor over through HandleCursorAfterManagedFocus. ActivateWindowRobust versus a bare WinActivate is the same divergence: the shell has to win against a fullscreen game's foreground lock.
+CloseSwitchableWindow=RequestCloseTaskSwitcherWindow: the shell splits the request from the kill. RequestCloseTaskSwitcherWindow asks politely and ForceCloseTaskSwitcherWindow is a separate confirmed action; the companion carries both in one function behind a `force` parameter and its own inline QuickMenuConfirmAction check. Merging them means choosing one confirmation model for two Quick Menus that present the confirmation differently.

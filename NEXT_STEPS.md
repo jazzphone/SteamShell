@@ -1,7 +1,10 @@
 # Next steps, and what was learned getting here
 
-Written 2026-08-08, immediately after 2.0.0. This is a work queue and a set of
-warnings. Delete it when the queue is empty.
+Written 2026-08-08, immediately after 2.0.0; Part 1 rewritten the same day once
+the queue had been worked. This is a work queue and a set of warnings.
+
+Part 1 is nearly empty and what is left needs hardware. Parts 2 and 3 are not a
+queue and do not expire -- do not delete this file with them in it.
 
 The warnings matter more than the queue. Most of them cost real time this pass,
 several produced a wrong answer that survived until something contradicted it,
@@ -10,142 +13,63 @@ obvious way.
 
 ---
 
-## Part 1 — Proposed work
+## Part 1 — What is left
 
-### A. Share the window inventory (the root fix)
+The 2026-08-08 queue ran. A, B, C, D, E and F are done and are in the history
+with their reasoning; what follows is the remainder, and one item that was
+proposed and turned out not to be worth doing as described.
 
-The consolidation shared the **judgement** and left the **inventory** per-tree.
-`GameWindowShapeVerdict`, `GameWindowCpuVerdict`, `SortCandidatesByScoreAreaDesc`
-and `WindowEngineIsLegacyApplicationSurface` are in `SteamShell-Common.ahk`;
-`WindowEngineBuildSnapshot` (shell) and `AssistInventoryBuild` (XFE) are not.
+### G. `PollController` core extraction — half done, half needs hardware
 
-That one missing layer is why the Task Switcher is duplicated, and why XFE
-enumerates windows three times while the shell enumerates once.
+Banked: `ControllerPrimeHoldTables` and `ControllerApplyStickDeadzone`, both in
+`SteamShell-Common.ahk`. Those were the two blocks each tree ran on every tick
+and could be moved by inspection.
 
-Measured: **the two inventory items are 21 keys each, 19 identical.** The four
-that differ are two aliases (`exe`=`proc`, `ours`=`scriptOwned`), one derived
-value (`classLower`), and one genuinely shell-specific flag (`bpm`).
+Not done, and deliberately: the shared `ControllerPollFrame` -- read, edge
+detection, hold and chord tracking. The loop is 550 lines in the shell against
+435 in the companion, the state is a dozen statics threaded through by
+reference, and the differences are real: the shell has the controller test and
+the settings editor, the companion has `CompanionDisabled`, a fresh-baseline
+path and per-edge diagnostic logging.
 
-| Step | Work | Risk |
-|---|---|---|
-| **A1** | Shared builder. Shell's `WindowEngineBuildSnapshot` becomes a wrapper, `bpm` through a seam. Shell behaviour unchanged. | **High** — feeds focus and geometry on the product that *is* the shell |
-| **A2** | XFE adopts it. Its three enumerations (`AssistInventoryBuild`, `RunScreenProbe`, `GetSwitchableWindows`) become one. | Medium |
-| **A3** | Task Switcher shared: filter + Steam exception, both trees reading the inventory. | Low once A1/A2 land |
+**It needs a machine with AutoHotkey and a controller.** Extract with both trees
+behaving identically and verify on hardware, THEN touch dispatch -- two commits,
+in that order. The gate scores the pair 0.31, so nothing demands it.
 
-Three commits. Build and hardware-test between each.
-
-### B. Task Switcher — already exists in both, under different names
-
-**XFE is not missing this feature.** It is there as `GetSwitchableWindows` /
-`ActivateSwitchableWindow` / `CloseSwitchableWindow`, against the shell's
-`GetTaskSwitcherWindows` / `SelectTaskSwitcherWindow` /
-`RequestCloseTaskSwitcherWindow` / `ForceCloseTaskSwitcherWindow`. Same Quick
-Menu row label, same `page:TASKS`.
-
-The names share no words, so the fingerprint gate — which compares functions
-defined in both trees **under the same name** — can never see the pair. This is
-precisely what `CROSS_NAME_DUPLICATES.txt` exists to record.
-
-**Do not adopt the shell's filter wholesale.** XFE's version is 68 lines against
-the shell's 28 because it carries a fix: Steam Big Picture vanished from the
-switcher under Xbox FSE, rejected in turn by the cloaked check, the empty-title
-check, the size check and the tool-window check. It resolves `isSteamWindow`
-first and waives all four. Losing that re-breaks a bug someone spent real time
-finding.
-
-Resolved by A3, with the Steam exception unconditional. The shell's snapshot
-drops **all** cloaked windows, and Windows cloaks for reasons beyond FSE, so the
-shell may have the same latent bug and simply trigger it less often.
-
-### C. `DiagnosticLogging` is a dead setting in the shell
-
-Shipped to **both** products by the shared spec, labelled *"Log all XInput slots
-on every change (diagnostic)"*, shown in the shell's Settings editor, read into
-`EnableControllerDiagnostics` — and in the shell the only thing that consumes it
-is `PositionGuiCentered`, which logs **window centring**. There is no
-`ControllerDiagnosticTick` or `ControllerDiagnosticIntervalMs` in the shell.
-
-A control that promises one thing and does another. Fix by porting the tick from
-XFE (~30 lines); the global is already declared and read.
-
-### D. Assert every settings row reaches a consumer
-
-Would have caught C. `Assert-QuickMenuRows` already proves every Quick Menu row
-reaches an activate path; this is the same check for the settings spec. Cheap,
-and it fails the build on the next dead setting instead of waiting for someone to
-notice.
-
-### E. `ProductIdentity` prints on every green build
-
-`Structural drift: 1 function(s) at or above 0.9 ... ProductIdentity (1)` appears
-in every passing run. It is a false positive: both bodies are a `static Map` and
-a `return`, so the call fingerprint is empty on both sides and scores 1.00. They
-can never be shared — that is what the seam is for.
-
-Exempt `$sharedSeamAllowed` from the structural-drift **report**, as was already
-done for the **gate**. Ten minutes. The cost of leaving it is that a permanent
-warning-shaped line in a green build teaches you to skip that section.
-
-### F. De-indented blocks — 187, not 650
-
-A control-flow line whose body sits at the same indent with no brace:
-
-| File | Count | Genuinely ambiguous |
-|---|---:|---:|
-| `SteamShell.ahk` | 167 | 29 |
-| `SteamShell-Common.ahk` | 12 | 3 |
-| `SteamShell-Shared.ahk` | 8 | 4 |
-| `SteamShell-XFE.ahk` | **0** | 0 |
-| `SteamShell-Helper.ahk` | **0** | 0 |
-
-XFE and the Helper are clean; this is legacy style in the oldest file. Fix the
-**36 ambiguous** ones by hand and leave the other 151 — reformatting them is a
-large diff for aesthetics. Example at `SteamShell.ahk:3297`, in INI parsing, next
-door to the `CleanIniValue` bug fixed this pass:
-
-```ahk
-if (sc)
-raw := Trim(SubStr(raw, 1, sc - 1))   ; guarded
-hc := InStr(raw, "#")                  ; NOT guarded, reads as though it is
-```
-
-### G. `PollController` core extraction
-
-**63% token-identical** once renamed locals are normalised (41% line-identical,
-which is why line diffing misleads here — the button table differs only in line
-wrapping). The largest identical runs are the core: state read, edge detection,
-hold and chord tracking, mouse move, binding execution.
-
-Differences are nine globals. Shell-only: `ControllerTestGui`,
-`SettingsEditorDialogActive`. XFE-only: `CompanionDisabled`,
-`EnableControllerDiagnostics`, `EnablePersistentMouseMode`, `ActiveInputBackend`,
-`ActiveControllerIndex`, `SettingsVisible`, `SettingsDialogActive`. Two of those
-are the same concept renamed (`SettingsEditorDialogActive` /
-`SettingsDialogActive`, already recorded as `ProductSetDialogActive`).
-
-Shape: shared `ControllerPollFrame` (read, edges, holds, chords, deadzone) plus
-per-tree dispatch, because the products genuinely have different surfaces
-competing for input. Two commits — extract with both trees behaving identically
-and verify on hardware, *then* touch dispatch. Gate scores it 0.31, so nothing
-demands it. Do it for maintenance, not for the score.
-
-### H. Event-driving the window enumeration — parked on one number
+### H. Event-driving the window enumeration — still parked on one number
 
 Open **Settings → Advanced → Health Check**, "Coordinated window engine" row. It
-already reports `last scan N windows in Mms`.
+reports `last scan N windows in Mms`.
 
-- ~12 windows in ~3 ms → **withdraw this**; 0.6% of a tick is not worth a hook.
+- ~12 windows in ~3 ms → **delete this item**; 0.6% of a tick is not worth a hook.
 - ~60 windows in ~45 ms → 9% of every tick confirming nothing changed; worth doing.
 
 If it is worth doing, the narrow version is: hook `EVENT_SYSTEM_FOREGROUND` and
-`EVENT_OBJECT_SHOW`/`HIDE` only — **not** `EVENT_OBJECT_LOCATIONCHANGE`, which
-fires per-pixel during drags and would cost more than the polling it replaces —
+`EVENT_OBJECT_SHOW`/`HIDE` only -- **not** `EVENT_OBJECT_LOCATIONCHANGE`, which
+fires per-pixel during drags and would cost more than the polling it replaces --
 and keep the 500 ms timer as a safety net. `TaskbarGuardWinEvent` is the working
 template, including its reentrancy guard and its "log when the hook was
 unavailable" discipline.
 
+There is now one enumeration to hook rather than four:
+`SharedWindowInventoryBuild`.
+
 ### I. Hardware verification (maintainer)
 
+Everything below was written or changed statically and has not been run.
+
+- **The shell's controller diagnostic tick.** New. Settings → Controller →
+  "Log all XInput slots on every change", then read the log for `Diag` lines.
+  Before this it was a control that did nothing; the failure mode to watch for
+  is the opposite one, a tick that never stops.
+- **The Task Switcher, in both products.** The list is one shared function now.
+  In the companion, Steam Big Picture must still appear under Xbox FSE -- that
+  is the fix the shared filter was built around. In the shell, check that an
+  ordinary desktop session's switcher looks exactly as it did, and that a
+  minimized exclusive-fullscreen game is still offered.
+- **The companion's screen probe and assist.** Both read the shared inventory
+  now. The probe should still list MORE windows than the inventory, with an
+  `excluded-from-inventory:` reason on each.
 - **Sleep/resume.** The trap: if device hand-over alone recovers input you will
   see neither a `Power: resumed from sleep` nor a `Power: wall-clock gap` line,
   and layers 2 and 3 go untested. Try a longer sleep, and from inside a
@@ -154,12 +78,23 @@ unavailable" discipline.
   the shared `ExportDiagnosticArchive`; only statically validated.
 - **Controller mouse speed** should feel unchanged after upgrading. If it feels
   roughly double, the ×32 migration factor is wrong for this hardware and 62.5 is
-  correct — a one-line change in both migrations.
+  correct -- a one-line change in both migrations.
 
-### Suggested order
+### D, revisited: the settings-row check does not catch what it was proposed for
 
-**E, D, C** (small; D catches the class C belongs to) → **A1, build, A2, build,
-A3** → **F** → **G** → **H** only if the number justifies it.
+`Assert-SettingsRowsReachConsumers` exists and is mutation-tested. It proves a
+row's key is read back and that the value reaches a consumer, and it would catch
+a genuinely unwired row.
+
+**It would not have caught `DiagnosticLogging`,** which is the reason it was
+proposed. That row passed both steps in the shell: read, and consumed -- by
+`PositionGuiCentered`, which logs window centring rather than the XInput slots
+the label promises. Telling that apart from `RtssOverlayToggleShortcut`, which is
+also consumed only in `SteamShell-Shared.ahk` and is entirely correct, needs the
+label's MEANING, and no static check has that.
+
+Recorded because the gap is easy to mistake for coverage. A control that lies is
+still found by reading the label and following the flag, and by nothing else.
 
 ---
 
@@ -191,9 +126,11 @@ brace matching showed the `finally` that clears it. **Always brace-match.**
 ### Grepping for a feature by one tree's function name
 
 The Task Switcher was declared missing from XFE because `GetTaskSwitcherWindows`
-returns nothing there. It exists as `GetSwitchableWindows`. An entire
+returns nothing there. It existed as `GetSwitchableWindows`. An entire
 architectural justification was then built on top of an absence that was really a
-naming difference.
+naming difference. The list is `SharedTaskSwitcherWindows` now, and the pair --
+along with the activate and close pairs, which stay separate -- is written down
+in `CROSS_NAME_DUPLICATES.txt`.
 
 **Search for the behaviour** — the Quick Menu row id, the page constant, the log
 string — not the shell's identifier.
@@ -255,7 +192,10 @@ difference between a design record and a rationalisation.
 
 ### Corrections made to my own analysis this pass
 
-Recorded so they are not re-derived: de-indents were **187**, not ~650; visible
+Recorded so they are not re-derived: de-indents were counted at **187**, not
+~650, and 155 ambiguous ones have since been indented with a check in both
+harnesses to stop them regrowing -- so the number to know now is that the
+remaining braceless bodies all END their block and read fine; visible
 top-level windows were quoted as 50–150 from a generic-desktop figure and are
 **unknown** for this workload (the Health Check reports the real number); XFE
 **has** the Task Switcher; `EnablePersistentMouseMode` **is** honoured by the

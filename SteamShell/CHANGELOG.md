@@ -1,5 +1,31 @@
 # SteamShell changelog
 
+## Unreleased
+
+The 2.0.0 follow-up queue, worked in order. One user-visible fix, one dead
+control made real, and the architectural change underneath both.
+
+- **Steam Big Picture can vanish from the Task Switcher when Windows cloaks it.**
+  The companion had the fix; the shell had the same latent bug and triggered it
+  less often, because Windows cloaks windows for reasons beyond Xbox FSE. Both
+  read one filter now, which resolves Steam before the three gates -- cloaking,
+  an empty title, no usable size -- that each reject it in turn.
+- **"Log all XInput slots on every change" now does that in the shell.** The row
+  had shipped in both products since the settings spec was unified, and only the
+  companion had a tick behind it; in the shell the flag reached nothing but the
+  window-centring log.
+- **One window inventory.** The consolidation had shared the judgement about
+  windows and left the enumeration per-tree, which is why the Task Switcher
+  existed twice under names sharing no word and why the companion enumerated
+  every top-level window three times per pass. There is one enumeration now,
+  asserted as one in both validators.
+- **Braceless bodies that read as though they guard more are indented** -- 155 of
+  them, whitespace only, and checked from now on. The layout had already
+  produced one report of a bug that did not exist, because a `}` at column zero
+  inside a function truncates range extraction.
+- Every Settings row is now asserted to reach something that reads it, and the
+  seam is no longer reported as structural drift on every green build.
+
 ## 2.0.0 — 2026-08-08
 
 The release that followed the 1.9.9 architecture checkpoint. Two themes run
