@@ -161,8 +161,10 @@ flickering.
 normal integrity and cannot move a High-integrity window, so it hands those to the small
 verified helper rather than elevating the whole shell.
 
-> **Known limitation:** geometry still centres against the *primary* monitor. Game
-> *detection* became per-monitor in 2.0.0; placement did not.
+> **Single display assumed.** Geometry centres against the primary monitor. SteamShell
+> is built for a TV or a handheld — one screen, one game — and window placement follows
+> that. Game *detection* is per-monitor as of 2.0.0, because the companion runs in
+> setups the shell does not, so the two differ deliberately rather than by omission.
 
 ### Focus
 
