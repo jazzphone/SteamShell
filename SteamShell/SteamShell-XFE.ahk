@@ -6762,21 +6762,7 @@ PollController() {
     ControllerResumeGapCheck(ControllerPollIntervalMs / 1000)
     inPoll := true
     try {
-        for definition in buttonDefinitions {
-            name := definition[1]
-            if !downTick.Has(name)
-                downTick[name] := 0
-            if !longFired.Has(name)
-                longFired[name] := false
-        }
-        if !downTick.Has("LT")
-            downTick["LT"] := 0
-        if !downTick.Has("RT")
-            downTick["RT"] := 0
-        if !longFired.Has("LT")
-            longFired["LT"] := false
-        if !longFired.Has("RT")
-            longFired["RT"] := false
+        ControllerPrimeHoldTables(downTick, longFired, buttonDefinitions)
 
         if CompanionDisabled {
             ResetControllerEdgeState(downTick, longFired, triggerDown,
@@ -6895,14 +6881,7 @@ PollController() {
         diagnosticLtDown := currentDiagnosticLtDown
         diagnosticRtDown := currentDiagnosticRtDown
 
-        if (Abs(lx) < ControllerDeadzone)
-            lx := 0
-        if (Abs(ly) < ControllerDeadzone)
-            ly := 0
-        if (Abs(rx) < ControllerDeadzone)
-            rx := 0
-        if (Abs(ry) < ControllerDeadzone)
-            ry := 0
+        ControllerApplyStickDeadzone(&lx, &ly, &rx, &ry, ControllerDeadzone)
 
         ; Settings chord: LB + RB + L3 + R3, held.
         ;

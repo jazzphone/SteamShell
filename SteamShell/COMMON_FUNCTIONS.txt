@@ -21,10 +21,12 @@ ClampFloat
 ClampInt
 CleanIniValue
 CommitIniChangesAt
+ControllerApplyStickDeadzone
 ControllerBindingHasLong
 ControllerBindingHoldsMouseButton
 ControllerHeldMouseButtons
 ControllerMouseSafetyTick
+ControllerPrimeHoldTables
 DisplayScaleLevels
 ElevatedHelperTaskXml
 ExpandEnvVars

@@ -838,6 +838,54 @@ SteamShellPathIsAdminOnlyWritable(path, &grantedTo, &failureReason) {
 ; sites and neither at others, and the helper clears previousButtons. Folding any
 ; of them in here would change behaviour at the sites that deliberately do not
 ; reset them.
+; The hold tables start every poll with a key for every button.
+;
+; Both loops ran on EVERY tick and did the same thing in a different order --
+; standalone primed downTick and longFired inside one loop and then the two
+; triggers in four separate ifs, XFE in the same loop and then two pairs. The
+; poll runs twenty times a second in both, so this is the most-executed
+; duplicate in the codebase and the least interesting one.
+;
+; It stays a "prime if absent" rather than an assignment, because these Maps are
+; static across ticks: overwriting would discard the press timestamps that Short
+; and Long bindings are measured from.
+ControllerPrimeHoldTables(downTick, longFired, buttonDefinitions) {
+    for definition in buttonDefinitions {
+        name := definition[1]
+        if !downTick.Has(name)
+            downTick[name] := 0
+        if !longFired.Has(name)
+            longFired[name] := false
+    }
+    for _, trigger in ["LT", "RT"] {
+        if !downTick.Has(trigger)
+            downTick[trigger] := 0
+        if !longFired.Has(trigger)
+            longFired[trigger] := false
+    }
+}
+
+; Stick deflection below the deadzone reads as no deflection.
+;
+; ByRef rather than a returned Map, because the callers carry these as four
+; plain locals through several hundred lines each and the point of this is to
+; delete eight identical lines, not to restructure the poll around them.
+;
+; TRIGGERS ARE NOT INCLUDED, deliberately. Both trees read LT and RT with their
+; own threshold (> 30) at several points, and the companion logs the RAW trigger
+; values in its per-edge diagnostic. A deadzone applied here would silently
+; change both.
+ControllerApplyStickDeadzone(&lx, &ly, &rx, &ry, deadzone) {
+    if (Abs(lx) < deadzone)
+        lx := 0
+    if (Abs(ly) < deadzone)
+        ly := 0
+    if (Abs(rx) < deadzone)
+        rx := 0
+    if (Abs(ry) < deadzone)
+        ry := 0
+}
+
 ResetControllerEdgeState(downTick, longFired, triggerDown, buttonDefinitions) {
     ; Every abort path already calls this, which is exactly the set of places a
     ; held mouse button must not survive. Wiring the release in here rather than

@@ -6947,22 +6947,7 @@ PollController() {
     ["R3", 0x0080],
     ]
 
-    ; Ensure keys exist
-    for def in btnDefs {
-    name := def[1]
-    if !downTick.Has(name)
-        downTick[name] := 0
-    if !longFired.Has(name)
-    longFired[name] := false
-    }
-    if !downTick.Has("LT")
-        downTick["LT"] := 0
-    if !longFired.Has("LT")
-        longFired["LT"] := false
-    if !downTick.Has("RT")
-        downTick["RT"] := 0
-    if !longFired.Has("RT")
-        longFired["RT"] := false
+    ControllerPrimeHoldTables(downTick, longFired, btnDefs)
 
     if (inPoll)
         return
@@ -7073,15 +7058,7 @@ PollController() {
         return
     }
 
-    ; Deadzone
-    if (Abs(lx) < ControllerDeadzone)
-        lx := 0
-    if (Abs(ly) < ControllerDeadzone)
-        ly := 0
-    if (Abs(rx) < ControllerDeadzone)
-        rx := 0
-    if (Abs(ry) < ControllerDeadzone)
-        ry := 0
+    ControllerApplyStickDeadzone(&lx, &ly, &rx, &ry, ControllerDeadzone)
 
     ; Controller chord: LB+RB+L3+R3 opens Full Settings (works even without
     ; holding View/Back). This is the emergency route on a handheld with no
