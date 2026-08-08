@@ -1122,8 +1122,11 @@ Assert-True (
     $source -match '(?s)ControllerLearnNextStep\(\).*?ControllerLearnValidateDpad\(' -and
     $source -match 'LearnDpadRetries') (
     "The four D-pad directions must be validated as a set, with a bounded retry.")
-# A control the driver swallows -- the Guide button, typically -- must not stall the
-# steps that follow it.
+# A control the driver swallows must not stall the steps that follow it.
+#
+# No step declares "optional" now -- it was the Guide button's, and that step is
+# gone. The mechanism is still asserted so it cannot be deleted as dead code:
+# removing it would make the next such step silently wait the full window.
 Assert-True (
     $source -match 'step\.Has\("optional"\)') (
     "Optional steps must use a shorter capture window so they cannot block later steps.")
@@ -1190,10 +1193,30 @@ Assert-True (
     $source -match 'LearnBaseline := ControllerLearnCopyReport\(data, base, length\)' -and
     $source -notmatch 'LearnBaseline := ControllerLearnCopyReport\(baseline, 0, length\)') (
     "A change-only controller must start rest sampling from the identifying release report, not its first-seen pressed report.")
+# Visible confirmation after every detection, in words -- and the byte, mask and
+# neutral value still written to the log.
+#
+# This used to require the byte/bit ON SCREEN, which is how the window came to
+# say 'A = byte 8 bit 0x01 active-high' to somebody mapping a gamepad. Both
+# halves are now asserted separately, because dropping either is a real loss:
+# without the on-screen line the user cannot tell a detection from a hang, and
+# without the logged detail today's gyro and trigger faults could not have been
+# diagnosed.
 Assert-True (
-    $source -match 'LearnDetailCtrl\.Text := "Detected: "' -and
-    $source -match 'Last detected:') (
-    "The learner must keep visible feedback showing which byte/bit was accepted.")
+    # Patterns stay ASCII on purpose: the strings they match contain an em dash,
+    # and a non-ASCII literal in a validator is the encoding trap this project
+    # has already been bitten by once.
+    $source -match 'LearnDetailCtrl\.Text := "Got it' -and
+    $source -match 'LearnLastFriendly \. "\."|Got it[^"]*" LearnLastFriendly' -and
+    $source -match 'Last one:[^"]*" LearnLastFriendly' -and
+    $source -match 'ControllerLearnFriendlyName\(name\)') (
+    "The learner must confirm each detection on screen in plain language.")
+Assert-True (
+    $source -match '(?s)ControllerLearnAccept\([^)]*\)\s*\{' +
+        '(?:(?!\n\})[\s\S])*?LogLine\("Learn: " detail' -and
+    $source -match 'name " = byte " offset " bit 0x"') (
+    "The learner must still log the byte and mask it accepted; the plain-language " +
+    "text on screen replaces that detail in the window, not in the log.")
 Assert-True (
     $source -notmatch 'LearnMoved|LearnAxis8|LearnAxis16|LearnLastReport|LearnRestSet') (
     "Interrupted controller-learner state from the earlier axis draft is still referenced.")

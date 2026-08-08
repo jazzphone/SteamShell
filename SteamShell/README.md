@@ -682,6 +682,31 @@ saved report length before use. The wizard is reachable from Settings and from
 the notification-area menu — deliberately both, because the user who needs it is
 the one whose controller does not work yet.
 
+The wizard speaks plainly — "Got it — the A button. Let go." rather than the
+byte and bit it matched. The byte, mask and neutral value still go to the log,
+where they are what makes a misbehaving pad diagnosable.
+
+It does **not** ask for the Guide/Xbox button. Windows usually swallows that
+press before it reaches the HID report, and when it does not, it opens Game Bar
+over the wizard and takes the foreground away mid-mapping. Pads that report the
+Guide bit over XInput still map it to `Y.Short`, and profiles learned before this
+keep decoding theirs.
+
+Anything held during the two "hands off" countdowns is recorded as resting noise
+and then ignored for the rest of the session — that is what keeps stick jitter
+and gyro drift out of the button steps. If a press is being swallowed for that
+reason the log now says so by name instead of appearing to ignore the pad.
+
+A trigger is never matched against a byte that moves on its own. A stick is saved
+by resting at its centre, which a motion sensor does not; a trigger legitimately
+rests at one end, so nothing downstream can catch that mistake. Where the only
+candidates are motion bytes the step is skipped and the rest of the profile is
+kept, rather than binding a trigger to a gyro and leaving the pointer running
+across the screen.
+
+The profile is written in one staged commit, so it is either the profile just
+learned or the one that was there before — never half of each.
+
 While the wizard is open the controller poll stands down entirely. It reads the
 pad itself, and every button it asks for otherwise means something: L3+R3 is the
 Quick Menu chord, and the D-pad would move focus between the wizard's own

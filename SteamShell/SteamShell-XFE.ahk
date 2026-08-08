@@ -2024,7 +2024,13 @@ global LearnRestCount := 0
 ; Peak magnitude per axis across the post-save rest window, and how many samples
 ; it covers. Declared here rather than created on first use so they behave like
 ; every other script-scope variable.
-global RestCheckPeak := Map()
+; Seeded with every axis it reads, not left empty. ControllerProfileRestCheck
+; reads RestCheckPeak[name] for all six unguarded, and an empty Map answers that
+; with "Item has no value" -- an uncaught error, from a timer, on the path taken
+; immediately after a controller profile is applied. Only
+; ControllerProfileRestCheckBegin fills it today, so the reads are safe by
+; sequence rather than by construction; this makes them safe either way.
+global RestCheckPeak := Map("LX", 0, "LY", 0, "RX", 0, "RY", 0, "LT", 0, "RT", 0)
 global RestCheckSamples := 0
 ; Before a controller is selected, keep one baseline per RawInput device. The
 ; wizard therefore honours "press any button" even when several pads are
@@ -2051,6 +2057,20 @@ global LearnAxisStarted := false
 ; failure, including ones that had nothing to do with travel, which made a real
 ; fault indistinguishable from a small movement.
 global LearnAxisRejection := ""
+; The plain-language twin of LearnLastAccepted. That one keeps the byte, mask
+; and neutral value because the log needs them; this is what the window shows.
+global LearnLastFriendly := ""
+; Set when an axis step is refused for a reason RETRYING CANNOT FIX, so the
+; capture timeout skips the step instead of restarting it. Axis steps retry on
+; timeout because a timeout is normally transient -- the user was slow, or did
+; not return to rest. A trigger whose only candidates are motion bytes is not
+; transient: every retry reaches the same refusal, and the controller is inert
+; while the wizard is open, so Skip needs a mouse the user may not have.
+global LearnAxisUnresolvable := false
+; One "that bit is masked as rest noise" line per step, not per report.
+; Reports arrive at over 100 Hz and the condition persists for the whole
+; step, so an ungated log would be thousands of identical lines.
+global LearnNoiseBlamed := false
 global LearnStepIndex := 0
 global LearnResultButtons := []
 global LearnResultAxes := Map()

@@ -1539,3 +1539,21 @@ implementation, so it is worth re-confirming.
 - Every button row is three even columns across the content width. Confirm no
   row is indented past the rows above it or stops short of the right edge, on
   every page that has buttons.
+
+## Controller learner, after the DirectInput audit
+
+The learner is shared, so everything in the shell's checklist for it applies
+here too. These are the companion-specific runs.
+
+- The companion is the product whose users are most likely to be on a
+  DirectInput pad with a live gyro. Run the full wizard on one and confirm the
+  trigger steps either learn a real trigger or **skip cleanly** — never bind one
+  to a motion axis.
+- Confirm the wizard no longer asks for the Guide/Xbox button, and that pressing
+  it during mapping does not disturb the wizard.
+- Confirm the plain-language text appears here as well: "Got it — the A button.
+  Let go.", "controller is responding". The byte and mask still belong in the log.
+- Save a profile and confirm no `.update-<pid>.tmp` remains beside the profile
+  file, and that a first-ever profile is created on a machine with none.
+- Start Over during a pause, and Close-then-reopen immediately, must both be
+  clean — no error dialog.

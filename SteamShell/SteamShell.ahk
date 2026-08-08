@@ -189,6 +189,20 @@ global LearnActive := false
 global LearnAnalogBytes := Map()
 global LearnAnalogValues := Map()
 global LearnAxisRejection := ""
+; The plain-language twin of LearnLastAccepted. That one keeps the byte, mask
+; and neutral value because the log needs them; this is what the window shows.
+global LearnLastFriendly := ""
+; Set when an axis step is refused for a reason RETRYING CANNOT FIX, so the
+; capture timeout skips the step instead of restarting it. Axis steps retry on
+; timeout because a timeout is normally transient -- the user was slow, or did
+; not return to rest. A trigger whose only candidates are motion bytes is not
+; transient: every retry reaches the same refusal, and the controller is inert
+; while the wizard is open, so Skip needs a mouse the user may not have.
+global LearnAxisUnresolvable := false
+; One "that bit is masked as rest noise" line per step, not per report.
+; Reports arrive at over 100 Hz and the condition persists for the whole
+; step, so an ungated log would be thousands of identical lines.
+global LearnNoiseBlamed := false
 global LearnAxisSamples := []
 global LearnAxisStarted := false
 global LearnBaseline := 0
@@ -218,7 +232,13 @@ global LearnResultAxes := Map()
 global LearnResultButtons := []
 global LearnStepIndex := 0
 global LearnStepReports := 0
-global RestCheckPeak := Map()
+; Seeded with every axis it reads, not left empty. ControllerProfileRestCheck
+; reads RestCheckPeak[name] for all six unguarded, and an empty Map answers that
+; with "Item has no value" -- an uncaught error, from a timer, on the path taken
+; immediately after a controller profile is applied. Only
+; ControllerProfileRestCheckBegin fills it today, so the reads are safe by
+; sequence rather than by construction; this makes them safe either way.
+global RestCheckPeak := Map("LX", 0, "LY", 0, "RX", 0, "RY", 0, "LT", 0, "RT", 0)
 global RestCheckSamples := 0
 ; "auto" (default), "rawinput" or "xinput".
 ;
@@ -9925,9 +9945,16 @@ CheckTempDisables() {
     }
     now := A_TickCount
     restoreAny := false
-    for feature, entry in TempDisables {
+    ; Over a CLONE, because the body deletes from the map it is walking.
+    ; AutoHotkey does not support modifying an object while it is being
+    ; enumerated, and both of the other places this codebase prunes a map during
+    ; a walk -- AssistCpuSamples in the companion, held in
+    ; ReleaseControllerMouseButtons -- already clone for exactly this reason.
+    ; This one did not.
+    for feature, entry in TempDisables.Clone() {
     if (now >= entry["until"]) {
     SetFeatureState(feature, entry["prev"])
+    if TempDisables.Has(feature)
     TempDisables.Delete(feature)
     restoreAny := true
     }

@@ -940,3 +940,32 @@ The part that mattered is already shared. The shell read only the configured
 XInput slot, so a pad that Steam Input moved mid-session stopped answering, on the
 product where the recovery on offer was to change Controller Index in Settings
 using the controller that had just stopped working.
+
+## The learner is shared, and that is now load-bearing
+
+An 8BitDo Ultimate 2 in DirectInput mode produced a trigger bound to a gyro axis
+in the shell, and the first instinct was that the companion had solved it and the
+shell had not — the drift this document exists to catch.
+
+It had not. All 32 learner functions live in `SteamShell-Shared.ahk` and none in
+either tree, so both products ran the identical filter and would both have done
+the same thing on that pad. What looked like drift was one product being tested
+on hardware the other had not met.
+
+That is the arrangement working, and it is worth stating plainly because the
+opposite reading is so available: when two products behave differently, shared
+code means the difference is in the input or the environment, not the source. The
+fix landed in both at once.
+
+The audit that followed found four defects in that shared code, so this is not an
+argument that sharing makes code correct — only that it makes one fix enough.
+
+## What is still per-tree in the controller path
+
+- `RestCheckPeak` is declared in each tree, because `SteamShell-Shared.ahk`
+  cannot declare a global. Same for the four learner flags added with the audit.
+- `TempDisables` is the shell's alone, which is why its enumerate-while-modifying
+  walk had no companion counterpart to compare against. The companion's
+  equivalent, `AssistCpuSamples`, already cloned before deleting — as does
+  `held` in `SteamShell-Common.ahk`. The shell was the only one of the three that
+  did not, and nothing could see that because there was no shared name to compare.

@@ -1715,3 +1715,41 @@ first; the tap and hold switches beside it are on.
   the escape hatch, and it used to be the tenth of nineteen buttons.
 - Open every page in turn and confirm the layout audit reports no issues in the
   log: no control crossing the content boundary, and no two controls overlapping.
+
+## Controller learner, after the DirectInput audit
+
+Run these with a pad whose gyro is live — an 8BitDo in DirectInput mode is the
+case they were written from.
+
+- **The wizard must not ask for the Guide/Xbox button.** Confirm the step list
+  goes ... L3, R3, D-pad up. Pressing Guide at any point should do whatever
+  Windows normally does and not disturb the wizard.
+- Keep hands off during both "hands off" countdowns. Then confirm every button
+  step detects its button. This is the failure that looked like the wizard
+  ignoring the controller.
+- Now deliberately **hold A during the "hands off — do not touch anything yet"
+  countdown**, then continue. The A step should fail, and the log must say
+  `byte N moved for A but every changed bit is masked as rest noise`. Press
+  Start Over and confirm a clean run works.
+- Confirm the rest-sample line names the byte offsets, e.g.
+  `12 of 34 bytes changed during rest (bytes 14,15,...)`. Button bytes appearing
+  there means something was held.
+- **Press Start Over during a pause** — right after an axis completes, or while
+  "let go of everything and we will try this one again" is showing. The wizard
+  must restart cleanly with no error dialog. Repeat with Close instead of Start
+  Over, then reopen immediately.
+- On a gyro pad, watch the trigger steps. If a trigger cannot be told apart from
+  the motion sensor the wizard must **skip it and carry on**, logging
+  `NOT retrying with them included`. It must never bind a trigger to a motion
+  byte — the symptom of that is the rest check reporting `LT=255` with nothing
+  touched.
+- Complete a profile and Save. Confirm no `.update-<pid>.tmp` file is left beside
+  `<settings>-Controllers.ini`, and that the profile is complete: report length,
+  buttons, axes and hat all present.
+- Save a profile on a machine that has never had one, so the profile file does
+  not exist yet. It must be created rather than failing.
+- Provoke the rest check to fail (a deliberately bad profile), answer **Yes** to
+  deleting it, and confirm the profile is deleted and the shell reloads —
+  **no "Item has no value" error box.**
+- Read the wizard end to end as a first-time user. No byte numbers, masks or
+  `active-high` should appear on screen; all of that belongs in the log.

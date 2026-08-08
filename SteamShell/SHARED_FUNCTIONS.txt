@@ -132,6 +132,7 @@ ControllerLearnCopyReport
 ControllerLearnDpadButtons
 ControllerLearnExamine
 ControllerLearnFinish
+ControllerLearnFriendlyName
 ControllerLearnHatText
 ControllerLearnHighByteQuality
 ControllerLearnIdentificationReady

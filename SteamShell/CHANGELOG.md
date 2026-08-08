@@ -1,5 +1,57 @@
 # SteamShell changelog
 
+## Unreleased — the controller learner, audited end to end
+
+Found while mapping an 8BitDo Ultimate 2 in DirectInput mode, where the gyro is
+live and streams six 16-bit motion axes at about 1 kHz.
+
+**A trigger could be learned onto a gyro axis.** The motion filter worked exactly
+as designed — 12 of 34 bytes moved at rest, 11 correctly excluded — and then the
+fallback handed them back. When nothing survives the filter the wizard retries
+with motion bytes allowed in, which is right for a stick and wrong for a trigger:
+a stick is thrown out for not resting at its centre, and a trigger legitimately
+rests at one end, so nothing downstream can catch it. LT was bound to byte 25,
+the profile saved, and the rest check immediately reported it pegged at 255 with
+nothing touched. Triggers no longer get that retry; the step is skipped and the
+rest of the profile kept.
+
+**Answering "yes, delete the bad profile" crashed instead of deleting it.**
+`Map.Delete` throws when the key is absent, and `RawInputDeviceKey` deleted an
+absent backoff entry one line below a `cache.Has()` guard that got it right.
+Reached straight from the rest-check dialog, so the user asking to be rid of a
+runaway pointer kept it and got an error box. Three more unguarded deletes fixed
+with it, and one enumerate-while-modifying walk in the shell that both other
+places in the codebase already clone to avoid.
+
+**Start Over could crash the wizard.** `ControllerLearnStartCapture` runs from a
+one-shot armed 900 to 1500 ms earlier. Start Over and closing the window both set
+the step index back to 0 and neither cancelled it, so a pending timer evaluated
+`steps[0]`. Both callers cancel it now, and the function guards as well.
+
+**The profile is written in one staged commit.** Six separate `IniWrite` calls
+could leave a profile carrying some of its keys, which the loader accepts as long
+as any one of buttons, hat or axes survived — a controller that comes back with
+its buttons and no sticks, behaving strangely for a reason nothing reports.
+`CommitIniChangesAt` gained the ability to stage a target that does not exist
+yet, which the first profile ever saved needs.
+
+**The Guide/Xbox step is gone.** Windows usually swallows that press, and when it
+does not it opens Game Bar over the wizard. The bit is still consumed and still
+mapped to `Y.Short` for pads that report it over XInput, and profiles learned
+before this keep decoding theirs.
+
+**The wizard speaks plainly.** "Got it — the A button. Let go." rather than
+`A = byte 8 bit 0x01 active-high`; "controller is responding" rather than a raw
+report count. The byte, mask and neutral value still go to the log, which is what
+made every fault above diagnosable — the split is deliberate, and asserted in
+both directions.
+
+**Anything held during a countdown is no longer a silent dead end.** Bits that
+move during the rest measurement are ignored for the whole session, which is what
+keeps gyro drift out of the button steps — but a button held during that
+countdown was then undetectable with nothing anywhere saying why. The log names
+the offsets it masked, and a step that sees the press but has it masked says so.
+
 ## Unreleased — five defects the settings window could not have shown you
 
 **The RTSS frame limiter did not survive a reboot, sometimes.** The frame cap is

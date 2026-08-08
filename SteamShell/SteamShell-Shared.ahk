@@ -5259,9 +5259,18 @@ RawInputDeviceKey(hDevice, refresh := false) {
     ; path of a handheld. So failure backs off for a couple of seconds instead.
     static failedUntil := Map()
     static IDENTITY_RETRY_MS := 2000
+    ; Map.Delete THROWS when the key is absent. The cache line below got that
+    ; right and this one did not, one line apart.
+    ;
+    ; It surfaced from the rest check: a profile that reads as pegged offers to
+    ; delete itself, DeleteControllerProfileForActiveDevice asks for the device
+    ; key with refresh := true, and this threw "Item has no value" out of a timer
+    ; -- so answering Yes to "delete the bad profile?" crashed instead of
+    ; deleting it, leaving the user with the runaway pointer they had just asked
+    ; to be rid of.
     if (refresh && cache.Has(hDevice))
         cache.Delete(hDevice)
-    if refresh
+    if (refresh && failedUntil.Has(hDevice))
         failedUntil.Delete(hDevice)
     if cache.Has(hDevice)
         return cache[hDevice]
@@ -5388,7 +5397,11 @@ RawInputDeviceKey(hDevice, refresh := false) {
     ; Success caches permanently; failure only backs off. See failedUntil above.
     if (key != "") {
         cache[hDevice] := key
-        failedUntil.Delete(hDevice)
+        ; Guarded for the same reason: a device that identifies on its first
+        ; attempt was never in failedUntil, and deleting a key that is not there
+        ; throws.
+        if failedUntil.Has(hDevice)
+            failedUntil.Delete(hDevice)
     } else {
         failedUntil[hDevice] := A_TickCount + IDENTITY_RETRY_MS
     }
@@ -6395,12 +6408,41 @@ CloseControllerLearner(*) {
     SetTimer(ControllerLearnTick, 0)
     SetTimer(ControllerLearnBeginSteps, 0)
     SetTimer(ControllerLearnNextStep, 0)
+    SetTimer(ControllerLearnStartCapture, 0)
     SetTimer(ControllerLearnIdentificationReady, 0)
     if IsSet(LearnGui) {
         try LearnGui.Destroy()
         LearnGui := unset
     }
     LogLine("Learn: wizard closed.")
+}
+
+
+; What a control is CALLED, for the person doing the mapping.
+;
+; The wizard has one string per detection and it was being shown on screen as
+; well as written to the log -- so the window said "A = byte 8 bit 0x01
+; active-high" and "LX = byte 2 u8 neutral 127 direction 1". That is the right
+; amount of detail for diagnosing a pad and the wrong amount for using one.
+;
+; The log keeps every byte, mask and neutral value: today's gyro and trigger
+; faults were found from exactly those numbers. This is only what the window
+; shows.
+ControllerLearnFriendlyName(name) {
+    static names := Map(
+        "A", "the A button", "B", "the B button",
+        "X", "the X button", "Y", "the Y button",
+        "LB", "the left bumper", "RB", "the right bumper",
+        "View", "the View button", "Menu", "the Menu button",
+        "Guide", "the Guide button",
+        "L3", "the left stick click", "R3", "the right stick click",
+        "Up", "D-pad up", "Right", "D-pad right",
+        "Down", "D-pad down", "Left", "D-pad left",
+        "LX", "the left stick", "LY", "the left stick",
+        "RX", "the right stick", "RY", "the right stick",
+        "LT", "the left trigger", "RT", "the right trigger",
+        "Analogue scan", "the sticks and triggers")
+    return names.Has(name) ? names[name] : name
 }
 
 
@@ -6412,11 +6454,13 @@ CloseControllerLearner(*) {
 ; step looks for any bit differing from rest, which the still-held control
 ; satisfies. The result is the next button being learned as the previous one's
 ; bit. Releasing is therefore part of the step, and the prompts say so.
-ControllerLearnAccept(detail, offset := -1, mask := 0) {
+ControllerLearnAccept(detail, offset := -1, mask := 0, friendly := "") {
     global LearnDetailCtrl, LearnCaptureUntil, LearnLastAccepted
     global LearnReleaseOffset, LearnReleaseMask, LearnReleaseUntil
+    global LearnLastFriendly
     LearnLastAccepted := detail
-    try LearnDetailCtrl.Text := "Detected: " detail " -- now let go"
+    LearnLastFriendly := friendly != "" ? friendly : detail
+    try LearnDetailCtrl.Text := "Got it — " LearnLastFriendly ". Let go."
     LogLine("Learn: " detail ".")
     LearnCaptureUntil := 0
     if (offset < 0) {
@@ -6495,9 +6539,19 @@ ControllerLearnBeginSteps() {
         if NumGet(LearnRestNoise, A_Index - 1, "UChar")
             noisy += 1
     }
+    ; The OFFSETS, not just how many. A run where the button bytes are in this
+    ; list is a run where something was held during the countdown, and every bit
+    ; in it is skipped by every later step -- silently, which is what made it
+    ; look like the wizard was ignoring the controller.
+    noisyList := ""
+    Loop LearnLength {
+        if NumGet(LearnRestNoise, A_Index - 1, "UChar")
+            noisyList .= (noisyList != "" ? "," : "") (A_Index - 1)
+    }
     LogLine("Learn: rest sampled from " LearnRestCount " report"
         . (LearnRestCount = 1 ? "" : "s") "; " noisy " of " LearnLength
-        . " bytes changed during rest.")
+        . " bytes changed during rest"
+        . (noisyList != "" ? " (bytes " noisyList ")" : "") ".")
     if (LearnRestCount = 0) {
         ; Some controllers only report on change, so silence at rest is normal
         ; and the idle report captured before the identifying press is retained.
@@ -6581,20 +6635,21 @@ ControllerLearnClassifyAnalog() {
 
 ControllerLearnCompleteAxis(step) {
     global LearnCaptureUntil, LearnResultAxes, LearnLastAccepted
-    global LearnDetailCtrl, LearnPeak, LearnAxisRejection
+    global LearnDetailCtrl, LearnPeak, LearnAxisRejection, LearnLastFriendly
     LearnCaptureUntil := 0
     if ControllerLearnResolveAxis(step) {
         axis := LearnResultAxes[step["name"]]
         LearnLastAccepted := step["name"] " = byte " axis["offset"] " "
             . axis["size"] " neutral " axis["neutral"] " direction "
             . axis["direction"]
-        try LearnDetailCtrl.Text := "Detected: " LearnLastAccepted
+        LearnLastFriendly := ControllerLearnFriendlyName(step["name"])
+        try LearnDetailCtrl.Text := "Got it — " LearnLastFriendly "."
         LogLine("Learn: " LearnLastAccepted ".")
         SetTimer(ControllerLearnNextStep, -700)
     } else {
         LearnLastAccepted := step["name"] " not detected"
-        try LearnDetailCtrl.Text := "Not detected — release everything, then move "
-            . "it all the way and hold for a moment."
+        try LearnDetailCtrl.Text := "Did not see that. Let go of everything, "
+            . "then move it as far as it goes and hold it there for a moment."
         LogLine("Learn: " step["name"] " not detected -- "
             . (LearnAxisRejection != "" ? LearnAxisRejection : "no reason recorded")
             . ". Retrying.", "Warning")
@@ -6651,6 +6706,7 @@ ControllerLearnExamine(data, base, length) {
     global LearnHatValues, LearnPeak, LearnDetailCtrl, LearnRestNoise
     global LearnAnalogBytes, LearnAnalogValues
     global LearnExcursion, LearnAxisSamples, LearnAxisStarted
+    global LearnNoiseBlamed
     step := ControllerLearnSteps()[LearnStepIndex]
     kind := step["kind"]
 
@@ -6697,7 +6753,7 @@ ControllerLearnExamine(data, base, length) {
                 "released", was)
             ; Mask 0: the whole hat byte must return to its resting value.
             ControllerLearnAccept(step["name"] " = byte " offset " value " now,
-                offset, 0)
+                offset, 0, ControllerLearnFriendlyName(step["name"]))
             return
         }
         return
@@ -6720,8 +6776,26 @@ ControllerLearnExamine(data, base, length) {
             was := NumGet(LearnBaseline, offset, "UChar")
             restNoise := NumGet(LearnRestNoise, offset, "UChar")
             changed := (now ^ was) & ~restNoise & 0xFF
-            if !changed
+            if !changed {
+                ; Movement that the rest mask swallowed whole. Reported once per
+                ; step, because otherwise this is indistinguishable from a
+                ; controller that is not sending anything: the user presses the
+                ; button, the wizard sits there, and nothing anywhere says why.
+                ;
+                ; It happens when a control was held or pressed during the "let
+                ; go of everything" countdown -- its bits are recorded as moving
+                ; at rest, and every later step skips them for the whole session.
+                if ((now ^ was) && !LearnNoiseBlamed) {
+                    LearnNoiseBlamed := true
+                    LogLine("Learn: byte " offset " moved for " step["name"]
+                        . " but every changed bit is masked as rest noise "
+                        . "(mask 0x" Format("{:02X}", restNoise) "). Something "
+                        . "was held during the rest countdown. Press Start Over "
+                        . "and keep hands off the controller until prompted.",
+                        "Warning")
+                }
                 continue
+            }
             ; Take the lowest set bit, so a byte carrying several changes at once
             ; still yields one unambiguous mask.
             mask := changed & -changed
@@ -6744,7 +6818,7 @@ ControllerLearnExamine(data, base, length) {
         if !active
             return
         LearnAxisStarted := true
-        try LearnDetailCtrl.Text := "Movement detected — return it to rest to finish."
+        try LearnDetailCtrl.Text := "Good — now let it return to the middle."
     } else if !active {
         ControllerLearnCompleteAxis(step)
         return
@@ -6763,7 +6837,7 @@ ControllerLearnExamine(data, base, length) {
         peak := Max(peak, NumGet(LearnExcursion, A_Index - 1, "UChar") * 256)
     if (peak > LearnPeak) {
         LearnPeak := peak
-        try LearnDetailCtrl.Text := "Movement detected — return it to rest to finish."
+        try LearnDetailCtrl.Text := "Good — now let it return to the middle."
     }
     ; Once enough travel exists, remember the likely field. This lets the
     ; release test use the decoded 8/16-bit value rather than being fooled by a
@@ -6779,9 +6853,9 @@ ControllerLearnFinish() {
     SetTimer(ControllerLearnTick, 0)
     try LearnPromptCtrl.Text := "Done — review and save"
     learnedButtons := LearnResultButtons.Length + Min(4, LearnHatValues.Count)
-    try LearnProgressCtrl.Text := learnedButtons " buttons/D-pad directions, "
-        . LearnResultAxes.Count " axes learned"
-    try LearnDetailCtrl.Text := "Save writes the profile and activates it immediately."
+    try LearnProgressCtrl.Text := learnedButtons " buttons and "
+        . LearnResultAxes.Count " sticks/triggers set up"
+    try LearnDetailCtrl.Text := "Save to start using this controller straight away."
 }
 
 
@@ -6911,7 +6985,7 @@ ControllerLearnRecordButton(name, offset, mask, pressed) {
         "name", name, "offset", offset, "mask", mask, "pressed", pressed))
     ControllerLearnAccept(name " = byte " offset " bit 0x"
         . Format("{:02X}", mask) (pressed ? " active-high" : " active-low"),
-        offset, mask)
+        offset, mask, ControllerLearnFriendlyName(name))
 }
 
 
@@ -7110,6 +7184,7 @@ ControllerLearnReportAxisActive(report, byteThreshold) {
 ; allowRestNoisy is set only by this function's own single retry -- see the
 ; rejection path at the end.
 ControllerLearnResolveAxis(step, allowRestNoisy := false) {
+    global LearnAxisUnresolvable
     global LearnAxisSamples, LearnExcursion, LearnLength
     global LearnResultAxes, LearnResultButtons, LearnHatValues, LearnPeak
     global LearnAxisRejection
@@ -7236,14 +7311,43 @@ ControllerLearnResolveAxis(step, allowRestNoisy := false) {
         chosen := best8
     }
     if !IsObject(chosen) {
-        ; Preference, not prohibition. If nothing survives the motion filter,
-        ; try once more with those bytes allowed back in -- a controller whose
-        ; sticks really do jitter across several bits at rest must still be
-        ; learnable.
-        if (!allowRestNoisy && excludedNoisy > 0) {
+        ; Preference, not prohibition -- FOR STICKS. If nothing survives the
+        ; motion filter, try once more with those bytes allowed back in: a
+        ; controller whose sticks really do jitter across several bits at rest
+        ; must still be learnable.
+        ;
+        ; A TRIGGER never gets that retry, and the reason is written twenty lines
+        ; up: a stick is saved by the rest-at-centre check, because a
+        ; self-centring stick cannot rest anywhere else, so a motion byte that
+        ; wins on travel is still thrown out for resting at 0% of range. A
+        ; trigger legitimately rests at an end of range and so has no equivalent
+        ; sanity check. Re-admitting motion bytes for a trigger hands it the one
+        ; step where nothing downstream can catch the mistake.
+        ;
+        ; Measured on an 8BitDo Ultimate 2 in DirectInput mode, where the gyro is
+        ; live: 12 of 34 bytes moved at rest, 11 were correctly excluded, LT had
+        ; no candidate outside them, and the retry bound LT to byte 25 -- a
+        ; motion axis, recorded as u16le neutral 65522. The profile saved, and
+        ; the rest check immediately reported LT pegged at 255 with nothing
+        ; touched, which is a pointer that runs across the screen.
+        ;
+        ; Refusing is the better failure. An unlearned trigger is one missing
+        ; control that the user can retry or map elsewhere; a trigger bound to a
+        ; gyro is a profile that cannot be used at all.
+        isTrigger := (step["name"] = "LT" || step["name"] = "RT")
+        if (!allowRestNoisy && excludedNoisy > 0 && !isTrigger) {
             LogLine("Learn: no candidate outside the " excludedNoisy
                 . " free-running byte(s); retrying with them included.")
             return ControllerLearnResolveAxis(step, true)
+        }
+        if (!allowRestNoisy && excludedNoisy > 0 && isTrigger) {
+            LearnAxisUnresolvable := true
+            LogLine("Learn: " step["name"] " has no candidate outside the "
+                . excludedNoisy . " free-running byte(s). NOT retrying with them "
+                . "included -- a trigger rests at an end of range, so a motion "
+                . "byte bound here would read as fully pressed and could not be "
+                . "detected as wrong. Skip this step or re-run it holding the "
+                . "controller still.", "Warning")
         }
         return ControllerLearnRejectAxis(step,
             "no unclaimed field moved far enough (largest byte excursion "
@@ -7292,7 +7396,7 @@ ControllerLearnRestart() {
     global LearnRestNoise, LearnRestSampling, LearnRestCount
     global LearnStepIndex, LearnResultButtons, LearnResultAxes
     global LearnHatValues, LearnCaptureUntil
-    global LearnLastAccepted
+    global LearnLastAccepted, LearnLastFriendly
     global LearnIdentifyDevices, LearnIdentifyReady
     global LearnAnalogBytes, LearnAnalogValues, LearnDpadRetries
     LearnAnalogBytes := Map()
@@ -7310,12 +7414,17 @@ ControllerLearnRestart() {
     LearnResultAxes := Map()
     LearnHatValues := Map()
     LearnLastAccepted := ""
+    LearnLastFriendly := ""
     LearnCaptureUntil := 0
     LearnIdentifyDevices := Map()
     LearnIdentifyReady := false
     SetTimer(ControllerLearnTick, 0)
     SetTimer(ControllerLearnBeginSteps, 0)
     SetTimer(ControllerLearnNextStep, 0)
+    ; Start Over is most often pressed DURING one of the pauses that arms this,
+    ; so leaving it pending meant the old step restarting on top of the fresh
+    ; session -- or firing at LearnStepIndex 0 and throwing.
+    SetTimer(ControllerLearnStartCapture, 0)
     SetTimer(ControllerLearnIdentificationReady, -1200)
     ControllerLearnUpdateUi()
 }
@@ -7326,6 +7435,9 @@ ControllerLearnRestart() {
 ControllerLearnSave() {
     global LearnDeviceKey, LearnLength, LearnResultButtons, LearnResultAxes
     global LearnHatValues, LearnDevice, LearnPromptCtrl, LearnDetailCtrl
+    ; Both trees declare ScriptPid; the staged commit names its work file after
+    ; it so an abandoned one can be told from a live one.
+    global ScriptPid
     if (LearnLength <= 0 || !LearnDevice) {
         TopmostMsgBox("No controller was identified yet.", "Learn controller", "Iconx")
         return
@@ -7380,19 +7492,31 @@ ControllerLearnSave() {
             . name ":" axis["offset"] ":" axis["size"] ":" axis["neutral"]
             . ":" axis["direction"] ":" axis["extent"]
     }
-    try {
-        IniWrite(LearnLength, path, LearnDeviceKey, "ReportLength")
-        IniWrite(ShortenText(RawInputDeviceName(LearnDevice), 120), path,
-            LearnDeviceKey, "Name")
-        IniWrite(buttonText, path, LearnDeviceKey, "Buttons")
-        IniWrite(axisText, path, LearnDeviceKey, "Axes")
-        IniWrite(hatText, path, LearnDeviceKey, "Hat")
+    ; SIX keys or none. These were six separate IniWrite calls, and a profile is
+    ; only meaningful as a set: ReportLength decides whether it is even
+    ; consulted, and Buttons, Axes and Hat are what it decodes with. A failure
+    ; partway left a profile carrying some of them, which the loader accepts as
+    ; long as any one of buttons, hat or axes survived -- so the controller comes
+    ; back with, say, its buttons and no sticks, or sticks and no triggers, and
+    ; behaves strangely for a reason nothing reports.
+    ;
+    ; Staged through the same commit the settings file uses: it writes into a
+    ; copy and moves it over the original, so the profile on disk is either the
+    ; one that was just learned or the one that was there before.
+    if !CommitIniChangesAt(path, ScriptPid, [
+        Map("section", LearnDeviceKey, "key", "ReportLength",
+            "value", LearnLength),
+        Map("section", LearnDeviceKey, "key", "Name",
+            "value", ShortenText(RawInputDeviceName(LearnDevice), 120)),
+        Map("section", LearnDeviceKey, "key", "Buttons", "value", buttonText),
+        Map("section", LearnDeviceKey, "key", "Axes", "value", axisText),
+        Map("section", LearnDeviceKey, "key", "Hat", "value", hatText),
         ; Recorded so a length-keyed profile is identifiable as the fallback it is.
-        IniWrite(identityFallback ? "length" : "device", path, LearnDeviceKey,
-            "IdentityFallback")
-    } catch as err {
-        TopmostMsgBox("Could not write the profile:`n`n" err.Message,
-            "Learn controller", "Iconx")
+        Map("section", LearnDeviceKey, "key", "IdentityFallback",
+            "value", identityFallback ? "length" : "device")]) {
+        TopmostMsgBox("The profile could not be saved. Nothing was changed — the "
+            . "controller is still using whatever it used before.`n`nThe log has "
+            . "the reason.", "Learn controller", "Iconx")
         return
     }
     LogLine("Learn: saved profile '" LearnDeviceKey "' with " buttons.Length
@@ -7443,9 +7567,20 @@ ControllerLearnStartCapture() {
     global LearnCaptureUntil, LearnPeak, LearnPromptCtrl, LearnProgressCtrl
     global LearnStepIndex, LearnDetailCtrl, LearnLength
     global LearnExcursion, LearnAxisSamples, LearnAxisStarted, LearnResultAxes
-    global LearnLastAccepted
+    global LearnLastAccepted, LearnAxisUnresolvable, LearnNoiseBlamed
+    global LearnLastFriendly
     global LearnReleaseOffset, LearnReleaseMask, LearnReleaseUntil
-    global LearnStepReports
+    global LearnStepReports, LearnActive
+    ; This runs from a one-shot timer armed 900 to 1500 ms earlier -- after an
+    ; axis completes, after a step times out, after the D-pad retry. Any of
+    ; those can be outlived by Start Over or by the window closing, and both of
+    ; those set LearnStepIndex back to 0, which makes steps[LearnStepIndex] an
+    ; invalid index rather than a missing one.
+    ;
+    ; Both callers cancel the timer now, but the guard stays: the next person to
+    ; arm this from somewhere new should not have to remember a fourth cancel.
+    if (!LearnActive || LearnStepIndex < 1)
+        return
     steps := ControllerLearnSteps()
     if (LearnStepIndex > steps.Length) {
         ControllerLearnFinish()
@@ -7453,6 +7588,10 @@ ControllerLearnStartCapture() {
     }
     step := steps[LearnStepIndex]
     LearnPeak := 0
+    ; Per step, not per wizard: a refusal that cannot be retried belongs to the
+    ; step that earned it, and Start Over must clear it.
+    LearnAxisUnresolvable := false
+    LearnNoiseBlamed := false
     ; Any release the previous step was waiting on is no longer relevant; Skip and
     ; Start Over both arrive here.
     LearnReleaseOffset := -1
@@ -7473,9 +7612,14 @@ ControllerLearnStartCapture() {
     } else if (step["kind"] = "axis") {
         LearnCaptureUntil := A_TickCount + 30000
     } else if step.Has("optional") {
-        ; The Guide button in particular is usually swallowed by Windows and never
-        ; reaches the HID report, so waiting the full time for it just stalls the
-        ; wizard before the D-pad steps.
+        ; A control many pads simply do not have gets a shorter window, so it
+        ; cannot stall the steps after it.
+        ;
+        ; NO STEP DECLARES THIS TODAY. It existed for the Guide button, which has
+        ; been removed -- Windows usually swallows that press, and when it does
+        ; not it opens Game Bar over the wizard. The mechanism is kept because it
+        ; is four lines and the next control of that kind will want it; without
+        ; it, such a step would silently take the full twenty seconds.
         LearnCaptureUntil := A_TickCount + 8000
     } else {
         LearnCaptureUntil := A_TickCount + 20000
@@ -7485,10 +7629,10 @@ ControllerLearnStartCapture() {
     ; Braces required: a braceless `if` body that is a `try` lets the following
     ; `else` bind to the try, which is a syntax error without a catch.
     if (step["kind"] = "axis") {
-        try LearnDetailCtrl.Text := "Move to the requested edge, then let it return to rest."
+        try LearnDetailCtrl.Text := "Move it as far as it goes, then let it spring back."
     } else {
-        detail := LearnLastAccepted != "" ? "Last detected: " LearnLastAccepted
-            : "Waiting for the press report..."
+        detail := LearnLastFriendly != "" ? "Last one: " LearnLastFriendly
+            : "Waiting for you to press it..."
         try LearnDetailCtrl.Text := detail
     }
 }
@@ -7522,8 +7666,21 @@ ControllerLearnSteps() {
             "prompt", "Click the LEFT stick in, then release"),
         Map("kind", "button", "name", "R3",
             "prompt", "Click the RIGHT stick in, then release"),
-        Map("kind", "button", "name", "Guide", "prompt", "Press and release the Guide / Xbox button",
-            "optional", true),
+        ; NO GUIDE STEP. Asking for it did more harm than the mapping was worth.
+        ;
+        ; Windows usually swallows the Guide/Xbox button before it reaches the HID
+        ; report, so the step normally learned nothing and simply waited. When the
+        ; press DOES get through to Windows it opens Game Bar or the Xbox app over
+        ; the wizard, which takes the foreground away mid-mapping -- the wizard is
+        ; asking for a button whose most likely effect is to interrupt it.
+        ;
+        ; Nothing is lost that was working: the button is consumed as bit 0x0400
+        ; and mapped to Y.Short, and XInput still supplies that bit through
+        ; XInputGetStateEx for pads that report it. Only the RawInput path stops
+        ; learning it, and that is the path where it was rarely captured anyway.
+        ;
+        ; The 0x0400 entry in the name-to-bit table stays: profiles learned before
+        ; this still carry a Guide line and must keep decoding.
         Map("kind", "dpad", "name", "Up", "prompt", "Press and release the D-pad UP"),
         Map("kind", "dpad", "name", "Right", "prompt", "Press and release the D-pad RIGHT"),
         Map("kind", "dpad", "name", "Down", "prompt", "Press and release the D-pad DOWN"),
@@ -7557,6 +7714,7 @@ ControllerLearnSteps() {
 ControllerLearnTick() {
     global LearnActive, LearnCaptureUntil, LearnStepIndex
     global LearnLastAccepted, LearnDetailCtrl, LearnProgressCtrl
+    global LearnAxisUnresolvable
     global LearnReleaseOffset, LearnReleaseMask, LearnReleaseUntil
     global LearnStepReports, LearnCountdownCtrl
     if !LearnActive
@@ -7573,9 +7731,12 @@ ControllerLearnTick() {
     if (LearnStepIndex >= 1 && LearnCaptureUntil) {
         steps := ControllerLearnSteps()
         if (LearnStepIndex <= steps.Length) {
+            ; The raw report count is the only live proof the controller is
+            ; talking to us at all, so it stays -- worded as listening rather
+            ; than as a protocol detail.
             try LearnProgressCtrl.Text := "Step " LearnStepIndex " of "
-                . steps.Length "  -  " LearnStepReports " report"
-                . (LearnStepReports = 1 ? "" : "s") " seen"
+                . steps.Length (LearnStepReports > 0
+                    ? "  -  controller is responding" : "  -  waiting...")
         }
     }
     ; A release we never saw. Advance anyway rather than stranding the wizard on a
@@ -7602,8 +7763,9 @@ ControllerLearnTick() {
         LearnCaptureUntil := 0
         found := ControllerLearnClassifyAnalog()
         LearnLastAccepted := found " analogue byte" (found = 1 ? "" : "s") " found"
-        try LearnDetailCtrl.Text := found " analogue byte"
-            . (found = 1 ? "" : "s") " found; buttons will ignore them."
+        try LearnDetailCtrl.Text := (found > 0
+            ? "Sticks and triggers found. Button steps will ignore them from now on."
+            : "No sticks or triggers seen — carrying on with the buttons.")
         SetTimer(ControllerLearnNextStep, -600)
         return
     }
@@ -7613,17 +7775,32 @@ ControllerLearnTick() {
     ; only be reached with a mouse or the touchscreen. Without this, a control the
     ; pad does not have -- a Guide button hidden by its driver, say -- would stall
     ; the whole wizard for anyone holding only a controller.
+    ; A refusal that retrying cannot fix is skipped on the same terms as a control
+    ; the pad does not have. Retrying it would restart the same step forever.
+    if (step["kind"] = "axis" && LearnAxisUnresolvable) {
+        LearnCaptureUntil := 0
+        LearnLastAccepted := step["name"] " could not be told apart from motion"
+        try LearnDetailCtrl.Text := "Skipping " ControllerLearnFriendlyName(step["name"])
+            . " — only the motion sensor moved, so this cannot be told apart "
+            . "from it. Everything else still works."
+        LogLine("Learn: " step["name"] " skipped; every candidate was a "
+            . "free-running byte and a trigger cannot be sanity-checked against "
+            . "one.", "Warning")
+        SetTimer(ControllerLearnNextStep, -400)
+        return
+    }
     if (step["kind"] != "axis") {
         LearnCaptureUntil := 0
         LearnLastAccepted := step["name"] " not detected"
-        try LearnDetailCtrl.Text := "Not detected — skipping " step["name"] "."
+        try LearnDetailCtrl.Text := "Did not see " ControllerLearnFriendlyName(step["name"])
+            . " — skipping it. Your controller may not have one."
         LogLine("Learn: " step["name"] " timed out; skipped.", "Warning")
         SetTimer(ControllerLearnNextStep, -400)
         return
     }
     LearnCaptureUntil := 0
     LearnLastAccepted := step["name"] " timed out"
-    try LearnDetailCtrl.Text := "Timed out — release everything; retrying this step."
+    try LearnDetailCtrl.Text := "Let go of everything and we will try this one again."
     LogLine("Learn: " step["name"] " timed out before returning to rest. Retrying.",
         "Warning")
     SetTimer(ControllerLearnStartCapture, -1200)
@@ -7637,18 +7814,21 @@ ControllerLearnUpdateUi() {
     global LearnRestSampling, LearnRestCount
     if !LearnDevice {
         if LearnIdentifyReady {
-            try LearnPromptCtrl.Text := "Press and release any button to choose the controller"
-            try LearnDetailCtrl.Text := "This selects the device; button mapping starts after rest measurement."
+            try LearnPromptCtrl.Text := "Press any button on the controller you want to set up"
+            try LearnDetailCtrl.Text := "This tells us which controller to listen to. "
+                . "Press and release one button."
         } else {
-            try LearnPromptCtrl.Text := "Release every controller for a moment"
-            try LearnDetailCtrl.Text := "Measuring idle input before device selection..."
+            try LearnPromptCtrl.Text := "Hands off the controller for a moment"
+            try LearnDetailCtrl.Text := "Checking what the controller sends when "
+                . "nothing is being touched. This takes a second."
         }
         return
     }
     if (LearnStepIndex = 0) {
-        try LearnPromptCtrl.Text := "Let go of everything"
-        try LearnDetailCtrl.Text := "Device " LearnDeviceKey ", " LearnLength
-            . "-byte reports. Measuring the resting state..."
+        try LearnPromptCtrl.Text := "Hands off — do not touch anything yet"
+        try LearnDetailCtrl.Text := "Learning what resting looks like. Anything "
+            . "you hold now will be ignored for the rest of the wizard, so let "
+            . "go until the next prompt."
         LearnRestSampling := true
         LearnRestCount := 0
         SetTimer(ControllerLearnBeginSteps, -1800)
@@ -7701,8 +7881,14 @@ ControllerLearnValidateDpad() {
         return true
     }
     LearnDpadRetries += 1
-    for _, name in DIRECTIONS
-        LearnHatValues.Delete(name)
+    ; Guarded: a direction that timed out was never recorded, and Map.Delete
+    ; throws on a key that is not there. The retry exists precisely because the
+    ; four directions did not come out right, so an incomplete set is the
+    ; expected input here, not an unlikely one.
+    for _, name in DIRECTIONS {
+        if LearnHatValues.Has(name)
+            LearnHatValues.Delete(name)
+    }
     ; Rewind to the first D-pad step. StartCapture is called from the timer below.
     steps := ControllerLearnSteps()
     Loop steps.Length {
@@ -7714,8 +7900,8 @@ ControllerLearnValidateDpad() {
     LogLine("Learn: the four D-pad directions do not describe a hat or four "
         . "distinct bits, most likely a diagonal press. Retrying them.", "Warning")
     try LearnPromptCtrl.Text := "Let us try the D-pad again"
-    try LearnDetailCtrl.Text := "Press each direction squarely — a diagonal reads "
-        . "as its own value and breaks the set."
+    try LearnDetailCtrl.Text := "Press each direction straight on. Catching two at "
+        . "once (like up-and-right) confuses it."
     SetTimer(ControllerLearnStartCapture, -1500)
     return false
 }
@@ -7806,7 +7992,7 @@ ShowControllerLearner(*) {
     global LearnBaseline, LearnRestNoise, LearnRestSampling, LearnRestCount
     global LearnStepIndex, LearnResultButtons, LearnResultAxes, LearnHatValues
     global LearnPromptCtrl, LearnDetailCtrl, LearnProgressCtrl, LearnCaptureUntil
-    global LearnLastAccepted
+    global LearnLastAccepted, LearnLastFriendly
     global LearnIdentifyDevices, LearnIdentifyReady
     global MouseHidden
     global LearnAnalogBytes, LearnAnalogValues, LearnDpadRetries
@@ -7854,6 +8040,7 @@ ShowControllerLearner(*) {
     LearnResultAxes := Map()
     LearnHatValues := Map()
     LearnLastAccepted := ""
+    LearnLastFriendly := ""
     LearnCaptureUntil := 0
     LearnIdentifyDevices := Map()
     LearnIdentifyReady := false

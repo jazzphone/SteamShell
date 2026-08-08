@@ -263,11 +263,21 @@ hat needs *and* collides in the bit fallback, so one imprecise press quietly rui
 the whole D-pad. If the set describes neither a hat nor four distinct bits, the
 wizard says so and asks for the four directions once more.
 
-Every step shows how many reports it has seen. A step that appears stuck is either
-receiving nothing (wrong backend, or running outside FSE) or receiving reports and
-rejecting them, and the count is what distinguishes them. Steps marked optional —
-the Guide button, which Windows usually swallows — give up sooner so they cannot
-block the steps behind them.
+Every step says whether the controller is responding. A step that appears stuck
+is either receiving nothing (wrong backend, or running outside FSE) or receiving
+reports and rejecting them, and that line is what distinguishes them.
+
+The wizard no longer asks for the Guide/Xbox button. Windows usually swallows it,
+and when it does not it opens Game Bar over the wizard. The shorter capture window
+that step used is still available to any future control that many pads lack.
+
+A trigger is never matched against a byte that moves on its own — a gyro, most
+often. A stick is protected by resting at its centre, which a motion sensor does
+not do; a trigger legitimately rests at one end, so there is no equivalent check
+to save it. Measured on an 8BitDo Ultimate 2 in DirectInput mode with the gyro
+live: 12 of 34 bytes moved at rest, and the left trigger had no candidate outside
+them. That step is skipped now, keeping the rest of the profile, instead of
+binding the trigger to a motion axis and pinning it at fully pressed.
 
 If Windows will not identify the device — measured on the ROG Ally X, where the
 device path, HID VID/PID and preparsed descriptor all came back empty — the

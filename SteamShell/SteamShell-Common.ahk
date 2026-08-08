@@ -2247,7 +2247,15 @@ CommitIniChangesAt(iniPath, ownerPid, changes, deletes := 0) {
     try {
         if FileExist(workPath)
             FileDelete(workPath)
-        FileCopy(iniPath, workPath, true)
+        ; A target that does not exist yet is staged from nothing rather than
+        ; failing. FileCopy throws on a missing source, and the settings file
+        ; always exists so that never showed -- but the controller profile file
+        ; does not exist until the first profile is saved, and refusing to write
+        ; it would be refusing to save the very first one.
+        if FileExist(iniPath)
+            FileCopy(iniPath, workPath, true)
+        else
+            FileAppend("", workPath, "UTF-8")
         for _, item in changes
             IniWrite(item["value"], workPath, item["section"], item["key"])
         if IsObject(deletes) {
