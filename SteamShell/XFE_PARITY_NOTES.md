@@ -910,19 +910,19 @@ this file already makes about text similarity.
 Lowered to **0.45**. Eleven pairs appeared, and reading them rather than scoring
 them found two that were drift:
 
-- **`TrayOpenQuickMenu`, 0.50, nine lines.** The shell raised the Quick Menu with
+- **`TrayOpenQuickMenu`, nine lines.** The shell raised the Quick Menu with
   `WinActivate`; the companion used `ForceForegroundWindow`. That is the hardened
   primitive — `SteamShell-Common.ahk`'s own header records that the shell's
   version was the one kept — and the shell already used it at every *other* Quick
   Menu site. `WinActivate` loses to the foreground lock a fullscreen game holds,
   which is exactly the situation someone reaching for the tray icon is in. Fixed,
   not recorded.
-- **`QuickMenuHandleController`, 0.78.** Above the old bar the whole time and
+- **`QuickMenuHandleController`, 0.73.** Above the old bar the whole time and
   simply never listed. Its TASKS-page handling is genuine; its B-button branch
   restated the MAIN-page test that shared `QuickMenuGoBack` already makes.
 
-`PollController` is the one to know about: **0.61, about 350 lines on each side,
-and one input loop written twice.** Most of the difference is renaming —
+`PollController` is the one to know about: **0.31, about 350 lines on each side,
+and one input loop written twice.** The low score is the finding, not a comfort. Most of the difference is renaming —
 `prevButtons`/`previousButtons`, `btnDefs`/`buttonDefinitions` — which is
 precisely the tidying the fingerprint was built to see through, and it still hid
 under the old bar for the gate's entire life. The genuine differences are bolted

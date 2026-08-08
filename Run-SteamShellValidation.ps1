@@ -154,6 +154,60 @@ foreach ($v in $validators) {
     }
 }
 
+# ----------------------------------------------------------------------------
+# The two Python checks, which until now were never executed by anything.
+#
+# Both were written to be run and neither was. Validate-SteamShell-XFE.ps1
+# asserts Test-ControllerProfiles.py EXISTS and greps its text for shared
+# constants, but never starts it -- so it sat crashing on import for however long
+# it took SettingsLayout() to move into SteamShell-Shared.ahk. Replay-Validation.py
+# drifted from the PowerShell gate it mirrors and reported ten failures on a clean
+# tree, which nobody saw either.
+#
+# Replay-Validation.py's own header says it: "A validator that is not run is not a
+# validator." Running them is the whole fix; the rest was consequence.
+#
+# Skipped, not failed, when Python is absent: these run on the development machine
+# as much as on Windows, and the build must not require a Python install to
+# compile an AutoHotkey program.
+$python = $null
+foreach ($candidate in @("python3", "python", "py")) {
+    $found = Get-Command $candidate -ErrorAction SilentlyContinue
+    if ($found) { $python = $found.Source; break }
+}
+
+$pythonChecks = @(
+    @{ Name = "Test-ControllerProfiles.py"
+       Path = Join-Path $projectDir "Test-ControllerProfiles.py"
+       What = "learned-controller decoder and learning heuristic" },
+    @{ Name = "Replay-Validation.py"
+       Path = Join-Path $projectDir "Replay-Validation.py"
+       What = "structural half of both validators, replayed without Windows" }
+)
+foreach ($c in $pythonChecks) {
+    Write-Host ""
+    Write-Host "--- $($c.Name)"
+    if (-not $python) {
+        Write-Host "SKIPPED - no Python interpreter found." -ForegroundColor Yellow
+        Add-Result "Python: $($c.Name)" "SKIPPED" "no interpreter"
+        continue
+    }
+    if (-not (Test-Path -LiteralPath $c.Path)) {
+        Write-Host "FAIL: $($c.Name) is missing." -ForegroundColor Red
+        Add-Result "Python: $($c.Name)" "FAIL" "missing"
+        continue
+    }
+    $proc = Start-Process -FilePath $python -ArgumentList @($c.Path) `
+        -NoNewWindow -Wait -PassThru
+    if ($proc.ExitCode -eq 0) {
+        Write-Host "PASS - $($c.What)." -ForegroundColor Green
+        Add-Result "Python: $($c.Name)" "PASS"
+    } else {
+        Write-Host "FAIL: exit code $($proc.ExitCode)." -ForegroundColor Red
+        Add-Result "Python: $($c.Name)" "FAIL" "exit code $($proc.ExitCode)"
+    }
+}
+
 # --------------------------------------------------------------------- 4. builds
 Write-Section "4. Full builds (produces and verifies dist EXEs; nothing is executed)"
 

@@ -1441,15 +1441,44 @@ def main():
                      "state the function touches; an incomplete one is worse than none.")
 
     # ---- the fingerprint gate --------------------------------------------
+    #
+    # KEPT IN STEP WITH Validate-Common.ps1 BY HAND, which is the standing hazard
+    # in this file: two implementations of one check, and only one of them runs on
+    # Windows. This gate drifted once already -- the PowerShell moved to 0.45, grew
+    # a seam exemption and changed its stale rule, and this replay was still at
+    # 0.75 with the old rule, reporting ten failures on a tree Windows called
+    # clean. Any edit to the gate over there belongs here in the same commit.
+    #
+    # 0.45, not 0.75: two copies of one routine drift apart in STRUCTURE as well as
+    # text, so the longer a duplicate goes unmerged the lower it scores. The metric
+    # loses confidence exactly as the problem gets worse.
     divergent = read_divergent()
     a, b = maps["SteamShell.ahk"], maps["SteamShell-XFE.ahk"]
+
+    # The per-product seam is exempt. $sharedSeamAllowed is already the record that
+    # those functions differ by design; making them declare it a second time here
+    # is how the counts in this project keep going wrong.
+    ps_gate = (ROOT / "Validate-Common.ps1").read_text(encoding="utf-8", errors="replace")
+    seam_block = re.search(r"\$sharedSeamAllowed = @\((.*?)\)\n", ps_gate, re.S)
+    seam_exempt = set()
+    if seam_block:
+        body = re.sub(r"#.*", "", seam_block.group(1))
+        seam_exempt = {n.lower() for n in re.findall(r'"([A-Za-z_]\w*)"', body)}
+        expected = re.search(r"\$sharedSeamExpectedCount = (\d+)", ps_gate)
+        if expected and len(seam_exempt) != int(expected.group(1)):
+            fail(f"The shared seam has {len(seam_exempt)} entries but "
+                 f"$sharedSeamExpectedCount says {expected.group(1)}. Update the "
+                 "expectation in the same commit that changes the list.")
+
     flagged = []
     for name in sorted(set(a) & set(b)):
+        if name.lower() in seam_exempt:
+            continue
         fa, fb = fingerprint(a[name][1]), fingerprint(b[name][1])
         score = similarity(fa, fb)
         subset = bool(fa and fb and fa != fb and
                       (is_subsequence(fa, fb) or is_subsequence(fb, fa)))
-        if score >= 0.75 or subset:
+        if score >= 0.45 or subset:
             flagged.append((name, score, subset, a[name][0], b[name][0]))
     for name, score, subset, la, lb in flagged:
         if name not in divergent:
@@ -1462,15 +1491,21 @@ def main():
                  "entire value of that file.")
     # An entry also earns its place by covering a Helper/Shared name collision,
     # which the gate above never sees: it only compares the two TREES.
+    #
+    # An entry is stale when the PAIR is gone, not when the pair scores low. This
+    # used to subtract `flagged`, which is only populated at or above the
+    # threshold -- so documenting a genuinely divergent pair that scores BELOW it
+    # failed as stale. OpenWindowsSettings scores 0.00 precisely because a
+    # privilege-boundary divergence shares no calls at all, and was therefore the
+    # one kind of entry the file could not hold. Required and permitted are
+    # separate questions: the threshold decides what MUST be explained, being a
+    # real pair decides what MAY be.
     helper_wrappers = set(maps["SteamShell-Helper.ahk"]) & set(maps["SteamShell-Shared.ahk"])
-    stale = sorted(set(divergent) - {n for n, *_ in flagged} - helper_wrappers)
+    tree_pairs = set(a) & set(b)
+    stale = sorted(set(divergent) - tree_pairs - helper_wrappers)
     for name in stale:
-        if name in set(a) & set(b):
-            fail(f"DIVERGENT_FUNCTIONS.txt lists '{name}', but the two copies no longer "
-                 "diverge. Remove the entry.")
-        else:
-            fail(f"DIVERGENT_FUNCTIONS.txt lists '{name}', which is no longer defined in both "
-                 "trees. Remove the entry.")
+        fail(f"DIVERGENT_FUNCTIONS.txt lists '{name}', which is no longer defined in both "
+             "trees. Remove the entry.")
 
     # ---- file hygiene ------------------------------------------------------
     #
