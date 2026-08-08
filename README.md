@@ -1,13 +1,14 @@
 # SteamShell
 
-**Boot straight into Steam Big Picture, and drive Windows from the couch with a controller.**
+**Turn a Windows PC into a console. Boot straight into Steam Big Picture, and run the whole
+machine from a controller.**
 
-SteamShell replaces the Windows shell with Steam Big Picture Mode. It keeps the right
-window in front, gives you a controller-driven pointer and Quick Menu, and hands the
-desktop back cleanly when you're done.
+Two programs, one codebase:
 
-Its companion, **SteamShell XFE**, does the controller half *without* replacing anything —
-for people running Windows' Xbox Full Screen Experience instead.
+- **SteamShell** replaces the Windows shell entirely. Windows boots, Big Picture appears,
+  and you never see a desktop.
+- **SteamShell XFE** does the controller half *without* replacing anything, for people
+  running Windows' Xbox Full Screen Experience instead.
 
 > [!WARNING]
 > **SteamShell is a Windows shell replacement.** It rewrites the shell registry value,
@@ -17,45 +18,127 @@ for people running Windows' Xbox Full Screen Experience instead.
 > `Ctrl+Alt+Shift+E` is the emergency permanent restore: it registers Explorer as the
 > shell and closes SteamShell. Learn it before you need it.
 >
-> The XFE companion changes nothing about your shell and carries none of this risk.
+> **The XFE companion changes nothing about your shell and carries none of this risk.**
+> If you are unsure, start there.
 
 ![SteamShell Control Panel running inside Steam Big Picture](SteamShell/images/control-panel.png)
+
+## Why this exists
+
+Steam Big Picture is a good console interface sitting on top of an operating system that
+is not. The gap shows up the moment something goes slightly wrong, and always in the same
+way: **you need a keyboard and mouse for something that should have been a button press.**
+
+- A launcher steals focus mid-game and Big Picture is behind it.
+- A game exits and leaves its launcher, its updater and an overlay running.
+- You want to change resolution, refresh rate, HDR or audio output — all of which live in
+  Settings apps designed for a mouse.
+- A game opens a dialog off-screen, or on the wrong monitor, or 800×600 in a corner.
+- You want to cap frame rate to keep a handheld quiet, which means alt-tabbing to RTSS.
+- Something needs closing and there is no Task Manager you can reach with a thumbstick.
+
+None of that is Steam's fault, and none of it is fixable *inside* Steam. It needs
+something sitting between Windows and Big Picture that watches what is happening and gives
+you controller-reachable answers.
+
+That is what this is. It started as a focus-fixing script and turned into a shell.
+
+The **XFE companion** exists because Microsoft shipped their own console front end, and it
+has the same gap — with one extra problem: **XInput reads zeros inside Xbox FSE**, so the
+obvious way to read a controller does not work in the exact place you need it. The
+companion reads the pad through RawInput instead, and can be taught unfamiliar hardware.
+
+## What you get
+
+### Getting into the game
+- Boots to **Steam Big Picture** and keeps it in front
+- **Focus scoring** — decides which window really is the game, using shape, CPU and audio,
+  rather than grabbing whatever is on top
+- **Always Focus** list for applications that should win over Steam
+- **Launcher Cleanup** — closes launchers, updaters and overlays after you return to Steam
+- **Startup programs**, launched with the shell
+- Optional **splash video** while everything comes up
+
+### Running the machine from the sofa
+- **Quick Menu** — hold L3 + R3. Display mode, resolution, refresh rate, scale, HDR,
+  audio output, frame cap, open windows, and the settings worth changing from a sofa
+- **Controller pointer**, with remappable short and long press on every button
+- **Task list** — switch to or close any window, including force-close
+- **Windows Start menu and File Explorer** on a controller chord
+
+### Making the controller actually work
+- **Three input backends** — RawInput, XInput and GameInput, selected automatically
+- **Controller Learner** — teach it any pad it does not recognise, by pressing buttons
+- **Input recovery after sleep**, including the case where Windows never tells you the
+  machine woke
+- **Smooth cursor** — velocity scaled by real elapsed time, not a fixed step per poll
+
+### Keeping the frame rate sane
+- **RTSS** frame limiter and overlay from the Quick Menu
+- Global or **per-game profile** caps, keyed on the game the scorer identified
+- Optional **elevated helper** for profile writes, so the shell itself stays unprivileged
+
+### Not painting yourself into a corner
+- **Setup Assistant** — standard, custom or portable install, with shell registration
+  optional and reversible
+- **Emergency restore** on a hotkey, and a **Safe Mode** launch that keeps Explorer alive
+- **Health Check** and a sanitised **diagnostic bundle**
+- Settings **migrate in place** across versions, with versioned backups
+
+## Feature comparison
+
+| | **SteamShell** | **SteamShell XFE** |
+|---|:---:|:---:|
+| **Replaces the Windows shell** | Yes | **No** |
+| Boots to Steam Big Picture | Yes | — |
+| Window centring, maximising, exclusions | Yes | — |
+| Full focus scoring engine | Yes | Lite |
+| Always Focus list | Yes | — |
+| Taskbar hiding / desktop blackout | Yes | — |
+| Desktop mode | Yes | — |
+| Splash video | Yes | — |
+| Setup Assistant and install modes | Yes | — |
+| Task list, switch and force-close | Yes | — |
+| **Quick Menu** | Yes | Yes |
+| Controller pointer and mappings | Yes | Yes |
+| Controller Learner | Yes | Yes |
+| Input recovery after sleep | Yes | Yes |
+| Display mode, resolution, refresh, scale | Yes | Yes |
+| HDR toggle | Yes | Yes |
+| Audio output switching | Yes | Yes |
+| RTSS frame cap and overlay | Yes | Yes |
+| Launcher Cleanup | Yes | Lite |
+| Startup programs | Yes | Yes |
+| Health Check and diagnostic bundle | Yes | Yes |
+| GameInput backend | — | Yes |
+| Runs inside Xbox FSE | — | Yes |
+| Can be disabled without exiting | — | Yes |
+| Portable, nothing registered | Optional | Always |
+
+Roughly half the settings are shared between the two products, and the build fails if a
+shared behaviour drifts apart.
 
 ## Download
 
 **[Latest release &rarr; SteamShell.exe](https://github.com/jazzphone/SteamShell/releases/latest)**
 
-One executable installs both products. It embeds the elevated helper and the XFE
-companion and deploys whichever you choose through its Setup Assistant.
+One executable installs both products. It embeds the elevated helper and the XFE companion
+and deploys whichever you choose through its Setup Assistant.
 
 Verify it if you like — the same binary is committed at
-`releases/2.0.0/current/SteamShell.exe` and its SHA-256 is in
-[`releases/2.0.0/RELEASE.md`](releases/2.0.0/RELEASE.md) alongside the exact source
-that produced it.
+`releases/2.0.0/current/SteamShell.exe`, and its SHA-256 is in
+[`releases/2.0.0/RELEASE.md`](releases/2.0.0/RELEASE.md) alongside the exact source that
+produced it.
 
 ## Getting started
 
 1. Put `SteamShell.exe` somewhere sensible and run it.
-2. The **Setup Assistant** opens on first run. Pick which product you want, confirm the
-   detected Steam path, and choose whether to register as the shell.
-3. Press `Ctrl+Alt+Shift+S` for the full Settings editor, or hold **L3 + R3** on a
-   controller for the Quick Menu.
+2. The **Setup Assistant** opens. Choose a product, confirm the detected Steam path, and
+   decide whether to register as the shell — you can skip that and launch manually first.
+3. Press `Ctrl+Alt+Shift+S` for Settings, or hold **L3 + R3** for the Quick Menu.
 
-Requires Windows 10 or 11. Running from source additionally needs AutoHotkey v2.0.19 or
+Requires Windows 10 or 11. Building from source additionally needs AutoHotkey v2.0.19 or
 newer, 64-bit.
-
-## Which one do I want?
-
-|  | **SteamShell** | **SteamShell XFE** |
-|---|---|---|
-| Replaces the Windows shell | Yes | **No** |
-| Boots to Steam Big Picture | Yes | No — you use Xbox FSE |
-| Controller pointer and Quick Menu | Yes | Yes |
-| Window management and focus assist | Yes | Lightweight assist only |
-| Display, HDR, audio, RTSS controls | Yes | Yes |
-| Risk if something goes wrong | You may need to restore the shell | Close it |
-
-Both are 2.0.0 and share most of their code.
 
 ## Hotkeys
 
@@ -69,17 +152,18 @@ Both are 2.0.0 and share most of their code.
 | `Ctrl+Alt+Shift+G` | Run Game Foreground Assist once |
 | `Ctrl+Alt+Shift+I` | Re-arm controller input |
 
-On a controller: hold **L3 + R3** for the Quick Menu, hold **View/Back** for the mouse
-pointer, and hold **View/Back + Start** for the Windows Start menu.
+On a controller: hold **L3 + R3** for the Quick Menu, hold **View/Back** for the pointer,
+and **View/Back + Start** for the Windows Start menu.
 
 ## Documentation
 
 The [**wiki**](https://github.com/jazzphone/SteamShell/wiki) is the reader-friendly
-documentation — installing, settings, controller mappings, troubleshooting.
+documentation — installing, the Quick Menu, settings, controller mappings, teaching a new
+controller, and troubleshooting.
 
 In-repo, for depth:
 
-| File | What it covers |
+| File | Covers |
 |---|---|
 | [`SteamShell/README.md`](SteamShell/README.md) | Full standalone reference |
 | [`SteamShell/README-XFE.md`](SteamShell/README-XFE.md) | Full companion reference |
@@ -94,29 +178,39 @@ Run-SteamShellValidation.cmd
 ```
 
 Syntax-checks all five AutoHotkey sources, runs both static validators, compiles the
-helper, the companion and the installer, proves the build gate rejects broken and stale
-output, and only then publishes to `current\`.
+helper, the companion and the installer, **proves the build gate rejects broken and stale
+output**, and only then publishes to `current\`.
 
 Needs Windows, PowerShell 5.1, and AutoHotkey v2 with Ahk2Exe. To build the installer
 alone, use `SteamShell\Build-SteamShell.cmd`.
 
 The harness never runs what it compiles, and neither should any automated process.
 
-## A note on how this is built
+## How this is built
 
-Two programs share one codebase. `SteamShell-Common.ahk` is compiled into all three
-binaries, `SteamShell-Shared.ahk` into both main products, and a set of static
-validators enforce that: exact function manifests, a duplicate-detection gate, and
-assertions that pin behaviour rather than implementation. If a shared function drifts,
-a count goes stale, or a fix lands in one product and not the other, the build fails.
+Two programs share one codebase. `SteamShell-Common.ahk` compiles into all three binaries,
+`SteamShell-Shared.ahk` into both main products, and static validators enforce that:
 
-`SteamShell/DIVERGENT_FUNCTIONS.txt` records every place the two products *deliberately*
-differ, with the reason — because a divergence nobody wrote down is indistinguishable
-from a bug nobody noticed.
+- **Exact function manifests** — a shared function cannot be quietly copied back into one
+  tree, and a name cannot appear in both.
+- **A duplicate-detection gate** that compares call sequences rather than text, because
+  text is the first thing that changes when a copy is tidied.
+- **Assertions that pin behaviour, not implementation** — the checks describe what must
+  remain true, so correcting a bug does not fail the build for the wrong reason.
+
+[`SteamShell/DIVERGENT_FUNCTIONS.txt`](SteamShell/DIVERGENT_FUNCTIONS.txt) records every
+place the two products *deliberately* differ, with the reason — because a divergence
+nobody wrote down is indistinguishable from a bug nobody noticed.
+
+That is not incidental tidiness. Several real bugs in this project were in code that was
+already shared and simply wrong in both places, or documented as an intentional difference
+when it was actually an unported fix. A gate proves two copies agree; it says nothing
+about whether they are right.
 
 ## Licence and support
 
 **No support is provided. Use at your own risk.**
 
-This is a personal project shared in case it's useful. It replaces the Windows shell;
-please read the warning at the top before running it on a machine that matters to you.
+A personal project, shared in case it is useful to someone with the same problem. It
+replaces the Windows shell — please read the warning at the top before running it on a
+machine that matters to you.
