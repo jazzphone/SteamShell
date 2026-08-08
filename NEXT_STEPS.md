@@ -156,6 +156,27 @@ recorded as 0.61 when it is **0.31**; `TrayOpenQuickMenu` as 0.50 when it became
 Read scores out of `Replay-Validation.py`'s own `fingerprint`/`similarity`, or
 instrument its gate. Do not estimate.
 
+### `Replay-Validation.py` cannot see an assertion written against a property
+
+It replays `$source -match '...'`. It does **not** replay
+`$probeMatch.Value -match '...'` -- the usual shape once a validator has pulled
+one function body out -- because its subject scan looks for `$name -match` and a
+property access does not match that. Nor does the "every subject must be known"
+check notice them, though its own comment claims EVERY subject.
+
+**62 rules are in that blind spot,** and one of them failed on Windows against a
+tree this script had just called clean: the companion's screen-probe rule, which
+pinned `WinGetList()` inside `RunScreenProbe`.
+
+The count is printed in the summary now, next to the replayed one. It is not
+closed, because closing it means reimplementing each extraction here -- the
+duplication this file already warns about. Treat the second number as the size
+of what only Windows checks, and when a change touches a function that a
+validator extracts by name, read that validator.
+
+The other half of the same trap: **Windows reports the FIRST failure only**,
+because `Assert-True` throws. One `FAIL` line is a lower bound.
+
 ### `Replay-Validation.py` mirrors `Validate-Common.ps1` by hand
 
 Two implementations of one check, and only the PowerShell runs on Windows. It

@@ -1146,8 +1146,13 @@ function Assert-SettingsRowsReachConsumers {
     }
 
     if (-not $Quiet) {
-        Write-Host ("Settings rows: {0} row-product pairs checked; every key is read " +
-            "back and every value reaches a consumer." -f $checked)
+        # Parenthesised, for the reason written out over Assert-QuickMenuRows'
+        # summary line and then walked into anyway three functions later: -f
+        # binds tighter than +, so without the inner parentheses the format
+        # operator applies to the SECOND string, which has no placeholder, and
+        # the line prints a literal "{0}".
+        Write-Host (("Settings rows: {0} row-product pairs checked; every key is read " +
+            "back and every value reaches a consumer.") -f $checked)
     }
 }
 

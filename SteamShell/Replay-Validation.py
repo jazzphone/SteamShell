@@ -1830,6 +1830,20 @@ def main():
     # Both halves are replayed, because only checking -match would have missed
     # the second entirely.
     replayed = 0
+    # Rules this cannot replay, COUNTED rather than silently dropped.
+    #
+    # The subject scan below matches `$name -match`, so a rule written against a
+    # property -- `$probeMatch.Value -match ...`, the usual shape when a
+    # validator has already extracted one function body -- is invisible to it,
+    # including to the "every subject must be known" check that reports anything
+    # it cannot read. That check's own comment claims EVERY subject; it did not
+    # mean this one, and the gap cost a Windows-only failure on a tree this
+    # script called clean.
+    #
+    # Reconstructing those subjects here means reimplementing each extraction,
+    # which is the duplication this file already warns about. So the number is
+    # printed instead: it is the size of what only Windows checks.
+    unreplayable = 0
     for vpath, spath in (("Validate-SteamShell.ps1", "SteamShell.ahk"),
                          ("Validate-SteamShell-XFE.ps1", "SteamShell-XFE.ahk")):
         if not (ROOT / vpath).exists():
@@ -1910,9 +1924,13 @@ def main():
         LOOP_LOCAL = {"previous", "fallback", "current", "line", "declared",
                       "candidate", "simulation", "forbiddenscope", "_",
                       "defline"}
-        # EVERY subject, not just $*source*. The old pattern could not see a
-        # subject whose name lacked the word "source", so $sample and
-        # $buildScript were outside the net without anything saying so.
+        unreplayable += len(re.findall(
+            r"\$\w+(?:\.\w+|\[[^\]]*\])+\s+-(?:not)?match", vtext))
+        # EVERY subject NAMED DIRECTLY, not just $*source*. The old pattern could
+        # not see a subject whose name lacked the word "source", so $sample and
+        # $buildScript were outside the net without anything saying so. Property
+        # subjects are still outside it, and are counted above rather than
+        # pretended about.
         for subject_name in sorted(set(
                 m.group(1).lower() for m in re.finditer(
                     r"\$(\w+)\s+-(?:not)?match", vtext))):
@@ -1957,6 +1975,8 @@ def main():
     print(f"  defined in both   : {both}")
     print(f"  fingerprint flags : {len(flagged)} ({len(divergent)} allowlisted)")
     print(f"  product assertions: {replayed} replayed from the two validators")
+    print(f"                      {unreplayable} written against a property "
+          "subject; only Windows checks those")
     if FAILURES:
         print(f"\nFAILED ({len(FAILURES)}):\n")
         for f in FAILURES:

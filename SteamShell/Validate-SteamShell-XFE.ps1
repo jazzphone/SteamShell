@@ -1393,12 +1393,20 @@ Assert-True (
 Assert-True (
     $source -match 'class:XamlExplorerHostIslandWindow') (
     "The measured Xbox FSE switcher window class must stay in the default overlay list.")
-# The probe exists to find windows the inventory filters out, so it must
-# enumerate every top-level window rather than reusing the inventory.
+# The probe exists to find windows the inventory filters out, so it must see
+# every top-level window rather than the assist inventory's filtered view.
+#
+# It used to have its own WinGetList() and this asserted that. There is one
+# enumeration now, so what has to be true instead is that the probe asks for the
+# UNFILTERED form of it -- SharedWindowInventoryBuild(true), the includeHidden
+# argument. Asserting the call without the argument would pass on exactly the
+# regression this exists to catch: a probe over the filtered list reports
+# "1 window, Steam" while the Xbox FSE switcher, a cloaked tool window, fills
+# the screen.
 $probeMatch = [regex]::Match($source, '(?ms)^RunScreenProbe\(\)\s*\{.*?^}')
 Assert-True (
     $probeMatch.Success -and
-    $probeMatch.Value -match 'WinGetList\(\)') (
+    $probeMatch.Value -match 'SharedWindowInventoryBuild\(true\)') (
     "The screen probe must enumerate all top-level windows, not just the assist inventory.")
 
 # The logon task must be registered from XML with the power conditions set
