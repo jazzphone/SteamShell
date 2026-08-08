@@ -67,6 +67,28 @@ in a temporary copy and replace the live INI only after every change succeeds.
 Every View/Back mapping, including these Start actions, can be reassigned in the Controller Mapping window. Quick
 Menu and Control Panel remain available as optional built-in actions but are unassigned by default.
 
+### The View/Back button's own action
+
+View/Back can also carry a Steam action of its own, on a press that was **not**
+used to reach a mapping. It is off by default here and configured in
+**Settings → Steam**.
+
+| | tap | hold |
+|---|---|---|
+| Steam in front | Steam menu | Steam Quick Access |
+| a game in front | nothing | Steam overlay |
+
+The tap doing nothing inside a game is deliberate: SteamShell never blocks input,
+so the game receives View normally and keeps its own use of it. The in-game hold
+threshold is separate and longer (1000 ms against 500 ms) because View is
+commonly the scoreboard or map button.
+
+This does not conflict with View/Back being the mapping modifier. Any other input
+during the hold — a button, a trigger, a stick — marks the press as a modifier use
+and its own action is dropped on release, so *hold View, press A* fires the A
+mapping and nothing else. Automatic mouse mode is expressed as a virtual View
+hold and never triggers it either; only the physical button counts.
+
 ### Automatic mouse mode
 
 `[Controller] AutoMouseExeList` names executables where those same mappings apply **without holding View/Back**.
@@ -462,6 +484,18 @@ The Quick Menu includes a controller-friendly **Settings** area with four focuse
 Quick Menu changes are written to `SteamShellSettings.ini` immediately. Startup-only rows are marked `NEXT BOOT`.
 The Settings landing page also opens Windows Settings or the full SteamShell
 Settings editor.
+
+The full Settings editor has nine pages: **General**, **Startup & Splash**,
+**Startup Programs**, **Controller & Cursor**, **Steam**, **Focus & Windows**,
+**RTSS & Performance**, **Launcher Cleanup** and **Advanced & Logging**. The
+Steam page holds the three Steam shortcuts, the Big Picture window title and the
+View button's own action; it is new, and before it existed the `[Steam]` section
+could only be changed by editing the INI.
+
+Shell registration lives at the top of **Advanced & Logging** — installing or
+registering SteamShell as the shell, repairing a managed installation, and
+**Permanently Restore Explorer**, which is the escape hatch if the machine is
+misbehaving and you want your desktop back.
 
 ## Notification-area control
 
@@ -940,6 +974,17 @@ Two deliberate limits:
 - **It only writes RTSS's profile when RTSS does not already agree.** That write
   is a real edit to RTSS's own configuration, so it does not happen on every boot
   when RTSS kept the value by itself.
+
+**The limiter is re-enabled even when the FPS cannot be written.** These are two
+different mechanisms: the FPS is a property of RTSS's Global profile on disk,
+which a standard user cannot save against a stock Program Files install, while
+the limiter flag goes through RTSS's shared memory and works either way. The
+restore used to give up on the flag when the FPS write failed, which made the
+limiter's survival depend on whether RTSS happened to already hold your number.
+It now re-enables the limiter regardless and logs which half was restored — you
+will be capping at RTSS's own value rather than yours, and the recorded selection
+is kept so the next boot still tries for it. See *Setting the Frame Limit without
+running as administrator* above for the remedies.
 
 This needs `UseDllIntegration=true`. The shortcut fallback can only toggle the
 limiter, not select a specific FPS; with DLL integration off, SteamShell logs

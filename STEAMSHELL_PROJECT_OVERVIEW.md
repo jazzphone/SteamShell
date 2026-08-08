@@ -93,6 +93,56 @@ That comparison is now the fingerprint gate. Divergence is declared in
 including when an entry goes stale — so the file cannot quietly become a list
 nobody reads.
 
+### What the gate cannot see, measured
+
+An August 2026 audit pass found two duplicate pairs the fingerprint gate is
+structurally unable to flag, and they are worth knowing because they bound what a
+green build means.
+
+- **A pure-data function has no call sequence.** `InitDefaultControllerMappings`
+  and the companion's `DefaultControllerMappings` built the same 22 controller
+  bindings and three display overrides under two names — 22 subscript assignments
+  against one `Map()` literal. Invisible to the name-keyed gate *and* to the
+  cross-name one.
+- **A `DllCall` target is part of the sequence.** `RevealWindow` was already one
+  function in two files, differing only in whether the call spelled its DLL.
+  `"User32\ShowWindow"` is not the string `"ShowWindow"`, so a behaviourally
+  identical pair scored 0.00.
+
+Both gaps are recorded in `CROSS_NAME_DUPLICATES.txt` rather than closed, on the
+grounds that a weak structural comparison of data tables would be worse than
+knowing this one does not cover them.
+
+The same pass found that a *recorded reason is not evidence*. Two entries in
+`DIVERGENT_FUNCTIONS.txt` were false rather than stale — one claimed the shared
+file could not read a global it declares in seven other functions, the other
+described a product feature that exists. Re-reading reasons against the code, not
+only checking that they are present, is a separate activity from running the gate.
+
+### The replay must agree with the build
+
+`Replay-Validation.py` reproduces the structural checks and replays the ~1,076
+regex assertions out of the two PowerShell validators, so most work can be
+verified without Windows. Its own header warns that a gate the two harnesses
+disagree about is worse than no gate, and that happened: a PowerShell scan with no
+Python counterpart failed on Windows while the replay passed.
+
+Checks added since, all of which exist because something got through:
+
+- Sources must decode as **UTF-8**. A cp1252 em dash written into a UTF-8 file
+  made `grep` treat it as binary and silently return no matches — a tool
+  reporting "not found" when it means "unreadable".
+- A **PowerShell variable** may not hold both a lookup table and raw text inside
+  one function. Reusing one replaced a function-body table with a string, and the
+  failure surfaced hundreds of lines later at an unrelated `.ContainsKey`.
+- No product may build **two controls for the same setting**; each product's save
+  writes every registered field, so one silently overwrites the other.
+- Every settings row's **category must be a page the product draws**, and the
+  declared category list must equal the set of constructed panels — in both
+  directions.
+- A **percent field must convert both ways**. One that divided by 100 on save
+  with nothing multiplying back made its own window unsaveable on open.
+
 ### What this means for reading the rest of this document
 
 The narrative sections here — *Solved:*, *Reversed:*, *What hardware testing

@@ -665,28 +665,6 @@ DefaultSettings() {
     )
 }
 
-DefaultControllerMappings() {
-    global ControllerMap, ControllerMapDisplay
-    ControllerMap := Map(
-        "RB.Short", "Builtin:LeftClick", "RB.Long", "Builtin:None",
-        "RT.Short", "Builtin:RightClick", "RT.Long", "Builtin:None",
-        "LT.Short", "Send:^+o", "LT.Long", "Send:^+f",
-        "LB.Short", "Send:^!{Tab}", "LB.Long", "Builtin:TaskManager",
-        "A.Short", "Builtin:Enter", "A.Long", "Builtin:None",
-        "B.Short", "Builtin:Esc", "B.Long", "Builtin:AltF4",
-        "X.Short", "Builtin:TabTip", "X.Long", "Builtin:OSK",
-        "Y.Short", "Builtin:WinG", "Y.Long", "Builtin:None",
-        "Start.Short", "Builtin:StartMenu", "Start.Long", "Builtin:Explorer",
-        "L3.Short", "Builtin:None", "L3.Long", "Builtin:None",
-        "R3.Short", "Builtin:None", "R3.Long", "Builtin:None"
-    )
-    ControllerMapDisplay := Map(
-        "LT.Short", "Ctrl+Shift+O",
-        "LT.Long", "Ctrl+Shift+F",
-        "LB.Short", "Ctrl+Alt+Tab"
-    )
-}
-
 EnsureSettingsFile() {
     global IniPath, SettingsSchemaVersion, ControllerMap, ControllerMapDisplay
     RetireStartupSplashSettings()
@@ -706,7 +684,7 @@ EnsureSettingsFile() {
     }
     IniWrite(SettingsSchemaVersion, IniPath, "Companion", "SettingsSchemaVersion")
 
-    DefaultControllerMappings()
+    InitDefaultControllerMappings()
     for key, value in ControllerMap {
         marker := "__STEAMSHELL_XFE_MISSING__"
         current := marker
@@ -1132,7 +1110,7 @@ LoadSettings() {
 
 LoadControllerMappings() {
     global IniPath, ControllerMap, ControllerMapDisplay
-    DefaultControllerMappings()
+    InitDefaultControllerMappings()
     keys := [
         "A.Short", "A.Long", "B.Short", "B.Long", "X.Short", "X.Long",
         "Y.Short", "Y.Long", "LB.Short", "LB.Long", "RB.Short", "RB.Long",
@@ -1330,15 +1308,6 @@ ReloadSettings(*) {
     ShowNotification("Settings reloaded", "Info")
 }
 
-LogLine(message, level := "Info") {
-    global LogPath
-    line := FormatTime(, "yyyy-MM-dd HH:mm:ss") " [" level "] " message "`r`n"
-    ; StrLen undercounts multi-byte UTF-8, which is fine: the estimate only has
-    ; to be close enough to decide when to measure for real.
-    RotateLogIfNeeded(StrLen(line))
-    try FileAppend(line, LogPath, "UTF-8")
-}
-
 Heartbeat() {
     global AppVersion, HeartbeatSeconds, LastHeartbeatStamp
     now := A_Now
@@ -1393,7 +1362,12 @@ OnCompanionExit(exitReason, exitCode) {
     AssistPendingHardKillPids := Map()
     ShutdownGameInput()
     ShutdownRtssHooksApi()
-    ReleaseQuickMenuPaintResources()
+    ; The shared teardown, directly. This went through a one-line
+    ; ReleaseQuickMenuPaintResources that only called it, and standalone had a
+    ; function of the same name doing something else -- one name, two routines,
+    ; which is the drift the manifests exist to catch and the one form of it a
+    ; name-keyed check cannot see.
+    QuickMenuDestroyWindow()
     if IsObject(DisplayPendingOldMode) {
         ApplyPrimaryDisplayMode(DisplayPendingOldMode)
         if IsObject(DisplayPendingOldScale)
@@ -1505,19 +1479,6 @@ RecenterVisibleGuiOnMonitorActual(guiObj, monitorIndex) {
         &correctedX, &correctedY)
     return MoveWindowPhysical(guiObj.Hwnd, correctedX, correctedY)
 }
-
-; Makes visible a window that PositionGuiCentered was asked to leave hidden.
-;
-; ShowWindow rather than Gui.Show, because Gui.Show with no coordinates
-; re-auto-sizes and re-centres the window -- undoing the placement this whole
-; sequence just computed.
-RevealWindow(guiObj, noActivate := false) {
-    static SW_SHOWNOACTIVATE := 4
-    static SW_SHOW := 5
-    try DllCall("ShowWindow", "Ptr", guiObj.Hwnd, "Int",
-        noActivate ? SW_SHOWNOACTIVATE : SW_SHOW)
-}
-
 
 ; Seams for the shared MouseWatch. Nothing stops the pass here -- this product
 ; has no desktop shell to hand the cursor over to, so the only gate is the
@@ -2233,54 +2194,6 @@ ControllerDiagnosticTick() {
         . slotText " | GI=" giText " | fg=" foreground)
 }
 
-XInputResolveController(&state) {
-    global ControllerIndex, ActiveControllerIndex
-    static lastMissingLogTick := 0
-
-    ; Prefer the last controller that answered, then the configured index,
-    ; then scan every remaining XInput slot. Steam Input and Xbox mode can
-    ; reorder physical/virtual controllers without restarting this process.
-    candidates := []
-    seen := Map()
-    if (ActiveControllerIndex >= 0 && ActiveControllerIndex <= 3) {
-        candidates.Push(ActiveControllerIndex)
-        seen[ActiveControllerIndex] := true
-    }
-    if !seen.Has(ControllerIndex) {
-        candidates.Push(ControllerIndex)
-        seen[ControllerIndex] := true
-    }
-    Loop 4 {
-        index := A_Index - 1
-        if !seen.Has(index)
-            candidates.Push(index)
-    }
-
-    for _, index in candidates {
-        if (XInputGetState(index, &state) = 0) {
-            if (ActiveControllerIndex != index) {
-                oldIndex := ActiveControllerIndex
-                ActiveControllerIndex := index
-                if (oldIndex < 0)
-                    LogLine("XInput controller connected on slot " index ".")
-                else
-                    LogLine("XInput controller moved from slot " oldIndex " to slot " index ".")
-            }
-            return true
-        }
-    }
-
-    if (ActiveControllerIndex >= 0) {
-        LogLine("XInput controller disconnected from slot " ActiveControllerIndex ".", "Warning")
-        ActiveControllerIndex := -1
-        lastMissingLogTick := A_TickCount
-    } else if (!lastMissingLogTick || A_TickCount - lastMissingLogTick >= 30000) {
-        LogLine("No XInput controller detected on slots 0–3.", "Warning")
-        lastMissingLogTick := A_TickCount
-    }
-    return false
-}
-
 ; Per-tree seam required by SteamShell-Shared.ahk: the builtin actions only
 ; this product has.
 ;
@@ -2392,51 +2305,6 @@ CurrentForegroundExe() {
 
 SteamIsInFront() {
     return IsSteamProcess(CurrentForegroundExe())
-}
-
-; Resolves the View button's own action, on release.
-;
-; View is also the mapping modifier, so this only runs when nothing else was
-; touched during the hold -- otherwise "hold View, press A" would fire a Steam
-; shortcut underneath the mapping. Resolving on release rather than at a timer
-; is what makes that possible.
-;
-;   Steam in front   tap  -> Steam menu        hold -> Steam Quick Access
-;   Game in front    tap  -> nothing           hold -> Steam overlay
-;
-; The tap doing nothing in a game is deliberate: the companion never blocks
-; input, so the game receives View normally and keeps its own use of it.
-ViewButtonReleased(heldMs, usedAsModifier) {
-    global EnableViewSteamActions, EnableViewTapAction, EnableViewHoldAction
-    global ViewHoldMs, ViewHoldInGameMs
-    global SteamMenuShortcut, SteamQuickAccessShortcut, SteamOverlayShortcut
-    if (!EnableViewSteamActions || usedAsModifier)
-        return
-    steamFront := SteamIsInFront()
-    ; In a game the threshold is longer: View is commonly the scoreboard or map
-    ; button there and gets held on purpose, so a short threshold would keep
-    ; throwing the Steam overlay up during play.
-    threshold := steamFront ? ViewHoldMs : ViewHoldInGameMs
-    ; Tap and hold are switched independently. A disabled hold still counts as a
-    ; hold rather than falling through to the tap action -- releasing after a
-    ; long press must never send the shortcut the short press would have.
-    if (heldMs >= threshold) {
-        if !EnableViewHoldAction
-            return
-        shortcut := steamFront ? SteamQuickAccessShortcut : SteamOverlayShortcut
-        LogLine("View held " heldMs "ms (threshold " threshold ") -> "
-            . (steamFront ? "Steam Quick Access" : "Steam overlay")
-            . " (" SendToPretty(shortcut) ").")
-        if steamFront
-            SendChordSafe(shortcut)
-        else
-            SendSteamOverlayChord()
-        return
-    }
-    if (!EnableViewTapAction || !steamFront)
-        return
-    LogLine("View tapped -> Steam Menu (" SendToPretty(SteamMenuShortcut) ").")
-    SendChordSafe(SteamMenuShortcut)
 }
 
 ; Steam Menu: Steam's own menu when Steam is in front, the in-game overlay when
@@ -4638,26 +4506,31 @@ ProductSetDialogActive(active) {
     SettingsDialogActive := active
 }
 
-ProductControllerLearnConsumesReport(data, base, length, device) {
-    global LearnActive
-    if !LearnActive
-        return false
-    ControllerLearnReport(data, base, length, device)
-    return true
+; The seam shared code persists through, bound to this program's INI and PID.
+;
+; This wrote each key straight into the live file in a loop and returned false at
+; the first failure -- which does not undo the keys already written. A three-key
+; save failing on the third left the file holding two of them while telling the
+; caller nothing was saved, and ProductApplyQuickMenuSetting responds to that
+; false by reloading settings from a file that now agrees with neither the caller
+; nor the user. It also meant a crash or a power loss mid-save could truncate the
+; settings file outright, because IniWrite rewrites it in place.
+;
+; Standalone had already solved this properly, so the loop is gone rather than
+; patched: CommitIniChangesAt stages a copy, writes into the copy and moves it
+; over the original, so the file is either fully updated or untouched.
+SharedPersistSettings(changes) {
+    global IniPath, ScriptPid
+    return CommitIniChangesAt(IniPath, ScriptPid, changes)
 }
 
-SharedPersistSettings(changes) {
-    global IniPath
-    for _, item in changes {
-        try IniWrite(item["value"], IniPath, item["section"], item["key"])
-        catch as err {
-            LogLine(
-                "Setting " item["section"] "/" item["key"]
-                . " could not be saved: " err.Message, "Warning")
-            return false
-        }
-    }
-    return true
+; Staging means the occasional abandoned staging file, so the companion sweeps
+; them for the same reason standalone does -- adopting the commit without the
+; sweep would just trade one kind of litter for another, beside the INI the user
+; is expected to be able to read.
+SweepAbandonedSettingsUpdates() {
+    global IniPath, ScriptPid
+    SweepAbandonedIniUpdates(IniPath, ScriptPid)
 }
 
 ; Per-tree seam required by SteamShell-Shared.ahk. See the header above
@@ -4685,23 +4558,6 @@ ProductIdentity() {
         ; ApplyTrayIconImage so the icon lifecycle has no per-tree copy.
         "icon", "SteamShell-XFE.ico")
     return identity
-}
-
-PersistRtssCustomFrameCap(value) {
-    global IniPath, RtssCustomFrameCap
-    value := ClampInt(value, 10, 1000)
-    try IniWrite(value, IniPath, "RTSS", "CustomFrameCap")
-    catch as err {
-        LogLine("RTSS Custom FPS could not be retained: " err.Message, "Warning")
-        ShowNotification("The Custom FPS value could not be retained", "Warning")
-        return false
-    }
-    RtssCustomFrameCap := value
-    ; Committing a Custom value is also a selection of Custom at that value.
-    ; Recorded here rather than in the caller: CommitRtssPendingFrameCap is
-    ; shared, so it cannot carry a tree-specific call.
-    PersistRtssFrameCapSelection("custom", value)
-    return true
 }
 
 ; Seam for the shared ToggleQuickMenu. Nothing here refuses to open the menu:
@@ -4774,6 +4630,7 @@ HideQuickMenuForOwnWindow() {
 HideQuickMenu(*) {
     global QuickMenuVisible, QuickMenuGui, EnableAutoHideCursor, MouseHidden
     global QuickMenuPreviousHwnd, ControllerNeedsFreshBaseline
+    wasVisible := QuickMenuVisible
     ; Hiding alone can leave the child title/rows/footer surfaces cached in DWM
     ; when a fullscreen game or Xbox FSE replaces its presentation surface.
     ; Hide the parent first, then retire the whole menu session.
@@ -4783,6 +4640,14 @@ HideQuickMenu(*) {
     }
     QuickMenuVisible := false
     QuickMenuDestroyWindow()
+    ; Everything below is a consequence of a menu having CLOSED, and none of it
+    ; is idempotent, so it is gated on the menu actually having been open --
+    ; which is what standalone's copy has always done and this one did not.
+    ; Called defensively on a menu that was already hidden, this pulled the
+    ; foreground to a window remembered from some earlier session, hid the
+    ; cursor, and spent the next controller poll on a baseline nothing needed.
+    if !wasVisible
+        return
     ControllerNeedsFreshBaseline := true
     ; Hand the foreground back to whatever had it, so closing the menu does not
     ; leave the session with nothing focused.
@@ -4805,11 +4670,6 @@ HideQuickMenu(*) {
 ; both, so a fix to the blend or the fallback should be a copy, not a
 ; re-derivation.
 ; ---------------------------------------------------------------------------
-
-; Exit cleanup uses the same ownership-safe teardown as an ordinary close.
-ReleaseQuickMenuPaintResources() {
-    QuickMenuDestroyWindow()
-}
 
 ; The one line of the painter that differs between the two trees, isolated so
 ; the rest can stay identical: standalone resolves a row's value live, while XFE
@@ -5336,22 +5196,6 @@ QuickMenuAdjustSelected(direction) {
     QuickMenuRefresh()
 }
 
-; Moves the selection, wrapping at both ends. Shared by the controller and the
-; keyboard so the two can never drift apart.
-; Rows that only report state and cannot be acted on, which this tree already
-; marks with action "none". Standalone answers the same question from a list of
-; row ids, because its rows carry no action field; the two sets are deliberately
-; the same six rows.
-; Per-tree seam for SteamShell-Shared.ahk's QuickMenuMoveSelection. This tree
-; WRAPS around the ends; standalone clamps.
-QuickMenuNormalizeSelection() {
-    global QuickMenuRows, QuickMenuSelected
-    if (QuickMenuSelected < 1)
-        QuickMenuSelected := QuickMenuRows.Length
-    if (QuickMenuSelected > QuickMenuRows.Length)
-        QuickMenuSelected := 1
-}
-
 QuickMenuHandleController(pressed, lx, ly, buttons := 0) {
     global QuickMenuRows, QuickMenuSelected
     global QuickMenuPage, ControllerChordHoldMs
@@ -5593,7 +5437,7 @@ ShowSettings(*) {
     ; because it belongs to AnyFSE's own configuration.
     SettingsAddNote(settings, category,
         "Integration: configure AnyFSE to launch Steam Big Picture as the Home "
-        . "app, and leave “Exit FSE when Home app exits” off. Setup Assistant "
+        . "app, and leave “Exit FSE when Home app exits�? off. Setup Assistant "
         . "already starts this companion at sign-in — do not also add it to "
         . "AnyFSE's startup applications.", &y, 60)
 
@@ -5665,8 +5509,23 @@ ShowSettings(*) {
         . "All Settings → Advanced → Probe Screen to identify an overlay that is "
         . "not being caught.", &y, 52)
 
+    ; Launcher cleanup
+    ;
+    ; Its own page, as in the shell. These rows were spread across the Assist
+    ; page -- three of them -- while three MORE settings this product reads on
+    ; every load had no control at all: RequireNoGame, GracefulCloseMs and the
+    ; launcher list. A page collects them where somebody looking for launcher
+    ; behaviour will look.
+    category := "Launcher Cleanup"
+    y := SettingsFirstRowY()
+    SettingsAddRowsForCategory(settings, category, "xfe", &y)
+    SettingsAddNote(settings, category,
+        "The launcher list itself is edited in the INI under [LauncherCleanup] "
+        . "LauncherProcesses, alongside the protected-process list under "
+        . "[Assist] ProtectedProcesses.", &y, 40)
+
     ; Advanced
-    category := "Advanced"
+    category := "Advanced & Logging"
     y := SettingsFirstRowY()
     SettingsAddNote(settings, category,
         "This companion contains no shell registration, Explorer control, taskbar "
@@ -5689,7 +5548,7 @@ ShowSettings(*) {
         . " y" y " w" SettingsLayout()["contentWidth"] " h20 +Wrap", "")
     SettingsTrackControl(category, LogonTaskStatusCtrl)
     y += 28
-    SettingsAddRowsForCategory(settings, category, "xfe", &y, "Advanced & Logging")
+    SettingsAddRowsForCategory(settings, category, "xfe", &y)
     SettingsAddNote(settings, category,
         "The heartbeat log proves whether the companion remains responsive while "
         . "Xbox FSE is active. Diagnostic logging compares every controller slot "
@@ -6084,7 +5943,48 @@ SettingsProductRecordShortcut(field, *) {
 ; Per-tree seams for the shared adapter. This product has no dependency pass --
 ; nothing here greys a row from another row -- and it does have section breaks,
 ; which replaced the group boxes that could not flow.
+; Greys the rows whose driver has turned them off.
+;
+; This body was empty, and that was recorded as a design choice -- the companion
+; has no dependency pass, so the seam does nothing. It reads as settled until you
+; ask which rows the shared spec marks with "dependency", because two of the
+; eight are "product", "both": the RTSS overlay and frame-limiter control modes.
+; Both reach this window, and neither did anything here: choosing Toggle left the
+; separate On and Off shortcut rows enabled and editable, and choosing Separate
+; left the single Toggle shortcut the same way. The user could type a shortcut
+; into a field the selected mode ignores, save it, and see no effect.
+;
+; Only the RTSS pair is handled. The other six dependency rows are all
+; "product", "standalone" -- game-assist, window management and launcher cleanup
+; -- and none of them is built into this window at all.
 SettingsProductWireDependency(ctrl, eventName) {
+    ctrl.OnEvent(eventName, SettingsRefreshDependencies)
+}
+
+SettingsRefreshDependencies(*) {
+    global SettingsFields
+    if (SettingsFields.Count = 0)
+        return
+    ; Compared by TEXT, as everything else in this window now is: the choice rows
+    ; carry their words, and the index they sit at is not a value anything else
+    ; agrees about.
+    overlaySeparate :=
+        StrLower(GetFieldText("RTSS.OverlayControlMode", "separate")) = "separate"
+    limiterSeparate :=
+        StrLower(GetFieldText("RTSS.FrameLimiterControlMode", "separate")) = "separate"
+    SettingsSetFieldEnabled("RTSS.OverlayToggleShortcut", !overlaySeparate)
+    SettingsSetFieldEnabled("RTSS.OverlayOnShortcut", overlaySeparate)
+    SettingsSetFieldEnabled("RTSS.OverlayOffShortcut", overlaySeparate)
+    SettingsSetFieldEnabled("RTSS.CustomFrameCapShortcut", !limiterSeparate)
+    SettingsSetFieldEnabled("RTSS.FrameLimiterOnShortcut", limiterSeparate)
+    SettingsSetFieldEnabled("RTSS.FrameLimiterOffShortcut", limiterSeparate)
+}
+
+SettingsSetFieldEnabled(key, enabled) {
+    global SettingsFields
+    if !SettingsFields.Has(key)
+        return
+    try SettingsFields[key].Enabled := enabled ? true : false
 }
 
 SettingsProductAddSectionRow(guiObj, category, title, &y) {
@@ -6130,35 +6030,6 @@ SetFieldText(key, value) {
 ; because a path is unreadable in 150 pixels.
 ; Up to three buttons on one flowing line. entries is an array of
 ; [label, callback] pairs; more than three wraps onto the next line.
-SettingsAddButtonRow(guiObj, category, entries, &y) {
-    ; Columns derived from the layout, not stated. They used to be [300, 496,
-    ; 692] with 178-wide buttons, which was correct for a 900-pixel window whose
-    ; content began at 300 -- and silently wrong the moment the content moved to
-    ; 255 and widened to 690, leaving every button row indented past the rows
-    ; above it and stopping short of the right edge.
-    layout := SettingsLayout()
-    gap := 15
-    buttonWidth := (layout["contentWidth"] - gap * 2) // 3
-    COLUMNS := [layout["contentX"],
-        layout["contentX"] + buttonWidth + gap,
-        layout["contentX"] + (buttonWidth + gap) * 2]
-    BUTTON_WIDTH := buttonWidth
-    LINE_HEIGHT := 42
-    index := 0
-    for _, entry in entries {
-        column := Mod(index, COLUMNS.Length)
-        if (column = 0 && index > 0)
-            y += LINE_HEIGHT
-        button := guiObj.AddButton(
-            "x" COLUMNS[column + 1] " y" y " w" BUTTON_WIDTH " h34", entry[1])
-        button.OnEvent("Click", entry[2])
-        SettingsTrackControl(category, button)
-        index += 1
-    }
-    if (index > 0)
-        y += LINE_HEIGHT
-    return y
-}
 
 ; Runs the screen probe from the Settings window. Settings itself is hidden for
 ; the duration: the probe exists to identify some other surface, and leaving our
@@ -6198,9 +6069,15 @@ SettingsCategoryTable() {
         ["Startup Programs",
             "Applications launched shortly after the companion starts."],
         ["Assist",
-            "Optional automatic help: game focus, Steam return, launcher cleanup, "
-            . "and when to stay out of the way."],
-        ["Advanced",
+            "Optional automatic help: game focus, Steam return, and when to stay "
+            . "out of the way."],
+        ["Launcher Cleanup",
+            "Closing game launchers that keep running after the game has exited."],
+        ; "Advanced & Logging", matching the shell. It was "Advanced" here, which
+        ; meant the shared row table had to be asked for one name while the page
+        ; was drawn under another -- the tableKey argument existed for this single
+        ; case. Same rows, same page, same name now, and the argument is gone.
+        ["Advanced & Logging",
             "Portable files, diagnostics, cursor test, reload, and companion lifecycle."]
     ]
     return categories
@@ -6384,6 +6261,11 @@ SettingsPopulate() {
     ; was read as a number after its row became a dropdown, and two settings were
     ; read here with bounds their own LoadSettings had stopped using.
     SettingsPopulateFields()
+    ; Once the values are in, so the window OPENS in the right state. Wiring the
+    ; drivers alone would only grey the dependent rows after the user touched a
+    ; driver, leaving the first view of the window showing rows the saved mode
+    ; already ignores.
+    SettingsRefreshDependencies()
     ; Not fields: a list and a status line, filled from elsewhere.
     SettingsRefreshStartupProgramsList()
     SettingsRefreshLogonTaskStatus()
@@ -6678,7 +6560,7 @@ MappingRestoreDefaults(*) {
         "Controller Mappings", "YesNo Icon?")
     if (answer != "Yes")
         return
-    DefaultControllerMappings()
+    InitDefaultControllerMappings()
     for key, value in ControllerMap {
         IniWrite(value, IniPath, "ControllerMap", key)
         if ControllerMapDisplay.Has(key)
@@ -7127,21 +7009,6 @@ PollController() {
             wasDisabled := true
             return
         }
-        if (wasDisabled || ControllerNeedsFreshBaseline) {
-            ; Establish a fresh baseline without firing edges for buttons that
-            ; happen to be held at the instant the companion is enabled.
-            if ControllerReadState(&state) {
-                ResetControllerEdgeState(downTick, longFired, triggerDown,
-                    buttonDefinitions)
-                previousButtons := NumGet(state, 4, "UShort")
-                previousViewDown := (previousButtons & 0x0020) != 0
-                viewWasDown := previousViewDown
-                wasDisabled := false
-                ControllerNeedsFreshBaseline := false
-            }
-            return
-        }
-
         ; The learning wizard owns the controller completely.
         ;
         ; It only diverts the RawInput path, so without this the poll loop keeps
@@ -7155,13 +7022,48 @@ PollController() {
         ; Suppressing the pipeline is also why button and D-pad steps must be able
         ; to time out on their own: with the controller inert, there is no way to
         ; press Skip from the couch.
+        ;
+        ; Ahead of the fresh-baseline block below, not after it. The baseline
+        ; block returns too, so from behind it the wizard's request for a baseline
+        ; would be granted and cleared on the very next poll -- leaving the
+        ; wizard's LAST poll, not its first one after closing, as the edge-free
+        ; sample. In front of it the request stands untouched for as long as the
+        ; wizard is open and is spent on the first poll after it closes, which is
+        ; the poll that needs it.
         if LearnActive {
-            previousButtons := 0
+            ; Not previousButtons := 0. That makes the next poll compute pressed
+            ; as buttons & ~0, so every button still held when the wizard closes
+            ; arrives as a press edge and fires its mapping -- the misfire this
+            ; guard exists to prevent, and the common case rather than the corner,
+            ; because the wizard is dismissed by pressing something.
+            ControllerNeedsFreshBaseline := true
             previousViewDown := false
             viewWasDown := false
             quickChordSince := 0
             quickChordFired := false
             ResetControllerEdgeState(downTick, longFired, triggerDown, buttonDefinitions)
+            return
+        }
+
+        if (wasDisabled || ControllerNeedsFreshBaseline) {
+            ; Establish a fresh baseline without firing edges for buttons that
+            ; happen to be held at the instant the companion is enabled.
+            if ControllerReadState(&state) {
+                ResetControllerEdgeState(downTick, longFired, triggerDown,
+                    buttonDefinitions)
+                previousButtons := NumGet(state, 4, "UShort")
+                previousViewDown := (previousButtons & 0x0020) != 0
+                viewWasDown := previousViewDown
+                ; The triggers are sampled here for the same reason the buttons
+                ; are. Left alone they kept their pre-interruption value while
+                ; everything around them was reset, so a trigger held across the
+                ; interruption read as a rising edge afterwards and changed the
+                ; Settings category on its own.
+                settingsLtDown := NumGet(state, 6, "UChar") > 30
+                settingsRtDown := NumGet(state, 7, "UChar") > 30
+                wasDisabled := false
+                ControllerNeedsFreshBaseline := false
+            }
             return
         }
 
@@ -7496,6 +7398,11 @@ OnError(HandleUncaughtError)
 ; is cancelled whenever the companion is disabled.
 SetTimer(ControllerMouseSafetyTick, 5000)
 EnsureSettingsFile()
+; After the file is known to exist and before anything reads it, matching
+; standalone's order: a sweep is only meaningful once the path is settled, and a
+; staging file left by a previous run must not still be sitting there when this
+; run stages its own.
+SweepAbandonedSettingsUpdates()
 LoadSettings()
 CheckXfeInstallationRecord()
 ; Echo the settings file actually in use and the values that came out of it.

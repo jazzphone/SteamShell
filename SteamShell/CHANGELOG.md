@@ -1,5 +1,145 @@
 # SteamShell changelog
 
+## Unreleased — five defects the settings window could not have shown you
+
+**The RTSS frame limiter did not survive a reboot, sometimes.** The frame cap is
+two mechanisms with two privilege requirements: the FPS is a property of RTSS's
+Global profile on disk and cannot be saved unelevated against a stock Program
+Files install, while the limiter flag goes through RTSS's shared memory and works
+either way. `RestoreRtssFrameLimitTick` returned on a failed FPS write, before
+ever reaching the flag — so whether the limiter came back was decided by whether
+RTSS happened to already hold the recorded number, and when it did not, the cause
+was usually an earlier write that had been blocked too. The flag is now restored
+regardless, and the log says which half was recovered. The recorded selection is
+deliberately NOT overwritten with RTSS's own value: that is what the next boot
+should still be trying to restore.
+
+**The Maximize width threshold made its own window unsaveable.** `MinWidthPercent`
+is stored as a fraction and shown as a percentage, and only the save half of that
+conversion existed. Opening Settings put `0.3` into a field whose own validator
+demands 5 to 100; typing 30 saved correctly as 0.3 and the next open showed 0.3
+again. A conversion with one direction implemented is worse than none — none is
+merely wrong, this was a loop with no exit.
+
+**The Quick Menu silently reverted settings.** Its chord is evaluated before the
+branch that hands input to Settings, so the menu opens over that window. Changing
+a setting from the menu moved the INI, the globals and the menu row, but not the
+Settings control behind it — and `SettingsEditorSave` writes every field it
+holds, so the next Save put the stale value back. The companion has guarded this
+since it wrote its own Quick Menu.
+
+**The cursor vanished while using the Settings window.** `MouseWatchHoldsCursorVisible`
+returned false in the shell on the recorded grounds that this tree holds the
+cursor visible for nothing. It has a pointer-driven Settings editor. With a
+controller connected it was worse than losing the cursor: the poll's Settings
+branch shows it again on the next tick, the mouse still has not moved, so the
+hide condition is still true when the watch next runs — the two fought and the
+cursor blinked.
+
+**The companion offered two settings that did nothing.** Two of the rows the
+shared spec marks with `dependency` are `product: both` — the RTSS overlay and
+frame-limiter control modes — and `SettingsProductWireDependency` was an empty
+body there, so a shortcut could be typed and saved into a field the selected mode
+ignores.
+
+## Unreleased — the View button's own action, and a controller that stays found
+
+**The View/Back tap and hold actions are in both products.** Tap with Steam in
+front opens the Steam menu, hold opens Quick Access; in a game, tap does nothing
+and hold opens the overlay. This existed only in the companion, and the reason
+recorded for that — that the shell uses View/Back as its mapping modifier and so
+has no bare press to give meaning to — described neither product. The companion
+uses it as a modifier too, for the same mappings and the same automatic mouse
+mode, expressed the same way. `usedAsModifier` is the whole mechanism: any other
+input during the hold drops the action on release, so "hold View, press A" fires
+the A mapping and nothing else. OFF by default in the shell, ON in the companion.
+
+**The shell now finds a controller that XInput has moved.** It read the configured
+slot and nothing else, so a pad that Steam Input relocated mid-session simply
+stopped answering — on the product that IS the shell, where the recovery on offer
+was to change Controller Index in Settings using the controller that had just
+stopped working. `XInputResolveController` is shared now: last slot that answered,
+then the configured one, then the rest, logging the move.
+
+## Unreleased — settings pages that line up
+
+The shell gained a **Steam** page. It read the whole `[Steam]` section and offered
+none of it, so the rows the shared table defines for that page were built for a
+page nothing drew — which is how the View-button rows first shipped invisible.
+
+Both products gained a **Launcher Cleanup** page. The companion's cleanup rows
+were spread across its Assist page while three more settings it reads on every
+load had no control at all; `RequireNoGame` and `GracefulCloseMs` are new
+controls, not moved ones.
+
+The companion's **Advanced** page is `Advanced & Logging`, matching the shell, and
+the `tableKey` argument that existed for that single name mismatch is unused.
+`BpmTitle` moved to Steam, `HeartbeatSeconds` to Advanced & Logging, and the three
+Steam shortcuts are defined once instead of twice.
+
+Buttons are laid out on the content grid rather than by hand. The shell's Startup
+Programs page had four buttons of 155, 175, 155 and 175 on one line and three of
+155 on the next, from columns that did not line up with each other. The companion
+already derived its columns from the layout; that helper is shared now, with a
+column count, because label length decides it. On the shell's Advanced page the
+four shell-registration actions lead the grid instead of sitting at rows four and
+five of ten — "Permanently Restore Explorer" is the escape hatch for a program
+that has taken over the Windows shell, and it was the tenth of nineteen buttons.
+
+## Unreleased — nine more functions defined once
+
+**To Shared:** `LogLine`, `RevealWindow`, `QuickMenuNormalizeSelection`,
+`InitDefaultControllerMappings`, `XInputResolveController`, `ViewButtonReleased`,
+`ControllerLearnConsumesReport`, `PersistRtssCustomFrameCap`,
+`SettingsAddButtonRow`. **To Common:** `CommitIniChangesAt`,
+`SweepAbandonedIniUpdates`.
+
+The companion's settings writes are staged now. It wrote each key straight into
+the live file and returned false at the first failure, which does not undo the
+keys already written — a three-key save failing on the third left the file
+holding two of them while telling the caller nothing was saved. The shell had
+solved this properly, so the loop is gone rather than patched. Staging leaves the
+occasional abandoned file, so the sweep came with it.
+
+Two of these were invisible to every existing check. `InitDefaultControllerMappings`
+and the companion's `DefaultControllerMappings` were the same 22 bindings and
+three display overrides under two names — a pure-data function has no call
+sequence, so neither the name-keyed gate nor the cross-name one could see it.
+`RevealWindow` was already one function in two files, differing only in whether
+its `DllCall` named the DLL; the gate reads that target as part of the call
+sequence, so an identical pair scored 0.00.
+
+Two recorded reasons turned out to be false rather than stale.
+`ProductControllerLearnConsumesReport` was kept per-tree because "Shared cannot
+read a global it does not declare into both trees" — that file declares
+`LearnActive` in seven other functions, and the whole wizard lives there. The
+`MouseWatchHoldsCursorVisible` entry described a shell with no pointer-driven
+window.
+
+## Unreleased — the harness catches what the build was catching
+
+Both harnesses disagreed about a gate, which the replay's own header warns is
+worse than no gate: the PowerShell escape scan had no Python counterpart, so
+moving `LogLine` into the shared file failed on Windows and passed on the
+development machine. The scan is replayed now, by name rather than by call,
+because a bare reference passed as a callback is a dependency too.
+
+New local checks: sources must decode as UTF-8 (a cp1252 em dash written into a
+UTF-8 file made `grep` treat it as binary and silently report no matches); a
+PowerShell variable may not hold both a lookup table and raw text inside one
+function (that replaced a function-body table with a string, and the failure
+surfaced hundreds of lines later at an unrelated `.ContainsKey`); no product may
+build two controls for the same setting; and the learner guard, the RTSS limiter
+restore, the View button parity and the percent round-trip are each pinned.
+
+Three assertions stopped restating numbers. The category count is now a set
+comparison between what is declared and what is built — checked in both
+directions, because a panel with no list entry is a page nobody can select and a
+list entry with no panel is an empty page, and neither is expressible as a count.
+The companion's page count derives from its category table. The Advanced button
+grid is asserted to go through the shared row builder rather than to contain the
+literals 255, 610 and 335.
+
 ## Unreleased — the RTSS cluster, the settings scrollbar and the Quick Menu title are defined once
 
 Nine functions moved, about 330 lines that existed twice.

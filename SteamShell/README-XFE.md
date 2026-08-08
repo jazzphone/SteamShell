@@ -455,7 +455,7 @@ process for no reason.
 
 ## The Settings window
 
-Seven categories in a sidebar, with a page for each. Rows place themselves from
+Eight categories in a sidebar, with a page for each. Rows place themselves from
 a flowing cursor, and the content area **scrolls** when a page is taller than the
 window — Controller & Cursor and RTSS & Performance both are. The scrollbar
 appears only when a page needs it.
@@ -464,12 +464,24 @@ Scroll with the mouse wheel, the scrollbar, or the **left stick**, which already
 drives the wheel over any Settings surface. The right stick moves the pointer and
 RB clicks, LT/RT change category, and Y saves.
 
-Four category names are shared with standalone SteamShell — General,
-Controller & Cursor, RTSS & Performance, Startup Programs — and present the
-settings that exist in *both* in the same order and wording. Steam, Assist and
-Advanced have no standalone counterpart; standalone's Startup & Splash, Focus &
-Windows and Launcher Cleanup do jobs this companion deliberately leaves to
-Xbox FSE, so those pages are not mirrored in either direction.
+Seven of the eight category names are shared with standalone SteamShell —
+General, Controller & Cursor, Steam, RTSS & Performance, Startup Programs,
+Launcher Cleanup and Advanced & Logging — and present the settings that exist in
+*both* in the same order and wording. Three of those are recent: standalone
+gained a Steam page (it had always read `[Steam]` and offered none of it), this
+companion gained a Launcher Cleanup page, and this companion's **Advanced** page
+is now **Advanced & Logging**, matching the shell.
+
+**Assist** is the only page with no standalone counterpart. Standalone's
+Startup & Splash and Focus & Windows do jobs this companion deliberately leaves
+to Xbox FSE, so those two are not mirrored in either direction.
+
+Launcher Cleanup is a page in both, but the rows are not shared: the two products
+clamp the same keys differently — `CooldownSec` is 30..7200 here and 0..86400
+there — and a shared row would offer one of them values its own loader rounds
+away. Two of its rows, **Only clean up when no game appears to be running** and
+**Graceful-close wait before a force close (ms)**, are settings this companion has
+always read and previously had no control for.
 
 One limitation worth knowing: a row scrolled out of view is hidden, and a hidden
 control cannot be reached by Tab. Scroll to it first. This matches standalone.

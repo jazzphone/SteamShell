@@ -1488,3 +1488,54 @@ setting than the one shown, silently.
   rotates with the same settings. The helper used to branch on which product
   started it; it now reads one key.
 
+
+## Settings writes are staged now
+
+- Change several settings at once and Save. Confirm they all land, and that the
+  INI is never left holding some of them: the writes used to go straight into
+  the live file one key at a time and stop at the first failure, which does not
+  undo the keys already written.
+- Confirm no `.update-<pid>.tmp` file is left beside the INI after a normal
+  save. Kill the companion mid-save if you can provoke it, restart, and confirm
+  the leftover staging file is swept on startup rather than accumulating.
+- Make the INI read-only and Save. The companion must report the failure and
+  leave the original file intact and readable.
+
+## Launcher Cleanup is its own page
+
+- Confirm **Launcher Cleanup** appears in the category list, between Assist and
+  Advanced & Logging, and that Assist no longer carries the cleanup rows.
+- The page holds six rows. **Only clean up when no game appears to be running**
+  and **Graceful-close wait before a force close (ms)** are new controls for
+  settings the companion has always read — confirm each saves, survives a
+  reload, and that the values were not reset by their first appearance.
+- The launcher list itself is still INI-only, under `[LauncherCleanup]
+  LauncherProcesses`. Confirm the note on the page says so.
+- Confirm cleanup still behaves as before: a launcher left running after a game
+  exits is closed once the settle time passes, and the cooldown is respected.
+
+## Advanced & Logging
+
+- The page is named **Advanced & Logging**, matching the shell. Confirm it opens,
+  draws all of its rows and buttons, and that nothing else lost its rows — the
+  shared table was previously asked for one name while the page was drawn under
+  another.
+- Confirm `Heartbeat log interval (seconds)` now lives here rather than on
+  General, and still saves.
+
+## The View button's own action
+
+On by default here, as before. The behaviour is unchanged; it is now the shared
+implementation, so it is worth re-confirming.
+
+- With Steam in front: tap View opens the Steam menu, hold opens Quick Access.
+  In a game: tap does nothing, hold opens the overlay.
+- **Hold View and press A. No Steam shortcut may fire.** Any other input during
+  the hold drops the action on release.
+- Hold View, open the Quick Menu, close it, release View. No action may fire.
+
+## Button rows
+
+- Every button row is three even columns across the content width. Confirm no
+  row is indented past the rows above it or stops short of the right edge, on
+  every page that has buttons.

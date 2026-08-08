@@ -852,6 +852,65 @@ POWERSHELL_SCOPES = ("env", "script", "global", "local", "using", "private",
                      "variable", "function")
 
 
+def check_powershell_variable_shapes():
+    """A variable that holds a lookup TABLE must not be reassigned to TEXT.
+
+    Both harnesses index the per-file function tables with .ContainsKey. Reusing
+    one of those names for a Get-Content string replaces the table with a string,
+    and PowerShell only notices at the next .ContainsKey -- which can be hundreds
+    of lines further on, in an unrelated rule. The reported error names neither
+    the variable nor the assignment that caused it.
+
+    Cheap to check statically and impossible to see by reading, so it belongs
+    here: the development machine cannot run PowerShell, and this exact mistake
+    reached a Windows build.
+    """
+    table_rhs = re.compile(r"Get-Ahk\w*FunctionBodies|Read-\w*Manifest")
+    text_rhs = re.compile(r"Get-Content|-Raw\b")
+    for name in ("Validate-Common.ps1", "Validate-SteamShell.ps1",
+                 "Validate-SteamShell-XFE.ps1", "Build-SteamShell.ps1"):
+        path = ROOT / name
+        if not path.exists():
+            continue
+        lines = decode_like_powershell(path.read_bytes()).splitlines()
+        # Bound each function so a name reused in a DIFFERENT function is fine.
+        bounds = []
+        for index, line in enumerate(lines):
+            if re.match(r"\s*function\s+[\w-]+", line):
+                depth = 0
+                for j in range(index, len(lines)):
+                    code = re.sub(r'"(?:[^"`]|`.)*"', '""', lines[j])
+                    code = re.sub(r"'[^']*'", "''", code)
+                    code = re.sub(r"(^|\s)#.*$", r"\1", code)
+                    depth += code.count("{") - code.count("}")
+                    if depth == 0 and j > index:
+                        bounds.append((index, j))
+                        break
+        for start, end in bounds:
+            kinds = {}
+            for offset, line in enumerate(lines[start:end + 1]):
+                match = re.match(r"\s*\$(\w+)\s*=(?!=)\s*(.*)$", line)
+                if not match:
+                    continue
+                variable, rhs = match.group(1), match.group(2)
+                if table_rhs.search(rhs):
+                    kind = "table"
+                elif text_rhs.search(rhs):
+                    kind = "text"
+                else:
+                    continue
+                seen = kinds.setdefault(variable, {})
+                seen.setdefault(kind, start + offset + 1)
+            for variable, seen in sorted(kinds.items()):
+                if len(seen) > 1:
+                    where = ", ".join(f"{k} at line {v}" for k, v in sorted(seen.items()))
+                    fail(f"{name}: ${variable} is assigned both a lookup table and "
+                         f"raw text inside one function ({where}). The later "
+                         "assignment wins, and every .ContainsKey on it afterwards "
+                         "fails with a message naming neither the variable nor "
+                         "this line.")
+
+
 def check_powershell_scope_colons():
     for name in ("Validate-Common.ps1", "Validate-SteamShell.ps1",
                  "Validate-SteamShell-XFE.ps1", "Build-SteamShell.ps1"):
@@ -961,10 +1020,219 @@ def check_settings_row_keys(sources):
              "the scan is not seeing the table and would pass on nothing.")
 
 
+def check_learner_guard(sources):
+    """The controller poll's learner stand-down, in both trees.
+
+    Replays the three Assert-SharedParity rules in Validate-Common.ps1. Written
+    out here rather than read from there because those rules live in PowerShell
+    code, not in the Assert-True table this script replays -- and the rule they
+    encode is one a development machine can check as well as Windows can.
+
+    The guard is bounded by what may not appear inside it, not by indentation:
+    standalone's sits at one level and XFE's a level deeper inside a try, and an
+    indentation-shaped boundary silently stopped bounding XFE's at all. Every
+    fragment is anchored to the start of a line, so the guard's own comments --
+    which name both the right statement and the wrong one -- cannot answer for
+    the code.
+    """
+    guard = r"(?ms)^PollController\(\)\s*\{(?:(?!\n\})[\s\S])*?\n[ \t]*if LearnActive \{"
+    for name in ("SteamShell.ahk", "SteamShell-XFE.ahk"):
+        text = sources[name]
+        if not re.search(
+                guard
+                + r"(?:(?!\breturn\b)[\s\S])*?\n[ \t]*Reset\w*State\("
+                + r"(?:(?!\n\})[\s\S])*?\n[ \t]*return\b", text, re.I):
+            fail(f"{name}: the controller poll must stand down while the learner "
+                 "is open, and clear its edge state on the way out.")
+        if not re.search(
+                guard
+                + r"(?:(?!\breturn\b)[\s\S])*?\n[ \t]*ControllerNeedsFreshBaseline := true",
+                text, re.I):
+            fail(f"{name}: the learner guard must request a fresh controller "
+                 "baseline, so the first poll after the wizard closes is edge-free.")
+        # Zeroing it makes the next poll compute pressed as buttons & ~0, so
+        # every button still held when the wizard closes arrives as a press edge
+        # and fires its mapping -- the misfire the guard exists to prevent. Both
+        # trees shipped the zeroing, under a comment claiming the opposite.
+        if re.search(
+                guard + r"(?:(?!\breturn\b)[\s\S])*?\n[ \t]*prev\w*Buttons := 0",
+                text, re.I):
+            fail(f"{name}: the learner guard must not zero the previous-button "
+                 "word -- that turns every button held at close into a press edge.")
+
+
+def check_source_encoding():
+    """Every source must still decode as UTF-8.
+
+    These files are UTF-8 on disk and are read as cp1252 by BOTH harnesses on
+    purpose -- the long note at the top of this file explains why the symmetry
+    matters. What that arrangement cannot survive is a byte that is valid cp1252
+    and invalid UTF-8 getting written INTO a source, because then the file is
+    neither.
+
+    It happened here: an edit wrote one em dash as cp1252 0x97 into a file whose
+    other twelve are UTF-8. Nothing failed loudly. grep began treating the file
+    as binary and silently returned no matches for text that was plainly there,
+    which is a worse failure than a crash -- every subsequent search says "not
+    found" and means "unreadable".
+    """
+    for name in ALL_FILES + ["SHARED_FUNCTIONS.txt", "COMMON_FUNCTIONS.txt",
+                             "DIVERGENT_FUNCTIONS.txt", "CROSS_NAME_DUPLICATES.txt"]:
+        path = ROOT / name
+        if not path.exists():
+            continue
+        raw = path.read_bytes()
+        try:
+            raw.decode("utf-8")
+        except UnicodeDecodeError as error:
+            line = raw[:error.start].count(b"\n") + 1
+            fail(f"{name}:{line} contains byte 0x{raw[error.start]:02X}, which is not "
+                 "valid UTF-8. The sources are UTF-8; a cp1252-only byte makes the "
+                 "file unreadable to tools that assume UTF-8 and they fail by "
+                 "finding nothing rather than by complaining.")
+
+
+def check_settings_row_placement(sources):
+    """No product may build two controls for the same setting.
+
+    Each product's Settings save walks every registered field and writes it, so
+    two rows for one section+key means the later registration silently overwrites
+    whatever the user typed on the other page -- and the two pages disagree on
+    screen until something reloads.
+
+    It happened: the three Steam shortcuts were defined for the shell on the
+    General page and, when the shell gained a Steam page, again on that. Nothing
+    caught it, because both rows were individually valid.
+
+    Also checks the other half of "is this row reachable" -- a row must belong to
+    a category the product actually draws. Those two questions are the whole of
+    whether a settings row lands where it was meant to.
+    """
+    shared = sources["SteamShell-Shared.ahk"]
+    match = re.search(r"(?ms)^SettingsCategoryRows\(category\)\s*\{(.*?)\n\}", shared)
+    if not match:
+        fail("SettingsCategoryRows could not be parsed to audit row placement.")
+        return
+    body = match.group(1)
+    heads = [(m.start(), m.group(1))
+             for m in re.finditer(r'\n\s{8}"([A-Za-z][\w &.\-]*)",\s*\[', body)]
+    seen = {}
+    for index, (start, page) in enumerate(heads):
+        end = heads[index + 1][0] if index + 1 < len(heads) else len(body)
+        for row in re.finditer(r"Map\((?:[^()]|\([^()]*\))*?\)", body[start:end], re.S):
+            text = row.group(0)
+            key = re.search(r'"key"\s*,\s*"([^"]+)"', text)
+            section = re.search(r'"section"\s*,\s*"([^"]+)"', text)
+            if not key or not section:
+                continue
+            product = re.search(r'"product"\s*,\s*"(\w+)"', text)
+            product = product.group(1) if product else "both"
+            for one in (("standalone", "xfe") if product == "both" else (product,)):
+                seen.setdefault((one, section.group(1), key.group(1)), []).append(page)
+    for (product, section, key), pages in sorted(seen.items()):
+        if len(pages) > 1:
+            fail(f"The {product} Settings window builds two controls for "
+                 f"[{section}] {key}, on {' and '.join(sorted(set(pages)))}. Its save "
+                 "writes every registered field, so one of them silently "
+                 "overwrites the other.")
+
+
+def check_view_button_actions(sources):
+    """The View button's tap/hold action, in both trees.
+
+    Replays the Assert-SharedParity rule of the same name. The third pattern is
+    the one that makes the other two safe: a press must be marked as a modifier
+    use the moment anything else is touched during the hold, or "hold View, press
+    A" fires a Steam shortcut underneath the mapping.
+    """
+    for name in ("SteamShell.ahk", "SteamShell-XFE.ahk"):
+        text = sources[name]
+        ok = (re.search(r"ViewButtonReleased\(\s*\n?\s*now - viewPressTick, viewUsedAsModifier\)", text)
+              and re.search(r"(?s)if !viewWasDown \{[\s\S]{0,200}?viewPressTick := now", text)
+              and re.search(r"(?s)\|\| lt > 30 \|\| rt > 30[\s\S]{0,120}?viewUsedAsModifier := true", text))
+        if not ok:
+            fail(f"{name}: the View button's tap/hold action must be tracked, and a "
+                 "press must be marked as a modifier use as soon as anything else "
+                 "is touched during the hold.")
+    # The rows live in the shared table's "Steam" category, so the shell has to
+    # DRAW a Steam page or they are unreachable however they are tagged. That is
+    # how they shipped invisible the first time.
+    shell = sources["SteamShell.ahk"]
+    if not (re.search(r"(?s)SettingsEditorCategories := \[(?:(?!\]).)*?\"Steam\"", shell)
+            and re.search(r'(?s)category := "Steam"[\s\S]{0,400}?'
+                          r'SettingsAddRowsForCategory\(SettingsGui, category, "standalone"', shell)):
+        fail("SteamShell.ahk defines Steam settings rows but does not draw a Steam "
+             "category, so they cannot be reached from the Settings window.")
+
+
+def check_view_button_default_split(sources):
+    """OFF in the shell, ON in the companion -- stated consistently.
+
+    Replays the Assert-SharedParity rule of the same name. A deliberate
+    asymmetry is the kind most at risk of being tidied away, and the default is
+    stated in four places per product. The spec row is the one that bites
+    silently: it is the Settings window's fallback when the key is absent, so a
+    spec disagreeing with LoadSettings shows a window claiming the feature is on
+    while the program runs with it off.
+    """
+    spec = sources["SteamShell-Shared.ahk"]
+    checks = [
+        (re.search(r'(?s)"product", "standalone"[^)]*?"key", "EnableViewButtonActions"'
+                   r'[^)]*?"default", false', spec), "spec row for the shell"),
+        (re.search(r'(?s)"product", "xfe"[^)]*?"key", "EnableViewButtonActions"'
+                   r'[^)]*?"default", true', spec), "spec row for the companion"),
+        (re.search(r'ReadBool\("Steam", "EnableViewButtonActions", false\)',
+                   sources["SteamShell.ahk"]), "the shell's LoadSettings default"),
+        (re.search(r'ReadBool\("Steam", "EnableViewButtonActions", true\)',
+                   sources["SteamShell-XFE.ahk"]), "the companion's LoadSettings default"),
+    ]
+    missing = [label for ok, label in checks if not ok]
+    if missing:
+        fail("The View button action must default OFF in the shell and ON in the "
+             "companion, and each tree's settings-spec row must carry the same "
+             "default its LoadSettings uses. Wrong or missing: "
+             + ", ".join(missing) + ".")
+
+
+def check_rtss_limiter_restore(sources):
+    """The limiter flag is re-enabled even when the FPS write fails.
+
+    Replays the Assert-SharedParity rule of the same name.
+
+    The frame cap is two mechanisms with two privilege requirements. The FPS is a
+    property of RTSS's Global profile ON DISK and cannot be saved unelevated
+    against a stock Program Files install; the limiter flag goes through RTSS's
+    shared memory and works either way. Returning on the failed FPS write skipped
+    the flag entirely, so whether the limiter survived a reboot was decided by
+    whether RTSS happened to already hold the recorded FPS -- and when it did
+    not, the cause was usually an earlier write that had been blocked too, so it
+    stayed broken.
+
+    Expressed as ORDER, because that is exactly what the defect was: the flag has
+    to be applied before any early return that reports the FPS could not land.
+    """
+    text = sources["SteamShell-Shared.ahk"]
+    if not re.search(
+            r'(?ms)^RestoreRtssFrameLimitTick\([^)]*\)\s*\{[\s\S]*?'
+            r'fpsRestored := SetRtssGlobalFrameLimit\('
+            r'(?:(?!\n\})[\s\S])*?ApplyRtssGlobalState\("limiter", true\)'
+            r'(?:(?!\n\})[\s\S])*?if !fpsRestored', text):
+        fail("RestoreRtssFrameLimitTick must re-enable the RTSS limiter before it "
+             "gives up on a failed FPS write; otherwise the limiter silently does "
+             "not survive a reboot whenever RTSS holds a different frame cap.")
+
+
 def main():
     sources = {name: read_source(name) for name in ALL_FILES}
     maps = {name: function_map(text) for name, text in sources.items()}
     check_powershell_scope_colons()
+    check_powershell_variable_shapes()
+    check_learner_guard(sources)
+    check_rtss_limiter_restore(sources)
+    check_source_encoding()
+    check_settings_row_placement(sources)
+    check_view_button_actions(sources)
+    check_view_button_default_split(sources)
     check_settings_row_keys(sources)
     check_quickmenu_rows(sources)
     check_schema_versions()
@@ -1028,15 +1296,42 @@ def main():
     for line in sources["SteamShell-Common.ahk"].split("\n"):
         for m in re.finditer(r"(?<![.\w])([A-Za-z_]\w*)\s*\(", strip_comments(line)):
             called.add(m.group(1).lower())
+    # Common must not NAME anything only SteamShell-Shared.ahk defines.
+    #
+    # Replays the escape scan in Validate-Common.ps1, which this script did not
+    # have -- and the gap cost a Windows build. Moving LogLine into the shared
+    # file made Common name a shared-defined function; the PowerShell scan failed
+    # and this one passed, because the only check here was the CALL-shaped one
+    # below, which subtracts the seam allowlist. Two harnesses disagreeing about
+    # a gate is the thing this file's own header warns about, so the scan is
+    # replayed here rather than left to the Windows run.
+    #
+    # By NAME, not by call, because a bare reference passed as a callback is a
+    # dependency too and is exactly what the call-shaped check cannot see.
+    shared_names = {n for n in maps["SteamShell-Shared.ahk"]}
+    common_text = strip_code_noise(sources["SteamShell-Common.ahk"])
+    for escaped in sorted(shared_names - common_defined - COMMON_SEAM_ALLOWED):
+        if re.search(r"(?<![.\w])" + re.escape(escaped) + r"\b", common_text, re.I):
+            fail(f"SteamShell-Common.ahk reaches into SteamShell-Shared.ahk, which stops "
+                 f"SteamShell-Helper.ahk compiling at all: {escaped}.")
+
     for leak in sorted((called & everything_else) - common_defined - COMMON_SEAM_ALLOWED):
         fail(f"SteamShell-Common.ahk calls '{leak}', which is not on its seam allowlist "
              f"({', '.join(sorted(COMMON_SEAM_ALLOWED))}). Move the callee in, pass the "
              "value as a parameter, or widen the allowlist deliberately.")
+    # Across the INCLUDE CLOSURE, not the one file. What has to be true is that
+    # the program can resolve the seam at load time, and #Include is how three
+    # files become one program -- so a seam function living in
+    # SteamShell-Shared.ahk satisfies both trees exactly as a local copy did.
+    # Checking maps[program] alone demanded a copy in every tree, which is the
+    # duplication the rest of this harness exists to drive out: it failed the
+    # moment LogLine stopped being two identical copies and became one.
     for required in sorted(COMMON_SEAM_ALLOWED):
-        for program in COMPILES:
-            if required not in maps[program]:
-                fail(f"{program} does not define '{required}', which SteamShell-Common.ahk "
-                     "depends on. AutoHotkey resolves that at load time, so it would not start.")
+        for program, included in COMPILES.items():
+            if not any(required in maps[f] for f in included):
+                fail(f"{program} cannot resolve '{required}', which SteamShell-Common.ahk "
+                     "depends on, from any file it compiles. AutoHotkey resolves that at "
+                     "load time, so it would not start.")
 
     # ---- cross-tree reachability -----------------------------------------
     for program, included in COMPILES.items():

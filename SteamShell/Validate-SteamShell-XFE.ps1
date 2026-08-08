@@ -1514,8 +1514,10 @@ Assert-True (
         '(?s)RotateLogIfNeeded\(\s*pendingBytes[^)]*\)\s*\{.*?static estimatedSize.*?' +
         'FileGetSize.*?FileMove\(LogPath' -and
     $source -match
-        '(?s)LogLine\([^)]*\)\s*\{.*?RotateLogIfNeeded\(StrLen\(line\)\).*?FileAppend') (
-    "Log rotation is missing, or LogLine appends without consulting it.")
+        '(?s)LogLine\([^)]*\)\s*\{[^}]*?LogRawLine\(' -and
+    $source -match
+        '(?s)LogRawLine\([^)]*\)\s*\{.*?RotateLogIfNeeded\(StrLen\(line\).*?FileAppend') (
+    "Log rotation is missing, or LogLine reaches the file without consulting it.")
 
 # Per-edge controller logging is a diagnostic, not a lifecycle record. Ungated
 # it emits a line per button press and was the largest writer to the log.
@@ -1987,10 +1989,24 @@ $pageCursorStarts = [regex]::Matches(
     $settingsPageBody.Groups[1].Value, 'y := SettingsFirstRowY\(\)')
 $pageCategoryAssignments = [regex]::Matches(
     $settingsPageBody.Groups[1].Value, '(?m)^\s*category := "')
+# Derived from the category table, not restated. "Seven" was a number that had
+# to be remembered, and adding the Launcher Cleanup page made it wrong; the
+# property is that EVERY page in the table names its category and resets the
+# cursor, whatever the table's length happens to be.
+$categoryTableBody = [regex]::Match(
+    $source, '(?s)static categories := \[(.*?)\n    \]')
+Assert-True $categoryTableBody.Success (
+    "The companion's Settings category table could not be extracted.")
+$categoryTableCount = @(
+    [regex]::Matches($categoryTableBody.Groups[1].Value, '(?m)^\s+\["[^"]+",')).Count
 Assert-True (
-    $pageCategoryAssignments.Count -eq 7 -and
-    $pageCursorStarts.Count -eq 7) (
-    "Each of the seven Settings pages must name its category and reset the row cursor.")
+    $categoryTableCount -gt 0 -and
+    $pageCategoryAssignments.Count -eq $categoryTableCount -and
+    $pageCursorStarts.Count -eq $categoryTableCount) (
+    "Every Settings page must name its category and reset the row cursor. " +
+    "Table lists $categoryTableCount page(s); found " +
+    $pageCategoryAssignments.Count + " category assignment(s) and " +
+    $pageCursorStarts.Count + " cursor reset(s).")
 
 # The row builders take the cursor BY REFERENCE and advance it. Passing it by
 # value compiles perfectly and silently stacks every row on the same line.
@@ -2169,10 +2185,48 @@ Assert-True (
 
 # The seam SteamShell-Shared.ahk calls back into. AutoHotkey resolves a missing
 # function at run time, not build time, so this cannot be left to the compiler.
+#
+# It must go through the STAGED commit in SteamShell-Common.ahk. This asserted
+# the body contained IniWrite, which described the unstaged per-key loop that
+# used to live here: it wrote each key straight into the live file and returned
+# false at the first failure without undoing the keys already written. Naming
+# IniWrite would now pin the defect rather than the requirement.
 Assert-True (
     $source -match
-        '(?s)SharedPersistSettings\(changes\)\s*\{(?:(?!\n\})[\s\S])*?IniWrite') (
-    "XFE no longer provides SharedPersistSettings, which shared code depends on.")
+        '(?s)SharedPersistSettings\(changes\)\s*\{(?:(?!\n\})[\s\S])*?CommitIniChangesAt\(') (
+    "XFE no longer provides SharedPersistSettings over the staged commit, " +
+    "which shared code depends on.")
+
+# The dependency seam must actually wire something, and the pass must run once
+# on open.
+#
+# Two of the rows the shared spec marks with "dependency" are "product", "both"
+# -- the RTSS overlay and frame-limiter control modes -- so they reach THIS
+# window. While SettingsProductWireDependency was an empty body they did nothing
+# here: choosing Toggle left the separate On/Off shortcut rows editable, and
+# choosing Separate left the single Toggle shortcut editable, so a shortcut could
+# be typed and saved into a field the selected mode ignores.
+#
+# Running it after SettingsPopulateFields is half the rule. Wiring the drivers
+# alone only greys rows once the user touches a driver, so the window would still
+# OPEN showing rows the saved mode already ignores.
+Assert-True (
+    $source -match
+        '(?s)SettingsProductWireDependency\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?' +
+        'OnEvent\([^)]*SettingsRefreshDependencies' -and
+    $source -match
+        '(?s)SettingsRefreshDependencies\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?' +
+        'RTSS\.OverlayToggleShortcut(?:(?!\n\})[\s\S])*?RTSS\.FrameLimiterOffShortcut' -and
+    $source -match
+        '(?s)SettingsPopulateFields\(\)\s*\r?\n(?:(?!\n\})[\s\S])*?SettingsRefreshDependencies\(\)') (
+    "The companion's Settings dependency pass is missing, no longer covers the " +
+    "shared RTSS control-mode rows, or does not run when the window opens.")
+
+# Staging leaves the occasional abandoned file, so the sweep has to run. Adopting
+# the commit without it trades one kind of litter for another, beside the INI.
+Assert-True (
+    $source -match '(?m)^SweepAbandonedSettingsUpdates\(\)\s*$') (
+    "XFE stages its settings writes but never sweeps abandoned staging files.")
 
 # Cross-tree parity. Both trees and the shared file are in this folder, so there
 # is no "skipped when the sibling is absent" path any more -- that existed only

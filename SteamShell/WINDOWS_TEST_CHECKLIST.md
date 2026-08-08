@@ -1644,3 +1644,74 @@ first test matters most: a controller that already worked must be unaffected.
 - With the probe off, confirm the log is NOT filling with "RawInput probe: N
   WM_INPUT message(s)". That line is every two seconds when it is on.
 
+
+## The View button's own action
+
+Off by default here, unlike the companion. Enable it in **Settings → Steam**
+first; the tap and hold switches beside it are on.
+
+- **Hold View and press A. No Steam shortcut may fire.** This is the whole
+  safety mechanism: any other input during the hold marks the press as a
+  modifier use and its action is dropped on release. Repeat with the triggers
+  and with a stick pushed, which also count.
+- With Steam in front, tap View and confirm the Steam menu opens; hold it and
+  confirm Quick Access opens instead.
+- In a game, tap View and confirm **nothing** happens — the game keeps its own
+  use of the button — then hold and confirm the overlay opens. The in-game hold
+  threshold is deliberately longer (1000 ms against 500 ms) because View is
+  commonly the scoreboard button.
+- Turn automatic mouse mode on and confirm no action fires when it engages or
+  releases. Mouse mode is expressed as a virtual View hold, and the action must
+  read the physical button only.
+- Hold View, open the Quick Menu or a recovery dialog, close it, release View.
+  No action may fire: a press made to reach a dialog is not a press meant for
+  Steam, and the release would otherwise report a hold as long as the dialog
+  was up.
+- Turn the master switch off and confirm the button reverts to being purely the
+  mapping modifier.
+
+## The controller keeps working when XInput moves it
+
+- Launch a game through Steam Input, which adds a virtual pad and shifts the
+  physical one. **The controller must keep working.** Confirm the log records
+  `XInput controller moved from slot N to slot M`.
+- Unplug the controller and confirm `XInput controller disconnected from slot N`,
+  then reconnect and confirm it is found again without changing any setting.
+- With no controller at all, confirm the controller test panel says "No
+  controller detected on any XInput slot" rather than naming the configured
+  index — the slot is discovered now, so the configured one is not the answer.
+- Health Check must report the slot that ANSWERED, and name the configured one
+  alongside it when they differ.
+
+## Settings the window itself was breaking
+
+- Open **Focus & Windows** and confirm **Maximize width threshold (%)** reads
+  `30`, not `0.3`. Press Save with nothing changed and confirm it saves. This
+  field is stored as a fraction and shown as a percentage, and only the save
+  half of that conversion used to exist, so the window blocked its own Save on
+  every open.
+- Open the Quick Menu over the Settings window, change a setting from the menu,
+  then press Save in Settings. **The menu's change must survive.** Settings
+  writes every field it holds, so the stale control used to overwrite it.
+- With **Hide the cursor after inactivity** on, open Settings and sit still past
+  the hide delay. The cursor must stay visible. With a controller connected,
+  watch for a blink rather than a disappearance — that was the poll and the
+  watch fighting each other.
+- In **Settings → RTSS**, switch **Overlay control mode** between Toggle and
+  Separate and confirm the shortcut rows below grey and un-grey correctly,
+  including on first open. Repeat for **Frame limiter control mode**.
+
+## Settings pages and layout
+
+- Confirm the category list reads: General, Startup & Splash, Startup Programs,
+  Controller & Cursor, Steam, Focus & Windows, RTSS & Performance, Launcher
+  Cleanup, Advanced & Logging — nine pages, each of which opens and draws.
+- The new **Steam** page holds the three Steam shortcuts, the Big Picture window
+  title, and the five View button rows. Confirm each saves and survives a reload.
+- On **Startup Programs**, confirm the seven buttons form three even columns
+  rather than two ragged rows, and that the second row lines up with the first.
+- On **Advanced & Logging**, confirm the four shell-registration actions are the
+  first two rows. **Permanently Restore Explorer must be easy to find** — it is
+  the escape hatch, and it used to be the tenth of nineteen buttons.
+- Open every page in turn and confirm the layout audit reports no issues in the
+  log: no control crossing the content boundary, and no two controls overlapping.

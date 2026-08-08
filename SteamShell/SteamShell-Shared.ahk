@@ -203,6 +203,7 @@ QuickMenuPaintRows() {
     global QuickMenuRedrawSuspended
     global QM_BG, QM_ROW_SELECTED, QM_ACCENT, QM_LABEL, QM_LABEL_SELECTED, QM_VALUE
     static warnedNoBitmap := false
+    static warnedNoCompose := false
     if (!IsSet(QuickMenuRowsCtrl) || !QuickMenuRowsCtrl)
         return
     if !EnsureGdiPlus()
@@ -262,71 +263,106 @@ QuickMenuPaintRows() {
     }
     previous := DllCall("SelectObject", "Ptr", memDC, "Ptr", bitmap, "Ptr")
     graphics := 0
-    DllCall("gdiplus\GdipCreateFromHDC", "Ptr", memDC, "Ptr*", &graphics)
-    if graphics {
-        DllCall("gdiplus\GdipSetSmoothingMode", "Ptr", graphics, "Int", 4)
-        ; The surface is opaque, so ClearType is available and text quality does
-        ; not regress against the Static controls this replaced.
-        DllCall("gdiplus\GdipSetTextRenderingHint", "Ptr", graphics, "Int", 5)
-        QuickMenuFillRounded(graphics, 0, 0, width, height, 0, QuickMenuArgb(QM_BG))
+    ; Declared before the try so the finally can free whichever ones were reached.
+    labelFont := 0
+    labelFontBold := 0
+    valueFont := 0
+    composed := false
+    ; The handoff below was hardened against a throw leaking one bitmap per
+    ; repaint. Composition was not, and it is the larger surface: a throw between
+    ; the SelectObject above and the release below abandoned the screen DC, the
+    ; memory DC, the DIB section, the GDI+ graphics and three fonts -- six
+    ; handles, on a menu that repaints on every keypress. The code twenty lines
+    ; up already names GDI handle exhaustion as a state this program reaches; a
+    ; page whose row Map is missing a key is all it takes to get there, and that
+    ; is a page-builder bug expressing itself as an unrelated rendering collapse
+    ; several minutes later.
+    try {
+        DllCall("gdiplus\GdipCreateFromHDC", "Ptr", memDC, "Ptr*", &graphics)
+        if graphics {
+            DllCall("gdiplus\GdipSetSmoothingMode", "Ptr", graphics, "Int", 4)
+            ; The surface is opaque, so ClearType is available and text quality does
+            ; not regress against the Static controls this replaced.
+            DllCall("gdiplus\GdipSetTextRenderingHint", "Ptr", graphics, "Int", 5)
+            QuickMenuFillRounded(graphics, 0, 0, width, height, 0, QuickMenuArgb(QM_BG))
 
-        labelFont := QuickMenuMakeFont(px(16), false)
-        labelFontBold := QuickMenuMakeFont(px(16), true)
-        valueFont := QuickMenuMakeFont(px(14.7), false)
-        rowHeight := QuickMenuRowHeight()
-        glowPad := QuickMenuGlowPadding()
-        inset := QuickMenuRowInset()
-        rowWidth := QuickMenuWidth() - (inset * 2)
-        radius := px(10)
-        textPad := px(16)
-        barWidth := px(4)
+            labelFont := QuickMenuMakeFont(px(16), false)
+            labelFontBold := QuickMenuMakeFont(px(16), true)
+            valueFont := QuickMenuMakeFont(px(14.7), false)
+            rowHeight := QuickMenuRowHeight()
+            glowPad := QuickMenuGlowPadding()
+            inset := QuickMenuRowInset()
+            rowWidth := QuickMenuWidth() - (inset * 2)
+            radius := px(10)
+            textPad := px(16)
+            barWidth := px(4)
 
-        boxHeight := px(rowHeight - 6)
-        left := px(inset)
-        boxWidth := px(rowWidth)
-        ; Paint selection decoration before any text. The stronger glow extends
-        ; into neighbouring slots; drawing it inside the row loop would haze text
-        ; belonging to an earlier row whenever a middle/lower row was selected.
-        if (QuickMenuSelected >= 1 && QuickMenuSelected <= QuickMenuRows.Length) {
-            selectedTop := px(glowPad + ((QuickMenuSelected - 1) * rowHeight) + 3)
-            QuickMenuDrawGlow(graphics, left, selectedTop, boxWidth, boxHeight, radius
-                , QM_ACCENT, 8, 120, px(1))
-            QuickMenuFillRounded(graphics, left, selectedTop, boxWidth, boxHeight, radius
-                , QuickMenuArgb(QM_ROW_SELECTED))
-            QuickMenuStrokeRounded(graphics, left, selectedTop, boxWidth, boxHeight, radius
-                , QuickMenuArgb(QM_ACCENT), px(2))
-            QuickMenuFillRounded(graphics
-                , left + px(6), selectedTop + px(7), barWidth, boxHeight - px(14)
-                , barWidth / 2, QuickMenuArgb(QM_ACCENT))
+            boxHeight := px(rowHeight - 6)
+            left := px(inset)
+            boxWidth := px(rowWidth)
+            ; Paint selection decoration before any text. The stronger glow extends
+            ; into neighbouring slots; drawing it inside the row loop would haze text
+            ; belonging to an earlier row whenever a middle/lower row was selected.
+            if (QuickMenuSelected >= 1 && QuickMenuSelected <= QuickMenuRows.Length) {
+                selectedTop := px(glowPad + ((QuickMenuSelected - 1) * rowHeight) + 3)
+                QuickMenuDrawGlow(graphics, left, selectedTop, boxWidth, boxHeight, radius
+                    , QM_ACCENT, 8, 120, px(1))
+                QuickMenuFillRounded(graphics, left, selectedTop, boxWidth, boxHeight, radius
+                    , QuickMenuArgb(QM_ROW_SELECTED))
+                QuickMenuStrokeRounded(graphics, left, selectedTop, boxWidth, boxHeight, radius
+                    , QuickMenuArgb(QM_ACCENT), px(2))
+                QuickMenuFillRounded(graphics
+                    , left + px(6), selectedTop + px(7), barWidth, boxHeight - px(14)
+                    , barWidth / 2, QuickMenuArgb(QM_ACCENT))
+            }
+
+            for index, row in QuickMenuRows {
+                selected := (index = QuickMenuSelected)
+                top := px(glowPad + ((index - 1) * rowHeight) + 3)
+                labelLeft := left + textPad + (selected ? px(10) : 0)
+                labelWidth := (boxWidth * 0.52) - textPad
+                QuickMenuDrawText(graphics, row["label"]
+                    , selected ? labelFontBold : labelFont
+                    , QuickMenuArgb(selected ? QM_LABEL_SELECTED : QM_LABEL)
+                    , labelLeft, top, labelWidth, boxHeight, 0)
+                valueLeft := left + (boxWidth * 0.52)
+                QuickMenuDrawText(graphics, QuickMenuRowValueText(row), valueFont
+                    , QuickMenuArgb(selected ? QM_ACCENT : QM_VALUE)
+                    , valueLeft, top, (boxWidth * 0.48) - textPad, boxHeight, 2)
+            }
+
+            composed := true
         }
-
-        for index, row in QuickMenuRows {
-            selected := (index = QuickMenuSelected)
-            top := px(glowPad + ((index - 1) * rowHeight) + 3)
-            labelLeft := left + textPad + (selected ? px(10) : 0)
-            labelWidth := (boxWidth * 0.52) - textPad
-            QuickMenuDrawText(graphics, row["label"]
-                , selected ? labelFontBold : labelFont
-                , QuickMenuArgb(selected ? QM_LABEL_SELECTED : QM_LABEL)
-                , labelLeft, top, labelWidth, boxHeight, 0)
-            valueLeft := left + (boxWidth * 0.52)
-            QuickMenuDrawText(graphics, QuickMenuRowValueText(row), valueFont
-                , QuickMenuArgb(selected ? QM_ACCENT : QM_VALUE)
-                , valueLeft, top, (boxWidth * 0.48) - textPad, boxHeight, 2)
+    } catch as err {
+        ; Once. A composition that throws will throw again on the next repaint,
+        ; and the repaint rate is the keypress rate.
+        if !warnedNoCompose {
+            warnedNoCompose := true
+            try LogLine("Quick Menu: the row surface could not be composed: "
+                . err.Message, "Warning")
         }
-
+    } finally {
         if labelFont
             DllCall("gdiplus\GdipDeleteFont", "Ptr", labelFont)
         if labelFontBold
             DllCall("gdiplus\GdipDeleteFont", "Ptr", labelFontBold)
         if valueFont
             DllCall("gdiplus\GdipDeleteFont", "Ptr", valueFont)
-        DllCall("gdiplus\GdipDeleteGraphics", "Ptr", graphics)
+        if graphics
+            DllCall("gdiplus\GdipDeleteGraphics", "Ptr", graphics)
+        DllCall("SelectObject", "Ptr", memDC, "Ptr", previous)
+        DllCall("DeleteDC", "Ptr", memDC)
+        DllCall("ReleaseDC", "Ptr", 0, "Ptr", screenDC)
     }
 
-    DllCall("SelectObject", "Ptr", memDC, "Ptr", previous)
-    DllCall("DeleteDC", "Ptr", memDC)
-    DllCall("ReleaseDC", "Ptr", 0, "Ptr", screenDC)
+    ; Nothing was painted, so there is nothing worth handing to the control.
+    ; Returning leaves it showing its last good frame, which is what the
+    ; CreateDIBSection failure above settles for as well; handing over an
+    ; unpainted DIB instead is the blank-rows outcome that path exists to avoid.
+    if !composed {
+        try DllCall("DeleteObject", "Ptr", bitmap)
+        return
+    }
 
     ; Suppress the Static control's erase/paint between images. STM_SETIMAGE
     ; invalidates the control; without this atomic swap Windows briefly exposes its
@@ -477,6 +513,30 @@ GetRtssAvailability() {
         : "Not Found"
 }
 
+; ------------------------------------------------------------------------------
+; Quick Menu frame cap
+; ------------------------------------------------------------------------------
+; RTSS exposes two independent mechanisms and the Quick Menu presents them as one
+; row, because two rows that can each mean "no limiting" is a menu that fights
+; itself:
+;
+;   limiter flag (global, bit 0x4 = DISABLED)  master on/off
+;   FramerateLimit (per profile, DWORD)        the target, 0 = uncapped
+;
+; "Off" therefore maps to the FLAG and never to the value. Writing 0 would
+; destroy the user's number, so turning the cap off and back on would silently
+; forget 72 and come back uncapped. Clearing the flag leaves 72 in the profile
+; and restores it on the way back.
+;
+; Everything here targets the GLOBAL profile only. Per-game profiles are the
+; user's own tuning and are deliberately never written: a quick menu that edits
+; whichever profile happens to be in the foreground is a menu that can silently
+; change a game's configuration.
+;
+; This banner was left behind in SteamShell.ahk, above an unrelated function,
+; once the last frame-cap function it described had moved here.
+; ------------------------------------------------------------------------------
+
 ; Resolves the flag and the value into the single state the row displays:
 ;   "off"         limiter flag cleared, or flag set with no target
 ;   "preset"      a value from RtssFrameCapPresets
@@ -604,6 +664,31 @@ RtssFrameCapModeForFps(fps) {
 ; The FPS is deliberately stored even for "off", for the same reason the Off
 ; entry never writes 0 into the profile: the number is what makes turning the
 ; limiter back on land where the user left it.
+; Retains a hand-typed Custom FPS, and records that Custom is now the selection.
+;
+; One definition as of this pass. The two copies had already converged on
+; everything that matters and differed only in how they reached the settings
+; file: standalone through its staged commit, the companion through a bare
+; IniWrite. Routing both through the SharedPersistSettings seam -- which every
+; other setting in both products already uses -- left the bodies identical, and
+; identical bodies in two trees are what this file exists to end.
+PersistRtssCustomFrameCap(value) {
+    global RtssCustomFrameCap
+    value := ClampInt(value, 10, 1000)
+    if !SharedPersistSettings([
+        Map("section", "RTSS", "key", "CustomFrameCap", "value", value)
+    ]) {
+        ShowNotification("The Custom FPS value could not be retained", "Warning")
+        return false
+    }
+    RtssCustomFrameCap := value
+    ; Committing a Custom value is also a selection of Custom at that value.
+    ; Recorded here rather than in the caller: CommitRtssPendingFrameCap is
+    ; shared too, so it cannot carry a tree-specific call.
+    PersistRtssFrameCapSelection("custom", value)
+    return true
+}
+
 PersistRtssFrameCapSelection(mode, fps) {
     global RtssLastFrameCapMode, RtssLastFrameCapFps
     mode := StrLower(Trim(mode))
@@ -707,19 +792,52 @@ RestoreRtssFrameLimitTick(*) {
     ; Only write when RTSS does not already agree. The profile write is a real
     ; edit to RTSS's own configuration, so it should not happen on every boot
     ; when RTSS kept the value on its own.
-    applied := true
+    fpsRestored := true
     if (state["fps"] != RtssLastFrameCapFps)
-        applied := SetRtssGlobalFrameLimit(RtssLastFrameCapFps)
-    if !applied {
-        LogLine(
-            "The last Frame Limit selection could not be written to RTSS.", "Warning")
-        return
-    }
+        fpsRestored := SetRtssGlobalFrameLimit(RtssLastFrameCapFps)
+
+    ; A failed FPS write does NOT stop the limiter being re-enabled.
+    ;
+    ; These are two different mechanisms with two different failure modes, and
+    ; only one of them needs a privilege this process usually lacks. The FPS is a
+    ; property of RTSS's Global profile ON DISK, so with a stock Program Files
+    ; install it cannot be saved unelevated -- the header above
+    ; RtssFrameCapBlockedReason records that measurement. The limiter flag goes
+    ; through RTSS's shared memory and works either way.
+    ;
+    ; This returned on a failed FPS write, before ever reaching the flag, and
+    ; that is why the limiter "sometimes" did not survive a reboot. The two
+    ; outcomes were decided by something the user cannot see:
+    ;
+    ;   RTSS already holds the recorded FPS -> no write attempted, flag enabled,
+    ;                                          the limiter comes back on
+    ;   RTSS holds a different FPS          -> write attempted, write fails,
+    ;                                          return, flag never enabled
+    ;
+    ; and the second case is self-perpetuating, because the reason RTSS holds a
+    ; different number is usually that an earlier write was blocked too. The
+    ; recorded FPS is the one the user picked; RTSS's is the one that stuck.
+    ;
+    ; Capping at RTSS's own number is much closer to what the user asked for than
+    ; not capping at all, so the flag goes on regardless and the log says which
+    ; half was restored.
     if (!state["limiter"]
         && !ApplyRtssGlobalState("limiter", true)) {
         LogLine(
-            "The last Frame Limit FPS was restored, but RTSS did not confirm enabling the limiter.",
-            "Warning")
+            "The last Frame Limit selection could not be restored: RTSS did not "
+            . "confirm enabling the limiter.", "Warning")
+        return
+    }
+    if !fpsRestored {
+        ; Deliberately not recorded as the live selection. The cap in force is
+        ; RTSS's number, not the one that was chosen, and overwriting the record
+        ; with it would lose what the user actually asked for -- which is the
+        ; value the next boot should still be trying to restore.
+        LogLine(
+            "Re-enabled the RTSS limiter, but the last Frame Limit FPS ("
+            . RtssLastFrameCapFps ") could not be written: "
+            . RtssFrameCapBlockedReason() ". It is capping at RTSS's own "
+            . state["fps"] " FPS instead.", "Warning")
         return
     }
     RtssFrameCapCustomMode := (RtssLastFrameCapMode = "custom")
@@ -1901,6 +2019,31 @@ QuickMenuMoveSelection(direction) {
     QuickMenuRefresh()
 }
 
+; Brings the selection back into range, wrapping at both ends.
+;
+; One definition as of this pass. Both trees implemented this seam and both
+; wrapped, so the products already agreed on the behaviour -- but the shell's
+; also answered for an EMPTY row list and the companion's did not: with no rows,
+; the companion left the selection pointing at row 1 of nothing, which is a
+; throw at the next subscript rather than a wrong highlight. QuickMenuMoveSelection
+; below happens to refuse an empty list before it ever calls this, which is why
+; that never showed; a guard that is only correct because of its one caller is
+; the kind that stops being correct when a second caller appears.
+;
+; The shell reached this through a second name, QuickMenuClampSelection, whose
+; body wrapped rather than clamped. Both names are gone.
+QuickMenuNormalizeSelection() {
+    global QuickMenuRows, QuickMenuSelected
+    if (QuickMenuRows.Length = 0) {
+        QuickMenuSelected := 1
+        return
+    }
+    if (QuickMenuSelected < 1)
+        QuickMenuSelected := QuickMenuRows.Length
+    if (QuickMenuSelected > QuickMenuRows.Length)
+        QuickMenuSelected := 1
+}
+
 ; ==============================================================================
 ; STOPPING THE ELEVATED HELPER, AND CANCELLING A SHORTCUT CAPTURE
 ; ==============================================================================
@@ -2077,6 +2220,71 @@ SendRtssShortcut(shortcut, description, settingName) {
 ; DLL handle and returned. Everything else that separated them was indentation
 ; and local names -- bufState/ex/bEx against state/extended/exButtons -- which is
 ; why the raw similarity read 0.70 for what is one algorithm.
+; Finds the controller, wherever XInput has put it this time.
+;
+; Steam Input and Xbox mode reorder physical and virtual controllers while the
+; process is running: launching a game through Steam Input adds a virtual pad and
+; the physical one shifts slot. Reading only the configured index therefore stops
+; working mid-session, with the pad still connected and still lit.
+;
+; That was standalone's behaviour until this pass, and standalone is the product
+; running AS THE WINDOWS SHELL on a machine with no keyboard -- so the recovery
+; it offered was "open Settings and change Controller Index" using the controller
+; that had just stopped working. The companion has scanned since it was written.
+; Nothing about the scan is companion-specific, which is the whole reason this
+; sat in one tree for as long as it did: it reads as a piece of that product's
+; backend work rather than as the general answer it is.
+;
+; Order matters. The last slot that answered comes first, so a settled session
+; costs one call; then the configured index, so an explicit choice still wins on
+; a cold start; then the rest, so it is found regardless. The slot is logged when
+; it changes, because "the controller moved" is otherwise indistinguishable from
+; "the controller broke" in a log.
+XInputResolveController(&state) {
+    global ControllerIndex, ActiveControllerIndex
+    static lastMissingLogTick := 0
+
+    candidates := []
+    seen := Map()
+    if (ActiveControllerIndex >= 0 && ActiveControllerIndex <= 3) {
+        candidates.Push(ActiveControllerIndex)
+        seen[ActiveControllerIndex] := true
+    }
+    if !seen.Has(ControllerIndex) {
+        candidates.Push(ControllerIndex)
+        seen[ControllerIndex] := true
+    }
+    Loop 4 {
+        index := A_Index - 1
+        if !seen.Has(index)
+            candidates.Push(index)
+    }
+
+    for _, index in candidates {
+        if (XInputGetState(index, &state) = 0) {
+            if (ActiveControllerIndex != index) {
+                oldIndex := ActiveControllerIndex
+                ActiveControllerIndex := index
+                if (oldIndex < 0)
+                    LogLine("XInput controller connected on slot " index ".")
+                else
+                    LogLine("XInput controller moved from slot " oldIndex " to slot " index ".")
+            }
+            return true
+        }
+    }
+
+    if (ActiveControllerIndex >= 0) {
+        LogLine("XInput controller disconnected from slot " ActiveControllerIndex ".", "Warning")
+        ActiveControllerIndex := -1
+        lastMissingLogTick := A_TickCount
+    } else if (!lastMissingLogTick || A_TickCount - lastMissingLogTick >= 30000) {
+        LogLine("No XInput controller detected on slots 0–3.", "Warning")
+        lastMissingLogTick := A_TickCount
+    }
+    return false
+}
+
 XInputGetState(index, &bufState) {
     global XInputDll
     if (XInputDll = "" && !InitXInput())
@@ -2388,6 +2596,24 @@ LogRow(ts, evt, scoreStr, exe, pidStr, cpuStr, audChar, fsChar, rectStr, hwndStr
     line .= " " . TruncPad(title, 60, true)
     }
     return line
+}
+
+; Every operational line gets a timestamp and a level.
+;
+; Without the timestamp the log records what happened but not when, so two lines
+; could be one second or one hour apart and nothing said which -- and elapsed
+; time is exactly what a startup stall, a focus handoff, or a sustained-exit
+; window has to be reasoned about in.
+;
+; One definition as of this pass. The companion had inlined the whole of
+; LogRawLine below rather than calling it -- the same rotate-then-append, with
+; the newline moved inside the length estimate instead of added to it -- so the
+; single busiest function in either product was two copies of four lines, and the
+; rotation call that keeps a shell's log from growing without bound sat in both
+; of them. SteamShell-Helper.ahk still defines its own, because it cannot see
+; this file; that copy is on the record in DIVERGENT_FUNCTIONS.txt.
+LogLine(message, level := "Info") {
+    LogRawLine(FormatTime(A_Now, "yyyy-MM-dd HH:mm:ss") " [" level "] " message)
 }
 
 ; Writes a line exactly as given, with no prefix.
@@ -3282,6 +3508,64 @@ IsSteamProcess(exeName) {
     return exeName = "steam.exe" || exeName = "steamwebhelper.exe"
 }
 
+; ONE definition, for both products, as of this pass. It lived only in the
+; companion, and the reason recorded for that -- that the shell uses View/Back as
+; its mapping modifier and so has no bare press to give meaning to -- was wrong:
+; the companion uses it as a modifier too, for exactly the same mappings and the
+; same automatic mouse mode, and expresses that the same way
+; (mappingActive := viewDown || autoMouse). The two poll loops are the same shape
+; here. What made the feature possible in one and "impossible" in the other was
+; not architecture, it was that only one of them had been given the tracking.
+;
+; usedAsModifier is the whole mechanism: any other input during the hold means
+; View was being used to reach a mapping or drive the pointer, so its own action
+; is dropped on release.
+
+; Resolves the View button's own action, on release.
+;
+; View is also the mapping modifier, so this only runs when nothing else was
+; touched during the hold -- otherwise "hold View, press A" would fire a Steam
+; shortcut underneath the mapping. Resolving on release rather than at a timer
+; is what makes that possible.
+;
+;   Steam in front   tap  -> Steam menu        hold -> Steam Quick Access
+;   Game in front    tap  -> nothing           hold -> Steam overlay
+;
+; The tap doing nothing in a game is deliberate: the companion never blocks
+; input, so the game receives View normally and keeps its own use of it.
+ViewButtonReleased(heldMs, usedAsModifier) {
+    global EnableViewSteamActions, EnableViewTapAction, EnableViewHoldAction
+    global ViewHoldMs, ViewHoldInGameMs
+    global SteamMenuShortcut, SteamQuickAccessShortcut, SteamOverlayShortcut
+    if (!EnableViewSteamActions || usedAsModifier)
+        return
+    steamFront := SteamIsInFront()
+    ; In a game the threshold is longer: View is commonly the scoreboard or map
+    ; button there and gets held on purpose, so a short threshold would keep
+    ; throwing the Steam overlay up during play.
+    threshold := steamFront ? ViewHoldMs : ViewHoldInGameMs
+    ; Tap and hold are switched independently. A disabled hold still counts as a
+    ; hold rather than falling through to the tap action -- releasing after a
+    ; long press must never send the shortcut the short press would have.
+    if (heldMs >= threshold) {
+        if !EnableViewHoldAction
+            return
+        shortcut := steamFront ? SteamQuickAccessShortcut : SteamOverlayShortcut
+        LogLine("View held " heldMs "ms (threshold " threshold ") -> "
+            . (steamFront ? "Steam Quick Access" : "Steam overlay")
+            . " (" SendToPretty(shortcut) ").")
+        if steamFront
+            SendChordSafe(shortcut)
+        else
+            SendSteamOverlayChord()
+        return
+    }
+    if (!EnableViewTapAction || !steamFront)
+        return
+    LogLine("View tapped -> Steam Menu (" SendToPretty(SteamMenuShortcut) ").")
+    SendChordSafe(SteamMenuShortcut)
+}
+
 QuickMenuHideThenSend(shortcut, delayMs := 150) {
     HideQuickMenu()
     SetTimer(() => SendChordSafe(shortcut), -delayMs)
@@ -3333,6 +3617,47 @@ GetLastLines(text, maxLines, newestFirst := false) {
     }
     }
     return out
+}
+
+; The out-of-the-box controller map, for both products.
+;
+; Defaults apply while holding View/Back. Sticks and the D-pad are fixed --
+; mouse move, scroll and arrows -- so they are not in the table.
+;
+; One definition as of this pass, and the pair that got here was invisible to
+; all three manifests at once. The shell called it InitDefaultControllerMappings
+; and wrote 22 subscript assignments; the companion called it
+; DefaultControllerMappings and wrote one Map() literal. Same 22 bindings, same
+; three display overrides, verified key by key -- one routine under two names,
+; which is the case CROSS_NAME_DUPLICATES.txt exists for and did not catch: that
+; check compares CALL SEQUENCES, and neither body calls anything worth comparing.
+; A pair of pure-data functions is the shape both the name-keyed gate and the
+; call-keyed one are blind to.
+;
+; The literal form survives because a table is what this is.
+InitDefaultControllerMappings() {
+    global ControllerMap, ControllerMapDisplay
+    ControllerMap := Map(
+        "RB.Short", "Builtin:LeftClick", "RB.Long", "Builtin:None",
+        "RT.Short", "Builtin:RightClick", "RT.Long", "Builtin:None",
+        "LT.Short", "Send:^+o", "LT.Long", "Send:^+f",
+        "LB.Short", "Send:^!{Tab}", "LB.Long", "Builtin:TaskManager",
+        "A.Short", "Builtin:Enter", "A.Long", "Builtin:None",
+        "B.Short", "Builtin:Esc", "B.Long", "Builtin:AltF4",
+        "X.Short", "Builtin:TabTip", "X.Long", "Builtin:OSK",
+        "Y.Short", "Builtin:WinG", "Y.Long", "Builtin:None",
+        ; Tap Start for the Windows Start menu, hold it for File Explorer. Both
+        ; remain fully customizable in the mapping editor.
+        "Start.Short", "Builtin:StartMenu", "Start.Long", "Builtin:Explorer",
+        ; Stick clicks are unassigned by default.
+        "L3.Short", "Builtin:None", "L3.Long", "Builtin:None",
+        "R3.Short", "Builtin:None", "R3.Long", "Builtin:None"
+    )
+    ControllerMapDisplay := Map(
+        "LT.Short", "Ctrl+Shift+O",
+        "LT.Long", "Ctrl+Shift+F",
+        "LB.Short", "Ctrl+Alt+Tab"
+    )
 }
 
 GetBindingValue(key) {
@@ -4683,7 +5008,7 @@ RawInputProbeMessage(wParam, lParam, msg, hwnd) {
         ; The learning wizard sees reports first and consumes them: while it is
         ; open, decoding as well would fire mappings from the very buttons being
         ; pressed to teach the layout.
-        if ProductControllerLearnConsumesReport(data, HEADER_SIZE + 8, sizeHid, device) {
+        if ControllerLearnConsumesReport(data, HEADER_SIZE + 8, sizeHid, device) {
             if !EnableRawInputProbe
                 return
         } else {
@@ -5590,37 +5915,108 @@ SettingsCategoryRows(category) {
             Map("product", "standalone", "type", "choice",
                 "section", "LauncherCleanup", "key", "DownloadGuardMode",
                 "label", "Download guard sensitivity",
-                "choices", ["Off", "Balanced", "Strict"], "default", "Balanced")],
+                "choices", ["Off", "Balanced", "Strict"], "default", "Balanced"),
+            ; The companion's launcher cleanup. Its own rows rather than the
+            ; shell's, because the two clamp differently -- CooldownSec is
+            ; 30..7200 here and 0..86400 there, GracefulCloseMs 500..30000
+            ; against 0..60000 -- and a shared row would offer one product values
+            ; its own LoadSettings rounds away.
+            ;
+            ; movedFrom records that these keys used to sit in [Assist]; the
+            ; companion resolves whichever section actually holds them, and the
+            ; shell ignores the field entirely.
+            ;
+            ; RequireNoGame and GracefulCloseMs are NEW controls, not moved ones:
+            ; this product has read both on every load since the assist work
+            ; landed and offered neither, so the only way to change them was to
+            ; edit the INI.
+            Map("product", "xfe", "type", "checkbox",
+                "section", "Assist", "key", "EnableLauncherCleanupLite",
+                "label", "Launcher Cleanup Lite — close game launchers once nothing is playing",
+                "default", true),
+            Map("product", "xfe", "type", "checkbox",
+                "section", "LauncherCleanup", "key", "RequireNoGame",
+                "label", "Only clean up when no game appears to be running",
+                "default", true, "movedFrom", "Assist"),
+            Map("product", "xfe", "type", "edit",
+                "section", "Assist", "key", "ForegroundStableSec",
+                "label", "Settle time before cleanup (s)",
+                "default", 30, "min", 5, "max", 600),
+            Map("product", "xfe", "type", "edit",
+                "section", "LauncherCleanup", "key", "CooldownSec",
+                "label", "Minimum time between cleanups (s)",
+                "default", 300, "min", 30, "max", 7200, "movedFrom", "Assist"),
+            Map("product", "xfe", "type", "edit",
+                "section", "LauncherCleanup", "key", "GracefulCloseMs",
+                "label", "Graceful-close wait before a force close (ms)",
+                "default", 4000, "min", 500, "max", 30000, "movedFrom", "Assist"),
+            Map("product", "xfe", "type", "checkbox",
+                "section", "LauncherCleanup", "key", "HardKill",
+                "label", "Force close launchers that ignore a polite close request",
+                "default", true, "movedFrom", "Assist")],
         "Steam", [
-            Map("product", "xfe", "type", "shortcut",
+            ; "both" as of the pass that gave the shell a Steam page. It read
+            ; all three of these already, out of the same section, with the same
+            ; keys and the same defaults -- they were simply unreachable from its
+            ; Settings window. Leaving them companion-only would have shipped a
+            ; page whose own feature SENDS these shortcuts while offering no way
+            ; to correct them, which matters because they are the user's Steam
+            ; keybinds and Steam lets those be changed.
+            Map("product", "both", "type", "shortcut",
                 "section", "Steam", "key", "MenuShortcut",
                 "label", "Steam Menu shortcut",
                 "default", "^1"),
-            Map("product", "xfe", "type", "shortcut",
+            Map("product", "both", "type", "shortcut",
                 "section", "Steam", "key", "QuickAccessShortcut",
                 "label", "Steam Quick Access shortcut",
                 "default", "^2"),
-            Map("product", "xfe", "type", "shortcut",
+            Map("product", "both", "type", "shortcut",
                 "section", "Steam", "key", "OverlayShortcut",
                 "label", "In-game Steam overlay shortcut",
                 "default", "+{Tab}"),
+            ; The Big Picture window title is a Steam fact, not a general
+            ; one. It sat on General because that is where this product's
+            ; odds and ends went before it had a Steam page.
+            Map("product", "standalone", "type", "edit",
+                "section", "BPM", "key", "BpmTitle",
+                "label", "Steam Big Picture window title",
+                "default", "Steam Big Picture Mode"),
+            ; The one row of this group whose DEFAULT differs by product, so it
+            ; is written twice rather than once with a default that would be
+            ; wrong for one of them. Everything below it is shared: those only
+            ; matter once this is on, and they behave the same in both.
+            ;
+            ; A spec default is not decoration -- SettingsPopulateFields reads it
+            ; as the fallback when the key is absent, so one shared "true" here
+            ; would have the shell's Settings window showing the feature enabled
+            ; while LoadSettings ran with it off.
+            ;
+            ; Off in the shell because it is the SHELL: View/Back is its mapping
+            ; modifier and the button people reach for constantly, so giving a
+            ; bare press a new meaning is opt-in there. On in the companion,
+            ; which has shipped it that way since it was written and where Xbox
+            ; FSE owns the surface the shortcut lands on.
+            Map("product", "standalone", "type", "checkbox",
+                "section", "Steam", "key", "EnableViewButtonActions",
+                "label", "Enable View button Steam actions",
+                "default", false),
             Map("product", "xfe", "type", "checkbox",
                 "section", "Steam", "key", "EnableViewButtonActions",
                 "label", "Enable View button Steam actions",
                 "default", true),
-            Map("product", "xfe", "type", "checkbox",
+            Map("product", "both", "type", "checkbox",
                 "section", "Steam", "key", "EnableViewTapAction",
                 "label", "Tap — Steam menu when Steam is in front, nothing in a game",
                 "default", true),
-            Map("product", "xfe", "type", "checkbox",
+            Map("product", "both", "type", "checkbox",
                 "section", "Steam", "key", "EnableViewHoldAction",
                 "label", "Hold — Steam Quick Access, or the overlay in a game",
                 "default", true),
-            Map("product", "xfe", "type", "edit",
+            Map("product", "both", "type", "edit",
                 "section", "Steam", "key", "ViewHoldMs",
                 "label", "Hold, Steam in front (ms)",
                 "default", 500, "min", 200, "max", 5000),
-            Map("product", "xfe", "type", "edit",
+            Map("product", "both", "type", "edit",
                 "section", "Steam", "key", "ViewHoldInGameMs",
                 "label", "Hold, in a game (ms)",
                 "default", 1000, "min", 200, "max", 5000)],
@@ -5634,10 +6030,6 @@ SettingsCategoryRows(category) {
                 "label", "Steam Assist Lite — return to Steam when no game is running",
                 "default", true),
             Map("product", "xfe", "type", "checkbox",
-                "section", "Assist", "key", "EnableLauncherCleanupLite",
-                "label", "Launcher Cleanup Lite — close game launchers once nothing is playing",
-                "default", true),
-            Map("product", "xfe", "type", "checkbox",
                 "section", "Assist", "key", "SuspendOnShellOverlay",
                 "label", "Pause while the Xbox FSE switcher or another shell overlay is on screen",
                 "default", true),
@@ -5649,18 +6041,7 @@ SettingsCategoryRows(category) {
                 "section", "Assist", "key", "CpuThresholdPercent",
                 "label", "Game CPU threshold (%, 0 = window shape only)",
                 "default", 12, "min", 0, "max", 100),
-            Map("product", "xfe", "type", "edit",
-                "section", "Assist", "key", "ForegroundStableSec",
-                "label", "Settle time before cleanup (s)",
-                "default", 30, "min", 5, "max", 600),
-            Map("product", "xfe", "type", "edit",
-                "section", "LauncherCleanup", "key", "CooldownSec",
-                "label", "Minimum time between cleanups (s)",
-                "default", 300, "min", 30, "max", 7200, "movedFrom", "Assist"),
-            Map("product", "xfe", "type", "checkbox",
-                "section", "LauncherCleanup", "key", "HardKill",
-                "label", "Force close launchers that ignore a polite close request",
-                "default", true, "movedFrom", "Assist")],
+],
         "General", [
             Map("product", "standalone", "type", "checkbox",
                 "section", "Features", "key", "EnableTaskbarHiding",
@@ -5694,29 +6075,13 @@ SettingsCategoryRows(category) {
             Map("product", "standalone", "type", "edit",
                 "section", "QuickMenu", "key", "TaskForceCloseHoldMs",
                 "label", "Task Switcher force-close hold time (ms)",
-                "default", "1200", "fieldType", "integer", "min", 600, "max", 3000),
-            ; The companion reaches its heartbeat interval here; the shell has no
-            ; heartbeat, because nothing is watching to see whether it is alive.
-            Map("product", "xfe", "type", "edit",
-                "section", "Companion", "key", "HeartbeatSeconds",
-                "label", "Heartbeat log interval (seconds)",
-                "default", "60", "fieldType", "integer", "min", 5, "max", 3600),
-            Map("product", "standalone", "type", "edit",
-                "section", "BPM", "key", "BpmTitle",
-                "label", "Steam Big Picture window title",
-                "default", "Steam Big Picture Mode"),
-            ; The companion keeps these on its own Steam page, which also holds
-            ; View-button rows the shell has no equivalent for. Shared rows, one
-            ; definition, two placements until the categories themselves merge.
-            Map("product", "standalone", "type", "shortcut",
-                "section", "Steam", "key", "MenuShortcut",
-                "label", "Steam Menu shortcut", "default", "^1"),
-            Map("product", "standalone", "type", "shortcut",
-                "section", "Steam", "key", "QuickAccessShortcut",
-                "label", "Steam Quick Access shortcut", "default", "^2"),
-            Map("product", "standalone", "type", "shortcut",
-                "section", "Steam", "key", "OverlayShortcut",
-                "label", "In-game Steam overlay shortcut", "default", "+{Tab}")],
+                "default", "1200", "fieldType", "integer", "min", 600, "max", 3000)],
+            ; The three Steam shortcuts used to be repeated here for the shell,
+            ; because the companion kept them on its own Steam page and the shell
+            ; had no such page. The note that stood here said "two placements
+            ; until the categories themselves merge" -- they have merged: the
+            ; shell draws a Steam page now, so the rows are defined once, over
+            ; there, next to the View-button action that SENDS them.
         "Startup Programs", [
             Map("product", "both", "type", "checkbox",
                 "section", "StartupPrograms", "key", "Enable",
@@ -5727,7 +6092,12 @@ SettingsCategoryRows(category) {
                 "section", "StartupPrograms", "key", "DelayMs",
                 "label", "Launch delay (ms)",
                 "default", "2000", "fieldType", "integer", "min", 0, "max", 600000),
-            Map("product", "xfe", "type", "edit",
+            ; "both". The shell reads this on every startup run -- same key,
+            ; same 1200 default, same 0..30000 bounds, same meaning: the gap
+            ; between one program launching and the next. It was tagged for the
+            ; companion only, so the shell honoured a setting it gave no way to
+            ; change.
+            Map("product", "both", "type", "edit",
                 "section", "StartupPrograms", "key", "StaggerMs",
                 "label", "Gap between launches (ms)",
                 "default", "1200", "fieldType", "integer", "min", 0, "max", 30000),
@@ -5743,6 +6113,12 @@ SettingsCategoryRows(category) {
                 "label", "Start them as the normal user when the companion is elevated",
                 "default", "true")],
         "Advanced & Logging", [
+            ; A diagnostic cadence, not a living-room control. It was on
+            ; General beside the Quick Menu rows.
+            Map("product", "xfe", "type", "edit",
+                "section", "Companion", "key", "HeartbeatSeconds",
+                "label", "Heartbeat log interval (seconds)",
+                "default", "60", "fieldType", "integer", "min", 5, "max", 3600),
             Map("product", "standalone", "type", "choice",
                 "section", "Logging", "key", "GameLogMode",
                 "label", "Game log detail",
@@ -5990,6 +6366,27 @@ SettingsRowAppliesTo(row, product) {
 ;
 ; Shared whole, wizard included: it is a self-contained dialog rather than a page
 ; of either product's Settings window, so nothing about it belongs to one tree.
+
+; Lets the wizard take a RawInput report before the decoder sees it.
+;
+; This was a per-tree seam named ProductControllerLearnConsumesReport, and the
+; two copies were byte-identical. The reason recorded for keeping them said the
+; QUESTION belonged to the shared file but the STATE belonged to the tree,
+; because this file cannot read a global it does not declare into both trees.
+;
+; That is not so, and this file is where it is disproved: the learner is defined
+; here in its entirety and reads LearnActive in seven other functions, including
+; the ControllerLearnReport this one calls. A global declared by both trees is
+; readable from here -- that is the arrangement the whole Quick Menu painter,
+; the RTSS orchestration and the wizard itself already run on. The seam was
+; costing two identical copies to answer a question this file could ask directly.
+ControllerLearnConsumesReport(data, base, length, device) {
+    global LearnActive
+    if !LearnActive
+        return false
+    ControllerLearnReport(data, base, length, device)
+    return true
+}
 
 CloseControllerLearner(*) {
     global LearnActive, LearnGui
@@ -7414,9 +7811,19 @@ ShowControllerLearner(*) {
     global MouseHidden
     global LearnAnalogBytes, LearnAnalogValues, LearnDpadRetries
     global LearnCountdownCtrl
+    ; An active wizard has a window, and this brings it forward. If it does not
+    ; have one, the flag is left over from a build that failed below and there is
+    ; nothing to bring forward -- so returning here returns into a state nothing
+    ; will ever clear. That state stands the controller poll down, so the pad is
+    ; dead, and this function is the only route back to the wizard that would
+    ; cancel it. Clear it and open a new one instead.
     if LearnActive {
-        try WinActivate("ahk_id " LearnGui.Hwnd)
-        return
+        if IsSet(LearnGui) {
+            try WinActivate("ahk_id " LearnGui.Hwnd)
+            return
+        }
+        LogLine("Learn: session was active with no window; clearing it.")
+        CloseControllerLearner()
     }
     ; RawInput has to be listening or there is nothing to learn from.
     if !RawInputProbeStart() {
@@ -7460,6 +7867,15 @@ ShowControllerLearner(*) {
     ; learning.
     ProductSetDialogActive(true)
 
+    ; Everything from LearnActive above to LearnGui below is state the rest of
+    ; the process reads, committed before the window that owns it exists. If the
+    ; build throws in between -- a font, a monitor query, a control -- the
+    ; session is left active with no window, and that is not a cosmetic leak: the
+    ; controller poll stands down on LearnActive, so the pad goes inert, and the
+    ; wizard is the thing that would have cancelled it. On a handheld with no
+    ; keyboard that is the whole machine. Hand the failure back to the one
+    ; function that clears all of it.
+    try {
     learn := Gui("+AlwaysOnTop -MinimizeBox", "Learn Controller")
     learn.Opt("+OwnDialogs")
     learn.MarginX := 24
@@ -7496,6 +7912,16 @@ ShowControllerLearner(*) {
     try ForceForegroundWindow(learn.Hwnd)
     SetTimer(ControllerLearnIdentificationReady, -1200)
     LogLine("Learn: wizard opened.")
+    } catch as err {
+        ; CloseControllerLearner clears LearnActive, the dialog flag, and every
+        ; timer, and destroys a partly built window if LearnGui was reached. It
+        ; is deliberately called before the message box: the box is modal, and
+        ; the controller must not still be inert behind it.
+        CloseControllerLearner()
+        LogLine("Learn: wizard could not be opened: " err.Message)
+        TopmostMsgBox("The Learn Controller window could not be opened."
+            . "`n`n" err.Message, "Learn controller", "Iconx")
+    }
 }
 
 
@@ -7578,6 +8004,27 @@ GetMonitorIndexForWindow(hwnd) {
 ; RevealWindow once anything else that depends on the final size is done --
 ; rounded corners, in the Quick Menu's case, which otherwise appear square for a
 ; frame. Returns true when a show was deferred.
+; Makes visible a window that PositionGuiCentered was asked to leave hidden.
+;
+; ShowWindow rather than Gui.Show, because Gui.Show with no coordinates
+; re-auto-sizes and re-centres the window -- undoing the placement the sequence
+; above just computed.
+;
+; One definition as of this pass, and it was already only one function: the two
+; copies were the same five lines, differing in whether the DllCall named its
+; DLL and in where the line was wrapped. The gate could not see that, because it
+; reads the DllCall TARGET as part of the call sequence and "User32\ShowWindow"
+; is not the string "ShowWindow" -- so a pair with identical behaviour scored
+; 0.00 and was never flagged once. Spelling the DLL is the better habit and is
+; what survives here.
+RevealWindow(guiObj, noActivate := false) {
+    static SW_SHOWNOACTIVATE := 4
+    static SW_SHOW := 5
+    try DllCall(
+        "User32\ShowWindow", "Ptr", guiObj.Hwnd,
+        "Int", noActivate ? SW_SHOWNOACTIVATE : SW_SHOW)
+}
+
 PositionGuiCentered(guiObj, left, top, right, bottom, width, height,
         noActivate := false, deferShow := false) {
     global EnableControllerDiagnostics
@@ -7709,15 +8156,61 @@ GetMonitorWorkAreaForPoint(x, y, &left, &top, &right, &bottom) {
     return 1
 }
 
+; A row of buttons, laid out on the content grid rather than by hand.
+;
+; Columns are DERIVED from the layout, not stated. The companion's copy carried
+; the scar that teaches this: it used to be [300, 496, 692] with 178-wide
+; buttons, correct for a 900-pixel window whose content began at 300, and
+; silently wrong the moment the content moved to 255 and widened to 690.
+;
+; Shared as of this pass, because the shell had no equivalent -- every button on
+; its pages carried a hand-typed x and width, and they had drifted apart. Its
+; Startup Programs page was the clearest case: four buttons of 155, 175, 155 and
+; 175 on one line, then three of 155 on the next, starting from columns that did
+; not line up with the row above. Nothing was wrong with any single number; they
+; were simply never derived from anything.
+;
+; columns is a parameter because label length decides it, not taste. Three fits
+; the companion's short labels and the shell's list controls; the shell's
+; Advanced page needs two, because "Install Managed Copy as Shell" does not fit
+; in a third of the content width.
+SettingsAddButtonRow(guiObj, category, entries, &y, columns := 3) {
+    layout := SettingsLayout()
+    gap := 15
+    if (columns < 1)
+        columns := 1
+    buttonWidth := (layout["contentWidth"] - gap * (columns - 1)) // columns
+    LINE_HEIGHT := 42
+    index := 0
+    for _, entry in entries {
+        column := Mod(index, columns)
+        if (column = 0 && index > 0)
+            y += LINE_HEIGHT
+        button := guiObj.AddButton(
+            "x" (layout["contentX"] + (buttonWidth + gap) * column)
+            . " y" y " w" buttonWidth " h34", entry[1])
+        button.OnEvent("Click", entry[2])
+        SettingsProductTrackControl(category, button)
+        index += 1
+    }
+    if (index > 0)
+        y += LINE_HEIGHT
+    return y
+}
+
 ; Draws a category from the shared definition, for whichever product asked.
 ;
 ; This was two adapters that the cross-name gate scored 0.88 on calls and 0.84
 ; on body -- the same walk over the same table, differing only in which product
 ; string they filtered by. That is a parameter, not a second function.
 ;
-; tableKey exists because the companion calls its logging page "Advanced" and
-; the shell calls it "Advanced & Logging"; the rows are keyed by the shell's
-; name and the companion passes it explicitly.
+; tableKey existed for ONE case: the companion called its logging page
+; "Advanced" while the shell called it "Advanced & Logging", so the rows were
+; keyed by the shell's name and the companion passed it explicitly. The companion
+; uses the shell's name now, and nothing passes tableKey. It is kept, unused,
+; because two products drawing one table will not always agree on a page name and
+; the parameter is the seam for that -- but a caller passing it today is a page
+; name that could simply be corrected instead.
 SettingsAddRowsForCategory(guiObj, category, product, &y, tableKey := "") {
     for _, row in SettingsCategoryRows(tableKey != "" ? tableKey : category) {
         if !SettingsRowAppliesTo(row, product)

@@ -127,6 +127,7 @@ ControllerLearnBufferAxisRaw
 ControllerLearnByteFreeRunning
 ControllerLearnClassifyAnalog
 ControllerLearnCompleteAxis
+ControllerLearnConsumesReport
 ControllerLearnCopyReport
 ControllerLearnDpadButtons
 ControllerLearnExamine
@@ -198,6 +199,7 @@ GetRtssMenuStatus
 GuiLiteralText
 HasLongBinding
 HealthResult
+InitDefaultControllerMappings
 InitializeTrayMenu
 InitXInput
 InstallationRecordAlert
@@ -207,12 +209,14 @@ IsSteamProcess
 IsUsableProfileExe
 LoadControllerProfile
 LogGameCandidateTable
+LogLine
 LogRawLine
 LogRow
 LogSteamShellSetupRecordDrift
 MouseWatch
 NormalizeKeyForSend
 ParseQuickMenuMainOrder
+PersistRtssCustomFrameCap
 PersistRtssFrameCapSelection
 PersistRtssFrameCapStateNow
 PositionGuiCentered
@@ -240,6 +244,7 @@ QuickMenuLayoutRestoreDefault
 QuickMenuLayoutSave
 QuickMenuLayoutToggle
 QuickMenuMoveSelection
+QuickMenuNormalizeSelection
 QuickMenuPaintRows
 QuickMenuRowAcceptsRepeat
 QuickMenuRowIsInert
@@ -280,6 +285,7 @@ RegisterTaskbarCreatedListener
 RequestElevatedRtssFrameLimit
 ResolveRtssExecutablePath
 RestoreRtssFrameLimitTick
+RevealWindow
 RotateLogIfNeeded
 RtssFrameCapBlockedReason
 RtssFrameCapModeForFps
@@ -292,6 +298,7 @@ SanitizeDiagnosticText
 SaveRtssFrameLimitToProfile
 SendChordSafe
 SendRtssShortcut
+SettingsAddButtonRow
 SettingsAddCheckbox
 SettingsAddChoice
 SettingsAddNote
@@ -335,6 +342,8 @@ ToggleRtssFrameLimiter
 ToggleRtssOverlay
 TryInvokeTouchKeyboard
 VerifyElevatedHelperProcess
+ViewButtonReleased
 WaitForElevatedRtssRequest
 WaitForVerifiedElevatedHelper
 XInputGetState
+XInputResolveController

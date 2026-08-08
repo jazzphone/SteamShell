@@ -304,17 +304,49 @@ $settingsCategoryNames = @(
     [regex]::Matches($settingsCategoryListMatch.Groups[1].Value, '"([^"]+)"') |
         ForEach-Object { $_.Groups[1].Value }
 )
+# The declared list and the constructed panels must be the SAME SET.
+#
+# This asserted a count of eight, which is a number somebody has to remember to
+# change and which says nothing about whether the pages are right. It was wrong
+# within a day of a page being added, and it would have gone on passing if a
+# page had been added to the list and never built.
+#
+# Both directions are checked now, because both have failed here: a panel with
+# no list entry is a page nobody can select -- the Steam rows shipped invisible
+# that way -- and a list entry with no panel is an empty page. Neither is
+# expressible as a count.
+$panelCategories = @(
+    [regex]::Matches($source, '(?m)^[ \t]*category := "([^"]+)"') |
+        ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique)
+$declaredCategories = @($settingsCategoryNames | Sort-Object -Unique)
 Assert-True (
-    $settingsCategoryNames.Count -eq 8 -and
-    @($settingsCategoryNames | Sort-Object -Unique).Count -eq 8) (
-    "Full Settings must declare exactly eight unique categories.")
-foreach ($categoryName in $settingsCategoryNames) {
-    Assert-True (
-        $source -match (
-            'category\s*:=\s*"' +
-            [regex]::Escape($categoryName) + '"')) (
-        "Full Settings category has no constructed panel: $categoryName")
-}
+    $declaredCategories.Count -gt 0 -and
+    $settingsCategoryNames.Count -eq $declaredCategories.Count) (
+    "Full Settings declares no categories, or a duplicate one: " +
+    ($settingsCategoryNames -join ", "))
+$categoryDifference = @(
+    Compare-Object $declaredCategories $panelCategories -ErrorAction SilentlyContinue)
+Assert-True ($categoryDifference.Count -eq 0) (
+    "The Full Settings category list and its constructed panels disagree. " +
+    "Declared: " + ($declaredCategories -join ", ") + ". Built: " +
+    ($panelCategories -join ", ") + ".")
+# A percent field is STORED as a fraction and SHOWN as a percentage, and both
+# halves of that have to exist.
+#
+# Only the save half did. SettingsEditorValidateField divided by 100 and nothing
+# multiplied back, so opening Settings put 0.3 into a field whose own validator
+# demands 5 to 100 -- the window blocked its own Save, and typing 30 fixed
+# nothing because it stored 0.3 again for the next open. A conversion with one
+# direction implemented is worse than none: none would merely have been wrong,
+# this was a loop the user could not leave.
+Assert-True (
+    $source -match
+        '(?s)SettingsEditorPopulateField\(field\)\s*\{(?:(?!\n\})[\s\S])*?' +
+        'field\["type"\] = "percent"(?:(?!\n\})[\s\S])*?\* 100' -and
+    $source -match
+        '(?s)fieldType = "percent"(?:(?!\n\})[\s\S])*?FormatSettingsFloat\(number / 100\)') (
+    "A percent settings field must convert in BOTH directions: multiplied by " +
+    "100 when the control is populated, divided by 100 when it is saved.")
 Assert-True (
     $source -match
         '(?s)SettingsEditorAuditLayout\(\)\s*\{.*?overlaps\s*:=' -and
@@ -754,7 +786,8 @@ Assert-True (
     $source -match
         '(?m)^\s*if ControllerNeedsFreshBaseline \{\s*\r?\n' +
         '\s*ResetControllerHoldState\(\s*\r?\n' +
-        '\s*&prevViewDown, downTick, longFired, prevTrigDown, btnDefs\)\s*\r?\n' +
+        '\s*&prevViewDown, downTick, longFired, prevTrigDown, btnDefs,\s*\r?\n' +
+        '\s*&viewWasDown\)\s*\r?\n' +
         '\s*ControllerNeedsFreshBaseline := false\s*\r?\n\s*return\s*\r?\n\s*\}') (
     "Closing Quick Settings can leak its final button release into persistent mappings.")
 Assert-True (
@@ -854,10 +887,19 @@ Assert-True (
     $source -match
         '(?s)\+MaxSize980x660.*?windowDpi\s*:=\s*Max\(96,\s*A_ScreenDPI\).*?' +
         'ClampInt\(availableLogicalHeight,\s*450,\s*660\)' -and
+    # The Advanced actions go through the shared row builder, which DERIVES its
+    # column positions and width from SettingsLayout. This used to pin the
+    # literals 255, 610 and 335 -- the hand-typed grid those buttons carried --
+    # which described one page's numbers rather than the property that matters,
+    # and would have gone on passing while every other button row on every other
+    # page drifted to a different width. Two columns because the labels are long.
     $source -match
-        '(?s)actionLeft\s*:=\s*255.*?actionRight\s*:=\s*610.*?' +
-        'actionWidth\s*:=\s*335') (
-    "Full Settings is no longer work-area bounded or using the aligned Advanced action grid.")
+        '(?s)SettingsAddButtonRow\(SettingsGui, category, \[' +
+        '(?:(?!\]\], &)[\s\S])*?Permanently Restore Explorer' +
+        '(?:(?!\]\], &)[\s\S])*?\]\], &actionY, 2\)' -and
+    $source -notmatch 'actionWidth\s*:=\s*335') (
+    "Full Settings is no longer work-area bounded, or its Advanced actions no " +
+    "longer use the shared grid-derived button row.")
 Assert-True (
     $source -match
         '(?s)SettingsGui\s*:=\s*Gui\(\s*"' +
@@ -1083,8 +1125,10 @@ Assert-True (
     $source -match
         '(?sm)^ResetControllerHoldState\(\s*\r?\n' +
         '\s*&previousViewDown, downTick, longFired, triggerDown, ' +
-        'buttonDefinitions\) \{\s*\r?\n\s*previousViewDown := false\s*\r?\n' +
-        '\s*ResetControllerEdgeState\(' +
+        'buttonDefinitions,\s*\r?\n\s*&viewWasDown\) \{' +
+        '(?:(?!\n\})[\s\S])*?previousViewDown := false' +
+        '(?:(?!\n\})[\s\S])*?viewWasDown := false' +
+        '(?:(?!\n\})[\s\S])*?ResetControllerEdgeState\(' +
         'downTick, longFired, triggerDown, buttonDefinitions\)' -and
     $helperSource -match 'ResetControllerEdgeState\(' -and
     $helperSource -notmatch '(?m)^ResetInputState\(') (
@@ -1230,14 +1274,15 @@ Assert-True (
 # false in exactly ONE place, its own static declaration. Any other occurrence is
 # a reset block that has grown back, which is how the seven appeared originally.
 $holdResetCalls = [regex]::Matches(
-    $source, 'ResetControllerHoldState\(\s*\r?\n\s*&prevViewDown, downTick, longFired, prevTrigDown, btnDefs\)')
+    $source, 'ResetControllerHoldState\(\s*\r?\n\s*&prevViewDown, downTick, longFired, prevTrigDown, btnDefs,\s*\r?\n\s*&viewWasDown\)')
 $strayViewDownResets = @(
     [regex]::Matches($source, '(?m)^(\s*)(static\s+)?prevViewDown := false') |
         Where-Object { -not $_.Groups[2].Success })
 Assert-True (
     $source -match
         '(?sm)^ResetControllerHoldState\(\s*\r?\n' +
-        '\s*&previousViewDown, downTick, longFired, triggerDown, buttonDefinitions\)\s*\{' +
+        '\s*&previousViewDown, downTick, longFired, triggerDown, buttonDefinitions,' +
+        '\s*\r?\n\s*&viewWasDown\)\s*\{' +
         '(?:(?!\n\})[\s\S])*?previousViewDown := false' +
         '(?:(?!\n\})[\s\S])*?ResetControllerEdgeState\(' -and
     # The tracker reset itself lives in SteamShell-Common.ahk now, so this body
@@ -1362,20 +1407,32 @@ Assert-True (
 $callbackReferences = @()
 $callbackReferences += [regex]::Matches(
     $source,
-    '\.OnEvent\(\s*"[^"]+"\s*,\s*([A-Za-z_][A-Za-z0-9_]*)') |
+    '\.OnEvent\(\s*"[^"]+"\s*,\s*([A-Za-z_][A-Za-z0-9_]*)(?![A-Za-z0-9_\[])') |
     ForEach-Object { $_.Groups[1].Value }
 $callbackReferences += [regex]::Matches(
     $source,
-    'SetTimer\(\s*([A-Za-z_][A-Za-z0-9_]*)') |
+    'SetTimer\(\s*([A-Za-z_][A-Za-z0-9_]*)(?![A-Za-z0-9_\[])') |
     ForEach-Object { $_.Groups[1].Value }
 $callbackReferences += [regex]::Matches(
     $source,
-    'OnMessage\(\s*[^,]+,\s*([A-Za-z_][A-Za-z0-9_]*)') |
+    'OnMessage\(\s*[^,]+,\s*([A-Za-z_][A-Za-z0-9_]*)(?![A-Za-z0-9_\[])') |
     ForEach-Object { $_.Groups[1].Value }
 $callbackReferences += [regex]::Matches(
     $source,
-    'CallbackCreate\(\s*([A-Za-z_][A-Za-z0-9_]*)') |
+    'CallbackCreate\(\s*([A-Za-z_][A-Za-z0-9_]*)(?![A-Za-z0-9_\[])') |
     ForEach-Object { $_.Groups[1].Value }
+# A SUBSCRIPT is not a name. The patterns above reject an identifier followed by
+# "[", because SettingsAddButtonRow wires its buttons with
+# .OnEvent("Click", entry[2]) -- "entry" is the loop variable holding a
+# [label, callback] pair, not a function. That function moved into
+# SteamShell-Shared.ahk, which this validator's effective source includes, so a
+# scan that had never seen it began reporting "entry" as a missing callback.
+#
+# The lookahead deliberately still allows "." so that SetTimer(Foo.Bind(...))
+# keeps checking that Foo exists; only the subscript form is excluded.
+#
+# "callback" below is a different case and stays: it is a PARAMETER holding a
+# function, which no regex over a call site can distinguish from a name.
 $missingCallbacks = @(
     $callbackReferences |
         Where-Object {
@@ -3721,6 +3778,23 @@ Assert-True (
         '(?s)RotateLogIfNeeded\(\s*pendingBytes[^)]*\)\s*\{.*?static estimatedSize.*?FileGetSize' -and
     $source -match 'RotateLogIfNeeded\(StrLen\(line\)') (
     "Log rotation is missing or measures the file on every written line.")
+
+# The XInput slot is DISCOVERED, never assumed to be the configured one.
+#
+# Steam Input and Xbox mode move a pad between slots while the process runs, so
+# reading XInputGetState(ControllerIndex) directly meant the controller stopped
+# answering mid-session with nothing wrong with it. That is worse here than in
+# the companion: this product is the shell, and the recovery it left the user was
+# to change Controller Index in Settings using the controller that had just
+# stopped working. The literal call is named as forbidden because it is the exact
+# line that regressed to.
+Assert-True (
+    $source -match
+        '(?s)ControllerReadState\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?XInputResolveController\(' -and
+    $source -match '(?s)XInputResolveController\([^)]*\)\s*\{.*?Loop\s+4' -and
+    $source -notmatch 'XInputGetState\(ControllerIndex') (
+    "Automatic four-slot XInput discovery is missing, or ControllerReadState " +
+    "went back to reading only the configured index.")
 
 # Cross-tree parity. Both trees and the shared file are in this folder, so there
 # is no "skipped when the sibling is absent" path any more -- that existed only

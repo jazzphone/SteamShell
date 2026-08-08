@@ -2209,6 +2209,104 @@ ReadIniInt(path, section, key, fallback, minimum, maximum) {
     return ClampInt(value, minimum, maximum)
 }
 
+; Applies a batch of INI changes as ONE replacement, or none of them.
+;
+; Both products had a function for this and only one of them was safe. Standalone
+; staged a copy, wrote into the copy and moved it over the original, so a failure
+; anywhere left the settings file exactly as it was. The companion wrote each key
+; straight into the live file in a loop and returned false at the first error --
+; which does not undo the keys it had already written. A three-key save that
+; failed on the third left the file holding two of them and told the caller
+; nothing had been saved, and the caller's in-memory state was then reloaded from
+; a file that agreed with neither.
+;
+; That is the whole argument for this being one function: the companion's intent
+; -- persist these settings -- is served completely by standalone's
+; implementation, and there is nothing the loop did that the staged commit does
+; not do better. Parameterised on path and PID because this file may not declare
+; a global; each product binds its own in a three-line wrapper, the same shape
+; ReadIniBool and ReadIniInt above already use.
+;
+; The staging file carries the owner's PID so SweepAbandonedIniUpdates can tell an
+; abandoned one from a live one.
+CommitIniChangesAt(iniPath, ownerPid, changes, deletes := 0) {
+    static busy := false
+    if (busy) {
+        ; A refusal is not a failure, and the two used to be indistinguishable:
+        ; both returned false and only the catch below logged anything. Staging
+        ; is deliberately not reentrant -- a second commit would copy a settings
+        ; file that is mid-replacement -- so the caller still gets false. What is
+        ; new is that the dropped write is on the record instead of vanishing.
+        LogLine("A settings write was refused because another commit was already "
+            . "in progress; " changes.Length " change(s) were not applied.",
+            "Warning")
+        return false
+    }
+    busy := true
+    workPath := iniPath ".update-" ownerPid ".tmp"
+    try {
+        if FileExist(workPath)
+            FileDelete(workPath)
+        FileCopy(iniPath, workPath, true)
+        for _, item in changes
+            IniWrite(item["value"], workPath, item["section"], item["key"])
+        if IsObject(deletes) {
+            for _, item in deletes
+                IniDelete(workPath, item["section"], item["key"])
+        }
+        FileMove(workPath, iniPath, true)
+        return true
+    } catch as err {
+        try {
+            if FileExist(workPath)
+                FileDelete(workPath)
+        }
+        LogLine("Settings update failed; original INI retained: " err.Message)
+        return false
+    } finally {
+        busy := false
+    }
+}
+
+; Removes staging files left behind by runs that ended mid-commit.
+;
+; FileMove replaces the original, so an exit between the copy and the move leaves
+; the copy behind. The name carries the PID that wrote it, which is what makes
+; them safe to delete: the caller has just started, so any file named after a PID
+; that is not its own and is no longer running belongs to a run that ended.
+;
+; A shell replacement is killed rather than closed often enough -- End Task,
+; power loss, a failed sign-in -- that these accumulate beside the settings file
+; the user is expected to be able to read. Shared with the commit above rather
+; than left behind with it: a product that stages without sweeping trades one
+; kind of litter for another.
+SweepAbandonedIniUpdates(iniPath, ownerPid) {
+    settingsDirectory := ""
+    settingsName := ""
+    SplitPath(iniPath, &settingsName, &settingsDirectory)
+    if (settingsDirectory = "" || settingsName = "")
+        return 0
+    removed := 0
+    try {
+        Loop Files, settingsDirectory "\" settingsName ".update-*.tmp" {
+            if !RegExMatch(A_LoopFileName, "\.update-(\d+)\.tmp$", &match)
+                continue
+            abandonedPid := Integer(match[1])
+            ; Never touch a live commit -- the caller's, or a second instance's.
+            if (abandonedPid = ownerPid || ProcessExist(abandonedPid))
+                continue
+            try {
+                FileDelete(A_LoopFilePath)
+                removed += 1
+            }
+        }
+    }
+    if removed
+        LogLine("Removed " removed " abandoned settings staging file(s) left by "
+            . "a previous run.")
+    return removed
+}
+
 ; Returns the XInput DLL that loaded, or "" if none did. The CALLER assigns its
 ; own global; this file cannot hold that state itself.
 ResolveXInputDll() {

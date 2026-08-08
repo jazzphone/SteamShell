@@ -147,6 +147,11 @@ global EnableControllerMouseMode := true ; Enable controller mouse/keyboard mapp
 global EnablePersistentMouseMode := false ; Apply mappings without holding View/Back
 global ControllerNeedsFreshBaseline := false
 global ControllerIndex := 0 ; 0 = first controller
+; The slot a controller last actually answered on, or -1 for none. Distinct from
+; ControllerIndex, which is what the user asked for: Steam Input and Xbox mode
+; move a pad between slots without restarting anything, so the configured index
+; is a starting guess and this is the answer. Read by XInputResolveController.
+global ActiveControllerIndex := -1
 global ControllerPollIntervalMs := 16 ; Poll rate (ms)
 global ControllerDeadzone := 3000 ; Stick deadzone (0-32767)
 global ControllerMouseSpeed := 100 ; Pixels per poll tick at full deflection
@@ -266,6 +271,20 @@ global GdiPlusModule := 0
 global SteamMenuShortcut := "^1"
 global SteamQuickAccessShortcut := "^2"
 global SteamOverlayShortcut := "+{Tab}"
+; The View/Back button's OWN action, on a press that was not used as the mapping
+; modifier. Shared with the companion, which has had it since it was written --
+; see ViewButtonReleased in SteamShell-Shared.ahk. The two hold thresholds are
+; separate because View is commonly the scoreboard or map button inside a game
+; and gets held on purpose there.
+; OFF by default in the shell, unlike the companion. View/Back is this
+; product's mapping modifier and the button reached for constantly, so giving a
+; bare press a new meaning is opt-in here. The sub-toggles below stay on, so
+; enabling this one gives the whole feature rather than a half of it.
+global EnableViewSteamActions := false
+global EnableViewTapAction := true
+global EnableViewHoldAction := true
+global ViewHoldMs := 500
+global ViewHoldInGameMs := 1000
 global QM_BG := "242424"          ; dark neutral charcoal window background
 global QM_ROW_SELECTED := "2C373D" ; selected row fill, derived from the accent
 global QM_ACCENT := "66C0F4"      ; selected row bar, outline and value
@@ -2561,6 +2580,11 @@ BpmTitle=Steam Big Picture Mode                             ; Big Picture window
 MenuShortcut=^1                                            ; Steam Menu while Big Picture owns the foreground
 QuickAccessShortcut=^2                                     ; Steam Quick Access shortcut
 OverlayShortcut=+{Tab}                                     ; Steam overlay while a game owns the foreground
+EnableViewButtonActions=false                              ; View/Back tap/hold action when not used as the mapping modifier; off by default in the shell
+EnableViewTapAction=true                                   ; Tap with Steam in front -> Steam Menu
+EnableViewHoldAction=true                                  ; Hold -> Quick Access (Steam) or overlay (in game)
+ViewHoldMs=500                                             ; Hold threshold with Steam in front (200-5000)
+ViewHoldInGameMs=1000                                      ; Hold threshold inside a game (200-5000)
 
 [Features]
 EnableElevatedInputHelper=true                             ; Launch the separate elevated window helper; applies immediately on reload; SteamShell.exe remains normal integrity
@@ -2611,7 +2635,7 @@ AlwaysFocusCooldownMs=1000                                  ; Minimum time betwe
 GameCPUThresholdPercent=5.0                                 ; CPU % that adds a score bonus
 FullscreenTolerance=0.98                                    ; Window must be >= this % of screen size to count as fullscreen-ish
 FullscreenPosTolerancePx=2                                  ; Window position must be within this many px of 0,0 for fullscreen-ish
-AudioPeakThreshold=0.02                                     ; Advanced: audio peak (0.0–1.0) to treat as “active game audio”
+AudioPeakThreshold=0.02                                     ; Advanced: audio peak (0.0–1.0) to treat as “active game audio�?
 GameForegroundCooldownMs=1500                               ; Minimum time between forced game activations
 GameAllowZeroCpuAsCandidate=true                            ; If CPU samples 0, still allow candidate
 GameRequireSteamForeground=true                             ; Only run game assist when Steam is foreground (safe default)
@@ -3328,7 +3352,7 @@ JoinPipe(listObj) {
 ; input still worked, which looked like RawInput recovering when it was XInput
 ; the whole time.
 ControllerReadState(&state) {
-    global ControllerBackend, ControllerIndex
+    global ControllerBackend
     wanted := StrLower(ControllerBackend)
     if (wanted = "rawinput" || wanted = "auto") {
         if RawInputReadState(&state)
@@ -3336,9 +3360,16 @@ ControllerReadState(&state) {
         if (wanted = "rawinput")
             return false
     }
-    if !IsObject(state)
-        state := Buffer(16, 0)
-    return XInputGetState(ControllerIndex, &state) = 0
+    ; Every slot, not just the configured one -- see XInputResolveController.
+    ; This asked XInput for the configured index and nothing else, so a pad that
+    ; Steam Input moved to another slot mid-session simply stopped answering.
+    ; (The old call is not quoted here on purpose: the rule that forbids it is a
+    ; -notmatch over this file, and a comment quoting it would fail the build.)
+    ;
+    ; The buffer allocation that stood here is gone with it: XInputGetState
+    ; already creates one when it is handed something that is not a Buffer, so
+    ; the guard was a second answer to a question the callee had settled.
+    return XInputResolveController(&state)
 }
 
 ; Per-tree seam required by SteamShell-Shared.ahk: a modal dialog is up, so
@@ -3346,14 +3377,6 @@ ControllerReadState(&state) {
 ProductSetDialogActive(active) {
     global SettingsEditorDialogActive
     SettingsEditorDialogActive := active
-}
-
-ProductControllerLearnConsumesReport(data, base, length, device) {
-    global LearnActive
-    if !LearnActive
-        return false
-    ControllerLearnReport(data, base, length, device)
-    return true
 }
 
 SharedPersistSettings(changes) {
@@ -3384,82 +3407,18 @@ ProductIdentity() {
     return identity
 }
 
-; Removes staging files left behind by a process that did not get to finish.
-;
-; CommitIniChanges copies the settings file, edits the copy, and moves it over
-; the original, so an exit between the copy and the move leaves the copy behind.
-; The name carries the PID that wrote it, which is what makes them safe to
-; delete: this process has just started, so any file named after a PID that is
-; not ours and is no longer running belongs to a run that ended.
-;
-; A shell replacement is killed rather than closed often enough -- End Task,
-; power loss, a failed sign-in -- that these accumulate beside the settings file
-; the user is expected to be able to read.
+; Both of these are three-line wrappers binding this program's settings path and
+; PID to the single staged-commit implementation in SteamShell-Common.ahk. The
+; reasoning that used to live here went with the code; the companion now runs the
+; same two functions instead of its own unstaged loop.
 SweepAbandonedSettingsUpdates() {
     global SettingsPath, ScriptPid
-    settingsDirectory := ""
-    settingsName := ""
-    SplitPath(SettingsPath, &settingsName, &settingsDirectory)
-    if (settingsDirectory = "" || settingsName = "")
-        return
-    removed := 0
-    try {
-        Loop Files, settingsDirectory "\" settingsName ".update-*.tmp" {
-            if !RegExMatch(A_LoopFileName, "\.update-(\d+)\.tmp$", &match)
-                continue
-            ownerPid := Integer(match[1])
-            ; Never touch a live commit -- ours, or a second instance's.
-            if (ownerPid = ScriptPid || ProcessExist(ownerPid))
-                continue
-            try {
-                FileDelete(A_LoopFilePath)
-                removed += 1
-            }
-        }
-    }
-    if removed
-        LogLine("Removed " removed " abandoned settings staging file(s) left by "
-            . "a previous run.")
+    SweepAbandonedIniUpdates(SettingsPath, ScriptPid)
 }
 
 CommitIniChanges(changes, deletes := 0) {
     global SettingsPath, ScriptPid
-    static busy := false
-    if (busy) {
-        ; A refusal is not a failure, and the two used to be indistinguishable:
-        ; both returned false and only the catch below logged anything. Staging
-        ; is deliberately not reentrant -- a second commit would copy a settings
-        ; file that is mid-replacement -- so the caller still gets false. What is
-        ; new is that the dropped write is on the record instead of vanishing.
-        LogLine("A settings write was refused because another commit was already "
-            . "in progress; " changes.Length " change(s) were not applied.",
-            "Warning")
-        return false
-    }
-    busy := true
-    workPath := SettingsPath ".update-" ScriptPid ".tmp"
-    try {
-        if FileExist(workPath)
-            FileDelete(workPath)
-        FileCopy(SettingsPath, workPath, true)
-        for _, item in changes
-            IniWrite(item["value"], workPath, item["section"], item["key"])
-        if IsObject(deletes) {
-            for _, item in deletes
-                IniDelete(workPath, item["section"], item["key"])
-        }
-        FileMove(workPath, SettingsPath, true)
-        return true
-    } catch as err {
-        try {
-            if FileExist(workPath)
-                FileDelete(workPath)
-        }
-        LogLine("Settings update failed; original INI retained: " err.Message)
-        return false
-    } finally {
-        busy := false
-    }
+    return CommitIniChangesAt(SettingsPath, ScriptPid, changes, deletes)
 }
 
 LoadSettings() {
@@ -3512,12 +3471,21 @@ LoadSettings() {
     global RtssElevatedFrameCapWrites, RtssFrameCapWriteBlocked
     global RtssLastFrameCapMode, RtssLastFrameCapFps
     global RtssFrameLimiterOnShortcut, RtssFrameLimiterOffShortcut
+    global EnableViewSteamActions, EnableViewTapAction, EnableViewHoldAction
+    global ViewHoldMs, ViewHoldInGameMs
 
     SteamPath := IniReadS("Paths", "SteamPath", SteamPath)
     BpmTitle := IniReadS("BPM", "BpmTitle", BpmTitle)
     SteamMenuShortcut := IniReadS("Steam", "MenuShortcut", "^1")
     SteamQuickAccessShortcut := IniReadS("Steam", "QuickAccessShortcut", "^2")
     SteamOverlayShortcut := IniReadS("Steam", "OverlayShortcut", "+{Tab}")
+    ; Same keys, same defaults and same bounds as the companion, because it is
+    ; the same feature reading the same section of the same-shaped file.
+    EnableViewSteamActions := ReadBool("Steam", "EnableViewButtonActions", false)
+    EnableViewTapAction := ReadBool("Steam", "EnableViewTapAction", true)
+    EnableViewHoldAction := ReadBool("Steam", "EnableViewHoldAction", true)
+    ViewHoldMs := ReadInt("Steam", "ViewHoldMs", 500, 200, 5000)
+    ViewHoldInGameMs := ReadInt("Steam", "ViewHoldInGameMs", 1000, 200, 5000)
 
     EnableElevatedInputHelper := ReadBool("Features", "EnableElevatedInputHelper", true)
     EnableSplashScreen := ReadBool("Features", "EnableSplashScreen", true)
@@ -4580,9 +4548,27 @@ MouseWatchDisabled() {
     return AllowExplorer || !EnableAutoHideCursor
 }
 
-; Nothing in this tree holds the cursor visible once the pass is running; the
-; Explorer case is handled above, before tracking.
+; The Settings window holds the cursor visible, because it is driven by one.
+;
+; This returned false, on the stated grounds that this tree holds the cursor
+; visible for nothing. That was not true: the full Settings editor is pointer
+; driven -- SettingsEditorHandlePointer moves the pointer with the right stick,
+; and the window has Browse buttons and text fields that need a mouse. Sitting
+; still in it for MouseHideDelay took the cursor away mid-edit.
+;
+; With a controller connected it was worse than losing the cursor. The poll's
+; Settings branch shows it again on the very next tick, and the mouse has still
+; not moved, so the hide condition is still true when the watch next runs: the
+; two fought each other and the cursor blinked for as long as the user sat still.
+;
+; Visible rather than active, deliberately: the Quick Menu opens over Settings
+; and takes the foreground with it, and the window underneath is still the reason
+; a pointer is wanted.
 MouseWatchHoldsCursorVisible() {
+    global SettingsGui
+    if !IsSet(SettingsGui)
+        return false
+    try return IsGuiVisible(SettingsGui) ? true : false
     return false
 }
 
@@ -4744,52 +4730,6 @@ OpenOSK() {
 ; ==============================================================================
 ; CONTROLLER MAPPING (configurable short/long press)
 ; ==============================================================================
-
-InitDefaultControllerMappings() {
-    global ControllerMap, ControllerMapDisplay
-    ControllerMap := Map()
-    ControllerMapDisplay := Map()
-
-    ; Defaults (while holding View/Back)
-    ; Note: Sticks + D-pad behavior are fixed (mouse move / scroll / arrows).
-    ControllerMap["RB.Short"] := "Builtin:LeftClick"
-    ControllerMap["RB.Long"] := "Builtin:None"
-
-    ControllerMap["RT.Short"] := "Builtin:RightClick"
-    ControllerMap["RT.Long"] := "Builtin:None"
-
-    ControllerMap["LT.Short"] := "Send:^+o"
-    ControllerMapDisplay["LT.Short"] := "Ctrl+Shift+O"
-    ControllerMap["LT.Long"] := "Send:^+f"
-    ControllerMapDisplay["LT.Long"] := "Ctrl+Shift+F"
-
-    ControllerMap["LB.Short"] := "Send:^!{Tab}"
-    ControllerMapDisplay["LB.Short"] := "Ctrl+Alt+Tab"
-    ControllerMap["LB.Long"] := "Builtin:TaskManager"
-
-    ControllerMap["A.Short"] := "Builtin:Enter"
-    ControllerMap["A.Long"] := "Builtin:None"
-
-    ControllerMap["B.Short"] := "Builtin:Esc"
-    ControllerMap["B.Long"] := "Builtin:AltF4"
-
-    ControllerMap["X.Short"] := "Builtin:TabTip"
-    ControllerMap["X.Long"] := "Builtin:OSK"
-
-    ControllerMap["Y.Short"] := "Builtin:WinG"
-    ControllerMap["Y.Long"] := "Builtin:None"
-
-    ; While View/Back is held, tap Start for the Windows Start menu or hold it
-    ; for File Explorer. Both remain fully customizable in the mapping editor.
-    ControllerMap["Start.Short"] := "Builtin:StartMenu"
-    ControllerMap["Start.Long"] := "Builtin:Explorer"
-
-    ; Stick clicks (default: unassigned)
-    ControllerMap["L3.Short"] := "Builtin:None"
-    ControllerMap["L3.Long"] := "Builtin:None"
-    ControllerMap["R3.Short"] := "Builtin:None"
-    ControllerMap["R3.Long"] := "Builtin:None"
-}
 
 LoadControllerMappings() {
     global IniPath, ControllerMap, ControllerMapDisplay
@@ -5631,17 +5571,6 @@ QuickMenuGetDefinitions() {
 ; indentation.
 ; ---------------------------------------------------------------------------
 
-; The last painted bitmap is owned by this script, not by the control, so it
-; outlives the GUI unless it is released explicitly.
-ReleaseQuickMenuPaintResources() {
-    global QuickMenuRowsBitmap
-    if QuickMenuRowsBitmap {
-        try DllCall("DeleteObject", "Ptr", QuickMenuRowsBitmap)
-        QuickMenuRowsBitmap := 0
-    }
-    ShutdownGdiPlus()
-}
-
 ; The one line of the painter that differs between the two trees, isolated so
 ; the rest can stay identical: standalone resolves a row's value live, while XFE
 ; rebuilds its whole row list per repaint and already carries it.
@@ -5744,14 +5673,6 @@ QuickMenuHintText() {
     if (QuickMenuPage = "MAIN")
         return "D-Pad Move  •  A Select  •  Hold Y for Controller Mappings  •  B Back"
     return "D-Pad Move  •  A Select  •  B Back"
-}
-
-RevealWindow(guiObj, noActivate := false) {
-    static SW_SHOWNOACTIVATE := 4
-    static SW_SHOW := 5
-    try DllCall(
-        "User32\ShowWindow", "Ptr", guiObj.Hwnd,
-        "Int", noActivate ? SW_SHOWNOACTIVATE : SW_SHOW)
 }
 
 PositionQuickMenuOnTarget(guiObj, targetHwnd, width, height, deferShow := false) {
@@ -6003,7 +5924,7 @@ GetControllerLayoutText(buttonName) {
 QuickMenuMouseSelect(index, *) {
     global QuickMenuSelected
     QuickMenuSelected := index
-    QuickMenuClampSelection()
+    QuickMenuNormalizeSelection()
     QuickMenuRefresh()
     QuickMenuActivateSelected()
 }
@@ -6190,7 +6111,7 @@ QuickMenuRefresh() {
     try {
         ; Normalized before the empty-page return, not after it, so the index is
         ; never left out of range for the next reader.
-        QuickMenuClampSelection()
+        QuickMenuNormalizeSelection()
         if (QuickMenuRows.Length = 0)
             return
 
@@ -6206,37 +6127,6 @@ QuickMenuRefresh() {
         if resumeRedraw
             QuickMenuSetRedraw(true)
     }
-}
-
-; Normalizes the selection index, wrapping at both ends.
-;
-; The invariant belongs here, at the sites that move the selection, rather than
-; downstream in the repaint. QuickMenuRefresh returns early on an empty page --
-; which is exactly the case where a stale out-of-range index used to survive --
-; so every reader of QuickMenuSelected had to re-guard the index itself.
-QuickMenuClampSelection() {
-    global QuickMenuRows, QuickMenuSelected
-    if (QuickMenuRows.Length = 0) {
-        QuickMenuSelected := 1
-        return
-    }
-    if (QuickMenuSelected < 1)
-        QuickMenuSelected := QuickMenuRows.Length
-    if (QuickMenuSelected > QuickMenuRows.Length)
-        QuickMenuSelected := 1
-}
-
-; Rows that only report state and cannot be acted on.
-;
-; A list of ids rather than a flag on every row, because there are six of them
-; and every other row in the menu does something. XFE answers the same question
-; from its row "action" field being "none"; the two sets are deliberately the
-; same six rows.
-; Per-tree seam for SteamShell-Shared.ahk's QuickMenuMoveSelection. This tree
-; CLAMPS at the ends; XFE wraps. Delegates rather than reimplementing, so the
-; three other callers of QuickMenuClampSelection cannot drift from this one.
-QuickMenuNormalizeSelection() {
-    QuickMenuClampSelection()
 }
 
 QuickMenuCloseSelected() {
@@ -6429,6 +6319,9 @@ PersistQuickMenuSetting(section, key, value) {
     }
     LoadSettings()
     ApplyRuntimeTimers()
+    ; If the full Settings window is open behind the Quick Menu, move its control
+    ; too, or a later Save there writes the stale value back over this.
+    SettingsEditorSyncFieldControl(section, key)
     if (!EnableAutoHideCursor && MouseHidden) {
         SystemCursor("Show")
         MouseHidden := false
@@ -6957,43 +6850,6 @@ IsSteamRunning() {
     return cachedResult
 }
 
-; ------------------------------------------------------------------------------
-; Quick Menu frame cap
-; ------------------------------------------------------------------------------
-; RTSS exposes two independent mechanisms and the Quick Menu presents them as one
-; row, because two rows that can each mean "no limiting" is a menu that fights
-; itself:
-;
-;   limiter flag (global, bit 0x4 = DISABLED)  master on/off
-;   FramerateLimit (per profile, DWORD)        the target, 0 = uncapped
-;
-; "Off" therefore maps to the FLAG and never to the value. Writing 0 would
-; destroy the user's number, so turning the cap off and back on would silently
-; forget 72 and come back uncapped. Clearing the flag leaves 72 in the profile
-; and restores it on the way back.
-;
-; Everything here targets the GLOBAL profile only. Per-game profiles are the
-; user's own tuning and are deliberately never written: a quick menu that edits
-; whichever profile happens to be in the foreground is a menu that can silently
-; change a game's configuration.
-
-PersistRtssCustomFrameCap(value) {
-    global RtssCustomFrameCap
-    value := ClampInt(value, 10, 1000)
-    if !CommitIniChanges([
-        Map("section", "RTSS", "key", "CustomFrameCap", "value", value)
-    ]) {
-        ShowNotification("The Custom FPS value could not be retained", "Warning")
-        return false
-    }
-    RtssCustomFrameCap := value
-    ; Committing a Custom value is also a selection of Custom at that value.
-    ; Recorded here rather than in the caller: CommitRtssPendingFrameCap is one
-    ; of the functions SHARED_FUNCTIONS.txt keeps byte-identical with XFE.
-    PersistRtssFrameCapSelection("custom", value)
-    return true
-}
-
 ; Discard every press/hold tracker, so a button held across an interruption
 ; cannot complete a Short or Long the user never finished.
 ;
@@ -7011,8 +6867,17 @@ PersistRtssCustomFrameCap(value) {
 ; smaller -- aligning the two signatures is what lets this move into the shared
 ; input file rather than being written a third time for the helper.
 ResetControllerHoldState(
-    &previousViewDown, downTick, longFired, triggerDown, buttonDefinitions) {
+        &previousViewDown, downTick, longFired, triggerDown, buttonDefinitions,
+        &viewWasDown) {
     previousViewDown := false
+    ; The View button's own press is a hold tracker too, so it is discarded here
+    ; with the rest rather than at each call site. Left standing, a View held
+    ; when the poll stood down -- the learner opening, the controller
+    ; disconnecting, mouse mode being switched off -- is still "down" when the
+    ; poll resumes, and the release after it reports a hold of however long the
+    ; interruption lasted. That fires the hold action, which throws the Steam
+    ; overlay up over whatever the user was doing.
+    viewWasDown := false
     ResetControllerEdgeState(downTick, longFired, triggerDown, buttonDefinitions)
 }
 
@@ -7031,6 +6896,12 @@ PollController() {
     static prevButtons := 0
     static lastScroll := 0
     static prevViewDown := false
+    ; The View button's own press, tracked apart from prevViewDown: that one
+    ; follows the mapping gate and so is true throughout automatic mouse mode,
+    ; which is not a press anybody made.
+    static viewWasDown := false
+    static viewPressTick := 0
+    static viewUsedAsModifier := false
     static quickChordSince := 0
     static quickChordFired := false
     static settingsChordSince := 0
@@ -7096,14 +6967,25 @@ PollController() {
     ;
     ; Edge state is cleared rather than left, or every button held when the
     ; wizard opened fires its mapping the moment it closes.
+    ;
+    ; A fresh baseline is REQUESTED rather than prevButtons being zeroed. Zeroing
+    ; it produces the exact misfire this paragraph promises to prevent: the next
+    ; poll computes pressed as buttons & ~0, so every button still held when the
+    ; wizard closes arrives as a press edge and fires its mapping. The wizard
+    ; ends on a button press more often than not -- Save is reached by pressing
+    ; something -- so this is the common case, not the corner. Asking for a
+    ; baseline instead makes the first poll after the wizard sample the pad as it
+    ; actually is and discard that sample's edges, which is what "cleared" was
+    ; meant to mean.
     if LearnActive {
-        prevButtons := 0
+        ControllerNeedsFreshBaseline := true
         quickChordSince := 0
         quickChordFired := false
         settingsChordSince := 0
         settingsChordFired := false
         ResetControllerHoldState(
-            &prevViewDown, downTick, longFired, prevTrigDown, btnDefs)
+            &prevViewDown, downTick, longFired, prevTrigDown, btnDefs,
+            &viewWasDown)
         return
     }
     settingsControllerActive := SettingsEditorControllerActive()
@@ -7115,8 +6997,11 @@ PollController() {
 
     if !ControllerReadState(&state) {
         if isControllerTestActive {
+            ; Not "at configured index N" any more. Every slot is tried now, so
+            ; naming the configured one sent the reader to a setting that was
+            ; not the problem and could not be the fix.
             try ControllerTestGui["ControllerButtons"].Text :=
-                "No controller detected at configured index " (ControllerIndex + 1) "."
+                "No controller detected on any XInput slot."
         }
         ; Discard all edge/hold state while disconnected. Otherwise reconnecting
         ; can synthesize stale releases or complete an old long-press.
@@ -7128,7 +7013,8 @@ PollController() {
         settingsPrevLtDown := false
         settingsPrevRtDown := false
         ResetControllerHoldState(
-            &prevViewDown, downTick, longFired, prevTrigDown, btnDefs)
+            &prevViewDown, downTick, longFired, prevTrigDown, btnDefs,
+            &viewWasDown)
         return
     }
 
@@ -7154,7 +7040,8 @@ PollController() {
         settingsPrevLtDown := false
         settingsPrevRtDown := false
         ResetControllerHoldState(
-            &prevViewDown, downTick, longFired, prevTrigDown, btnDefs)
+            &prevViewDown, downTick, longFired, prevTrigDown, btnDefs,
+            &viewWasDown)
         return
     }
 
@@ -7228,20 +7115,18 @@ PollController() {
     released := (~buttons) & prevButtons
     prevButtons := buttons
 
-    ; A menu-selection button can still be physically down when the menu is
-    ; destroyed. Establish one edge-free sample and clear every hold tracker so
-    ; its later release cannot also fire the normal persistent mapping.
-    if ControllerNeedsFreshBaseline {
-        ResetControllerHoldState(
-            &prevViewDown, downTick, longFired, prevTrigDown, btnDefs)
-        ControllerNeedsFreshBaseline := false
-        return
-    }
-
     ; Full Settings reserves the analog triggers for category changes. Track
     ; their edges here—even while View/Back is held—so releasing Back cannot
     ; create a stale category change. Ignore both together because both triggers
     ; are part of the Full Settings fallback chord.
+    ;
+    ; Evaluated BEFORE the fresh-baseline return below, so that an edge-free
+    ; sample is edge-free for the triggers too. It ran after, which left the
+    ; trigger trackers holding whatever they held before the interruption while
+    ; every other tracker was reset: close the Quick Menu or the learner with a
+    ; trigger held and the poll after the baseline one saw a rising edge that
+    ; never happened and changed the Settings category on its own. The direction
+    ; computed on a baseline poll is discarded with the rest of that sample.
     settingsLtDown := lt > 30
     settingsRtDown := rt > 30
     settingsCategoryDirection := 0
@@ -7257,11 +7142,30 @@ PollController() {
     settingsPrevLtDown := settingsLtDown
     settingsPrevRtDown := settingsRtDown
 
+    ; A menu-selection button can still be physically down when the menu is
+    ; destroyed. Establish one edge-free sample and clear every hold tracker so
+    ; its later release cannot also fire the normal persistent mapping.
+    if ControllerNeedsFreshBaseline {
+        ResetControllerHoldState(
+            &prevViewDown, downTick, longFired, prevTrigDown, btnDefs,
+            &viewWasDown)
+        ControllerNeedsFreshBaseline := false
+        return
+    }
+
+    ; These three surfaces own the controller and return before the View
+    ; tracking below ever runs, so a View held as one of them opens would still
+    ; be "down" when it closes -- and the release would report a hold lasting as
+    ; long as the dialog was up, firing the hold action over whatever came next.
+    ; Dropped rather than carried: a press the user made to reach a dialog is not
+    ; a press meant for Steam.
     if DesktopRecoveryControllerActive() {
+        viewWasDown := false
         RecoveryDialogHandleController(pressed)
         return
     }
     if StartupRecoveryControllerActive() {
+        viewWasDown := false
         RecoveryDialogHandleController(pressed)
         return
     }
@@ -7291,6 +7195,7 @@ PollController() {
     ; evaluating the normal View/Back modifier mappings.
     if (QuickMenuVisible) {
         QuickMenuWatchForegroundLoss()
+        viewWasDown := false
         QuickMenuHandleController(pressed, released, lx, ly, buttons)
         return
     }
@@ -7306,7 +7211,8 @@ PollController() {
                 MouseHidden := false
             }
             ResetControllerHoldState(
-                &prevViewDown, downTick, longFired, prevTrigDown, btnDefs)
+                &prevViewDown, downTick, longFired, prevTrigDown, btnDefs,
+                &viewWasDown)
             if (SettingsEditorDialogActive || settingsPrimaryActive)
                 SettingsEditorHandleController(
                     pressed, lx, ly, rx, ry, settingsCategoryDirection)
@@ -7333,8 +7239,33 @@ PollController() {
             buttons, lt, rt, pressed, released, now,
             quickChordNow || settingsComboNow)
         ResetControllerHoldState(
-            &prevViewDown, downTick, longFired, prevTrigDown, btnDefs)
+            &prevViewDown, downTick, longFired, prevTrigDown, btnDefs,
+            &viewWasDown)
         return
+    }
+
+    ; The View button's own tap/hold action, tracked BEFORE the controller-mouse
+    ; gate so it works whether or not mouse mode is enabled -- the same placement
+    ; and the same reason as the companion.
+    ;
+    ; This is the modifier button, and that is not a conflict: any other input
+    ; during the hold marks the press as a modifier use and its own action is
+    ; dropped on release. "Hold View, press A" therefore fires the A mapping and
+    ; nothing else.
+    viewPhysical := (buttons & 0x0020) != 0
+    if viewPhysical {
+        if !viewWasDown {
+            viewWasDown := true
+            viewPressTick := now
+            viewUsedAsModifier := false
+        }
+        if ((buttons & ~0x0020) || lt > 30 || rt > 30
+            || lx != 0 || ly != 0 || rx != 0 || ry != 0)
+            viewUsedAsModifier := true
+    } else if viewWasDown {
+        viewWasDown := false
+        ViewButtonReleased(now - viewPressTick, viewUsedAsModifier)
+        viewUsedAsModifier := false
     }
 
     ; Quick Menu and Settings navigation still require polling when normal
@@ -7342,7 +7273,8 @@ PollController() {
     ; View/Back mapping, stick movement, scrolling, or D-pad passthrough.
     if (!EnableControllerMouseMode) {
         ResetControllerHoldState(
-            &prevViewDown, downTick, longFired, prevTrigDown, btnDefs)
+            &prevViewDown, downTick, longFired, prevTrigDown, btnDefs,
+            &viewWasDown)
         return
     }
 
@@ -7361,11 +7293,17 @@ if (autoMouse && MouseHidden) {
     SystemCursor("Show")
     MouseHidden := false
 }
-viewDown := (buttons & 0x0020) || autoMouse
+; The PHYSICAL button and the mapping gate are two different things, and they are
+; named separately now: viewPhysical above drives the tap/hold action, this drives
+; the mappings. Reading one variable for both would make automatic mouse mode --
+; which is a permanent virtual hold -- look like a button the user is holding
+; down, and every release of it like a tap.
+viewDown := viewPhysical || autoMouse
 if (!viewDown) {
     ; Reset press tracking so Short/Long doesn't misfire when View/Back is not held.
     ResetControllerHoldState(
-        &prevViewDown, downTick, longFired, prevTrigDown, btnDefs)
+        &prevViewDown, downTick, longFired, prevTrigDown, btnDefs,
+        &viewWasDown)
     return
 }
 
@@ -8716,6 +8654,22 @@ CaptureLastRealForeground() {
     }
 }
 
+; The name shared code asks by, bound to this tree's foreground cache.
+;
+; SteamShell-Shared.ahk's ViewButtonReleased needs to know whether Steam is in
+; front, and both products already answered that -- under two names, over two
+; different caches. The companion resolves it through CurrentForegroundExe and
+; LastObservedForegroundExe; this tree keeps LastRealFgHwnd and tests the process
+; name itself. Both deliberately look past our OWN windows, which is the part
+; that makes the question worth caching at all.
+;
+; A two-line binding rather than a merge: the caches are real per-tree state and
+; folding them together would mean changing how one product observes the
+; foreground to satisfy a name.
+SteamIsInFront() {
+    return IsSteamForeground()
+}
+
 IsSteamForeground() {
     global ScriptPid, LastRealFgHwnd
     try {
@@ -8741,17 +8695,6 @@ IsSteamForeground() {
     } catch {
     return false
     }
-}
-
-; Every operational line gets a timestamp and a level, matching XFE.
-;
-; Without the timestamp the log records what happened but not when, so two lines
-; could be one second or one hour apart and nothing said which -- and elapsed
-; time is exactly what a startup stall, a focus handoff, or a sustained-exit
-; window has to be reasoned about in. Until now the only timestamped lines were
-; the game-score rows, which stamped themselves.
-LogLine(message, level := "Info") {
-    LogRawLine(FormatTime(A_Now, "yyyy-MM-dd HH:mm:ss") " [" level "] " message)
 }
 
 ; ==============================================================================
@@ -10179,29 +10122,89 @@ SettingsEditorMarkDirty(*) {
 ; from the stored value -- one adds a "Custom (x)" entry when the value matches
 ; no preset, the other builds a list item per entry -- so they read at creation
 ; and are the two builders this product does not share.
+; One field's control, loaded from the INI.
+;
+; Split out of the loop below so a single field can be refreshed on its own --
+; see SettingsEditorSyncFieldControl.
+SettingsEditorPopulateField(field) {
+    if (field["type"] = "mapped-choice" || field["type"] = "exe-list")
+        return
+    if !field.Has("default")
+        return
+    ; movedFrom is NOT consulted here. It records where a setting used to
+    ; live in the COMPANION -- schema 13 moved several out of [Cursor] --
+    ; and this product has always kept them where they are now. Reading the
+    ; companion's old section from the shell's INI would find nothing and
+    ; return the default over a value the user had set.
+    section := field["section"]
+    ctrl := field["ctrl"]
+    if (field["type"] = "bool")
+        ctrl.Value := ReadBool(section, field["key"],
+            ToBool(field["default"], false))
+    else if (field["type"] = "choice")
+        SettingsSelectChoiceByText(ctrl,
+            IniReadS(section, field["key"], field["default"]),
+            field["choices"])
+    else if (field["type"] = "percent")
+        ; STORED as a fraction, SHOWN as a percentage. The conversion existed in
+        ; one direction only: SettingsEditorValidateField divides by 100 on save,
+        ; and nothing multiplied by 100 on the way back in, so this branch used to
+        ; fall through to the raw read below and put 0.3 into a field whose own
+        ; validator demands 5 to 100.
+        ;
+        ; That made the window unsaveable on open and gave no way out that
+        ; stuck: 0.3 failed validation, typing 30 saved correctly as 0.3, and the
+        ; next open showed 0.3 again. Every Save the user attempted was blocked
+        ; by a value the window itself had just put there.
+        ;
+        ; Rounded because 0.3 * 100 is 30.000000000000004 in binary floating
+        ; point, and FormatSettingsFloat would faithfully render the tail.
+        ctrl.Value := FormatSettingsFloat(
+            Round(ToFloat(IniReadS(section, field["key"], field["default"]),
+                ToFloat(field["default"], 0)) * 100, 4))
+    else
+        ctrl.Value := IniReadS(section, field["key"], field["default"])
+}
+
 SettingsEditorPopulateFields() {
     global SettingsEditorFields
+    for _, field in SettingsEditorFields
+        SettingsEditorPopulateField(field)
+}
+
+; Re-reads ONE field's control after that setting was changed somewhere else.
+;
+; The Quick Menu opens over the Settings window -- its chord is evaluated before
+; the branch that hands input to Settings, deliberately, so the menu stays
+; reachable from in there. Change a setting from the menu and the INI, the
+; globals and the menu row all move; the Settings control behind it does not.
+; SettingsEditorSave then writes EVERY field it holds, not only the edited ones,
+; so pressing Save afterwards put the stale value straight back over the change
+; the user had just made. The companion has had a guard for exactly this since
+; it wrote its own Quick Menu; the shell never did.
+;
+; One field, not a full repopulate: the window may hold edits the user has not
+; saved yet, and refreshing all of it would discard them.
+;
+; Read back from the INI rather than taking the value passed in, which also
+; sidesteps the trap the companion had to write its way around -- these arrive
+; as the words written to the file, and in AutoHotkey v2 the string "false" is a
+; non-empty string and therefore true, so handing it to a checkbox ticks the box
+; it was meant to clear. ReadBool already answers that question correctly.
+SettingsEditorSyncFieldControl(section, key) {
+    global SettingsGui, SettingsEditorFields
+    if !IsSet(SettingsGui)
+        return
+    try {
+        if !IsGuiVisible(SettingsGui)
+            return
+    } catch
+        return
     for _, field in SettingsEditorFields {
-        if (field["type"] = "mapped-choice" || field["type"] = "exe-list")
-            continue
-        if !field.Has("default")
-            continue
-        ; movedFrom is NOT consulted here. It records where a setting used to
-        ; live in the COMPANION -- schema 13 moved several out of [Cursor] --
-        ; and this product has always kept them where they are now. Reading the
-        ; companion's old section from the shell's INI would find nothing and
-        ; return the default over a value the user had set.
-        section := field["section"]
-        ctrl := field["ctrl"]
-        if (field["type"] = "bool")
-            ctrl.Value := ReadBool(section, field["key"],
-                ToBool(field["default"], false))
-        else if (field["type"] = "choice")
-            SettingsSelectChoiceByText(ctrl,
-                IniReadS(section, field["key"], field["default"]),
-                field["choices"])
-        else
-            ctrl.Value := IniReadS(section, field["key"], field["default"])
+        if (field["section"] = section && field["key"] = key) {
+            try SettingsEditorPopulateField(field)
+            return
+        }
     }
 }
 
@@ -11804,7 +11807,7 @@ AppendProcessIntegrityHealth(results, checkName, pid, expectedIntegrity := "Medi
 ; Seam for SteamShell-Shared.ahk: this tree's own checks. The harness around them
 ; -- the window, the list, the report text, Copy and Refresh -- is shared.
 ProductHealthResults() {
-    global ControllerBackend, RawInputLastReportTick
+    global ControllerBackend, RawInputLastReportTick, ActiveControllerIndex
     global SteamPath, SettingsPath, CurrentSettingsSchemaVersion
     global ShellRegKey, SteamShellInstalledExe, SteamShellVersion
     global SteamShellDataDir, SteamShellInstallationMode
@@ -12090,11 +12093,22 @@ ProductHealthResults() {
     controllerConnected := ControllerReadState(&state)
     controllerVia := RawInputRegistered() && RawInputLastReportTick
         ? "RawInput" : "XInput"
+    ; The slot that ANSWERED, not the one that was configured. Those are no
+    ; longer the same question: the slot is discovered now, so reporting the
+    ; configured index told the user where SteamShell was told to look rather
+    ; than where the controller actually is -- and the gap between those two is
+    ; exactly what the discovery exists to close and what a health check should
+    ; therefore surface.
     HealthResult(results, controllerConnected ? "pass" : "warn", "Controller",
         controllerConnected
-            ? controllerVia " controller " (ControllerIndex + 1) " is connected."
-            : "No controller was detected at configured index "
-                (ControllerIndex + 1) " on backend " ControllerBackend ".")
+            ? controllerVia " controller is connected"
+                . (ActiveControllerIndex >= 0
+                    ? " on slot " (ActiveControllerIndex + 1)
+                        . (ActiveControllerIndex != ControllerIndex
+                            ? " (configured: " (ControllerIndex + 1) ")" : "")
+                    : "") "."
+            : "No controller was detected on any XInput slot, on backend "
+                ControllerBackend ".")
 
     bindingOwners := Map()
     duplicateBindings := []
@@ -12189,6 +12203,16 @@ ExportDiagnosticBundle(*) {
             '/select,' QuoteWindowsCommandLineArg(zipPath),
             A_WinDir, "Normal", &explorerPid, "Diagnostic bundle location")
     } catch as err {
+        ; The staging directory is removed on the way out of the FAILURE path as
+        ; well as the success one. Only the success path deleted it, and the
+        ; throw above it -- "PowerShell could not create the ZIP archive" -- is
+        ; the most likely way out of this function on a machine that has a
+        ; problem worth bundling. What was left in %TEMP% was the sanitized
+        ; settings file and two thousand lines of log, once per attempt, and a
+        ; user who tries three times to export diagnostics leaves three copies
+        ; behind and is told each time that nothing was exported. The companion
+        ; has always cleaned up here; this is the same two lines.
+        try DirDelete(tempDir, true)
         if IsSet(HealthCheckGui) && IsGuiVisible(HealthCheckGui) {
             try MsgBox(
                 "The diagnostic bundle could not be exported.`n`n" err.Message,
@@ -14234,6 +14258,7 @@ ShowSettingsEditor(*) {
         "Startup & Splash",
         "Startup Programs",
         "Controller & Cursor",
+        "Steam",
         "Focus & Windows",
         "RTSS & Performance",
         "Launcher Cleanup",
@@ -14328,17 +14353,19 @@ ShowSettingsEditor(*) {
         "x255 y" (startupListY + 180) " w690", IniReadS("StartupPrograms", "Program1", ""))
     SettingsStartupCommandEdit.OnEvent("Change", SettingsEditorMarkDirty)
     SettingsEditorRegisterControl(category, SettingsStartupCommandEdit)
+    ; On the grid, not by hand. These were 155, 175, 155 and 175 wide on the
+    ; first line and three of 155 on the second, from columns that did not line
+    ; up with each other -- the second line also stopped 205 pixels short of the
+    ; right edge. Seven buttons over three derived columns instead.
     startupButtonY := startupListY + 220
-    SettingsEditorAddActionButton(category, "Add Program…", SettingsEditorAddStartupProgram, 255, startupButtonY, 155)
-    SettingsEditorAddActionButton(category, "Browse Selected…", SettingsEditorBrowseStartupProgram, 420, startupButtonY, 175)
-    SettingsEditorAddActionButton(category, "Apply Command", SettingsEditorSetStartupCommand, 605, startupButtonY, 155)
-    SettingsEditorAddActionButton(category, "Remove Selected", SettingsEditorClearStartupCommand, 770, startupButtonY, 175)
-    SettingsEditorAddActionButton(
-        category, "Test Launch", SettingsEditorTestStartupProgram, 255, startupButtonY + 38, 155)
-    SettingsEditorAddActionButton(
-        category, "Move Up", SettingsEditorMoveStartupProgram.Bind(-1), 420, startupButtonY + 38, 155)
-    SettingsEditorAddActionButton(
-        category, "Move Down", SettingsEditorMoveStartupProgram.Bind(1), 585, startupButtonY + 38, 155)
+    SettingsAddButtonRow(SettingsGui, category, [
+        ["Add Program…", SettingsEditorAddStartupProgram],
+        ["Browse Selected…", SettingsEditorBrowseStartupProgram],
+        ["Apply Command", SettingsEditorSetStartupCommand],
+        ["Remove Selected", SettingsEditorClearStartupCommand],
+        ["Test Launch", SettingsEditorTestStartupProgram],
+        ["Move Up", SettingsEditorMoveStartupProgram.Bind(-1)],
+        ["Move Down", SettingsEditorMoveStartupProgram.Bind(1)]], &startupButtonY)
     SettingsStartupListView.Modify(1, "Select Focus Vis")
 
     ; Controller and cursor
@@ -14362,6 +14389,20 @@ ShowSettingsEditor(*) {
     SettingsEditorAddExeListField(
         category, "Controller", "DesktopAutoMouseExcludeExeList",
         "Desktop-mode exclusions (games/apps)", 610, autoMouseY, 335)
+
+    ; Steam
+    ;
+    ; This page did not exist here. The [Steam] section has always been read by
+    ; this product -- the three shortcuts, and now the View button's own action
+    ; -- but none of it was reachable from the Settings window, so the rows the
+    ; shared table defines for it were built for a page nothing drew. A setting
+    ; that can only be changed by hand-editing the INI is not a setting most
+    ; users have.
+    category := "Steam"
+    SettingsEditorAddHeading(category, "Steam"
+        , "What the View/Back button does on a press that was not used to reach a mapping.")
+    y := 150
+    SettingsAddRowsForCategory(SettingsGui, category, "standalone", &y)
 
     ; Focus
     category := "Focus & Windows"
@@ -14423,28 +14464,44 @@ ShowSettingsEditor(*) {
     y := 150
     SettingsAddRowsForCategory(SettingsGui, category, "standalone", &y)
     actionY := y + 12
-    actionLeft := 255
-    actionRight := 610
-    actionWidth := 335
-    SettingsEditorAddActionButton(category, "Pause / Resume Focus", SettingsEditorToggleFocusPause, actionLeft, actionY, actionWidth)
-    SettingsEditorAddActionButton(category, "Run Game Assist", SettingsEditorRunGameAssist, actionRight, actionY, actionWidth)
-    SettingsEditorAddActionButton(category, "Reload Runtime", SettingsEditorReloadRuntime, actionLeft, actionY + 38, actionWidth)
-    SettingsEditorAddActionButton(category, "Open INI in Notepad", SettingsEditorOpenIni, actionRight, actionY + 38, actionWidth)
-    SettingsEditorAddActionButton(category, "Open Live Log", ShowLiveLogWindow, actionLeft, actionY + 76, actionWidth)
-    SettingsEditorAddActionButton(category, "Diagnostics Panel…", ShowControlPanel, actionRight, actionY + 76, actionWidth)
-    SettingsEditorAddActionButton(category, "Install Managed Copy as Shell", SettingsEditorInstallSteamShell, actionLeft, actionY + 114, actionWidth)
-    SettingsEditorAddActionButton(category, "Repair Managed Installation", SettingsEditorRepairSteamShell, actionRight, actionY + 114, actionWidth)
-    SettingsEditorAddActionButton(category, "Register Current EXE as Shell", SettingsEditorRegisterCurrentShell, actionLeft, actionY + 152, actionWidth)
-    SettingsEditorAddActionButton(category, "Permanently Restore Explorer", SettingsEditorRestoreDesktop, actionRight, actionY + 152, actionWidth)
-    SettingsEditorAddActionButton(category, "Health Check…", ShowHealthCheck, actionLeft, actionY + 190, actionWidth)
-    SettingsEditorAddActionButton(category, "Export Diagnostic ZIP", ExportDiagnosticBundle, actionRight, actionY + 190, actionWidth)
-    SettingsEditorAddActionButton(category, "Create Settings Backup", SettingsEditorCreateBackup, actionLeft, actionY + 228, actionWidth)
-    SettingsEditorAddActionButton(category, "Export Settings…", SettingsEditorExportSettings, actionRight, actionY + 228, actionWidth)
-    SettingsEditorAddActionButton(category, "Import / Restore…", SettingsEditorImportSettings, actionLeft, actionY + 266, actionWidth)
-    SettingsEditorAddActionButton(category, "Restore Category Defaults…", SettingsEditorResetCategory, actionRight, actionY + 266, actionWidth)
-    SettingsEditorAddActionButton(category, "Reset All Settings…", SettingsEditorResetAll, actionLeft, actionY + 304, actionWidth)
-    SettingsEditorAddActionButton(category, "Restart in Safe Mode", RestartSteamShellInSafeMode, actionRight, actionY + 304, actionWidth)
-    SettingsEditorAddActionButton(category, "Setup Assistant…", ShowSetupAssistant, actionLeft, actionY + 342, actionWidth)
+    ; Shell registration first, then everything else.
+    ;
+    ; These four were rows four and five of a ten-row grid, interleaved with
+    ; diagnostics, backup and export. "Permanently Restore Explorer" was the
+    ; tenth of nineteen buttons -- it is the escape hatch for a program that has
+    ; taken over the Windows shell, reached for when the machine is misbehaving
+    ; and the desktop is wanted back, and it was sitting between "Register
+    ; Current EXE as Shell" and "Health Check".
+    ;
+    ; Paired by intent rather than by name: the top row is the two ways to BECOME
+    ; the shell, the second is repair and undo. That also stops Register and
+    ; Restore -- opposite outcomes, similar labels -- sitting side by side, which
+    ; is how they were.
+    ;
+    ; TWO columns, not the default three: "Install Managed Copy as Shell" does
+    ; not fit in a third of the content width. The width itself is derived, so
+    ; these no longer carry a hand-typed 335 that stops being right when the
+    ; content area moves.
+    SettingsAddButtonRow(SettingsGui, category, [
+        ["Install Managed Copy as Shell", SettingsEditorInstallSteamShell],
+        ["Register Current EXE as Shell", SettingsEditorRegisterCurrentShell],
+        ["Repair Managed Installation", SettingsEditorRepairSteamShell],
+        ["Permanently Restore Explorer", SettingsEditorRestoreDesktop],
+        ["Pause / Resume Focus", SettingsEditorToggleFocusPause],
+        ["Run Game Assist", SettingsEditorRunGameAssist],
+        ["Reload Runtime", SettingsEditorReloadRuntime],
+        ["Open INI in Notepad", SettingsEditorOpenIni],
+        ["Open Live Log", ShowLiveLogWindow],
+        ["Diagnostics Panel…", ShowControlPanel],
+        ["Health Check…", ShowHealthCheck],
+        ["Export Diagnostic ZIP", ExportDiagnosticBundle],
+        ["Create Settings Backup", SettingsEditorCreateBackup],
+        ["Export Settings…", SettingsEditorExportSettings],
+        ["Import / Restore…", SettingsEditorImportSettings],
+        ["Restore Category Defaults…", SettingsEditorResetCategory],
+        ["Reset All Settings…", SettingsEditorResetAll],
+        ["Restart in Safe Mode", RestartSteamShellInSafeMode],
+        ["Setup Assistant…", ShowSetupAssistant]], &actionY, 2)
 
     ; Common bottom controls
     SettingsEditorDividerCtrl := SettingsGui.AddText("x20 y" dividerY " w925 h1 0x10")
@@ -14515,7 +14572,7 @@ ShowControlPanel(*) {
     ControlGui.AddText("x" x1 " ym", "Feature toggles (runtime)")
     ControlGui.SetFont("s9 Norm")
     ControlGui.AddText("x" x1 " y+2 w" colW " h42 +Wrap"
-    , "Tip: Use “Apply (runtime only)” for temporary changes. Use “Save to INI” to persist after reboot.")
+    , "Tip: Use “Apply (runtime only)�? for temporary changes. Use “Save to INI�? to persist after reboot.")
     ControlGui.SetFont("s10 Norm")
 
     ControlGui.AddCheckbox("x" x1 " y+10 vcbGame", "Game focusing (fullscreen game assist)")
@@ -15546,7 +15603,15 @@ ExitCleanup(ExitReason, ExitCode) {
     ; recreates the desktop windows from scratch.
     StopDesktopBlackout(true)
     ShutdownRtssHooksApi()
-    ReleaseQuickMenuPaintResources()
+    ; The shared teardown, directly. ReleaseQuickMenuPaintResources was one name
+    ; for two different routines -- here it deleted QuickMenuRowsBitmap and shut
+    ; GDI+ down, in the companion it called this. Deleting the bitmap was the
+    ; weaker of the two: the Static control is still holding that handle, and the
+    ; one the control had swapped in earlier was never freed at all, so the tidier
+    ; of the two names did the less complete job. QuickMenuDestroyWindow detaches
+    ; the image from the control first, frees both handles, and then shuts GDI+
+    ; down.
+    QuickMenuDestroyWindow()
     if ElevatedGeometryEventHandle {
         try DllCall(
             "Kernel32\CloseHandle", "Ptr", ElevatedGeometryEventHandle, "Int")

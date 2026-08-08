@@ -20,6 +20,7 @@ CenteredPosition
 ClampFloat
 ClampInt
 CleanIniValue
+CommitIniChangesAt
 ControllerBindingHasLong
 ControllerBindingHoldsMouseButton
 ControllerHeldMouseButtons
@@ -100,6 +101,7 @@ SortCandidatesByScoreAreaDesc
 SplitStartupCommandLine
 SteamShellPathIsAdminOnlyWritable
 StrRepeat
+SweepAbandonedIniUpdates
 ToFloat
 ToInt
 TopmostMsgBox

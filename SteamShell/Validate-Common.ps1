@@ -821,8 +821,25 @@ function Assert-SharedParity {
     # dependency. Code and strings are still scanned, because those can act.
     $commonCode = (($commonText -split "`n") |
         Where-Object { $_ -notmatch '^\s*;' }) -join "`n"
+    # Declared here rather than beside its own check below, because this check
+    # needs it too.
+    #
+    # The seam names are EXEMPT from the escape scan. This asks "does Common name
+    # anything SteamShell-Shared.ahk defines", and the answer became yes the
+    # moment LogLine stopped being three per-program copies and became one shared
+    # definition -- which broke the build for a dependency that is satisfied:
+    # both trees resolve LogLine through the include of SteamShell-Shared.ahk,
+    # and SteamShell-Helper.ahk defines its own. Nothing about that stops the
+    # helper compiling, which is the only thing this rule exists to prevent.
+    #
+    # The guarantee is not dropped, it is moved to the check that is shaped for
+    # it: every allowlisted seam name must be RESOLVABLE by all three programs
+    # across their include closures, asserted below. A name on this list is one
+    # this file has already promised every program can reach.
+    $commonSeamAllowed = @("LogLine")
     $commonEscapes = @(
         $shared.Keys | Where-Object {
+            $commonSeamAllowed -notcontains $_ -and
             $commonCode -match ('(?<![.\w])' + [regex]::Escape($_) + '\b') })
     Assert-True ($commonEscapes.Count -eq 0) (
         "SteamShell-Common.ahk reaches into SteamShell-Shared.ahk, which stops " +
@@ -834,7 +851,7 @@ function Assert-SharedParity {
     # eight before anyone noticed, because nothing enumerated what actually left
     # the file. This enumerates: every call in SteamShell-Common.ahk that is not
     # defined there and is not an AutoHotkey builtin must be on this list.
-    $commonSeamAllowed = @("LogLine")
+    # $commonSeamAllowed is declared above, where the escape scan also needs it.
     $commonCode = ($commonText -split "`n" |
         ForEach-Object { $_ -replace '(?<!`);.*$', '' }) -join "`n"
     $commonCode = $commonCode -replace '"(?:[^"`]|`.)*"', '""'
@@ -943,15 +960,30 @@ function Assert-SharedParity {
         ($commonLeaks -join ", ") +
         ". Move the callee in, pass the value as a parameter, or widen the " +
         "allowlist deliberately.")
+    # Across the INCLUDE CLOSURE, not the one file. What has to be true is that
+    # the program can RESOLVE the seam at load time, and #Include is how three
+    # files become one program -- so a seam function living in
+    # SteamShell-Shared.ahk satisfies both trees exactly as a per-tree copy did.
+    # Checking the tree's own table alone demanded a copy in every tree, which is
+    # the duplication the rest of this file exists to drive out: it failed the
+    # moment LogLine stopped being two identical copies and became one.
     foreach ($name in $commonSeamAllowed) {
         foreach ($pair in @(
-            @{ Name = "SteamShell.ahk"; Table = $standalone },
-            @{ Name = "SteamShell-XFE.ahk"; Table = $companion },
-            @{ Name = "SteamShell-Helper.ahk"; Table = $helper })) {
-            Assert-True ($pair.Table.ContainsKey($name)) (
-                "$($pair.Name) does not define '$name', which " +
-                "SteamShell-Common.ahk depends on. AutoHotkey resolves that at " +
-                "load time, so the program would not start.")
+            @{ Name = "SteamShell.ahk"; Tables = @($standalone, $shared, $common) },
+            @{ Name = "SteamShell-XFE.ahk"; Tables = @($companion, $shared, $common) },
+            @{ Name = "SteamShell-Helper.ahk"; Tables = @($helper, $common) })) {
+            $resolvable = $false
+            foreach ($table in $pair.Tables) {
+                if ($table.ContainsKey($name)) {
+                    $resolvable = $true
+                    break
+                }
+            }
+            Assert-True $resolvable (
+                "$($pair.Name) cannot resolve '$name', which " +
+                "SteamShell-Common.ahk depends on, from any file it compiles. " +
+                "AutoHotkey resolves that at load time, so the program would " +
+                "not start.")
         }
     }
 
@@ -1175,6 +1207,105 @@ function Assert-SharedParity {
         }
     }
 
+    # The View button's own tap/hold action exists in BOTH products.
+    #
+    # It was the companion's alone, and the reason given was that the shell uses
+    # View/Back as its mapping modifier and so has no bare press to give meaning
+    # to. The companion uses it as a modifier too -- same mappings, same
+    # automatic mouse mode, expressed the same way -- so that reason described
+    # neither product. What made it possible in one and not the other was only
+    # that one had been given the tracking.
+    #
+    # Three things have to hold in each tree, and the third is the one that makes
+    # the other two safe: the press must be marked as a modifier use the moment
+    # any other input arrives during the hold, or "hold View, press A" fires a
+    # Steam shortcut underneath the mapping.
+    foreach ($tree in @("SteamShell.ahk", "SteamShell-XFE.ahk")) {
+        $viewTreeText = Get-Content -LiteralPath (Join-Path $projectRoot $tree) -Raw
+        Assert-True (
+            $viewTreeText -match 'ViewButtonReleased\(\s*\r?\n?\s*now - viewPressTick, viewUsedAsModifier\)' -and
+            $viewTreeText -match '(?s)if !viewWasDown \{[\s\S]{0,200}?viewPressTick := now' -and
+            $viewTreeText -match
+                '(?s)\|\| lt > 30 \|\| rt > 30[\s\S]{0,120}?viewUsedAsModifier := true') (
+            "${tree}: the View button's tap/hold action must be tracked, and a " +
+            "press must be marked as a modifier use as soon as anything else is " +
+            "touched during the hold.")
+    }
+
+    # ...and the page those rows live on has to be one the product DRAWS.
+    #
+    # The rows were tagged for the shell and were still invisible, because they
+    # sit in the shared table's "Steam" category and the shell's Settings window
+    # had no Steam page -- it read the whole [Steam] section and offered none of
+    # it. A row built for a page nothing draws is the quietest way to ship a
+    # setting nobody can reach, and it looks exactly like the feature not
+    # working.
+    $shellText = Get-Content -LiteralPath (
+        Join-Path $projectRoot "SteamShell.ahk") -Raw
+    Assert-True (
+        $shellText -match '(?s)SettingsEditorCategories := \[(?:(?!\]).)*?"Steam"' -and
+        $shellText -match
+            '(?s)category := "Steam"[\s\S]{0,400}?' +
+            'SettingsAddRowsForCategory\(SettingsGui, category, "standalone"') (
+        "SteamShell.ahk defines Steam settings rows but does not draw a Steam " +
+        "category, so they cannot be reached from the Settings window.")
+
+    # ...and it is OFF by default in the shell, ON in the companion.
+    #
+    # A deliberate asymmetry, which is the kind most at risk of being tidied away
+    # by someone normalising the two. It is also stated in four places per
+    # product -- the global, the LoadSettings fallback, the settings-spec row and
+    # the sample INI -- and the spec row is the one that bites silently:
+    # SettingsPopulateFields reads it as the fallback when the key is absent, so
+    # a spec saying true against a LoadSettings saying false shows the user a
+    # window claiming the feature is on while the program runs with it off.
+    $sharedSpecText = Get-Content -LiteralPath (
+        Join-Path $projectRoot "SteamShell-Shared.ahk") -Raw
+    Assert-True (
+        $sharedSpecText -match
+            '(?s)"product", "standalone"[^)]*?"key", "EnableViewButtonActions"' +
+            '[^)]*?"default", false' -and
+        $sharedSpecText -match
+            '(?s)"product", "xfe"[^)]*?"key", "EnableViewButtonActions"' +
+            '[^)]*?"default", true' -and
+        (Get-Content -LiteralPath (Join-Path $projectRoot "SteamShell.ahk") -Raw) -match
+            'ReadBool\("Steam", "EnableViewButtonActions", false\)' -and
+        (Get-Content -LiteralPath (Join-Path $projectRoot "SteamShell-XFE.ahk") -Raw) -match
+            'ReadBool\("Steam", "EnableViewButtonActions", true\)') (
+        "The View button action must default OFF in the shell and ON in the " +
+        "companion, and each tree's settings-spec row must carry the same " +
+        "default its LoadSettings uses.")
+
+    # Restoring the frame cap must re-enable the limiter even when the FPS write
+    # fails.
+    #
+    # The FPS is a property of RTSS's Global profile on disk and cannot be saved
+    # unelevated against a stock Program Files install; the limiter flag goes
+    # through RTSS's shared memory and works either way. Returning on the failed
+    # write skipped the flag, so whether the limiter survived a reboot was
+    # decided by whether RTSS happened to already hold the recorded FPS -- and
+    # when it did not, the cause was usually that an earlier write had been
+    # blocked too, so it stayed broken.
+    #
+    # Expressed as ORDER, because that is what the defect was: the flag must be
+    # applied before any early return that reports the FPS could not be written.
+    # NOT $shared: that name already holds the function-body table this whole
+    # function indexes with .ContainsKey, and reusing it here replaced the table
+    # with a string. Everything above this line had already run, so the failure
+    # surfaced hundreds of lines later as "[System.String] does not contain a
+    # method named 'ContainsKey'" -- nowhere near the assignment that caused it.
+    $sharedRtssText = Get-Content -LiteralPath (
+        Join-Path $projectRoot "SteamShell-Shared.ahk") -Raw
+    Assert-True (
+        $sharedRtssText -match
+            '(?ms)^RestoreRtssFrameLimitTick\([^)]*\)\s*\{[\s\S]*?' +
+            'fpsRestored := SetRtssGlobalFrameLimit\(' +
+            '(?:(?!\n\})[\s\S])*?ApplyRtssGlobalState\("limiter", true\)' +
+            '(?:(?!\n\})[\s\S])*?if !fpsRestored') (
+        "RestoreRtssFrameLimitTick must re-enable the RTSS limiter before it " +
+        "gives up on a failed FPS write; otherwise the limiter silently does " +
+        "not survive a reboot whenever RTSS holds a different frame cap.")
+
     # The controller poll stands down entirely while the learner is open.
     #
     # The wizard reads the pad through WM_INPUT, so it loses nothing -- and every
@@ -1184,15 +1315,46 @@ function Assert-SharedParity {
     #
     # Edge state must be cleared on the way out, or every button held when the
     # wizard opened fires its mapping the moment it closes.
+    #
+    # The block is bounded by what it must NOT contain rather than by how far it
+    # is indented. Bounding it by '\n    }' assumed standalone's four spaces, and
+    # XFE's guard sits a level deeper inside a try, so on XFE the boundary never
+    # bound: the pattern ran on past the guard and found a reset belonging to
+    # some later branch. Deleting XFE's reset outright still satisfied it. What
+    # actually matters is that no 'return' comes between the guard opening and
+    # the reset, which is the same statement without reference to layout.
+    #
+    # Each fragment is anchored to the start of a line so that a comment
+    # MENTIONING one of these statements cannot satisfy or break the rule -- the
+    # guard's own comments name both of them.
+    $learnGuard =
+        '(?ms)^PollController\(\)\s*\{(?:(?!\n\})[\s\S])*?\n[ \t]*if LearnActive \{'
     foreach ($tree in @("SteamShell.ahk", "SteamShell-XFE.ahk")) {
         $treeText = Get-Content -LiteralPath (Join-Path $projectRoot $tree) -Raw
         Assert-True (
-            $treeText -match
-                '(?ms)^PollController\(\)\s*\{[\s\S]*?if LearnActive \{' +
-                '(?:(?!\n    \})[\s\S])*?Reset\w*State\(' +
-                '(?:(?!\n    \})[\s\S])*?return') (
+            $treeText -match ($learnGuard +
+                '(?:(?!\breturn\b)[\s\S])*?\n[ \t]*Reset\w*State\(' +
+                '(?:(?!\n\})[\s\S])*?\n[ \t]*return\b')) (
             "${tree}: the controller poll must stand down while the learner is " +
             "open, and clear its edge state on the way out.")
+
+        # ...and the way it clears that state is by asking for a baseline, NOT by
+        # zeroing the previous-button word. Zeroing it means the next poll
+        # computes pressed as buttons & ~0, so every button still held when the
+        # wizard closes arrives as a press edge and fires its mapping -- which is
+        # the misfire the guard above is there to prevent. Both trees shipped the
+        # zeroing, both under a comment claiming the opposite, so the rule names
+        # the wrong shape as well as the right one.
+        Assert-True (
+            $treeText -match ($learnGuard +
+                '(?:(?!\breturn\b)[\s\S])*?\n[ \t]*ControllerNeedsFreshBaseline := true')) (
+            "${tree}: the learner guard must request a fresh controller " +
+            "baseline, so the first poll after the wizard closes is edge-free.")
+        Assert-True (
+            -not ($treeText -match ($learnGuard +
+                '(?:(?!\breturn\b)[\s\S])*?\n[ \t]*prev\w*Buttons := 0'))) (
+            "${tree}: the learner guard must not zero the previous-button " +
+            "word -- that turns every button held at close into a press edge.")
     }
 
     # A learning session stands the automatic mouse down, in both products.
@@ -1317,16 +1479,22 @@ function Assert-SharedParity {
     }
 
     $sharedSeamAllowed = @(
-        "LogLine", "SharedPersistSettings",
+        "SharedPersistSettings",
+        # Each tree answers over its own foreground cache -- the companion
+        # through CurrentForegroundExe, the shell through LastRealFgHwnd --
+        # and ViewButtonReleased has to ask the question from the shared
+        # file. Widened deliberately when that function stopped being the
+        # companion's alone.
+        "SteamIsInFront",
         "HideQuickMenu", "ShowQuickMenu",
         "ProductLaunchMinimized", "ProductQuickMenuBlockedReason",
         "MouseWatchDisabled", "MouseWatchHoldsCursorVisible",
-        "PersistRtssCustomFrameCap", "ProductBestGameExe",
+        "ProductBestGameExe",
         "ProductCenterGui", "ProductDataDir", "ProductElevatedHelperAlive",
         "ProductHealthResults", "ProductIdentity",
         "OpenOSK", "OpenTouchKeyboard",
         "ProductApplyQuickMenuSetting", "ProductControllerBindingAction",
-        "ProductControllerLearnConsumesReport", "ProductSetDialogActive",
+        "ProductSetDialogActive",
         # Only SettingsRegisterBuiltField is CALLED from the shared file. The
         # browse, record and mark-dirty seams are passed as callbacks, and the
         # reachability check covers those by requiring a bare reference to
@@ -1335,13 +1503,12 @@ function Assert-SharedParity {
         "SettingsProductAddSectionRow", "SettingsProductTrackControl",
         "SettingsProductWireDependency",
         "SettingsRegisterBuiltField",
-        "RevealWindow",
         "ProductSettingBool",
         "ProductSettingsScrollBar", "ProductSettingsViewportHeight",
         "ProductTrayBaseTip", "ProductTrayItems", "ProductVersionText",
         "QuickMenuActivateSelected", "QuickMenuAdjustSelected",
         "QuickMenuBuildGui", "QuickMenuCloseSelected",
-        "QuickMenuMouseChoose", "QuickMenuNormalizeSelection",
+        "QuickMenuMouseChoose",
         "QuickMenuRefresh", "QuickMenuValue")
     foreach ($name in $sharedSeamAllowed) {
         foreach ($pair in @(

@@ -23,6 +23,27 @@
 # All seven are shared now, which is why this file is empty. An entry here means
 # two names for one routine were kept ON PURPOSE, and says why.
 #
+# THE EIGHTH, AND WHAT IT SAYS ABOUT THIS CHECK
+# ---------------------------------------------
+# An audit pass found one more, months after the seven:
+#
+#   InitDefaultControllerMappings / DefaultControllerMappings
+#                                               the same 22 controller bindings
+#                                               and 3 display overrides, one
+#                                               written as subscript assignments
+#                                               and one as a Map() literal
+#
+# It is shared now, but it was not found BY this check, and it could not have
+# been. The check compares call sequences, and neither body calls anything worth
+# comparing -- one is 22 assignments, the other is a single Map(). A pure-DATA
+# function has no call sequence, so it is invisible here for the same reason it
+# is invisible to the name-keyed gate: nothing about it is a call, and the names
+# do not match.
+#
+# The gap is recorded rather than closed. Comparing data tables structurally is a
+# different check from comparing call sequences, and writing a weak version of it
+# would be worse than knowing this one does not cover them.
+#
 # Format
 # ------
 #   xfeName=standaloneName: the reason they must stay separate

@@ -835,3 +835,108 @@ mouse mode divergence it found was not between the two trees at all, it was
 between `SteamShell.ahk` and `SteamShell-Helper.ahk` — two programs that already
 share `SteamShell-Common.ahk`. Sharing code does not by itself stop two
 processes answering the same question differently. Only having one answer does.
+
+## The settings surface, after the page audit
+
+The pages now line up where they can, and the places they do not are the places
+the products genuinely differ.
+
+| page | shell | companion |
+|---|---|---|
+| General | 8 rows | 6 |
+| Startup & Splash | 12 | — |
+| Startup Programs | 4 | 5 |
+| Controller & Cursor | 13 | 13 |
+| Steam | 9 | 8 |
+| Focus & Windows | 7 | — |
+| RTSS & Performance | 14 | 14 |
+| Launcher Cleanup | 10 | 6 |
+| Assist | — | 5 |
+| Advanced & Logging | 11 | 2 |
+
+Three pages are the shell's alone — splash, focus and window management — because
+Xbox FSE owns presentation and the companion has no equivalent. Assist is the
+companion's alone. Everything else exists in both.
+
+**`Advanced` is `Advanced & Logging` in both.** The `tableKey` argument on
+`SettingsAddRowsForCategory` existed for that single name mismatch and is now
+unused by every caller.
+
+**The shell gained a Steam page.** It had always read the whole `[Steam]` section
+and offered none of it. This is what made the View-button rows ship invisible:
+they were tagged for the shell and built correctly, onto a page nothing drew. The
+category list and the constructed panels are now asserted to be the same set, in
+both directions.
+
+**Both products have Launcher Cleanup.** The keys overlap but the rows are not
+shared: the two clamp differently — `CooldownSec` is 30..7200 in the companion and
+0..86400 in the shell, `GracefulCloseMs` 500..30000 against 0..60000 — and a
+shared row would offer one product values its own `LoadSettings` rounds away.
+
+**A settings row is only real if its page is drawn and its section is read.** Two
+new checks came out of this audit: no product may build two controls for the same
+section and key (the shell briefly had three, each silently overwriting the other
+on save), and every row's category must be one the product actually draws.
+
+## What the fingerprint gate cannot see
+
+The August audit's premise was that a call-sequence comparison finds duplication
+that text comparison misses. It does. This pass found two pairs it cannot.
+
+- **Pure-data functions have no call sequence.** `InitDefaultControllerMappings`
+  and `DefaultControllerMappings` produced the same 22 bindings and three display
+  overrides under two names — 22 subscript assignments against one `Map()`
+  literal. Neither the name-keyed gate nor the cross-name one could see them.
+- **A `DllCall` target is part of the sequence.** `RevealWindow` was already one
+  function in two files, differing only in whether the call named its DLL.
+  `"User32\ShowWindow"` is not the string `"ShowWindow"`, so an identical pair
+  scored 0.00 and was never flagged.
+
+Both are recorded in `CROSS_NAME_DUPLICATES.txt`. The gap is written down rather
+than closed: comparing data tables structurally is a different check, and a weak
+version would be worse than knowing this one does not cover them.
+
+## A recorded reason is not evidence
+
+Two entries in `DIVERGENT_FUNCTIONS.txt` were re-read against the code rather than
+taken at their word, and were false — not stale, false.
+
+- **`ProductControllerLearnConsumesReport`** was kept per-tree because "Shared
+  cannot read a global it does not declare into both trees". `SteamShell-Shared.ahk`
+  declares `LearnActive` in seven other functions and the entire learner wizard
+  lives there. The two bodies were byte-identical.
+- **`MouseWatchHoldsCursorVisible`** said the shell holds the cursor visible for
+  nothing. It has a pointer-driven Settings editor, and the cursor was vanishing
+  mid-edit — blinking, with a controller connected, as the poll and the watch
+  fought each other.
+
+The same re-reading found `SettingsProductWireDependency` recorded as a design
+choice — "the companion has no dependency pass, so its body is deliberately
+empty" — when two of the eight rows the shared spec marks with `dependency` are
+`product: both` and reached that empty body. That was an unimplemented feature
+described as a settled decision.
+
+Worth noting how the first fix hid itself: correcting
+`MouseWatchHoldsCursorVisible` changed the pair from identical-shaped to
+genuinely different, which un-flagged it, which made its manifest entry stale and
+required deleting it. **Fixing the bug removed the only written record that the
+pair differs at all.** That is a property of a gate that only demands reasons for
+what it flags, not a mistake — but it is the mechanism by which this file drifts
+away from the code.
+
+## What is left between the two controller backends
+
+`ControllerReadState` is the last substantial divergence, and it is now one thing.
+Both trees try RawInput first, both decline to fall back when RawInput was asked
+for by name, and both finish at the shared `XInputResolveController`. The shell's
+body is a strict subset of the companion's because the companion also tries a
+GameInput backend in between and records which one answered.
+
+Sharing it needs `InitGameInput`, `GameInputReadState`, `ShutdownGameInput` and
+`SetActiveBackend` in both trees — a new input backend in the product that runs as
+the shell, which wants hardware behind it rather than a review.
+
+The part that mattered is already shared. The shell read only the configured
+XInput slot, so a pad that Steam Input moved mid-session stopped answering, on the
+product where the recovery on offer was to change Controller Index in Settings
+using the controller that had just stopped working.
