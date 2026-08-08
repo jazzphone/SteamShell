@@ -1158,28 +1158,9 @@ LoadSettings() {
 }
 
 LoadControllerMappings() {
-    global IniPath, ControllerMap, ControllerMapDisplay
-    InitDefaultControllerMappings()
-    keys := [
-        "A.Short", "A.Long", "B.Short", "B.Long", "X.Short", "X.Long",
-        "Y.Short", "Y.Long", "LB.Short", "LB.Long", "RB.Short", "RB.Long",
-        "LT.Short", "LT.Long", "RT.Short", "RT.Long", "Start.Short",
-        "Start.Long", "L3.Short", "L3.Long", "R3.Short", "R3.Long"
-    ]
-    for key in keys {
-        value := ""
-        try value := IniRead(IniPath, "ControllerMap", key, "")
-        if (value = "")
-            continue
-        if (SubStr(value, 1, 5) != "Send:" && SubStr(value, 1, 8) != "Builtin:")
-            value := "Send:" value
-        ControllerMap[key] := value
-        if (SubStr(value, 1, 5) = "Send:") {
-            display := ""
-            try display := IniRead(IniPath, "ControllerMap", key ".Display", "")
-            ControllerMapDisplay[key] := display != "" ? display : SendToPretty(SubStr(value, 6))
-        }
-    }
+    ; Thin wrapper over the shared reader. Nothing to migrate: this product never
+    ; shipped the Start.Short/Start.Long pair the shell rewrites.
+    LoadControllerMappingsFromIni()
 }
 
 ApplyRuntimeTimers() {
@@ -1323,18 +1304,6 @@ SetCompanionDisabled(disabled) {
 ToggleCompanionDisabled(*) {
     global CompanionDisabled
     SetCompanionDisabled(!CompanionDisabled)
-}
-
-TrayOpenQuickMenu(*) {
-    global CompanionDisabled, QuickMenuVisible, QuickMenuGui
-    if CompanionDisabled
-        return
-    if QuickMenuVisible {
-        try QuickMenuGui.Show()
-        try ForceForegroundWindow(QuickMenuGui.Hwnd)
-        return
-    }
-    ShowQuickMenu()
 }
 
 TrayOpenSettings(*) {
@@ -6702,84 +6671,63 @@ ExportDiagnosticBundle(*) {
     stamp := FormatTime(A_Now, "yyyyMMdd-HHmmss")
     tempDir := A_Temp "\SteamShell-XFE-Diagnostics-" stamp
     zipPath := A_Desktop "\SteamShell-XFE-Diagnostics-" stamp ".zip"
-    try {
-        DirCreate(tempDir)
-
         foreground := "unknown"
-        try foreground := WinGetProcessName("A")
-        caps := Buffer(20, 0)
-        capsText := "unavailable"
-        if (XInputGetCapabilities(0, &caps) = 0) {
-            capsText := "type=" NumGet(caps, 0, "UChar")
-                . " subtype=" NumGet(caps, 1, "UChar")
-                . " buttonmask=0x" Format("{:04X}", NumGet(caps, 4, "UShort"))
-        }
-        displayScale := GetPrimaryDisplayScale()
-        displayScaleText := IsObject(displayScale)
-            ? displayScale["percent"] "%"
-            : "unavailable"
-        hdr := GetPrimaryHdrState()
-        hdrText := !IsObject(hdr)
-            ? "unavailable"
-            : (!hdr["supported"] ? "unsupported" : (hdr["enabled"] ? "on" : "off"))
-        info := "AppVersion=" AppVersion "`r`n"
-            . "Generated=" FormatTime(, "yyyy-MM-dd HH:mm:ss") "`r`n"
-            . "OSVersion=" A_OSVersion "`r`n"
-            . "Is64BitOS=" (A_Is64bitOS ? "true" : "false") "`r`n"
-            . "Compiled=" (A_IsCompiled ? "true" : "false") "`r`n"
-            . "Elevated=" (A_IsAdmin ? "true" : "false") "`r`n"
-            . "ScreenDPI=" A_ScreenDPI " (" Round(A_ScreenDPI / 96.0 * 100) "%)`r`n"
-            . "PrimaryDisplayScale=" displayScaleText "`r`n"
-            . "PrimaryDisplayHDR=" hdrText "`r`n"
-            . "Screen=" A_ScreenWidth "x" A_ScreenHeight "`r`n"
-            . "ScriptPath=" A_ScriptFullPath "`r`n"
-            . "SettingsPath=" IniPath "`r`n"
-            . "BackendSetting=" ControllerBackend "`r`n"
-            . "BackendActive=" ActiveInputBackend "`r`n"
-            . "XInputSlot=" ActiveControllerIndex "`r`n"
-            . "XInputSlot0Caps=" capsText "`r`n"
-            . "RawInputRegistered=" (RawInputProbeActive ? "true" : "false") "`r`n"
-            . "RawInputDevice=0x" Format("{:X}", RawInputDevice) "`r`n"
-            . "RawInputReceiving=" (RawInputLastReportTick ? "true" : "false") "`r`n"
-            . "GameInputReady=" (GameInputReady ? "true" : "false") "`r`n"
-            . "GameInputFailed=" (GameInputFailed ? "true" : "false") "`r`n"
-            . "Foreground=" foreground "`r`n"
-            . "AnyFSERunning=" (ProcessExist("AnyFSE.exe") ? "true" : "false") "`r`n"
-            . "SteamRunning=" (ProcessExist("steam.exe") ? "true" : "false") "`r`n"
-        FileAppend(SanitizeDiagnosticText(info), tempDir "\Environment.txt", "UTF-8")
-
-        if FileExist(IniPath)
-            FileAppend(SanitizeDiagnosticText(FileRead(IniPath)),
-                tempDir "\SteamShell-XFE-settings.ini", "UTF-8")
-        if FileExist(LogPath)
-            FileAppend(SanitizeDiagnosticText(GetLastLines(FileRead(LogPath), 2000)),
-                tempDir "\SteamShell-XFE-log-tail.txt", "UTF-8")
-
-        ; PowerShell wants the paths in single quotes, with any literal single
-        ; quote doubled. Building that quote from Chr(39) keeps AHK's own string
-        ; escaping out of it: a run of three quote characters is read by AHK as
-        ; an escaped quote, which silently moves the string boundaries.
-        psQuote := Chr(39)
-        psSource := StrReplace(tempDir "\*", psQuote, psQuote psQuote)
-        psTarget := StrReplace(zipPath, psQuote, psQuote psQuote)
-        psCommand := "Compress-Archive -Path " psQuote psSource psQuote
-            . " -DestinationPath " psQuote psTarget psQuote " -Force"
-        exitCode := RunWait('powershell -NoProfile -NonInteractive -Command "'
-            . psCommand '"', , "Hide")
-        try DirDelete(tempDir, true)
-        if (exitCode = 0 && FileExist(zipPath)) {
-            ShowNotification("Diagnostics saved to the desktop")
-            LogLine("Diagnostic bundle written to " zipPath ".")
-            try Run('explorer.exe /select,"' zipPath '"')
-        } else {
-            ShowNotification("Could not create the diagnostic ZIP", "Warning")
-            LogLine("Diagnostic bundle failed (exit " exitCode ").", "Warning")
-        }
-    } catch as err {
-        try DirDelete(tempDir, true)
-        ShowNotification("Diagnostics export failed: " err.Message, "Warning")
-        LogLine("Diagnostic bundle error: " err.Message, "Warning")
+    try foreground := WinGetProcessName("A")
+    caps := Buffer(20, 0)
+    capsText := "unavailable"
+    if (XInputGetCapabilities(0, &caps) = 0) {
+        capsText := "type=" NumGet(caps, 0, "UChar")
+            . " subtype=" NumGet(caps, 1, "UChar")
+            . " buttonmask=0x" Format("{:04X}", NumGet(caps, 4, "UShort"))
     }
+    displayScale := GetPrimaryDisplayScale()
+    displayScaleText := IsObject(displayScale)
+        ? displayScale["percent"] "%"
+        : "unavailable"
+    hdr := GetPrimaryHdrState()
+    hdrText := !IsObject(hdr)
+        ? "unavailable"
+        : (!hdr["supported"] ? "unsupported" : (hdr["enabled"] ? "on" : "off"))
+    info := "AppVersion=" AppVersion "`r`n"
+        . "Generated=" FormatTime(, "yyyy-MM-dd HH:mm:ss") "`r`n"
+        . "OSVersion=" A_OSVersion "`r`n"
+        . "Is64BitOS=" (A_Is64bitOS ? "true" : "false") "`r`n"
+        . "Compiled=" (A_IsCompiled ? "true" : "false") "`r`n"
+        . "Elevated=" (A_IsAdmin ? "true" : "false") "`r`n"
+        . "ScreenDPI=" A_ScreenDPI " (" Round(A_ScreenDPI / 96.0 * 100) "%)`r`n"
+        . "PrimaryDisplayScale=" displayScaleText "`r`n"
+        . "PrimaryDisplayHDR=" hdrText "`r`n"
+        . "Screen=" A_ScreenWidth "x" A_ScreenHeight "`r`n"
+        . "ScriptPath=" A_ScriptFullPath "`r`n"
+        . "SettingsPath=" IniPath "`r`n"
+        . "BackendSetting=" ControllerBackend "`r`n"
+        . "BackendActive=" ActiveInputBackend "`r`n"
+        . "XInputSlot=" ActiveControllerIndex "`r`n"
+        . "XInputSlot0Caps=" capsText "`r`n"
+        . "RawInputRegistered=" (RawInputProbeActive ? "true" : "false") "`r`n"
+        . "RawInputDevice=0x" Format("{:X}", RawInputDevice) "`r`n"
+        . "RawInputReceiving=" (RawInputLastReportTick ? "true" : "false") "`r`n"
+        . "GameInputReady=" (GameInputReady ? "true" : "false") "`r`n"
+        . "GameInputFailed=" (GameInputFailed ? "true" : "false") "`r`n"
+        . "Foreground=" foreground "`r`n"
+        . "AnyFSERunning=" (ProcessExist("AnyFSE.exe") ? "true" : "false") "`r`n"
+        . "SteamRunning=" (ProcessExist("steam.exe") ? "true" : "false") "`r`n"
+
+    files := Map()
+    files["Environment.txt"] := info
+    if FileExist(IniPath)
+        files["SteamShell-XFE-sanitized.ini"] := FileRead(IniPath)
+    if FileExist(LogPath)
+        files["SteamShell-XFE-log-tail.txt"] := GetLastLines(FileRead(LogPath), 2000)
+
+    failureReason := ""
+    zipPath := ExportDiagnosticArchive("SteamShell-XFE", files, &failureReason)
+    if (zipPath = "") {
+        ShowNotification("Diagnostics export failed: " failureReason, "Warning")
+        return
+    }
+    ShowNotification("Diagnostics saved to the desktop")
+    try Run('explorer.exe /select,"' zipPath '"')
 }
 
 ; Seam for SteamShell-Shared.ahk: this companion's own checks. The window, the

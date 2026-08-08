@@ -3860,23 +3860,6 @@ InitDpiAwareness() {
 ; LOG-ONLY ACTION MESSAGES + TRAY ACTIONS
 ; ==============================================================================
 
-TrayOpenQuickMenu(*) {
-    global QuickMenuVisible, QuickMenuGui
-    if QuickMenuVisible {
-        try QuickMenuGui.Show()
-        ; ForceForegroundWindow, like every other place this tree raises the Quick
-        ; Menu. This was the one WinActivate left, and it is the weaker primitive:
-        ; WinActivate loses to the foreground lock a fullscreen game holds, which
-        ; is the exact situation someone reaching for the tray icon is in. The
-        ; companion already used the hardened call here; the shell did not, and
-        ; nothing measured the pair because a nine-line tray handler scores far
-        ; below the fingerprint gate's threshold.
-        try ForceForegroundWindow(QuickMenuGui.Hwnd)
-        return
-    }
-    ShowQuickMenu()
-}
-
 TrayOpenSettings(*) {
     ShowSettingsEditor()
 }
@@ -4788,46 +4771,13 @@ OpenOSK() {
 ; ==============================================================================
 
 LoadControllerMappings() {
-    global IniPath, ControllerMap, ControllerMapDisplay
-    if !FileExist(IniPath) {
-    InitDefaultControllerMappings()
-    return
-    }
-
-    InitDefaultControllerMappings() ; start from defaults and override
-
-    ; Buttons we support in the editor
-    keys := [
-    "A.Short","A.Long","B.Short","B.Long","X.Short","X.Long","Y.Short","Y.Long",
-    "LB.Short","LB.Long","RB.Short","RB.Long","LT.Short","LT.Long","RT.Short","RT.Long",
-    "Start.Short","Start.Long",
-    "L3.Short","L3.Long","R3.Short","R3.Long"
-    ]
-
-    for k in keys {
-    v := ""
-    try v := IniRead(IniPath, "ControllerMap", k, "")
-    if (v = "")
-    continue
-
-    if (SubStr(v, 1, 5) = "Send:") {
-    send := SubStr(v, 6)
-    ControllerMap[k] := v
-    disp := ""
-    try disp := IniRead(IniPath, "ControllerMap", k ".Display", "")
-    if (disp = "")
-    disp := SendToPretty(send)
-    ControllerMapDisplay[k] := disp
-    } else if (SubStr(v, 1, 8) = "Builtin:") {
-    ControllerMap[k] := v
-    } else {
-    ; Back-compat: if user stored raw send string, treat as Send:
-    ControllerMap[k] := "Send:" v
-    ControllerMapDisplay[k] := SendToPretty(v)
-    }
-    }
-
-    ; Fallback migration for a settings file that could not be schema-upgraded.
+    global ControllerMap
+    LoadControllerMappingsFromIni()
+    ; Standalone only, and one-time. Older settings files bound Start to the Quick
+    ; Menu and Control Panel; schema 4 moved them to the Windows Start menu and
+    ; File Explorer. Rewritten in place so the change survives, and only when BOTH
+    ; still hold the old pair -- a user who has since rebound either one is left
+    ; alone. The companion never shipped the old defaults and must not do this.
     if (ControllerMap["Start.Short"] = "Builtin:QuickMenu"
         && ControllerMap["Start.Long"] = "Builtin:ControlPanel") {
         ControllerMap["Start.Short"] := "Builtin:StartMenu"
@@ -5814,6 +5764,21 @@ QuickMenuEnsureContentFits() {
         MoveWindowPhysical(QuickMenuGui.Hwnd, x, y, winWidth, finalHeight)
     else
         MoveWindowPhysical(QuickMenuGui.Hwnd, x, y)
+    ; Say so when the window had to grow, which the companion has always done and
+    ; this tree did not. A Quick Menu that silently resizes itself is the one
+    ; surface where a clipped row has no other diagnostic: on a shell replacement
+    ; it may be the only interface on screen, and "the bottom row looks wrong" is
+    ; not something a log can otherwise answer.
+    ;
+    ; Only when it GREW. The unconditional re-centre below a grow of zero is not
+    ; worth a line -- it is how the menu follows the foreground window's monitor,
+    ; and it happens on every refresh.
+    if (grow > 0)
+        LogLine("Quick Menu: content needed " grow "px more than the window had "
+            . "(client " clientHeight ", status ends " (statusY + statusHeight)
+            . "); grew to " winWidth "x" finalHeight " and re-centred."
+            . (finalHeight < winHeight + grow ? " Clamped to the work area." : ""),
+            "Warning")
 }
 
 GetTargetMonitorWorkArea(targetHwnd, &left, &top, &right, &bottom) {
@@ -12259,16 +12224,11 @@ ExportDiagnosticBundle(*) {
     stamp := FormatTime(A_Now, "yyyyMMdd-HHmmss")
     tempDir := A_Temp "\SteamShell-Diagnostics-" stamp
     zipPath := A_Desktop "\SteamShell-Diagnostics-" stamp ".zip"
-    try {
-        DirCreate(tempDir)
-        results := ProductHealthResults()
-        HealthCheckResults := results
-        FileAppend(
-            SanitizeDiagnosticText(FormatHealthReport(results)),
-            tempDir "\HealthCheck.txt", "UTF-8")
+    results := ProductHealthResults()
+    HealthCheckResults := results
 
-        currentShell := ""
-        try currentShell := RegRead(ShellRegKey, "Shell")
+    currentShell := ""
+    try currentShell := RegRead(ShellRegKey, "Shell")
         ; Display and input state, which this bundle did not carry and the
         ; companion's always has.
         ;
@@ -12306,58 +12266,37 @@ ExportDiagnosticBundle(*) {
             . "RawInputLastReport=" rawInputAge "`r`n"
             . "ScriptPath=" A_ScriptFullPath "`r`n"
             . "CurrentShell=" currentShell "`r`n"
-        FileAppend(
-            SanitizeDiagnosticText(systemInfo),
-            tempDir "\SystemInfo.txt", "UTF-8")
 
-        if FileExist(SettingsPath)
-            FileAppend(
-                SanitizeDiagnosticText(FileRead(SettingsPath)),
-                tempDir "\SteamShellSettings-sanitized.ini", "UTF-8")
-        if FileExist(LogPath)
-            FileAppend(
-                SanitizeDiagnosticText(GetLastLines(FileRead(LogPath), 2000)),
-                tempDir "\SteamShell-log-tail.txt", "UTF-8")
+    files := Map()
+    files["HealthCheck.txt"] := FormatHealthReport(results)
+    files["SystemInfo.txt"] := systemInfo
+    if FileExist(SettingsPath)
+        files["SteamShellSettings-sanitized.ini"] := FileRead(SettingsPath)
+    if FileExist(LogPath)
+        files["SteamShell-log-tail.txt"] := GetLastLines(FileRead(LogPath), 2000)
 
-        psPath := StrReplace(tempDir "\*", "'", "''")
-        psZip := StrReplace(zipPath, "'", "''")
-        psCommand := "Compress-Archive -Path '" psPath
-            . "' -DestinationPath '" psZip "' -Force"
-        exitCode := RunWait(
-            'powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "'
-            . psCommand . '"', , "Hide")
-        if (exitCode != 0 || !FileExist(zipPath))
-            throw Error("PowerShell could not create the ZIP archive.")
-        try DirDelete(tempDir, true)
-        if IsSet(HealthCheckGui)
-            try HealthCheckGui["HealthSummary"].Text := "Diagnostic bundle exported to " zipPath
-        if IsObject(SettingsEditorStatusCtrl)
-            try SettingsEditorStatusCtrl.Text := "Diagnostic bundle exported to " zipPath
-        explorerPid := 0
-        LaunchInteractiveApp(
-            A_WinDir "\explorer.exe",
-            '/select,' QuoteWindowsCommandLineArg(zipPath),
-            A_WinDir, "Normal", &explorerPid, "Diagnostic bundle location")
-    } catch as err {
-        ; The staging directory is removed on the way out of the FAILURE path as
-        ; well as the success one. Only the success path deleted it, and the
-        ; throw above it -- "PowerShell could not create the ZIP archive" -- is
-        ; the most likely way out of this function on a machine that has a
-        ; problem worth bundling. What was left in %TEMP% was the sanitized
-        ; settings file and two thousand lines of log, once per attempt, and a
-        ; user who tries three times to export diagnostics leaves three copies
-        ; behind and is told each time that nothing was exported. The companion
-        ; has always cleaned up here; this is the same two lines.
-        try DirDelete(tempDir, true)
+    failureReason := ""
+    zipPath := ExportDiagnosticArchive("SteamShell", files, &failureReason)
+    if (zipPath = "") {
         if IsSet(HealthCheckGui) && IsGuiVisible(HealthCheckGui) {
             try MsgBox(
-                "The diagnostic bundle could not be exported.`n`n" err.Message,
+                "The diagnostic bundle could not be exported.`n`n" failureReason,
                 "SteamShell Health Check", "Owner" HealthCheckGui.Hwnd " Iconx")
         } else {
             SettingsEditorMsgBox(
-                "The diagnostic bundle could not be exported.`n`n" err.Message, "Iconx")
+                "The diagnostic bundle could not be exported.`n`n" failureReason, "Iconx")
         }
+        return
     }
+    if IsSet(HealthCheckGui)
+        try HealthCheckGui["HealthSummary"].Text := "Diagnostic bundle exported to " zipPath
+    if IsObject(SettingsEditorStatusCtrl)
+        try SettingsEditorStatusCtrl.Text := "Diagnostic bundle exported to " zipPath
+    explorerPid := 0
+    LaunchInteractiveApp(
+        A_WinDir "\explorer.exe",
+        '/select,' QuoteWindowsCommandLineArg(zipPath),
+        A_WinDir, "Normal", &explorerPid, "Diagnostic bundle location")
 }
 
 ; The window a dialog must sit above, or 0 when none is showing.

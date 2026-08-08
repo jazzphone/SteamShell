@@ -1805,6 +1805,62 @@ VerifyElevatedHelperProcess(pid, &failureReason) {
 ; Removes the paths that identify a machine before text reaches a log or a
 ; support bundle. The directory token names the product so two bundles from the
 ; same machine stay tellable apart.
+
+; Stages a diagnostic bundle and zips it, for both products.
+;
+; The ENVELOPE was written twice: timestamped staging directory under %TEMP%,
+; sanitised text files, Compress-Archive through PowerShell, delete the staging
+; directory on the way out of BOTH paths. What legitimately differs is the file
+; NAMES and their contents, so those arrive as a Map and the caller reports
+; success its own way -- the shell into the Health Check and Settings status
+; lines, the companion through a notification.
+;
+; Duplicating the envelope is how the two bundles drifted in the first place. The
+; companion collected display scale, HDR, the active input backend, the XInput
+; slot and the RawInput registration state for months while the shell collected
+; none of it -- on the product where an unreadable controller means a machine the
+; user cannot drive. Sharing the envelope does not by itself keep the CONTENTS in
+; step, but it removes the reason they were ever edited separately.
+;
+; SANITISATION HAPPENS HERE, not in the callers. Every file written goes through
+; SanitizeDiagnosticText on the way in, so a new file added to the map cannot
+; forget it and put a user's paths into an archive they are about to send someone.
+;
+; Returns the zip path, or "" with the reason in failureReason.
+ExportDiagnosticArchive(namePrefix, files, &failureReason) {
+    failureReason := ""
+    stamp := FormatTime(A_Now, "yyyyMMdd-HHmmss")
+    tempDir := A_Temp "\\" namePrefix "-Diagnostics-" stamp
+    zipPath := A_Desktop "\\" namePrefix "-Diagnostics-" stamp ".zip"
+    try {
+        DirCreate(tempDir)
+        for name, text in files {
+            if (text = "")
+                continue
+            FileAppend(SanitizeDiagnosticText(text), tempDir "\\" name, "UTF-8")
+        }
+        psPath := StrReplace(tempDir "\\*", "'", "''")
+        psZip := StrReplace(zipPath, "'", "''")
+        psCommand := "Compress-Archive -Path '" psPath
+            . "' -DestinationPath '" psZip . "' -Force"
+        exitCode := RunWait('powershell -NoProfile -NonInteractive -Command "'
+            . psCommand . '"', , "Hide")
+        if (exitCode != 0 || !FileExist(zipPath))
+            throw Error("PowerShell could not create the ZIP archive.")
+        try DirDelete(tempDir, true)
+        return zipPath
+    } catch as err {
+        ; The staging directory goes on the FAILURE path too. Only the success
+        ; path used to delete it, and the throw above -- the most likely way out
+        ; of here on a machine with a problem worth bundling -- left the
+        ; sanitised settings and two thousand lines of log in %TEMP%, once per
+        ; attempt, while telling the user nothing had been exported.
+        try DirDelete(tempDir, true)
+        failureReason := err.Message
+        return ""
+    }
+}
+
 SanitizeDiagnosticText(text) {
     userProfile := EnvGet("USERPROFILE")
     localAppData := EnvGet("LOCALAPPDATA")
@@ -3721,6 +3777,49 @@ GetLastLines(text, maxLines, newestFirst := false) {
 ; call-keyed one are blind to.
 ;
 ; The literal form survives because a table is what this is.
+
+; Reads the saved controller mappings over the defaults.
+;
+; The LOOP is shared; the migration is not. Both trees seeded the defaults and
+; then walked the same twenty-two Button.Short/Button.Long keys, normalising a
+; bare value to "Send:" and filling ControllerMapDisplay from the .Display key or
+; SendToPretty. Two copies of one reader, differing in whitespace and local names.
+;
+; The companion's version is the one kept, because it is the more correct of the
+; two: for a BARE value the shell never consulted .Display and always derived the
+; label, so a display name stored against an unprefixed mapping was silently
+; ignored. Sharing it fixes that in the shell.
+;
+; Each tree keeps a thin LoadControllerMappings wrapper -- the shell's carries a
+; one-time Start.Short/Start.Long migration that the companion never shipped and
+; must not perform. That is the same shape as the ReadBool and ReadInt wrappers
+; recorded in DIVERGENT_FUNCTIONS.txt: the name stays in both, the behaviour
+; cannot drift, because there is only one reader.
+LoadControllerMappingsFromIni() {
+    global IniPath, ControllerMap, ControllerMapDisplay
+    InitDefaultControllerMappings()
+    keys := [
+        "A.Short", "A.Long", "B.Short", "B.Long", "X.Short", "X.Long",
+        "Y.Short", "Y.Long", "LB.Short", "LB.Long", "RB.Short", "RB.Long",
+        "LT.Short", "LT.Long", "RT.Short", "RT.Long", "Start.Short",
+        "Start.Long", "L3.Short", "L3.Long", "R3.Short", "R3.Long"
+    ]
+    for key in keys {
+        value := ""
+        try value := IniRead(IniPath, "ControllerMap", key, "")
+        if (value = "")
+            continue
+        if (SubStr(value, 1, 5) != "Send:" && SubStr(value, 1, 8) != "Builtin:")
+            value := "Send:" value
+        ControllerMap[key] := value
+        if (SubStr(value, 1, 5) = "Send:") {
+            display := ""
+            try display := IniRead(IniPath, "ControllerMap", key ".Display", "")
+            ControllerMapDisplay[key] := display != "" ? display : SendToPretty(SubStr(value, 6))
+        }
+    }
+}
+
 InitDefaultControllerMappings() {
     global ControllerMap, ControllerMapDisplay
     ControllerMap := Map(
@@ -3761,6 +3860,33 @@ GetBindingValue(key) {
 ; desktop is being restored or when the menu is switched off, and the companion
 ; has neither state. That is a question to ask the product, not a reason to
 ; write the routine twice.
+
+; Open the Quick Menu from the notification area, or raise it if it is already up.
+;
+; Was defined in both trees and scored 1.00 -- IDENTICAL call sequences -- once the
+; drift it had been hiding was removed. The shell raised the menu with WinActivate
+; while the companion used ForceForegroundWindow, which is the hardened primitive
+; this project keeps in SteamShell-Common.ahk precisely because WinActivate loses
+; to the foreground lock a fullscreen game holds. That is the situation somebody
+; reaching for the tray icon is in, so the shell had the wrong one in the one place
+; it mattered.
+;
+; CompanionDisabled is checked here rather than left to a per-tree wrapper. The
+; shell declares it false and never assigns it -- the global exists there only
+; because shared code references it and the seam rule requires it in both trees --
+; so the guard is a no-op for the shell and the whole function becomes one copy.
+TrayOpenQuickMenu(*) {
+    global CompanionDisabled, QuickMenuVisible, QuickMenuGui
+    if CompanionDisabled
+        return
+    if QuickMenuVisible {
+        try QuickMenuGui.Show()
+        try ForceForegroundWindow(QuickMenuGui.Hwnd)
+        return
+    }
+    ShowQuickMenu()
+}
+
 ToggleQuickMenu(*) {
     global QuickMenuVisible
     reason := ProductQuickMenuBlockedReason()

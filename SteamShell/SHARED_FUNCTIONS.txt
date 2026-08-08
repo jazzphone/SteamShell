@@ -181,6 +181,7 @@ EnsureElevatedRtssEvent
 EnsureGdiPlus
 EnsureRtssRunning
 ExecuteControllerBinding
+ExportDiagnosticArchive
 FormatHealthReport
 FrequenciesForResolution
 GameShapeFactsForWindow
@@ -211,6 +212,7 @@ IsCloaked
 IsRtssFrameCapPreset
 IsSteamProcess
 IsUsableProfileExe
+LoadControllerMappingsFromIni
 LoadControllerProfile
 LogGameCandidateTable
 LogLine
@@ -349,6 +351,7 @@ ToggleQuickMenuHdrState
 ToggleQuickMenu
 ToggleRtssFrameLimiter
 ToggleRtssOverlay
+TrayOpenQuickMenu
 TryInvokeTouchKeyboard
 VerifyElevatedHelperProcess
 ViewButtonReleased
