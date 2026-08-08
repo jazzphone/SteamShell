@@ -834,6 +834,185 @@ function Assert-QuickMenuRows {
     }
 }
 
+# Every Settings row reaches something that reads it.
+#
+# The Quick Menu half of this question has been checked since the rows moved
+# into one table; the Settings half never was, and Settings is the larger
+# surface. A row is four independent facts -- it is drawn, it is saved, it is
+# read back, and something acts on the value -- and only the first two fail
+# visibly. A row whose key nothing reads renders, accepts input, writes the INI,
+# and changes nothing, in a window whose whole promise is that it changes things.
+#
+# TWO STEPS, because they fail differently:
+#
+#   1. The key is READ, by one of the section/key readers, somewhere in the set
+#      the product actually compiles -- its own tree plus Shared plus Common.
+#      This catches a row wired to a key nobody consumes, including the common
+#      case of a key renamed on one side of the read.
+#
+#   2. The variable the read lands in is REFERENCED somewhere other than its
+#      `global` declaration and its own assignment. A read into a global nothing
+#      ever looks at is the same dead control with an extra step.
+#
+# WHAT THIS DOES NOT CATCH, stated because the gap is easy to mistake for
+# coverage. It proves the value is consumed; it cannot prove the consumer is the
+# one the label promises. DiagnosticLogging passed both steps in the shell while
+# doing nothing it claimed: it was read, and consumed -- by PositionGuiCentered,
+# which logs window centring, not the XInput slots the label offers. Telling that
+# apart from RtssOverlayToggleShortcut, which is also consumed only in Shared and
+# is entirely correct, needs the label's meaning, and no static check has that.
+#
+# The scan is over the COMPILED set on purpose. Counting only a tree's own file
+# reports nine RTSS rows whose sole consumer is Shared -- which is where those
+# features live for both products, so the asymmetry is the architecture working.
+function Assert-SettingsRowsReachConsumers {
+    param(
+        [Parameter(Mandatory = $true)][string]$ProjectRoot,
+        [switch]$Quiet
+    )
+    $sharedText = Get-Content -LiteralPath (Join-Path $ProjectRoot "SteamShell-Shared.ahk") -Raw
+    $tableStart = $sharedText.IndexOf("SettingsCategoryRows(category) {")
+    $tableEnd = $sharedText.IndexOf("return table.Has(category)", [Math]::Max($tableStart, 0))
+    Assert-True ($tableStart -ge 0 -and $tableEnd -gt $tableStart) (
+        "SettingsCategoryRows could not be read, so no Settings row would be checked " +
+        "for a consumer. A scan that sees no rows passes on nothing.")
+    if ($tableStart -lt 0 -or $tableEnd -le $tableStart) { return }
+    $table = $sharedText.Substring($tableStart, $tableEnd - $tableStart)
+
+    # section+key+product per row. A row with no key is a note or a section
+    # header and has nothing to read.
+    $rows = @()
+    foreach ($m in [regex]::Matches($table, '(?s)Map\((?:[^()]|\([^()]*\))*?\)')) {
+        $text = $m.Value
+        $key = [regex]::Match($text, '"key"\s*,\s*"([^"]+)"')
+        $section = [regex]::Match($text, '"section"\s*,\s*"([^"]+)"')
+        if (-not $key.Success -or -not $section.Success) { continue }
+        $product = [regex]::Match($text, '"product"\s*,\s*"(\w+)"')
+        $rows += [pscustomobject]@{
+            Key = $key.Groups[1].Value
+            Section = $section.Groups[1].Value
+            Product = $(if ($product.Success) { $product.Groups[1].Value } else { "both" })
+        }
+    }
+    Assert-True ($rows.Count -ge 90) (
+        "Only $($rows.Count) Settings rows were read from the shared table. The " +
+        "extraction is not seeing it, and a scan over nothing passes.")
+
+    # The readers that take (section, key, ...). Nothing else can turn a row's
+    # key into a value.
+    $readers = "(?:ReadText|ReadNumber|ReadBool|ReadInt|ReadFloat|IniReadS|ReadIniBool|ReadIniInt)"
+
+    $checked = 0
+    foreach ($pair in @(
+        @{ Product = "standalone"; Tree = "SteamShell.ahk" },
+        @{ Product = "xfe";        Tree = "SteamShell-XFE.ahk" })) {
+        # CONTINUATION SECTIONS ARE DROPPED, and step 2 is worth nothing without
+        # that. GetDefaultSettingsIniText() holds the whole default INI as one
+        # literal, so `MouseParkEdge=Right` sits in the shell's source as text --
+        # and since most globals are named after their key, nearly every setting
+        # in the shell looked consumed by the file that documents it. There is
+        # exactly one such section in these sources, opened by a bare `(` line.
+        $lines = @()
+        foreach ($file in @($pair.Tree, "SteamShell-Shared.ahk", "SteamShell-Common.ahk")) {
+            $raw = Get-Content -LiteralPath (Join-Path $ProjectRoot $file)
+            $literal = $false
+            for ($i = 0; $i -lt $raw.Count; $i++) {
+                $trimmed = $raw[$i].Trim()
+                if (-not $literal -and $trimmed -eq "(") { $literal = $true; continue }
+                if ($literal) {
+                    if ($trimmed.StartsWith(")")) { $literal = $false }
+                    continue
+                }
+                # A full-line comment naming a setting explains it rather than
+                # reading it, and an end-of-line one is worse -- `; MouseHideDelay
+                # is read above` would answer for the code.
+                $lines += ($raw[$i] -replace '(?<!`);.*$', '')
+            }
+        }
+        $flat = ($lines -join "`n") -replace '\s+', ' '
+        # Hoisted: one scan for every assignment fed by a reader, then each row
+        # looks itself up in the result. Re-running it per row is the same regex
+        # over a megabyte and a half, two hundred times.
+        $readSites = [regex]::Matches(
+            $flat, '(\w+)\s*:=\s*(?:\w+\(\s*)*' + $readers + '\(')
+        # Every identifier that appears in a READING position, collected in one
+        # pass. A line contributes every identifier it mentions except the one it
+        # assigns to, and a `global` line contributes nothing.
+        #
+        # STRING BODIES BLANKED here and not in the key scan above. Step 1 looks
+        # for a key, which IS a literal; step 2 looks for a variable, and most
+        # globals are named after their key -- so `"replacementKey",
+        # "EnableMouseParkOnFocusChange"` in a migration table, and the row's own
+        # entry in the shared spec, answered for code that had been deleted.
+        #
+        # A SET, not a scan per row: the per-row form is two hundred rows against
+        # thirty thousand lines, and a validator nobody waits for is one nobody
+        # runs.
+        $consumers = @{}
+        foreach ($line in $lines) {
+            $trimmed = ($line -replace '"(?:[^"`]|`.)*"', '""').Trim()
+            if ($trimmed -eq "" -or $trimmed -match '^global\b') { continue }
+            $assigned = [regex]::Match($trimmed, '^(\w+)\s*(?::=|\+=|-=|\.=)')
+            $skip = $(if ($assigned.Success) { $assigned.Groups[1].Value.ToLowerInvariant() } else { "" })
+            foreach ($word in [regex]::Matches($trimmed, '(?<![.\w])([A-Za-z_]\w*)(?![\w])')) {
+                $lower = $word.Groups[1].Value.ToLowerInvariant()
+                if ($lower -eq $skip) { continue }
+                $consumers[$lower] = $true
+            }
+        }
+
+        foreach ($row in $rows) {
+            if ($row.Product -ne "both" -and $row.Product -ne $pair.Product) { continue }
+            $checked++
+
+            # Step 1: something reads the key.
+            #
+            # Matched against the FLATTENED text because a read spans two lines
+            # whenever MovedSettingSection() is involved, and those are exactly
+            # the rows most likely to have drifted.
+            $quoted = '"' + [regex]::Escape($row.Key) + '"'
+            $binding = $null
+            $found = $false
+            foreach ($site in $readSites) {
+                # Bounded by the next assignment, not by a character count. A
+                # fixed window reaches into the NEXT read -- these arrive in runs
+                # of one per line -- and binds the row to the variable above it.
+                $next = $flat.IndexOf(":=", $site.Index + $site.Length)
+                $end = $(if ($next -gt 0) { $next } else { [Math]::Min($flat.Length, $site.Index + $site.Length + 240) })
+                $window = $flat.Substring($site.Index + $site.Length,
+                    $end - $site.Index - $site.Length)
+                if ($window -match $quoted) {
+                    $binding = $site.Groups[1].Value
+                    $found = $true
+                    break
+                }
+            }
+            if (-not $found) {
+                # A read that is not assigned anywhere -- passed straight into a
+                # call -- is consumed by definition, so look for the bare form
+                # before failing.
+                $found = $flat -match ($readers + '\((?:[^()]|\([^()]*\))*?' + $quoted)
+            }
+            Assert-True $found (
+                "The $($pair.Product) Settings window offers [$($row.Section)] " +
+                "$($row.Key), and nothing in the set it compiles reads that key back. " +
+                "The row draws, accepts input and writes the INI, and changes nothing.")
+            if (-not $binding) { continue }
+
+            # Step 2: the value reaches something.
+            Assert-True ($consumers.ContainsKey($binding.ToLowerInvariant())) (
+                "The $($pair.Product) Settings window offers [$($row.Section)] " +
+                "$($row.Key), which is read into '$binding', and nothing ever reads " +
+                "'$binding' back. The setting is stored and never acted on.")
+        }
+    }
+
+    if (-not $Quiet) {
+        Write-Host ("Settings rows: {0} row-product pairs checked; every key is read " +
+            "back and every value reaches a consumer." -f $checked)
+    }
+}
+
 function Assert-SharedParity {
     param(
         [Parameter(Mandatory = $true)][string]$ProjectRoot,

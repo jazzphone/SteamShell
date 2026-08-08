@@ -1020,6 +1020,139 @@ def check_settings_row_keys(sources):
              "the scan is not seeing the table and would pass on nothing.")
 
 
+SETTINGS_READERS = (r"(?:ReadText|ReadNumber|ReadBool|ReadInt|ReadFloat"
+                    r"|IniReadS|ReadIniBool|ReadIniInt)")
+
+
+def settings_rows_with_keys(shared):
+    """(product, section, key) for every Settings row that names a key.
+
+    A row with no key is a note or a section header and has nothing to read.
+    """
+    start = shared.find("SettingsCategoryRows(category) {")
+    end = shared.find("return table.Has(category)", max(start, 0))
+    if start < 0 or end <= start:
+        return None
+    table = shared[start:end]
+    rows = []
+    for match in re.finditer(r"Map\((?:[^()]|\([^()]*\))*?\)", table, re.S):
+        text = match.group(0)
+        key = re.search(r'"key"\s*,\s*"([^"]+)"', text)
+        section = re.search(r'"section"\s*,\s*"([^"]+)"', text)
+        if not key or not section:
+            continue
+        product = re.search(r'"product"\s*,\s*"(\w+)"', text)
+        rows.append(((product.group(1) if product else "both"),
+                     section.group(1), key.group(1)))
+    return rows
+
+
+def check_settings_rows_reach_consumers(sources):
+    """Every Settings row reaches something that reads it.
+
+    KEPT IN STEP WITH Assert-SettingsRowsReachConsumers in Validate-Common.ps1.
+    See the header there for why the check is in two steps and, more usefully,
+    for what it cannot do -- it proves the value is consumed, never that the
+    consumer is the one the label promises.
+
+    Two steps: the key is read by one of the section/key readers somewhere in the
+    set the product compiles, and the variable that read lands in is referenced
+    somewhere other than its `global` line and its own assignment.
+    """
+    rows = settings_rows_with_keys(sources["SteamShell-Shared.ahk"])
+    if rows is None:
+        fail("SettingsCategoryRows could not be read, so no Settings row would be "
+             "checked for a consumer. A scan that sees no rows passes on nothing.")
+        return
+    if len(rows) < 90:
+        fail(f"Only {len(rows)} Settings rows were read from the shared table. "
+             "The extraction is not seeing it, and a scan over nothing passes.")
+
+    for product, tree in (("standalone", "SteamShell.ahk"),
+                          ("xfe", "SteamShell-XFE.ahk")):
+        # Comments stripped, string bodies kept: the keys being looked for ARE
+        # string literals. A comment naming a setting explains it rather than
+        # reading it, and an end-of-line one would answer for the code.
+        #
+        # CONTINUATION SECTIONS ARE DROPPED, and step 2 is worth nothing without
+        # that. GetDefaultSettingsIniText() holds the whole default INI as one
+        # literal, so `MouseParkEdge=Right` sits in the shell's source as text --
+        # and since most globals are named after their key, nearly every setting
+        # in the shell looked consumed by the file that documents it. There is
+        # exactly one such section in these sources, opened by a bare `(` line.
+        lines = []
+        for name in (tree, "SteamShell-Shared.ahk", "SteamShell-Common.ahk"):
+            literal = False
+            for line in sources[name].split("\n"):
+                if not literal and line.strip() == "(":
+                    literal = True
+                    continue
+                if literal:
+                    if line.strip().startswith(")"):
+                        literal = False
+                    continue
+                lines.append(re.sub(r"(?<!`);.*$", "", line))
+        flat = re.sub(r"\s+", " ", "\n".join(lines))
+        sites = list(re.finditer(r"(\w+)\s*:=\s*(?:\w+\(\s*)*" + SETTINGS_READERS
+                                 + r"\(", flat))
+        # STRING BODIES BLANKED, once, for the consumer scan -- and not for the
+        # key scan. Step 1 is looking for a key, which IS a literal; step 2 is
+        # looking for a variable, and most globals are named after their key, so
+        # `"replacementKey", "EnableMouseParkOnFocusChange"` in a migration table
+        # answered for code that had been deleted.
+        #
+        # Collected as a SET in one pass rather than re-scanned per row. The
+        # per-row form was 200 rows times 30,000 lines of regex and cost twelve
+        # seconds on its own; a validator nobody waits for is a validator nobody
+        # runs. A line contributes every identifier it mentions except the one it
+        # assigns to, and `global` lines contribute nothing -- which is exactly
+        # the per-row rule, hoisted.
+        consumers = set()
+        for line in lines:
+            trimmed = re.sub(r'"(?:[^"`]|`.)*"', '""', line).strip()
+            if not trimmed or trimmed.startswith("global "):
+                continue
+            assigned = re.match(r"(\w+)\s*(?::=|\+=|-=|\.=)", trimmed)
+            for word in re.findall(r"(?<![.\w])([A-Za-z_]\w*)(?![\w])", trimmed):
+                if assigned and word.lower() == assigned.group(1).lower():
+                    continue
+                consumers.add(word.lower())
+
+        for row_product, section, key in rows:
+            if row_product != "both" and row_product != product:
+                continue
+            quoted = '"' + key + '"'
+
+            # Flattened, because a read spans two lines whenever
+            # MovedSettingSection() is involved -- and those are the rows most
+            # likely to have drifted.
+            binding = None
+            for site in sites:
+                # Bounded by the next assignment, not by a character count. A
+                # fixed window reaches into the NEXT read -- these arrive in runs
+                # of one per line -- and binds the row to the variable above it.
+                nxt = flat.find(":=", site.end())
+                window = flat[site.end():nxt if nxt > 0 else site.end() + 240]
+                if quoted in window:
+                    binding = site.group(1)
+                    break
+            if binding is None:
+                # A read that is not assigned anywhere -- passed straight into a
+                # call -- is consumed by definition.
+                if not re.search(SETTINGS_READERS + r"\((?:[^()]|\([^()]*\))*?"
+                                 + re.escape(quoted), flat):
+                    fail(f"The {product} Settings window offers [{section}] {key}, "
+                         "and nothing in the set it compiles reads that key back. "
+                         "The row draws, accepts input and writes the INI, and "
+                         "changes nothing.")
+                continue
+
+            if binding.lower() not in consumers:
+                fail(f"The {product} Settings window offers [{section}] {key}, which "
+                     f"is read into '{binding}', and nothing ever reads '{binding}' "
+                     "back. The setting is stored and never acted on.")
+
+
 def check_learner_guard(sources):
     """The controller poll's learner stand-down, in both trees.
 
@@ -1234,6 +1367,7 @@ def main():
     check_view_button_actions(sources)
     check_view_button_default_split(sources)
     check_settings_row_keys(sources)
+    check_settings_rows_reach_consumers(sources)
     check_quickmenu_rows(sources)
     check_schema_versions()
     check_cross_name_duplicates(sources)
