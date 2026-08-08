@@ -4273,7 +4273,7 @@ QuickMenuSettingValueText(id) {
         case "qPersistentMouse":
             return EnablePersistentMouseMode ? "ON" : "OFF"
         case "qMouseSpeed":
-            return ControllerMouseSpeed
+            return ControllerMouseSpeed " PX/S"
         case "qMouseHideDelay":
             return MouseHideDelay = 0 ? "IMMEDIATE" : Format("{:.1f} SEC", MouseHideDelay / 1000)
         case "qParkEdge":
@@ -4336,8 +4336,12 @@ QuickMenuAdjustSharedSetting(id, direction) {
                 index := 1
             return ProductApplyQuickMenuSetting("QuickMenu", "AccentColor", names[index])
         case "qMouseSpeed":
+            ; Step and bounds follow the setting's unit, which is now pixels per
+            ; SECOND rather than pixels per poll tick. A step of 5 was about 5%
+            ; of the old range; 200 is about the same proportion of the new one,
+            ; so a press moves the slider by a comparable amount.
             return ProductApplyQuickMenuSetting("Controller", "ControllerMouseSpeed",
-                ClampInt(ControllerMouseSpeed + (direction * 5), 5, 200))
+                ClampInt(ControllerMouseSpeed + (direction * 200), 200, 12000))
         case "qMouseHideDelay":
             ; Snap to the nearest listed value first. The setting accepts any
             ; number -- the full Settings window and a hand-edited INI can both
@@ -6502,10 +6506,15 @@ SettingsCategoryRows(category) {
                 "section", "Controller", "key", "ControllerIndex",
                 "label", "Controller index",
                 "choices", ["0", "1", "2", "3"], "default", "0"),
-            Map("product", "both", "type", "edit",
+            ; A slider, not an edit box. The useful information here is the
+            ; RANGE -- an edit box asks the user to already know that 3200 is
+            ; normal and 400 is a crawl, and the only way to find out was to
+            ; type a number, save, and try it.
+            Map("product", "both", "type", "slider",
                 "section", "Controller", "key", "ControllerMouseSpeed",
                 "label", "Controller mouse speed",
-                "default", "100", "fieldType", "integer", "min", 1, "max", 300),
+                "default", "3200", "min", 200, "max", 12000,
+                "step", 100, "suffix", " px/s"),
             Map("product", "both", "type", "edit",
                 "section", "Controller", "key", "ControllerDeadzone",
                 "label", "Stick deadzone",
@@ -8723,6 +8732,13 @@ SettingsAddRowsForCategory(guiObj, category, product, &y, tableKey := "") {
                     row.Has("fieldType") ? row["fieldType"] : "text",
                     row.Has("min") ? row["min"] : "",
                     row.Has("max") ? row["max"] : "")
+            case "slider":
+                SettingsAddSliderField(guiObj, category, row["section"],
+                    row["key"], label, &y, value,
+                    row.Has("min") ? row["min"] : 0,
+                    row.Has("max") ? row["max"] : 100,
+                    row.Has("step") ? row["step"] : 1,
+                    row.Has("suffix") ? row["suffix"] : "")
             case "shortcut":
                 SettingsAddShortcutField(guiObj, category, row["section"],
                     row["key"], label, &y, value)
@@ -8801,6 +8817,93 @@ SettingsAddChoice(guiObj, category, section, key, label, choices, &y, defaultVal
     return ctrl
 }
 
+
+; Slider handle -> its value readout, for the refresh below.
+SettingsSliderReadoutRegistry() {
+    static registry := Map()
+    return registry
+}
+
+
+; Repaints every slider's value readout from its slider.
+;
+; Needed because assigning .Value in code does NOT raise Change in AutoHotkey --
+; only the user dragging the track does. Without this the number beside a slider
+; keeps whatever it was built with while the slider itself moves to the loaded
+; value, which is worse than showing no number at all.
+;
+; Called after the populate pass in both products, and by the sliders' own Change
+; handler. Entries whose window has been destroyed are pruned as they are found,
+; so reopening the Settings window cannot accumulate dead controls.
+SettingsRefreshSliderReadouts() {
+    registry := SettingsSliderReadoutRegistry()
+    dead := []
+    for hwnd, entry in registry {
+        refreshed := false
+        try {
+            entry["readout"].Text := entry["slider"].Value entry["suffix"]
+            refreshed := true
+        }
+        if !refreshed
+            dead.Push(hwnd)
+    }
+    for _, hwnd in dead
+        registry.Delete(hwnd)
+}
+
+
+; A bounded numeric setting, as a track bar with its range written at each end.
+;
+; For values where the RANGE is the useful information and the exact number is
+; not. Controller mouse speed is the case that prompted it: an edit box asks the
+; user to know that 3200 is reasonable and 200 is a crawl, and the only way to
+; find out is to type, save, and try. A slider shows the whole span at once and
+; the readout updates as it moves.
+;
+; Registered as a normal field with type "integer", so save, dirty-tracking,
+; defaults and category reset all treat it exactly like the edit box it replaces
+; and neither product needed a new save path. The registered control is the
+; SLIDER, so ProductSettingsScrollBar and the focus list see one control per row.
+;
+; The value readout is a plain Text, deliberately not an Edit: two writable views
+; of one setting is a synchronisation problem, and the Quick Menu already offers
+; stepped adjustment for anyone who wants a precise number.
+SettingsAddSliderField(guiObj, category, section, key, label, &y, defaultValue := ""
+    , minValue := 0, maxValue := 100, step := 1, suffix := "") {
+    layout := SettingsLayout()
+    labelCtrl := guiObj.AddText("x" layout["contentX"] " y" (y + 4) " w315 h24", label)
+    ; The readout is sized for the widest value the range can produce, plus the
+    ; suffix, so the slider does not shift as the number gains a digit.
+    readoutWidth := 46 + (StrLen(maxValue "") * 9) + (StrLen(suffix) * 8)
+    trackWidth := layout["controlWidth"] - readoutWidth - 8
+    slider := guiObj.AddSlider(
+        "x" layout["controlX"] " y" (y + 2) " w" trackWidth " h26"
+        . " Range" minValue "-" maxValue " Page" (step * 10) " Line" step
+        . " NoTicks", ToInt(defaultValue, minValue))
+    readout := guiObj.AddText(
+        "x" (layout["controlX"] + trackWidth + 8) " y" (y + 6)
+        . " w" readoutWidth " h22", slider.Value suffix)
+    slider.OnEvent("Change", (*) => SettingsRefreshSliderReadouts())
+    slider.OnEvent("Change", SettingsProductMarkDirty)
+    ; Registered centrally rather than through a per-field callback, because the
+    ; two products hold their field registries differently -- the shell keeps an
+    ; array of field Maps, the companion a Map from Section.Key to the control --
+    ; and only one of them could carry a closure. One registry keyed on the
+    ; slider's own handle is reachable from both.
+    SettingsSliderReadoutRegistry()[slider.Hwnd] := Map(
+        "slider", slider, "readout", readout, "suffix", suffix)
+    field := Map(
+        "category", category, "section", section, "key", key,
+        "label", label, "type", "integer", "default", defaultValue, "ctrl", slider,
+        "min", minValue, "max", maxValue,
+        ; Carried so controller stepping matches the slider's own granularity
+        ; rather than a constant chosen for some other row's range.
+        "step", step,
+        "controls", [labelCtrl, slider, readout])
+    SettingsRegisterBuiltField(category, field)
+    y += 34
+    return field
+}
 
 SettingsAddTextField(guiObj, category, section, key, label, &y, defaultValue := ""
     , fieldType := "text", minValue := "", maxValue := "", rows := 1) {

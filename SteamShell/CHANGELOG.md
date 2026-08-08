@@ -1,5 +1,76 @@
 # SteamShell changelog
 
+## Unreleased — the cursor stops ticking along the path
+
+Controller mouse movement was jittery in a way that had been there since the
+beginning, and it was a timing bug rather than a mapping one. Speed and
+responsiveness were never wrong; the *animation* was.
+
+**In all three programs.** `ApplyControllerMouseMove` was already shared, so the
+shell, the companion and the elevated helper had the identical bug and every
+cross-tree check passed the whole time — a duplication gate proves two copies
+agree, not that they are right. One edit fixed all three.
+
+**Windows quantises timers to about 15.625 ms** unless a process raises the
+resolution, and nothing here does. A timer fires on the first tick boundary at or
+after its interval — so `ControllerPollIntervalMs = 16`, sitting **0.375 ms past a
+boundary**, could not fire at 15.625 and waited for 31.25. The poll ran at roughly
+**32 Hz while the setting implied 62.5**, and because 16 is only marginally over,
+ordinary scheduling noise flipped it between one boundary and two.
+
+On top of that, `ControllerMouseSpeed` was a distance **per tick**, so uneven
+timing became uneven distance: ticks arriving 15.6, 31.2, 31.2 ms apart moved the
+cursor the same amount each time. At 32 updates a second the cursor was making
+20–100 pixel hops, unevenly spaced. A real mouse moves 1–8 px per update.
+
+Three changes, and they had to land together:
+
+- **Speed is now a velocity.** `ControllerMouseSpeed` is pixels per *second* at
+  full deflection, scaled by measured elapsed time. A late tick moves
+  proportionally further, so on-screen velocity is constant no matter how the
+  timer behaves — and the poll interval becomes a smoothness control rather than a
+  speed control. They used to be the same knob, which is why neither could be
+  changed alone.
+- **The default interval is 15 ms**, which fires on every boundary: about 64 Hz,
+  halving the step size at identical speed.
+- **A sub-pixel remainder is carried between ticks** rather than rounded away.
+  Deltas now land well under a pixel at low deflection, and rounding each tick
+  independently would re-quantise exactly the motion this was meant to smooth.
+
+Velocity is preserved exactly across the change — 320 px/s at 10% deflection
+before and after — because the migration converts by **×32**, the rate the poll
+*actually* ran at rather than the 62.5 Hz the old setting claimed. Those differed
+by two, and the observed one is what a thumb is calibrated to.
+
+**Settings schema 23** converts every stored `ControllerMouseSpeed`, not just the
+former default: the unit changed, so a custom 150 would otherwise have become 150
+px/s — a cursor that barely moves. It also moves a `ControllerPollIntervalMs` of
+exactly 16 to 15, leaving deliberately chosen intervals alone. The companion
+carries the same two migrations, detected by range rather than by version, matching
+how its other migrations work. The elevated helper's copies of both settings moved
+in step.
+
+### Controller mouse speed is a slider
+
+A new `slider` row type for the settings spec, reusing the `min`/`max` the spec
+already carried, with the value shown beside the track and the range visible at a
+glance. An edit box asked the user to already know that 3200 is normal and 400 is a
+crawl, and the only way to find out was to type a number, save, and try it.
+
+It registers as an ordinary integer field, so save, dirty-tracking, defaults,
+category reset and import all treat it exactly like the edit box it replaces —
+neither product needed a new save path. Two details it does need:
+
+- **Assigning `.Value` in code does not raise `Change`** in AutoHotkey; only
+  dragging does. Without an explicit refresh the number beside the track would
+  keep whatever it was built with while the slider moved to the loaded value. The
+  readouts are registered centrally and repainted after each populate pass,
+  because the two products hold their field registries differently and only one of
+  them could have carried a closure.
+- **Controller stepping reads the row's declared step.** A hard-coded step of 5 sat
+  in the shell's adjust path — correct when the setting was 1–300 — and would have
+  needed 2360 presses to cross the new 200–12000 range.
+
 ## Unreleased — the multi-monitor scorer, resume recovery in the shell, and the gate that could not see either
 
 A review pass that started on correctness and ended up moving four functions into

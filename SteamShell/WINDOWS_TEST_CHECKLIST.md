@@ -460,6 +460,34 @@ uncompiled script on the HTPC before replacing the current shell executable.
 - Open Setup Assistant and confirm Steam/RTSS pickers, Controller Test, Health Check, portable mode, and installation
   actions stay in front and remain usable.
 
+## Controller mouse smoothness and the speed slider
+
+- **Move the cursor slowly with the right stick and watch the motion itself**, not
+  the speed. It should travel rather than step. The old build hopped 20-100 px per
+  update at about 32 Hz; this one halves the step and spaces it evenly.
+- **Confirm the speed did not change.** This is the regression that matters: the
+  migration converts stored values by x32 to preserve the speed you were used to.
+  If the cursor is now roughly twice as fast, the conversion factor is wrong for
+  your hardware and the poll was already running at 62.5 Hz rather than 32 Hz.
+- **Check an upgraded INI**, not a fresh one. `ControllerMouseSpeed` must read
+  about 3200 after upgrading from a file that had 100, and a
+  `ControllerPollIntervalMs` of exactly 16 must become 15. A deliberately chosen
+  interval such as 20 must be left alone.
+- **Hold RT while moving** and confirm the fast multiplier still applies smoothly.
+- **Settings -> Controller & Cursor:** the speed row is a slider with its value
+  shown beside the track. Drag it, save, reopen, and confirm the value persisted
+  and the readout matches the track on open -- the readout is refreshed
+  explicitly, because assigning a value in code does not raise the change event.
+- **Drive that slider with the controller**, left and right on the focused row.
+  It must move in visible steps of 100 rather than 1.
+- **Restore Category Defaults** on that page and confirm the slider *and* its
+  readout both return to 3200.
+- **Quick Menu -> mouse speed** still adjusts, now in steps of 200 px/s, and the
+  row reads e.g. `3200 PX/S`.
+- **Repeat the smoothness check in the elevated helper's surface** (an
+  administrator window with controller mouse active). It carries its own copy of
+  both settings and they moved in step.
+
 ## Sleep, resume and controller re-acquisition
 
 The failure this guards against is **silent** — input simply stops, with nothing

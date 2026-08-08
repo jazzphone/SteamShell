@@ -105,6 +105,39 @@ Reconnecting a controller while the machine is running needs none of this.
 RawInput is registered by **usage page**, not by device, so a reconnected pad
 starts producing reports immediately and hand-over adopts it within a second.
 
+## Controller mouse smoothness
+
+Cursor speed is a **velocity** — `ControllerMouseSpeed` is pixels per second at
+full stick deflection, and the Settings slider shows the whole usable range
+rather than asking you to guess a number.
+
+It was pixels per *poll tick*, which made the cursor's speed depend on how often
+the timer happened to fire, and that produced a visible stepping along the path:
+
+- **Windows quantises timers to about 15.625 ms** unless a process raises the
+  resolution, and nothing here does. A timer fires on the first tick boundary at
+  or after its interval, so the old 16 ms poll — 0.375 ms past a boundary — could
+  not fire at 15.625 and waited for 31.25. The poll ran at roughly **32 Hz while
+  the setting implied 62.5**, and scheduling noise flipped it between one boundary
+  and two.
+- **A fixed distance per tick turns uneven timing into uneven distance.** Ticks
+  arriving 15.6, 31.2, 31.2 ms apart moved the cursor the same amount each time,
+  so it stepped rather than travelled.
+
+Movement is now scaled by measured elapsed time, so a late tick moves
+proportionally further and on-screen velocity stays constant regardless of the
+timer. The default interval is **15 ms**, which fires on every boundary — about
+64 Hz, half the step size of before at the same speed. A sub-pixel remainder is
+carried between ticks rather than rounded away, which is what makes the smaller
+distances usable.
+
+Changing the poll interval now changes *smoothness only*, not speed. That is the
+point of the change: the two used to be the same knob.
+
+**Upgrading:** settings schema 23 converts existing values (×32) so the cursor
+moves at the speed you were already used to, and moves a `ControllerPollIntervalMs`
+of exactly 16 to 15. A deliberately chosen interval is left alone.
+
 ### The View/Back button's own action
 
 View/Back can also carry a Steam action of its own, on a press that was **not**

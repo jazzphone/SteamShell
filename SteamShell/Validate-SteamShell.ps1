@@ -1101,10 +1101,25 @@ Assert-True (
 # The -notmatch is the real assertion. The constant is what a re-implementation
 # would have to contain, so forbidding it outside the shared file is what stops
 # a sixth copy appearing.
+#
+# The first half used to pin the BODY: the exact parameter name `speed`, and the
+# exact expression `Round((stickX / 32767.0) * speed)`. That is an assertion about
+# an implementation rather than about the rule this check exists to enforce, and
+# it failed the moment the arithmetic was corrected -- while the rule itself was
+# never in danger, because the constant stayed in one file the whole time.
+#
+# Rewritten against the properties that are load-bearing, which now includes the
+# fix itself. Speed is a VELOCITY scaled by measured elapsed time, not a distance
+# per poll tick. A per-tick distance makes cursor speed depend on how often the
+# timer happens to fire, and Windows quantises timers to about 15.625 ms -- which
+# is what made the cursor visibly step along its path for the life of the project.
+# Reverting to per-tick would look like a simplification and would bring the
+# jitter back, so A_TickCount and the sub-pixel carry are asserted by name.
 Assert-True (
     $commonSource -match
-        '(?sm)^ApplyControllerMouseMove\(stickX, stickY, speed\)\s*\{' +
-        '(?:(?!\n\})[\s\S])*?Round\(\(stickX / 32767\.0\) \* speed\)' +
+        '(?sm)^ApplyControllerMouseMove\(stickX, stickY, pixelsPerSecond\)\s*\{' +
+        '(?:(?!\n\})[\s\S])*?A_TickCount' +
+        '(?:(?!\n\})[\s\S])*?carryX \+= \(stickX / 32767\.0\)' +
         '(?:(?!\n\})[\s\S])*?MouseMove\(deltaX, deltaY, 0, "R"\)' -and
     $commonSource -match
         '(?sm)^ApplyControllerMouseScroll\(stickY, steps\)\s*\{' +

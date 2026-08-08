@@ -929,6 +929,51 @@ under the old bar for the gate's entire life. The genuine differences are bolted
 onto the ends. It is the largest consolidation left and the riskiest, being the
 input path of the product that runs as the shell.
 
+### The controller mouse, and a shared UI primitive
+
+`ApplyControllerMouseMove` was already shared, which is why the smoothness fix
+reached three programs from one edit. Worth recording *what* it fixed, because the
+cause was not in the mouse code at all:
+
+**Windows quantises timers to about 15.625 ms** unless a process raises the
+resolution, and none of the three does. A timer fires on the first tick boundary
+at or after its interval, so `ControllerPollIntervalMs = 16` — 0.375 ms past a
+boundary — could not fire at 15.625 and waited for 31.25. Both products polled at
+roughly **32 Hz while the setting said 62.5**, and because 16 sits only marginally
+over, scheduling noise flipped the interval between one boundary and two.
+
+Speed was then a distance *per tick*, so uneven timing became uneven distance on
+screen. That is a shared-code bug that no parity check could have found: the two
+copies agreed perfectly, and both were wrong.
+
+The fix makes speed a velocity scaled by measured elapsed time, which decouples it
+from the tick rate — so the interval could be moved to 15 without changing how
+fast the cursor travels. Those two were the same knob before, which is why neither
+had ever been adjusted.
+
+`SettingsAddSliderField` is new and shared. It is the first row type added since
+the settings spec was unified, and it needed one thing the others did not:
+
+> **Assigning `.Value` in code does not raise `Change`** in AutoHotkey; only the
+> user moving the control does. A slider carries a separate value readout, so
+> without an explicit repaint the number shows what the row was BUILT with while
+> the track sits at the loaded value.
+
+The repaint could not be a per-field callback, because **the two products hold
+their field registries differently** — the shell an array of field Maps, the
+companion a Map from `Section.Key` to the control — and only one of them can carry
+a closure. That is `SettingsRegisterBuiltField`'s entry in this file, seen from the
+other side: the divergence is real, and it constrains what a shared builder may
+assume. The readouts are registered in one Map keyed on the slider's own handle,
+which both products can reach.
+
+The two trees also reach the same *behaviour* by different routes for controller
+adjustment, and this one is not worth merging: the shell has a field-aware adjust
+path and now reads the row's declared step from the spec, while the companion
+navigates its Settings window with ordinary arrow keys and gets the same 100 px/s
+movement from the track's own line size. Two mechanisms, one outcome, and the
+companion's needs no code at all.
+
 ### The gate compares functions, so inline logic is invisible at any threshold
 
 Lowering the bar closes one blind spot. It cannot close this one.

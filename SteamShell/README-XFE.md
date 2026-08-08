@@ -394,6 +394,46 @@ XInput, and RawInput stayed dead.
 Controller**. Both release the lock, re-register RawInput, and force XInput to
 rescan its slots.
 
+## Controller mouse smoothness
+
+Cursor speed is a **velocity** — `ControllerMouseSpeed` is pixels per second at
+full stick deflection, and the Settings row is a slider showing the whole usable
+range rather than an edit box asking you to guess a number.
+
+It used to be pixels per *poll tick*, which tied the cursor's speed to how often
+the timer happened to fire, and the result was motion that visibly stepped along
+its path:
+
+- **Windows quantises timers to about 15.625 ms** unless a process raises the
+  resolution, and neither product does. A timer fires on the first tick boundary
+  at or after its interval, so the old 16 ms poll — 0.375 ms past a boundary —
+  could not fire at 15.625 and waited for 31.25. The poll ran at roughly **32 Hz
+  while the setting implied 62.5**, and scheduling noise flipped it between one
+  boundary and two.
+- **A fixed distance per tick turns uneven timing into uneven distance**, so the
+  cursor made 20–100 pixel hops at irregular intervals.
+
+Movement is now scaled by measured elapsed time, the default interval is **15 ms**
+(which fires on every boundary, about 64 Hz), and the sub-pixel remainder is
+carried between ticks instead of being rounded away. Changing the poll interval
+now changes smoothness only, not speed — they used to be the same knob, which is
+why neither could be adjusted alone.
+
+`ApplyControllerMouseMove` lives in `SteamShell-Common.ahk`, so the shell, the
+companion and the elevated helper all move the cursor with the same arithmetic.
+The validators forbid the `32767.0` constant anywhere else, which is what stops a
+second copy appearing.
+
+**Upgrading:** existing values are converted (×32) so the cursor moves at the
+speed you were already used to, and a `ControllerPollIntervalMs` of exactly 16
+becomes 15. A deliberately chosen interval is left alone. The conversion is
+detected by range rather than by schema version, matching the companion's other
+migrations.
+
+On the Settings page the slider steps by 100 px/s. Driving it with the controller
+works through the ordinary arrow-key navigation this window already uses — the
+track's own line size is what makes each press move a useful amount.
+
 ## Elevation — deliberately not used
 
 The companion runs at **normal privileges**, and the optional logon task never

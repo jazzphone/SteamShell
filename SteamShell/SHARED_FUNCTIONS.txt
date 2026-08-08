@@ -311,6 +311,7 @@ SettingsAddNote
 SettingsAddPathField
 SettingsAddRowsForCategory
 SettingsAddShortcutField
+SettingsAddSliderField
 SettingsAddTextField
 SettingsCategoryRows
 SettingsEditorRepaint
@@ -322,11 +323,13 @@ SetRtssFrameLimiterState
 SetRtssGlobalFrameLimit
 SetRtssOverlayState
 SettingsLayout
+SettingsRefreshSliderReadouts
 SettingsRowAppliesTo
 SettingsRowChoices
 SettingsRowDefault
 SettingsRowLabel
 SettingsSelectChoiceByText
+SettingsSliderReadoutRegistry
 SettingsUpdateScrollBar
 SharedNotify
 ShouldLogRateLimited

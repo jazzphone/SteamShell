@@ -859,12 +859,61 @@ ResetControllerEdgeState(downTick, longFired, triggerDown, buttonDefinitions) {
 ; The caller applies its own deadzone before calling and decides `speed`,
 ; including whether a trigger is acting as the fast modifier -- all three read
 ; that multiplier from their own settings.
-ApplyControllerMouseMove(stickX, stickY, speed) {
-    if (stickX = 0 && stickY = 0)
+; Moves the cursor for one poll tick. `pixelsPerSecond` is the speed at full
+; deflection -- a VELOCITY, not a per-tick distance, and that is the fix.
+;
+; This used to be `Round((stick / 32767) * speed)` with speed meaning "pixels per
+; poll tick", which made the cursor's speed depend on how often the timer happened
+; to fire. Two things followed, and together they are the whole of the jitter:
+;
+; 1. WINDOWS TIMERS ARE QUANTISED TO ~15.625 ms unless a process raises the
+;    resolution, and nothing here does. A timer fires on the first tick boundary
+;    at or after its interval, so the old 16 ms request -- 0.375 ms past a
+;    boundary -- could not fire at 15.625 and waited for 31.25. The poll ran at
+;    about 32 Hz while the setting said 62.5, and any scheduling noise flipped it
+;    between one boundary and two.
+;
+; 2. A fixed distance PER TICK turns uneven timing into uneven distance. Ticks
+;    arriving 15.6, 31.2, 31.2, 15.6 ms apart moved the cursor the same amount
+;    each time, so it visibly stepped along the path rather than travelling it.
+;
+; Scaling by measured elapsed time fixes both: a late tick moves proportionally
+; further, so on-screen velocity stays constant no matter how the timer behaves,
+; and the poll interval becomes a smoothness control rather than a speed control.
+;
+; The sub-pixel carry is what makes the smaller per-tick distances usable. Deltas
+; now land well under a pixel at low deflection, and rounding each tick
+; independently would throw that away and re-quantise the motion this function
+; exists to smooth. The remainder is kept and added to the next tick instead.
+;
+; Carry is per-axis and is DROPPED when the stick centres, so a fraction left over
+; from the last movement cannot leak into the first pixel of the next one.
+ApplyControllerMouseMove(stickX, stickY, pixelsPerSecond) {
+    static lastTick := 0
+    static carryX := 0.0
+    static carryY := 0.0
+    now := A_TickCount
+    elapsedMs := lastTick ? now - lastTick : 0
+    lastTick := now
+    if (stickX = 0 && stickY = 0) {
+        carryX := 0.0
+        carryY := 0.0
         return false
-    deltaX := Round((stickX / 32767.0) * speed)
+    }
+    ; A first tick, a clock that went backwards, or a gap left by a dialog, a
+    ; suspend or a stalled message loop. Translating an absence of any length into
+    ; one proportional jump is exactly the behaviour being removed, so the step is
+    ; capped rather than trusted.
+    if (elapsedMs <= 0 || elapsedMs > 100)
+        elapsedMs := 16
+    seconds := elapsedMs / 1000.0
+    carryX += (stickX / 32767.0) * pixelsPerSecond * seconds
     ; Screen Y grows downward and the stick's Y grows upward.
-    deltaY := Round((-stickY / 32767.0) * speed)
+    carryY += (-stickY / 32767.0) * pixelsPerSecond * seconds
+    deltaX := Round(carryX)
+    deltaY := Round(carryY)
+    carryX -= deltaX
+    carryY -= deltaY
     if (deltaX = 0 && deltaY = 0)
         return false
     try MouseMove(deltaX, deltaY, 0, "R")

@@ -81,7 +81,7 @@ try DirCreate(SteamShellDataDir "\backups")
 global SettingsPath := SteamShellDataDir "\SteamShellSettings.ini"
 ; Back-compat alias used by some helper functions
 global IniPath := SettingsPath
-global CurrentSettingsSchemaVersion := 22
+global CurrentSettingsSchemaVersion := 23
 global LogPath := SteamShellDataDir "\logs\SteamShell.log"
 global IntentionalExitMode := ""
 global SafeMode := false
@@ -152,9 +152,9 @@ global ControllerIndex := 0 ; 0 = first controller
 ; move a pad between slots without restarting anything, so the configured index
 ; is a starting guess and this is the answer. Read by XInputResolveController.
 global ActiveControllerIndex := -1
-global ControllerPollIntervalMs := 16 ; Poll rate (ms)
+global ControllerPollIntervalMs := 15 ; Poll rate (ms). 15 fires on every Windows timer tick; 16 waits for the next
 global ControllerDeadzone := 3000 ; Stick deadzone (0-32767)
-global ControllerMouseSpeed := 100 ; Pixels per poll tick at full deflection
+global ControllerMouseSpeed := 3200 ; Cursor pixels per SECOND at full deflection
 global ControllerMouseFastMultiplier:= 2.5 ; Multiplier when RT is held (fast move)
 global ControllerScrollIntervalMs := 80 ; Min ms between scroll ticks
 global ControllerScrollStep := 1 ; Wheel notches per scroll tick
@@ -2580,7 +2580,7 @@ GetDefaultSettingsIniText() {
 ; ==================================================================================================
 
 [SteamShell]
-SettingsSchemaVersion=22                                   ; Internal schema used for safe settings upgrades
+SettingsSchemaVersion=23                                   ; Internal schema used for safe settings upgrades
 
 [Setup]
 SetupState=Pending                                         ; Pending | InProgress | Complete
@@ -2754,9 +2754,9 @@ RawInputStaleMs=5000                                        ; Treat RawInput as 
 EnableControllerMouseMode=true                              ; Enable controller mouse/keyboard mapping (hold View/Back)
 EnablePersistentMouseMode=false                             ; Apply controller mouse/mappings without holding View/Back
 ControllerIndex=0                                           ; 0=first controller
-ControllerPollIntervalMs=16                                 ; Poll rate (ms)
+ControllerPollIntervalMs=15                                 ; Poll rate (ms). 15 fires every Windows timer tick; 16 waits for the next
 ControllerDeadzone=3000                                     ; Stick deadzone (0-32767)
-ControllerMouseSpeed=100                                    ; Pixels per poll tick at full deflection
+ControllerMouseSpeed=3200                                   ; Cursor pixels per SECOND at full deflection
 ControllerMouseFastMultiplier=2.5                           ; Multiplier while RT is held
 ControllerScrollIntervalMs=80                               ; Min ms between scroll ticks
 ControllerScrollStep=1                                      ; Wheel notches per scroll tick
@@ -3162,6 +3162,35 @@ SyncSettingsIniSchema() {
         IniWrite(A_ScriptDir, workPath, "Setup", "InstallDirectory")
         IniWrite(SteamShellDataDir, workPath, "Setup", "DataDirectory")
     }
+
+    ; Schema 23 changes ControllerMouseSpeed's UNIT, so every value migrates --
+    ; not only the former default. A stored 100 meant "100 pixels per poll tick";
+    ; it now means "100 pixels per second", which is a cursor that barely moves.
+    ; Leaving custom values alone would silently break exactly the users who had
+    ; tuned it.
+    ;
+    ; x32, because 32 Hz is the rate the poll ACTUALLY ran at, not the 62.5 Hz the
+    ; 16 ms setting implied. Windows quantises timers to about 15.625 ms and
+    ; nothing raised the resolution, so a 16 ms request could not fire before
+    ; 31.25 ms. The conversion preserves the speed the user has been living with
+    ; rather than the speed the old setting claimed -- those differed by two, and
+    ; the observed one is the one their thumb is calibrated to.
+    if (sourceVersion < 23
+        && TryReadIniRaw("Controller", "ControllerMouseSpeed", &oldMouseSpeed)) {
+        convertedSpeed := ToInt(CleanIniValue(oldMouseSpeed, "100"), 100) * 32
+        IniWrite(ClampInt(convertedSpeed, 200, 12000) "",
+            workPath, "Controller", "ControllerMouseSpeed")
+    }
+
+    ; And the interval that caused it. 16 sat 0.375 ms past a 15.625 ms boundary,
+    ; so it waited for the next one and halved the poll rate; 15 fires on every
+    ; boundary. Only the exact former default moves, because a deliberately
+    ; chosen interval is a deliberate choice. Safe to change now only because
+    ; speed no longer depends on the tick rate.
+    if (sourceVersion < 23
+        && TryReadIniRaw("Controller", "ControllerPollIntervalMs", &oldPollInterval)
+        && ToInt(CleanIniValue(oldPollInterval, "16"), 16) = 16)
+        IniWrite("15", workPath, "Controller", "ControllerPollIntervalMs")
 
         for _, option in schema {
             if TryReadIniRaw(option["section"], option["key"], &existingValue)
@@ -3675,9 +3704,9 @@ LauncherCleanupAudioPeakThreshold := ReadNumber("LauncherCleanup", "AudioPeakThr
     EnableControllerDiagnostics := ReadBool("Controller", "DiagnosticLogging", false)
     RawInputStaleMs := ReadInt("Controller", "RawInputStaleMs", 5000, 500, 60000)
     ControllerIndex := ReadInt("Controller", "ControllerIndex", 0, 0, 3)
-    ControllerPollIntervalMs := ReadInt("Controller", "ControllerPollIntervalMs", 16, 5, 200)
+    ControllerPollIntervalMs := ReadInt("Controller", "ControllerPollIntervalMs", 15, 5, 200)
     ControllerDeadzone := ReadInt("Controller", "ControllerDeadzone", 3000, 0, 32000)
-    ControllerMouseSpeed := ReadInt("Controller", "ControllerMouseSpeed", 100, 1, 300)
+    ControllerMouseSpeed := ReadInt("Controller", "ControllerMouseSpeed", 3200, 200, 12000)
     ControllerMouseFastMultiplier := ReadNumber("Controller", "ControllerMouseFastMultiplier", 2.5, 1.0, 10.0)
     ControllerScrollIntervalMs := ReadInt("Controller", "ControllerScrollIntervalMs", 80, 10, 1000)
     ControllerScrollStep := ReadInt("Controller", "ControllerScrollStep", 1, 1, 10)
@@ -10227,6 +10256,10 @@ SettingsEditorPopulateField(field) {
                 ToFloat(field["default"], 0)) * 100, 4))
     else
         ctrl.Value := IniReadS(section, field["key"], field["default"])
+    ; Sliders carry a separate value readout, and assigning .Value in code does
+    ; NOT raise Change -- only the user dragging the track does. Cheap enough to
+    ; run per field: it walks one entry per slider on screen.
+    SettingsRefreshSliderReadouts()
 }
 
 SettingsEditorPopulateFields() {
@@ -11025,8 +11058,13 @@ SettingsEditorAdjustFocusedControl(direction) {
         else
             step := 1000
     }
-    else if (field["key"] = "ControllerMouseSpeed")
-        step := 5
+    ; A row that declares its own step wins. Sliders carry one because their
+    ; range is chosen for dragging, not for stepping: ControllerMouseSpeed spans
+    ; 200..12000, and the hard-coded 5 that used to sit here -- correct when the
+    ; setting was 1..300 pixels per tick -- would now need 2360 presses to cross
+    ; it. Reading the step from the spec means the two cannot disagree again.
+    if field.Has("step")
+        step := field["step"]
     newValue := (currentValue + 0) + (direction * step)
     if (field["min"] != "")
         newValue := Max(newValue, field["min"])
@@ -11037,6 +11075,9 @@ SettingsEditorAdjustFocusedControl(direction) {
     else
         newValue := Round(newValue)
     ctrl.Value := newValue
+    ; Assigning .Value does not raise Change, so a slider's readout would keep the
+    ; number it had before the controller moved it.
+    SettingsRefreshSliderReadouts()
     SettingsEditorMarkDirty()
 }
 

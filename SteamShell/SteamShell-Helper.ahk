@@ -54,9 +54,9 @@ global LogPath := ""
 global LogMaxBytes := 256 * 1024
 global LogBackups := 2
 global ControllerIndex := 0
-global PollIntervalMs := 16
+global PollIntervalMs := 15
 global Deadzone := 3000
-global MouseSpeed := 100
+global MouseSpeed := 3200 ; Cursor pixels per SECOND at full deflection
 global FastMultiplier := 2.5
 global ScrollIntervalMs := 80
 global ScrollStep := 1
@@ -852,9 +852,9 @@ LoadConfiguration() {
     ; real one also depends on DesktopMode and this process cannot see that.
     ControllerIndex := ReadInt("Controller", "ControllerIndex", 0, 0, 3)
     PollIntervalMs := ReadInt(
-        "Controller", "ControllerPollIntervalMs", 16, 8, 100)
+        "Controller", "ControllerPollIntervalMs", 15, 8, 100)
     Deadzone := ReadInt("Controller", "ControllerDeadzone", 3000, 0, 20000)
-    MouseSpeed := ReadInt("Controller", "ControllerMouseSpeed", 100, 1, 500)
+    MouseSpeed := ReadInt("Controller", "ControllerMouseSpeed", 3200, 200, 12000)
     FastMultiplier := ReadFloat(
         "Controller", "ControllerMouseFastMultiplier", 2.5, 1.0, 10.0)
     ScrollIntervalMs := ReadInt(

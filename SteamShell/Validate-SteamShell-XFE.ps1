@@ -2069,6 +2069,7 @@ Assert-True (
 foreach ($builder in @(
     "SettingsAddCheckbox", "SettingsAddTextField", "SettingsAddChoice",
     "SettingsAddShortcutField", "SettingsAddPathField", "SettingsAddNote",
+    "SettingsAddSliderField",
     "SettingsAddSectionRow", "SettingsAddButtonRow")) {
     Assert-True (
         $source -match "(?m)^$builder\([^\r\n]*&y") (

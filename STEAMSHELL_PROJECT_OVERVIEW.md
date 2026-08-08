@@ -872,6 +872,26 @@ A `dinput8` backend would have been a second, weaker path to the same data: manu
 
 The general form: when a device "needs mode X", check what mode X actually puts on the wire before adopting the API named after it.
 
+## Solved: the controller cursor stepped along its path (August 2026)
+
+**Symptom.** Controller mouse movement had been jittery since the first version — "ticking along the path" rather than travelling it. Speed and responsiveness were never wrong, which is why it read as a rendering problem and went unexamined for so long.
+
+**Cause, and it was not in the mouse code.** **Windows quantises timers to about 15.625 ms** unless a process raises the resolution, and none of the three programs does. A timer fires on the first tick boundary at or after its requested interval — so `ControllerPollIntervalMs = 16`, sitting **0.375 ms past a boundary**, could not fire at 15.625 and waited for 31.25. Every product polled at roughly **32 Hz while the setting implied 62.5**. Because 16 is only marginally over the boundary, ordinary scheduling noise flipped the interval between one tick and two.
+
+`ControllerMouseSpeed` was then a distance **per poll tick**, so uneven timing became uneven distance: ticks arriving 15.6, 31.2, 31.2 ms apart moved the cursor the same amount each time. At 32 updates a second the cursor made 20–100 pixel hops, unevenly spaced. A real mouse moves 1–8 px per update.
+
+**Fix, in three parts that had to land together.**
+
+1. **Speed became a velocity**, scaled by measured elapsed time. A late tick moves proportionally further, so on-screen velocity is constant regardless of how the timer behaves.
+2. **The default interval moved to 15 ms**, which fires on every boundary — about 64 Hz, halving the step size at identical speed.
+3. **The sub-pixel remainder is carried between ticks** rather than rounded away, because the smaller per-tick distances would otherwise be re-quantised.
+
+Parts 1 and 2 are inseparable: poll rate and cursor speed were the same knob, so changing the interval alone would have doubled the speed. That coupling is why the value survived for the life of the project.
+
+**Not a parity failure.** `ApplyControllerMouseMove` was already shared, so all three programs had the identical bug and every cross-tree check passed. A duplication gate proves two copies agree; it says nothing about whether they are right.
+
+**Lesson.** A setting whose unit is "per tick" silently depends on the scheduler being accurate, and Windows timers are not. Anything that should feel continuous has to be expressed as a rate and integrated against a real clock. The setting had also been *documented* as 62.5 Hz for years while delivering 32 — the number was in the INI comment, and nothing measured it.
+
 ## Solved: controller input dead after sleep (July 25, 2026)
 
 **Symptom.** On a ROG Xbox Ally X, controller input worked, the machine slept, and after waking nothing responded inside Xbox FSE. Setting `Backend=rawinput` explicitly did not help. Returning to the Windows desktop restored input immediately, with no restart.

@@ -364,6 +364,36 @@ meant it could essentially never apply here.
   startup-curtain control. Standalone SteamShell still owns its startup
   curtain/video; this retirement is XFE-only.
 
+## Controller mouse smoothness and the speed slider
+
+Shared with the shell through `SteamShell-Common.ahk`, so a fault here is a fault
+in both products — but test it in the companion too, because Xbox FSE is where
+the pointer matters most and the poll runs under different load.
+
+- **Move the cursor slowly with the right stick and watch the motion**, not the
+  speed. It should travel rather than step. The old build made 20-100 px hops at
+  about 32 Hz; this one halves the step and spaces it evenly.
+- **Confirm the speed did not change.** The migration converts stored values by
+  x32 specifically to preserve the speed you were used to. Roughly double means
+  the factor is wrong for this hardware.
+- **Check an upgraded INI, not a fresh one.** `ControllerMouseSpeed` must read
+  about 3200 after upgrading from a file holding 100, and a
+  `ControllerPollIntervalMs` of exactly 16 must become 15 while a deliberately
+  chosen 20 is left alone. The companion detects these by RANGE rather than by
+  schema version, so run it twice and confirm the value is not converted again.
+- **Settings -> Controller & Cursor:** the speed row is a slider with its value
+  beside the track. Drag it, save, reopen, and confirm both the track and the
+  number show the saved value on open.
+- **Drive the slider with the controller.** This window navigates with ordinary
+  arrow keys rather than the shell's field-aware adjust path, so the movement
+  comes from the track's own line size -- confirm each press moves 100 px/s and
+  that the readout and the unsaved-changes state both update.
+- **Quick Menu -> Controller Mouse Speed** adjusts in steps of 200 px/s and reads
+  e.g. `3200 PX/S`.
+- **Move the pointer over a Settings dialog** (a file picker or message box). The
+  Settings surface owns the right stick there, and it uses the same movement
+  path with no fast modifier.
+
 ## Controller input backend
 
 Leave **Input backend** on **Auto**. It reads RawInput inside Xbox FSE and

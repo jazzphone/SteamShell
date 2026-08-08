@@ -125,9 +125,9 @@ global LastHeartbeatStamp := ""
 global RawInputStaleMs := 5000
 global ControllerIndex := 0
 global ActiveControllerIndex := -1
-global ControllerPollIntervalMs := 16
+global ControllerPollIntervalMs := 15
 global ControllerDeadzone := 3000
-global ControllerMouseSpeed := 100
+global ControllerMouseSpeed := 3200
 global ControllerMouseFastMultiplier := 2.5
 global ControllerScrollIntervalMs := 80
 global ControllerScrollStep := 1
@@ -536,9 +536,9 @@ DefaultSettings() {
             "RawInputProbe", "false",
             "RawInputStaleMs", 5000,
             "ControllerIndex", 0,
-            "ControllerPollIntervalMs", 16,
+            "ControllerPollIntervalMs", 15,
             "ControllerDeadzone", 3000,
-            "ControllerMouseSpeed", 100,
+            "ControllerMouseSpeed", 3200,
             "ControllerMouseFastMultiplier", 2.5,
             "ControllerScrollIntervalMs", 80,
             "ControllerScrollStep", 1,
@@ -671,6 +671,8 @@ EnsureSettingsFile() {
     RetireQuickControlSettings()
     RetireDesktopAutoMouseSettings()
     MigrateRtssPresetFrameCap()
+    MigrateControllerMouseSpeedToPixelsPerSecond()
+    MigrateControllerPollInterval()
     MigrateSectionsToStandaloneLayout()
     defaults := DefaultSettings()
     for section, values in defaults {
@@ -704,6 +706,53 @@ EnsureSettingsFile() {
 ; Schema 8 splits the former fallback cap into a named Preset and a separately
 ; retained Custom value. Copy first, before DefaultSettings adds the missing
 ; PresetFrameCap, so an existing user value remains the configured preset.
+; ControllerMouseSpeed changed UNIT: it was pixels per poll tick, it is now pixels
+; per second. A stored 100 therefore means a cursor that crawls rather than one
+; that is unchanged, so every value migrates and not just the old default.
+;
+; x32, because 32 Hz is the rate the poll ACTUALLY ran at. Windows quantises
+; timers to about 15.625 ms and nothing raised the resolution, so the old 16 ms
+; interval -- 0.375 ms past a boundary -- could not fire before 31.25 ms. The
+; conversion preserves the speed the user has been living with rather than the
+; speed the setting claimed; those differed by a factor of two.
+;
+; Detected by RANGE, not by a schema version, matching the other migrations here.
+; The old setting was clamped to 1..300 and the new one starts at 200, so any
+; value at or below 300 is an old one. A converted value is at least 6400 and can
+; never be re-converted.
+MigrateControllerMouseSpeedToPixelsPerSecond() {
+    global IniPath
+    marker := "__STEAMSHELL_XFE_MISSING__"
+    stored := marker
+    try stored := IniRead(IniPath, "Controller", "ControllerMouseSpeed", marker)
+    if (stored = marker)
+        return
+    value := ToInt(CleanIniValue(stored, "100"), 100)
+    if (value <= 0 || value > 300)
+        return
+    try IniWrite(ClampInt(value * 32, 200, 12000) "",
+        IniPath, "Controller", "ControllerMouseSpeed")
+}
+
+
+; The interval that caused the jitter. 16 sat 0.375 ms past a 15.625 ms timer
+; boundary, so it waited for the next one and halved the poll rate; 15 fires on
+; every boundary. Only the exact former default moves -- a deliberately chosen
+; interval is a deliberate choice -- and this is only safe now that cursor speed
+; is scaled by measured elapsed time rather than by the tick.
+MigrateControllerPollInterval() {
+    global IniPath
+    marker := "__STEAMSHELL_XFE_MISSING__"
+    stored := marker
+    try stored := IniRead(IniPath, "Controller", "ControllerPollIntervalMs", marker)
+    if (stored = marker)
+        return
+    if (ToInt(CleanIniValue(stored, "15"), 15) != 16)
+        return
+    try IniWrite("15", IniPath, "Controller", "ControllerPollIntervalMs")
+}
+
+
 MigrateRtssPresetFrameCap() {
     global IniPath
     marker := "__STEAMSHELL_XFE_MISSING__"
@@ -983,14 +1032,14 @@ LoadSettings() {
     EnableRawInputProbe := ReadBool("Controller", "RawInputProbe", false)
     RawInputStaleMs := ReadInt("Controller", "RawInputStaleMs", 5000, 500, 60000)
     ControllerIndex := ReadInt("Controller", "ControllerIndex", 0, 0, 3)
-    ControllerPollIntervalMs := ReadInt("Controller", "ControllerPollIntervalMs", 16, 8, 100)
+    ControllerPollIntervalMs := ReadInt("Controller", "ControllerPollIntervalMs", 15, 8, 100)
     ControllerDeadzone := ReadInt("Controller", "ControllerDeadzone", 3000, 0, 32000)
     ; Bounds match standalone's deliberately: this is one setting, and the Quick
     ; Menu row that steps it is shared. A range the row can leave -- or one the
     ; row cannot reach -- makes the row lie, showing a value the next reload
     ; clamps away. Widened rather than narrowed so no configured value is ever
     ; silently reduced.
-    ControllerMouseSpeed := ReadInt("Controller", "ControllerMouseSpeed", 100, 1, 300)
+    ControllerMouseSpeed := ReadInt("Controller", "ControllerMouseSpeed", 3200, 200, 12000)
     ControllerMouseFastMultiplier := ReadNumber("Controller", "ControllerMouseFastMultiplier", 2.5, 1, 6)
     ControllerScrollIntervalMs := ReadInt("Controller", "ControllerScrollIntervalMs", 80, 20, 500)
     ControllerScrollStep := ReadInt("Controller", "ControllerScrollStep", 1, 1, 10)
@@ -6220,6 +6269,11 @@ SettingsPopulate() {
     ; was read as a number after its row became a dropdown, and two settings were
     ; read here with bounds their own LoadSettings had stopped using.
     SettingsPopulateFields()
+    ; Sliders carry a separate value readout, and assigning .Value in code does
+    ; NOT raise Change -- only the user dragging the track does. Without this the
+    ; number beside a slider would show the value it was BUILT with while the
+    ; track sits at the loaded one.
+    SettingsRefreshSliderReadouts()
     ; Once the values are in, so the window OPENS in the right state. Wiring the
     ; drivers alone would only grey the dependent rows after the user touched a
     ; driver, leaving the first view of the window showing rows the saved mode
