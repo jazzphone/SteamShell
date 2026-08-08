@@ -70,12 +70,12 @@ $commonSource = Get-Content -LiteralPath $commonSourcePath -Raw
 $sample = Get-Content -LiteralPath $samplePath -Raw
 
 Assert-True (
-    $source -match '@Ahk2Exe-SetVersion 1\.9\.9\.0' -and
-    $source -match 'SteamShellVersion\s*:=\s*"1\.9\.9"' -and
-    $helperSource -match '@Ahk2Exe-SetVersion 1\.9\.9\.4' -and
-    $helperSource -match 'HelperVersion\s*:=\s*"1\.9\.9"' -and
-    $source -match 'ElevatedHelperExpectedVersion\s*:=\s*"1\.9\.9\.4"') (
-    "SteamShell 1.9.9 main/helper version metadata is inconsistent.")
+    $source -match '@Ahk2Exe-SetVersion 2\.0\.0\.0' -and
+    $source -match 'SteamShellVersion\s*:=\s*"2\.0\.0"' -and
+    $helperSource -match '@Ahk2Exe-SetVersion 2\.0\.0\.1' -and
+    $helperSource -match 'HelperVersion\s*:=\s*"2\.0\.0"' -and
+    $source -match 'ElevatedHelperExpectedVersion\s*:=\s*"2\.0\.0\.1"') (
+    "SteamShell 2.0.0 main/helper version metadata is inconsistent.")
 $buildScript = Get-Content -LiteralPath $buildScriptPath -Raw
 
 # The helper version is DERIVED from the helper source, not written down a fourth

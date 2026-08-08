@@ -25,7 +25,7 @@
 #Include SteamShell-Shared.ahk
 ;@Ahk2Exe-SetName SteamShell XFE Companion
 ;@Ahk2Exe-SetDescription Controller-first companion for Xbox Full Screen Experience
-;@Ahk2Exe-SetVersion 1.9.9.0
+;@Ahk2Exe-SetVersion 2.0.0.0
 Persistent
 SendMode "Input"
 SetTitleMatchMode 2
@@ -46,7 +46,7 @@ SetTitleMatchMode 2
 ; hotkey thread too. MouseMove(..., "R") is relative and unaffected.
 CoordMode "Mouse", "Screen"
 
-global AppVersion := "1.9.9"
+global AppVersion := "2.0.0"
 global SettingsSchemaVersion := 18
 global IniPath := A_ScriptDir "\SteamShell-XFE.ini"
 global LogPath := A_ScriptDir "\SteamShell-XFE.log"
@@ -325,7 +325,7 @@ global ElevatedHelperLastError := "Not started"
 ; Must match SteamShell.ahk. One payload, embedded once in SteamShell.exe and
 ; deployed by one Setup Assistant, so a mismatch here means the two trees were
 ; built from different commits.
-global ElevatedHelperExpectedVersion := "1.9.9.4"
+global ElevatedHelperExpectedVersion := "2.0.0.1"
 ; Recorded once at startup from this process's own token. XFE never re-launches
 ; itself across the elevation boundary, so unlike standalone there is no
 ; pre-elevation identity to carry forward -- see InitializeExpectedInteractiveIdentity

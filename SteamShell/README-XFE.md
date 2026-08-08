@@ -4,11 +4,11 @@ SteamShell XFE is a portable controller-utility companion for Windows Xbox Full
 Screen Experience. It is separate from the standalone SteamShell application
 and does not replace, install, or modify the Windows shell.
 
-The working tree is **1.9.9**, locked with standalone SteamShell in the
-self-contained `releases/1.9.9` bundle. Controller input, the Quick Menu, Settings,
+The working tree is **2.0.0**, locked with standalone SteamShell in the
+self-contained `releases/2.0.0` bundle. Controller input, the Quick Menu, Settings,
 display/HDR controls, RTSS integration, and notification-area control work inside
 Xbox FSE. The companion remains deliberately separate from the SteamShell
-Windows-shell application, whose working tree is also 1.9.9.
+Windows-shell application, whose working tree is also 2.0.0.
 
 1.9.9 advances to settings schema 9 and consolidates the validated 0.1.21 feature
 line into the coordinated pre-2.0 version. Every companion-owned settings/editor
@@ -66,8 +66,8 @@ controls persist only for the open menu session; closing destroys the HWND so
 DWM cannot revive stale child surfaces after a fullscreen transition. The
 renderer and configurable Quick Menu accent were introduced in 0.1.17 with
 settings schema 4. The 0.1.18 changes advanced to schema 5 for the audit
-hardening described above; 1.9.9 shipped schema 9 and the post-1.9.9 working
-tree is at schema 16. Schema 10 added the opt-in
+hardening described above; 1.9.9 shipped schema 9 and the 2.0.0 tree is at
+schema 18. Schema 10 added the opt-in
 `[RTSS] EnableElevatedFrameCapWrites` described under *Elevation*; schema 11
 retired the automatic-mouse exclusion mode, described under *Automatic mouse
 mode*; schema 12 moved the settings XFE shares with standalone SteamShell into
@@ -75,12 +75,18 @@ the sections standalone keeps them in, so the same setting is in the same place
 in both products; schema 13 did the same for cursor auto-hide and pointer
 parking, which both products had under different names.
 
-Schemas 14 to 16 are additions rather than moves, so nothing relocates. Schema 14
+Schemas 14 to 18 are additions rather than moves, so nothing relocates. Schema 14
 added the `[Assist]` scoring keys that decide which window is the game; schema 15
 added a `[Logging]` section, which this product did not have at all; schema 16
-added `[Setup]`, the record of what this installation is and where it lives.
-Nothing about behaviour changed in any of them, and existing files are migrated
-on first run. Use the locked release
+added `[Setup]`, the record of what this installation is and where it lives;
+schemas 17 and 18 added the elevated RTSS helper's opt-in keys and the companion's
+heartbeat interval. Nothing about behaviour changed in any of them, and existing
+files are migrated on first run.
+
+`ControllerMouseSpeed` changed UNIT in 2.0.0 — pixels per second rather than
+pixels per poll tick — and that conversion is *not* driven by the schema number.
+It is detected by range, like this product's other migrations, because a stored
+value of 100 is unambiguously an old one: the new setting starts at 200. Use the locked release
 directory when reproducibility matters.
 
 ### Where settings live, and why the INI is now commented
@@ -1211,7 +1217,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Build-SteamShell.ps1
 
 It runs both validators, then validates each source with the installed 64-bit
 AutoHotkey v2 interpreter before compiling it. The companion is compiled to
-`build\SteamShell-XFE.exe` for embedding and verified at file version 1.9.9.0,
+`build\SteamShell-XFE.exe` for embedding and verified at file version 2.0.0.0,
 and `assets\SteamShell-XFE.ico` is applied automatically. A copy is left in
 `dist\SteamShell-XFE.exe` for developing the companion — pass `-NoXfeDist` to
 skip it.

@@ -27,10 +27,10 @@ The validated pre-rewrite 1.4 source baseline is preserved in
 `../releases/1.6.0`. The 1.7.0 source is preserved in `../releases/1.7.0`.
 
 The 1.7.1 source is preserved in `../releases/1.7.1`. This tree is the
-SteamShell **1.9.9** source, locked together with XFE in
-`../releases/1.9.9`; 1.7.3 remains the
+SteamShell **2.0.0** source, locked together with XFE in
+`../releases/2.0.0`; 1.7.3 remains the
 pre-rendering-rewrite revert point. The feature-by-feature XFE port decisions are recorded in
-`XFE_PARITY_NOTES.md`. The current settings schema is 20.
+`XFE_PARITY_NOTES.md`. The current settings schema is 23.
 
 ## Settings upgrades
 
@@ -261,7 +261,7 @@ the uninstaller rather than the product.
 
 ## Elevated window helper
 
-SteamShell 1.9.9 uses two privilege levels. `SteamShell.exe`—including Quick
+SteamShell 2.0.0 uses two privilege levels. `SteamShell.exe`—including Quick
 Menu, Settings, recovery, Steam launch, and every ordinary child—runs at normal
 integrity. This lets Steam observe that a normal SteamShell window took the
 foreground, preventing controller input from continuing into Big Picture behind
@@ -337,7 +337,7 @@ can stamp onto any file, so without these checks a writable helper directory
 would be a way to have SteamShell hand arbitrary code an administrator token.
 
 If Health Check reports **Elevated helper protection** as failed — most likely
-because the folder was moved by hand or the helper predates 1.9.9.4 — start
+because the folder was moved by hand or the helper predates 2.0.0.1 — start
 SteamShell with **Run as administrator** and apply Setup again to re-secure it.
 
 ### Controller behavior over administrator windows
@@ -921,10 +921,10 @@ calculation invariants without starting the normal shell session.
 `Build-SteamShell.ps1` is the only build script and produces all three
 binaries. It runs **both** validators — `Validate-SteamShell.ps1` and
 `Validate-SteamShell-XFE.ps1` — then validates and compiles
-`SteamShell-Helper.ahk` and verifies helper version 1.9.9.4, validates and
-compiles `SteamShell-XFE.ahk` and verifies version 1.9.9.0, and finally
+`SteamShell-Helper.ahk` and verifies helper version 2.0.0.1, validates and
+compiles `SteamShell-XFE.ahk` and verifies version 2.0.0.0, and finally
 validates and compiles `SteamShell.ahk` with both payloads embedded, verifying
-the published executable reports 1.9.9.0.
+the published executable reports 2.0.0.0.
 
 Everything it needs is in this folder, which is what makes locking a release a
 copy of one directory.

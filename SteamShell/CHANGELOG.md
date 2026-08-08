@@ -1,6 +1,54 @@
 # SteamShell changelog
 
-## Unreleased — the cursor stops ticking along the path
+## 2.0.0 — 2026-08-08
+
+The release that followed the 1.9.9 architecture checkpoint. Two themes run
+through all of it.
+
+**Consolidation stopped being a goal and became a mechanism.** Both products now
+compile one `SteamShell-Shared.ahk` and one `SteamShell-Common.ahk`, the manifests
+are checked exactly, and the duplicate gate runs at 0.45 rather than 0.75 — a
+threshold that had been hiding real drift, because two copies of one routine drift
+apart in *structure* as well as text, so the longer a duplicate goes unmerged the
+lower it scores.
+
+**Several defects were in code that was already shared, or already documented.**
+The controller cursor stepped along its path in all three programs because
+`ApplyControllerMouseMove` was shared *and wrong*; the shell scored a second-monitor
+game against the primary display because a comment in the other tree asserted it
+could; the shell had no sleep-resume path because all of it had been written in the
+companion and never called. A duplication gate proves two copies agree. It says
+nothing about whether they are right — and a divergence recorded in prose is not
+evidence that anyone decided it.
+
+Highlights, in rough order of what a user will notice:
+
+- **The controller cursor is smooth.** Speed is a velocity scaled by measured
+  elapsed time rather than a distance per poll tick, the poll fires on every
+  Windows timer boundary instead of every other one, and the sub-pixel remainder
+  is carried between ticks. Speed itself is unchanged.
+- **Controller mouse speed is a slider** with its range visible, replacing an edit
+  box that required knowing what a reasonable number was.
+- **A fullscreen game on a second monitor is detected correctly** by the shell.
+- **The shell recovers controller input after sleep**, through the power broadcast
+  and a wall-clock gap check that does not depend on being notified — which
+  matters on a handheld, where modern standby does not reliably deliver the
+  broadcast.
+- **Re-arm controller input** on `Ctrl+Alt+Shift+I` and in Settings → Advanced,
+  in both products.
+- **Batched controller reports are no longer dropped**, which on a change-only pad
+  meant presses that never arrived at all.
+- **The XInput sweep no longer costs 250 calls a second** with nothing attached.
+- The controller learner, the Settings window, Setup Assistant, uninstall, the
+  installation record, and the RTSS cluster all had defects found and fixed; each
+  is described in its own section below.
+
+Settings schema is **23**. Existing files upgrade in place, including the
+`ControllerMouseSpeed` unit change, which converts every stored value rather than
+only the former default.
+
+
+### the cursor stops ticking along the path
 
 Controller mouse movement was jittery in a way that had been there since the
 beginning, and it was a timing bug rather than a mapping one. Speed and
@@ -71,7 +119,7 @@ neither product needed a new save path. Two details it does need:
   in the shell's adjust path — correct when the setting was 1–300 — and would have
   needed 2360 presses to cross the new 200–12000 range.
 
-## Unreleased — the multi-monitor scorer, resume recovery in the shell, and the gate that could not see either
+### the multi-monitor scorer, resume recovery in the shell, and the gate that could not see either
 
 A review pass that started on correctness and ended up moving four functions into
 the shared file. Everything below is in **both** products unless it says otherwise.
@@ -212,7 +260,7 @@ The numbers are gone from the prose rather than corrected a third time, and
 `Assert-SharedParity` now fails when the seam list changes size without the
 expectation beside it being updated.
 
-## Unreleased — the controller learner, audited end to end
+### the controller learner, audited end to end
 
 Found while mapping an 8BitDo Ultimate 2 in DirectInput mode, where the gyro is
 live and streams six 16-bit motion axes at about 1 kHz.
@@ -264,7 +312,7 @@ keeps gyro drift out of the button steps — but a button held during that
 countdown was then undetectable with nothing anywhere saying why. The log names
 the offsets it masked, and a step that sees the press but has it masked says so.
 
-## Unreleased — five defects the settings window could not have shown you
+### five defects the settings window could not have shown you
 
 **The RTSS frame limiter did not survive a reboot, sometimes.** The frame cap is
 two mechanisms with two privilege requirements: the FPS is a property of RTSS's
@@ -306,7 +354,7 @@ frame-limiter control modes — and `SettingsProductWireDependency` was an empty
 body there, so a shortcut could be typed and saved into a field the selected mode
 ignores.
 
-## Unreleased — the View button's own action, and a controller that stays found
+### the View button's own action, and a controller that stays found
 
 **The View/Back tap and hold actions are in both products.** Tap with Steam in
 front opens the Steam menu, hold opens Quick Access; in a game, tap does nothing
@@ -325,7 +373,7 @@ was to change Controller Index in Settings using the controller that had just
 stopped working. `XInputResolveController` is shared now: last slot that answered,
 then the configured one, then the rest, logging the move.
 
-## Unreleased — settings pages that line up
+### settings pages that line up
 
 The shell gained a **Steam** page. It read the whole `[Steam]` section and offered
 none of it, so the rows the shared table defines for that page were built for a
@@ -350,7 +398,7 @@ four shell-registration actions lead the grid instead of sitting at rows four an
 five of ten — "Permanently Restore Explorer" is the escape hatch for a program
 that has taken over the Windows shell, and it was the tenth of nineteen buttons.
 
-## Unreleased — nine more functions defined once
+### nine more functions defined once
 
 **To Shared:** `LogLine`, `RevealWindow`, `QuickMenuNormalizeSelection`,
 `InitDefaultControllerMappings`, `XInputResolveController`, `ViewButtonReleased`,
@@ -380,7 +428,7 @@ read a global it does not declare into both trees" — that file declares
 `MouseWatchHoldsCursorVisible` entry described a shell with no pointer-driven
 window.
 
-## Unreleased — the harness catches what the build was catching
+### the harness catches what the build was catching
 
 Both harnesses disagreed about a gate, which the replay's own header warns is
 worse than no gate: the PowerShell escape scan had no Python counterpart, so
@@ -404,7 +452,7 @@ The companion's page count derives from its category table. The Advanced button
 grid is asserted to go through the shared row builder rather than to contain the
 literals 255, 610 and 335.
 
-## Unreleased — the RTSS cluster, the settings scrollbar and the Quick Menu title are defined once
+### the RTSS cluster, the settings scrollbar and the Quick Menu title are defined once
 
 Nine functions moved, about 330 lines that existed twice.
 
@@ -453,7 +501,7 @@ required to differ in content), `SendSteamOverlayChord` (the companion's
 `CompanionDisabled` guard, a concept the shell does not have at all) and
 `QuickMenuGoBack` (different page stacks).
 
-## Unreleased — a portable installation can be upgraded in place
+### a portable installation can be upgraded in place
 
 Reported from a portable install with SteamShell and its helper in one folder:
 Setup Assistant recognised it as a Standalone installation but did not know where
@@ -490,7 +538,7 @@ Verified against six cases including a portable install whose only record is the
 Winlogon value, a portable install that has been moved, and a managed install
 whose executable has been deleted.
 
-## Unreleased — the companion's tray icon survives an Explorer restart
+### the companion's tray icon survives an Explorer restart
 
 The menus differ; the machinery around them did not. `ApplyTrayIconImage`,
 `RegisterTaskbarCreatedListener`, `TaskbarCreatedHandler`, `ReassertTrayIcon`,
@@ -524,7 +572,7 @@ still comes from both auto-mouse flags, that the moved-installation entry is
 still offered, that the ordering still starts with the Quick Menu — rather than
 at the imperative form it happened to be written in.
 
-## Unreleased — a moved installation offers Setup Assistant, and never demands it
+### a moved installation offers Setup Assistant, and never demands it
 
 The verdict is now surfaced where a user can act on it. In SteamShell it adds a
 tray entry, "Installation moved — open Setup Assistant", above everything else in
@@ -557,7 +605,7 @@ Two globals had to be declared at the new call sites. Left undeclared they would
 have resolved to empty locals, and an empty live path compares unequal to a
 recorded one — so a correct installation would have reported itself as moved.
 
-## Unreleased — one verdict on the installation, reported in Health Check
+### one verdict on the installation, reported in Health Check
 
 `SteamShellInstallationVerdict` classifies what the record says about the running
 installation as `consistent`, `new`, `moved` or `older`, and
@@ -584,7 +632,7 @@ already gates on `SetupState`, `SetupVersion` and `Product` and has done for som
 time -- that is existing, deliberate behaviour. What stays advisory is the
 comparison of the recorded paths and mode against reality.
 
-## Unreleased — the installation record can now contradict the installation
+### the installation record can now contradict the installation
 
 Setup already recorded what an installation is, in two places. The registry key
 carries `Product`, `InstalledPath`, `DataPath`, `InstallationMode`,
@@ -622,7 +670,7 @@ What already worked and was left alone: startup trusts the registry's `DataPath`
 only when `InstalledPath` matches the running executable, so a portable or test
 copy cannot adopt an installed shell's settings. That check was already right.
 
-## Unreleased — the companion can see a minimized game, so its last stand-in is gone
+### the companion can see a minimized game, so its last stand-in is gone
 
 Found by auditing the 27 seam functions for the pattern behind the score-floor
 mistake: a weaker mechanism standing in for one the other product has, wearing a
@@ -658,7 +706,7 @@ holds: a half-written settings file on the Windows shell is a machine that boots
 into nothing, where for an ordinary application it is lost settings. The
 consequence genuinely differs, which is what separates a decision from drift.
 
-## Unreleased — the companion can now say why it chose a window, and its Health Check grew up
+### the companion can now say why it chose a window, and its Health Check grew up
 
 Two pieces of the shell that the companion should always have had.
 
@@ -725,7 +773,7 @@ An assertion pinning two Health Check sentences was repointed at their
 must remain distinct rows with distinct statuses. That claim survives rewording;
 the prose did not.
 
-## Unreleased — the rest of the duplication, and a check so it does not come back
+### the rest of the duplication, and a check so it does not come back
 
 Continuing the triage. Every function that was structurally identical between the
 trees is now defined once: **zero remain at or above 0.90** once naming and
@@ -765,7 +813,7 @@ Both functions were moved by script with a single substitution — the notify na
 — rather than retyped, after hand-merging introduced two regressions in the
 previous change.
 
-## Unreleased — five functions were duplicated for no reason, and one hid a leak
+### five functions were duplicated for no reason, and one hid a leak
 
 A claim in `XFE_PARITY_NOTES.md` — that the functions differing between the trees
 are "real divergence, not drift" — was repeated without being tested. Testing it
@@ -811,7 +859,7 @@ sent chords without releasing held modifiers, and `Trim(shortcut) = ""` in place
 of `shortcut = ""`. Both pins were written against the original shape and did
 their job.
 
-## Unreleased — both products now decide "which window is the game" the same way
+### both products now decide "which window is the game" the same way
 
 The arbiter moved to `SteamShell-Common.ahk` and both trees call it.
 
@@ -858,7 +906,7 @@ defaulting to the shell's values so both products choose the same window. The
 foreground observation is retained below the scorer as a last resort, for the
 case where nothing clears the threshold.
 
-## Unreleased — three RTSS defects the companion did not have
+### three RTSS defects the companion did not have
 
 Found by diffing the RTSS cluster against SteamShell-XFE ahead of sharing it. The
 two trees call the same DLL through the same path, and most of what separates
@@ -891,7 +939,7 @@ of the three cases occurred: the helper tried and failed, no helper was running,
 or elevated writes are switched off. The old text asserted "the elevated helper
 could not apply it either", which became untrue once the write was gated.
 
-## Unreleased — Setup Assistant showed both products' sign-in options as ticked
+### Setup Assistant showed both products' sign-in options as ticked
 
 Section 4 offered "Register the selected SteamShell.exe as the Windows shell"
 and "Start SteamShell-XFE automatically at sign-in" both ticked at once, even
@@ -914,7 +962,7 @@ Apply was never affected. It branches on the selected product before reading
 either value, so the irrelevant checkbox could not reach an install — this was
 what the window showed, not what it did.
 
-## Unreleased — uninstall had no way forward when detection failed
+### uninstall had no way forward when detection failed
 
 Setup Assistant answered a failed detection with "No installed SteamShell or
 SteamShell-XFE was detected on this PC. Nothing was changed." and stopped there.
@@ -960,7 +1008,7 @@ written that way and only the AutoHotkey parser rejected it. A `(` line that
 closes on the same line is an expression and still passes, as does a deliberate
 continuation section with or without options.
 
-## Unreleased — uninstall left the machine looking installed
+### uninstall left the machine looking installed
 
 Reported from a real machine: Setup Assistant kept offering to remove
 SteamShell-XFE on a PC where only the shell was installed.
@@ -1034,7 +1082,7 @@ Two real gaps, found while checking the above:
 Every dialog in the tree is now owned-or-topmost, and a new assertion fixes the
 number of raw `MsgBox` calls at five, so a sixth way to open one fails the build.
 
-## Unreleased — the two shelved items, taken off the shelf
+### the two shelved items, taken off the shelf
 
 ### Typed settings readers, and a bug class that can no longer be written
 
@@ -1112,7 +1160,7 @@ Two assertions per validator turned out to have a **comment inside the pattern
 expression**, which makes them invisible to any matcher working on raw text.
 Those needed hand edits.
 
-## Unreleased — four functions that were one function under two names
+### four functions that were one function under two names
 
 The parity checks match on **name** first, so a function copied into both trees
 and then renamed in one of them is invisible to every check this project has.
@@ -1156,7 +1204,7 @@ third time in this work — and this time the offline replay caught them
 immediately rather than a Windows run finding them. **951 regex assertions, 2
 count assertions, 0 failures, 0 harmful vacuity.**
 
-## Unreleased — second Windows run: a count, and an assertion that had gone quiet
+### second Windows run: a count, and an assertion that had gone quiet
 
 One failure, and it found two problems in the same assertion — one loud, one
 silent.
@@ -1194,7 +1242,7 @@ helper must not define this at all" — are correctly left alone; there are six,
 and they are doing their job. Harmful vacuity is now **zero**, where before this
 fix it was one.
 
-## Unreleased — first Windows run of this work, and what it caught
+### first Windows run of this work, and what it caught
 
 `Run-SteamShellValidation.cmd` on Windows PowerShell 5.1 with AutoHotkey 2.0.26.
 Both syntax checks passed and XFE's validator passed; standalone's failed on
@@ -1236,7 +1284,7 @@ Everything else in the run behaved correctly: the negative tests reported
 **SKIPPED** rather than PASS, because section 5 checks for a green baseline
 before breaking anything, and `current/` was left untouched.
 
-## Unreleased — consolidation by intent, not by byte-identity
+### consolidation by intent, not by byte-identity
 
 `XFE_PARITY_NOTES.md` has long argued that *"how many functions are
 byte-identical is a poor proxy for how much these trees benefit each other."*
@@ -1377,7 +1425,7 @@ product. Those are feature ports rather than consolidation and are recorded in
 `QuickMenuActivateSelected` (0.34) and `LoadControllerMappings` (0.24) remain
 genuinely different and are the reason there are two programs.
 
-## Unreleased — XFE settings: a reader that survives being documented
+### XFE settings: a reader that survives being documented
 
 **XFE's INI could not carry comments, so it did not have any.** Its four typed
 readers took the value as everything after the `=`. `EnableAutoMouseMode=true  ;
@@ -1436,7 +1484,7 @@ turned it off. Caught by reading the table back rather than by any check, which
 is the same lesson this changelog keeps recording: a mechanical edit needs its
 result inspected, not just its exit status.
 
-## Unreleased — audit fixes: one answer per question, and checks that can fail
+### audit fixes: one answer per question, and checks that can fail
 
 Six defects, found by auditing the working tree rather than by any check. Four
 of them were sitting behind a check that was written to catch exactly that
@@ -1578,7 +1626,7 @@ PowerShell. That round trip, not the edit, is the cost.
 "73 deliberate". Those came from a narrower and undocumented definition of
 "names a function"; the table above states its own.
 
-## Unreleased — one shared definition, all three programs
+### one shared definition, all three programs
 
 **No UAC prompt on any installation mode.**
 
@@ -1974,7 +2022,7 @@ Nothing moved changed. Verified mechanically: no name collides across the four
 files, the common half references nothing in the coupled half, both manifests
 match their files exactly, and braces balance in both.
 
-## Unreleased — Setup could not replace a file that was running
+### Setup could not replace a file that was running
 
 **Fixed, and it was not an upgrade inconvenience — it was a hard blocker.**
 
@@ -2054,7 +2102,7 @@ removing the companion stop, moving the helper stop after the harden, restarting
 with `Run` instead of the desktop shell, and dropping the Win32 32 case all fail
 the build. **None of this has executed on Windows.**
 
-## Unreleased — from hardware: KEEP, automatic mouse, and a stale instruction
+### from hardware: KEEP, automatic mouse, and a stale instruction
 
 Three reports, all found by using the programs rather than by any assertion.
 
@@ -2141,7 +2189,7 @@ without a keyboard, so every early-return reset path — around eight in
 from a normal window into an elevated one changes which process owns the held
 button mid-gesture.
 
-## Unreleased — one folder, one build script, one published executable
+### one folder, one build script, one published executable
 
 Structural only. No runtime behaviour changed; every file that moved kept its
 contents.
@@ -2197,7 +2245,7 @@ valuable safety property this project has, under *Merging the runtimes entirely*
 Folders are not runtimes.
 
 
-## Unreleased — an opt-in elevated RTSS helper for XFE, and a scrolling XFE Settings window
+### an opt-in elevated RTSS helper for XFE, and a scrolling XFE Settings window
 
 Validated by `Run-SteamShellValidation.cmd`? **Not yet — see the note at the end
 of this entry.** No behaviour below has executed; both `WINDOWS_TEST_CHECKLIST.md`
@@ -2326,7 +2374,7 @@ sections 5b/5c of `Run-SteamShellValidation.ps1` were unchanged by this work.
   matched nothing and the rule would have passed while saying nothing about the
   new elevation. Rewritten to enumerate the two permitted forms.
 
-## The XFE Settings window now flows and scrolls
+### The XFE Settings window now flows and scrolls
 
 Separate from the helper work above, and applied to `SteamShell-XFE.ahk` only.
 
@@ -2442,7 +2490,7 @@ be re-run.
 
 A passing build still proves nothing about behaviour.
 
-## Unreleased — post-1.9.9 helper hardening
+### post-1.9.9 helper hardening
 
 Validated end to end by `Run-SteamShellValidation.cmd` on Windows PowerShell 5.1
 with AutoHotkey 2.0.26: syntax, both static validators, both builds, and the

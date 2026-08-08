@@ -18,8 +18,8 @@
 #Include SteamShell-Shared.ahk
 ;@Ahk2Exe-SetName SteamShell
 ;@Ahk2Exe-SetDescription Steam Big Picture living-room Windows shell
-;@Ahk2Exe-SetVersion 1.9.9.0
-global SteamShellVersion := "1.9.9"
+;@Ahk2Exe-SetVersion 2.0.0.0
+global SteamShellVersion := "2.0.0"
 ; Declared `global` like every other script-scope variable here. Without it
 ; these are ordinary globals rather than super-globals, so a function that
 ; reads them without its own `global` declaration would silently get an empty
@@ -91,11 +91,11 @@ global ElevatedHelperPath := ""
 global ElevatedHelperPid := 0
 global ElevatedHelperAvailable := false
 global ElevatedHelperLastError := "Not started"
-global ElevatedHelperExpectedVersion := "1.9.9.4"
+global ElevatedHelperExpectedVersion := "2.0.0.1"
 ; SteamShell.exe installs either product, so it embeds the XFE companion the same
 ; way it embeds the elevated helper. "Standalone" replaces the Windows shell;
 ; "XFE" runs alongside Xbox Full Screen Experience at normal integrity.
-global XfeExpectedVersion := "1.9.9.0"
+global XfeExpectedVersion := "2.0.0.0"
 global SteamShellProduct := "Standalone"
 global ElevatedGeometryEventHandle := 0
 ; Publishes AutoMouseModeActive() to the elevated helper. See
