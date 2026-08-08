@@ -40,10 +40,60 @@ if ([string]::IsNullOrWhiteSpace($Root)) {
 # copy of this directory and nothing else.
 $projectDir = Join-Path $Root "SteamShell"
 $results = New-Object System.Collections.Generic.List[object]
+$runClock = [System.Diagnostics.Stopwatch]::StartNew()
+
+# Every step is timed, and the summary prints it.
+#
+# This run takes minutes, and until it was measured nobody could say which part.
+# The guesses available from the log alone -- the assertion count, the compiler,
+# the network -- point at three different fixes, and cutting checks to solve a
+# problem caused by running them repeatedly would have removed coverage and left
+# the wall time where it was. A number per step costs nothing and settles it.
+#
+# Start-Step rather than measuring inside Add-Result, because several
+# steps do work (copying a tree, locking a file) that belongs in their time and
+# happens before there is a result to record.
+$script:stepClock = $null
+function Start-Step { $script:stepClock = [System.Diagnostics.Stopwatch]::StartNew() }
+function Get-StepSeconds {
+    if (-not $script:stepClock) { return $null }
+    $s = [Math]::Round($script:stepClock.Elapsed.TotalSeconds, 1)
+    $script:stepClock = $null
+    return $s
+}
 
 function Add-Result {
     param([string]$Step, [string]$Status, [string]$Detail = "")
-    $results.Add([PSCustomObject]@{ Step = $Step; Status = $Status; Detail = $Detail })
+    $results.Add([PSCustomObject]@{
+        Step = $Step
+        Status = $Status
+        Seconds = (Get-StepSeconds)
+        Detail = $Detail
+    })
+}
+
+# The project folder, minus what no build reads.
+#
+# This was Copy-Item -Recurse followed by deleting dist\ and build\ -- so the two
+# largest directories were pulled across the wire seven times and thrown away,
+# along with images\, which nothing in the build or either validator opens. On a
+# UNC root that was the single biggest cost in the harness.
+#
+# EXCLUSION BY NAME, and the list is short on purpose. The reason 5b and 5c copy
+# the WHOLE folder is that the trees used to reach outside their own directory
+# for an #Include, and forgetting to bring that file made every negative test
+# pass while proving nothing. Keep anything that could be read: assets\ holds the
+# icons the build passes to Ahk2Exe and the preview PNG the companion's validator
+# checks for, and extras\ is 20 KB.
+function Copy-ProjectForTest {
+    param([string]$Destination)
+    $skip = @("dist", "build", "images", "__pycache__")
+    New-Item -ItemType Directory -Path $Destination -Force | Out-Null
+    Get-ChildItem -LiteralPath $projectDir -Force |
+        Where-Object { $skip -notcontains $_.Name } |
+        ForEach-Object {
+            Copy-Item -LiteralPath $_.FullName -Destination $Destination -Recurse -Force
+        }
 }
 
 function Write-Section {
@@ -74,6 +124,7 @@ function Invoke-Native {
 
 # ---------------------------------------------------------------- 1. environment
 Write-Section "1. Environment"
+Start-Step
 
 Write-Host "PowerShell edition : $($PSVersionTable.PSEdition)"
 Write-Host "PowerShell version : $($PSVersionTable.PSVersion)"
@@ -117,6 +168,7 @@ $sources = @(
     @{ Name = "SteamShell-XFE.ahk"; Path = Join-Path $projectDir "SteamShell-XFE.ahk" }
 )
 foreach ($s in $sources) {
+    Start-Step
     Write-Host ""
     Write-Host "--- $($s.Name)"
     $r = Invoke-Native $ahk[0] @("/ErrorStdOut=UTF-8", "/Validate", "`"$($s.Path)`"")
@@ -142,6 +194,7 @@ $validators = @(
     @{ Name = "Validate-SteamShell-XFE.ps1"; Path = Join-Path $projectDir "Validate-SteamShell-XFE.ps1" }
 )
 foreach ($v in $validators) {
+    Start-Step
     Write-Host ""
     Write-Host "--- $($v.Name)"
     try {
@@ -204,6 +257,7 @@ $pythonChecks = @(
        What = "structural half of both validators, replayed without Windows" }
 )
 foreach ($c in $pythonChecks) {
+    Start-Step
     Write-Host ""
     Write-Host "--- $($c.Name)"
     if (-not $python) {
@@ -250,6 +304,7 @@ $builds = @(
 )
 $builtOutputs = New-Object System.Collections.Generic.List[object]
 foreach ($b in $builds) {
+    Start-Step
     Write-Host ""
     Write-Host "--- $($b.Name)"
     try {
@@ -295,6 +350,7 @@ try {
     # Both mechanisms returning non-zero is therefore the EXPECTED result here.
     # This stays in the harness so the assumption keeps being checked rather than
     # inherited -- a future PowerShell or AutoHotkey build may behave differently.
+    Start-Step
     $broken = Join-Path $temp "Broken.ahk"
     Copy-Item -LiteralPath (Join-Path $projectDir "SteamShell.ahk") -Destination $broken
     Add-Content -LiteralPath $broken -Value "`r`nthis is not valid autohotkey ][ {{{"
@@ -389,18 +445,29 @@ try {
         $skipNegative = $false
     }
 
+    # THE FIRST CASE KEEPS FULL VALIDATION; the rest skip it.
+    #
+    # Every case here injects a SYNTAX fault, and the static validators pass on it
+    # every time -- visible in any log: both print their summaries, then the
+    # AutoHotkey /Validate step rejects the file. So running them for all five
+    # proved nothing five times over. Running them for ONE still proves the thing
+    # worth proving, which is that a copied tree validates at all; the other four
+    # exercise the gate this section is named after.
+    $first = $true
     foreach ($sourceName in $(if ($skipNegative) { @() } else { $negativeSources })) {
+        Start-Step
         $label = [System.IO.Path]::GetFileNameWithoutExtension($sourceName)
         $brokenTree = Join-Path $temp ("BrokenTree-" + $label)
-        Copy-Item -LiteralPath $projectDir -Destination $brokenTree -Recurse
-        Remove-Item -LiteralPath (Join-Path $brokenTree "dist") -Recurse -Force -ErrorAction SilentlyContinue
-        Remove-Item -LiteralPath (Join-Path $brokenTree "build") -Recurse -Force -ErrorAction SilentlyContinue
+        Copy-ProjectForTest -Destination $brokenTree
         Add-Content -LiteralPath (Join-Path $brokenTree $sourceName) -Value "`r`nthis is not valid autohotkey ][ {{{"
 
         $threw = $false
         $message = ""
         $buildScript = Join-Path $brokenTree "Build-SteamShell.ps1"
-        try { & $buildScript | Out-Null }
+        $buildArgs = @{}
+        if (-not $first) { $buildArgs["SkipStaticValidation"] = $true }
+        $first = $false
+        try { & $buildScript @buildArgs | Out-Null }
         catch { $threw = $true; $message = $_.Exception.Message }
         $producedExe = Test-Path (Join-Path (Join-Path $brokenTree "dist") "SteamShell.exe")
 
@@ -466,12 +533,12 @@ try {
         }
     }
     foreach ($target in $(if ($skipNegative) { @() } else { $staleTargets })) {
+        Start-Step
         $label = [System.IO.Path]::GetFileNameWithoutExtension($target.ExeName) + "-" + $target.Directory
         $cleanTree = Join-Path $temp ("CleanTree-" + $label)
-        Copy-Item -LiteralPath $projectDir -Destination $cleanTree -Recurse
-        foreach ($scratch in @("dist", "build")) {
-            Remove-Item -LiteralPath (Join-Path $cleanTree $scratch) -Recurse -Force -ErrorAction SilentlyContinue
-        }
+        Copy-ProjectForTest -Destination $cleanTree
+        # Validation is skipped in both: 5b's first case already proved a copied
+        # tree validates, and what these two exercise is the freshness gate.
         $outDir = Join-Path $cleanTree $target.Directory
         New-Item -ItemType Directory -Path $outDir -Force | Out-Null
 
@@ -487,7 +554,7 @@ try {
         $staleThrew = $false
         $staleMessage = ""
         $buildScript = Join-Path $cleanTree "Build-SteamShell.ps1"
-        try { & $buildScript | Out-Null }
+        try { & $buildScript -SkipStaticValidation | Out-Null }
         catch { $staleThrew = $true; $staleMessage = $_.Exception.Message }
 
         $lock.Close(); $lock = $null
@@ -527,6 +594,7 @@ try {
 # --------------------------------------------------------- 6. transactional publish
 Write-Section "6. Publish the verified installer to root current"
 
+Start-Step
 $prePublishFailures = @($results | Where-Object { $_.Status -notin @("OK", "PASS") })
 if ($prePublishFailures.Count -gt 0 -or $builtOutputs.Count -ne $builds.Count) {
     Write-Host "SKIPPED - validation failed; the existing current folder was not changed." -ForegroundColor Yellow
@@ -585,7 +653,26 @@ if ($prePublishFailures.Count -gt 0 -or $builtOutputs.Count -ne $builds.Count) {
 
 # -------------------------------------------------------------------- 7. summary
 Write-Section "7. Summary"
-$results | Format-Table -AutoSize Step, Status, Detail
+$results | Format-Table -AutoSize Step, Status, @{
+    Name = "Secs"; Expression = { $_.Seconds }; Align = "right" }, Detail
+$measuredSum = (@($results | Where-Object { $null -ne $_.Seconds }) |
+    Measure-Object -Property Seconds -Sum).Sum
+if ($null -eq $measuredSum) { $measuredSum = 0 }
+# The two numbers differ on purpose. The gap is what happens between steps --
+# creating the temp directory, the section banners, and on a UNC root the
+# directory enumerations that precede the first Start-Step. A large gap is itself
+# a finding.
+Write-Host ("Total {0}s wall clock; {1}s of it attributed to a step above." -f
+    [Math]::Round($runClock.Elapsed.TotalSeconds, 1), [Math]::Round($measuredSum, 1))
+# THE SLOWEST STEP, named. A summary of eighteen rows hides the one that matters,
+# and knowing which it is decides whether the next thing to cut is a check, a
+# compile, or the network.
+$slowest = @($results | Where-Object { $null -ne $_.Seconds } |
+    Sort-Object -Property Seconds -Descending | Select-Object -First 3)
+if ($slowest.Count -gt 0) {
+    Write-Host ("Slowest: " + (($slowest | ForEach-Object {
+        "$($_.Step) ($($_.Seconds)s)" }) -join ", "))
+}
 $bad = @($results | Where-Object { $_.Status -notin @("OK", "PASS", "SKIPPED") })
 Write-Host ""
 if ($bad.Count -eq 0) {

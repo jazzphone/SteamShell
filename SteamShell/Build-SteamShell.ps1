@@ -4,7 +4,22 @@ param(
     # Skips publishing SteamShell-XFE.exe to dist. The companion is always
     # BUILT -- it is the payload SteamShell.exe embeds -- and this only controls
     # whether a second distributable is left beside the installer.
-    [switch]$NoXfeDist
+    [switch]$NoXfeDist,
+    # FOR THE HARNESS, NOT FOR BUILDING. Skips the two static validators.
+    #
+    # Run-SteamShellValidation.ps1 builds this project nine times: once for real,
+    # five times against a deliberately broken source, and twice against a locked
+    # output. Those seven throwaway builds test the SYNTAX gate and the FRESHNESS
+    # gate, both of which sit downstream of validation -- and every one of them
+    # re-ran both validators over the same unchanged files first, eighteen full
+    # scans per run where two carry signal. On a project served over SMB that is
+    # most of the wall time.
+    #
+    # The harness still runs one throwaway build WITHOUT this switch, so
+    # "validation happens inside a copied tree" stays proven rather than assumed.
+    # Do not pass it by hand: a build that skips its own validation is not a
+    # build anyone should publish.
+    [switch]$SkipStaticValidation
 )
 
 # Builds all three binaries, in the only order that works:
@@ -93,10 +108,14 @@ function Invoke-BuildProcess {
 # purpose -- several of XFE's architecture rules are the exact inverse of the
 # shell's -- but a build that produces one EXE from two sources has to satisfy
 # both of them.
-Write-Host "Running SteamShell static validation..."
-& $validatorPath
-Write-Host "Running SteamShell XFE static validation..."
-& $xfeValidatorPath
+if ($SkipStaticValidation) {
+    Write-Host "Static validation SKIPPED (-SkipStaticValidation). Harness use only."
+} else {
+    Write-Host "Running SteamShell static validation..."
+    & $validatorPath
+    Write-Host "Running SteamShell XFE static validation..."
+    & $xfeValidatorPath
+}
 
 $autoHotkeyRoots = @(
     (Join-Path $env:ProgramFiles "AutoHotkey"),
