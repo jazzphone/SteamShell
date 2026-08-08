@@ -170,10 +170,29 @@ foreach ($v in $validators) {
 # Skipped, not failed, when Python is absent: these run on the development machine
 # as much as on Windows, and the build must not require a Python install to
 # compile an AutoHotkey program.
+# EXISTING ON PATH IS NOT THE SAME AS BEING AN INTERPRETER.
+#
+# Windows ships App Execution Aliases: zero-byte stubs named python.exe and
+# python3.exe in %LOCALAPPDATA%\Microsoft\WindowsApps that Get-Command finds
+# happily. They are not Python. Run one and it prints an advert for the Microsoft
+# Store and exits 9009, which is exactly how this check first failed on a machine
+# with no Python installed -- reported as a broken test rather than an absent
+# interpreter.
+#
+# So each candidate is PROBED: it has to answer --version, exit 0, and say
+# "Python". py comes first because the launcher is the reliable one on Windows
+# when a real install exists.
 $python = $null
-foreach ($candidate in @("python3", "python", "py")) {
+foreach ($candidate in @("py", "python3", "python")) {
     $found = Get-Command $candidate -ErrorAction SilentlyContinue
-    if ($found) { $python = $found.Source; break }
+    if (-not $found) { continue }
+    $answer = ""
+    try { $answer = & $found.Source --version 2>&1 | Out-String } catch { continue }
+    if ($LASTEXITCODE -eq 0 -and $answer -match "Python\s+\d") {
+        $python = $found.Source
+        Write-Host ("Python interpreter    : {0} ({1})" -f $python, $answer.Trim())
+        break
+    }
 }
 
 $pythonChecks = @(
@@ -188,8 +207,12 @@ foreach ($c in $pythonChecks) {
     Write-Host ""
     Write-Host "--- $($c.Name)"
     if (-not $python) {
-        Write-Host "SKIPPED - no Python interpreter found." -ForegroundColor Yellow
-        Add-Result "Python: $($c.Name)" "SKIPPED" "no interpreter"
+        # Skipped, not failed: compiling an AutoHotkey program must not require a
+        # Python install. But say plainly what that costs -- these checks then run
+        # only where an interpreter exists, which may not be this machine.
+        Write-Host ("SKIPPED - no working Python interpreter. This check will not " +
+            "run here; install Python to have it run as part of the build.") -ForegroundColor Yellow
+        Add-Result "Python: $($c.Name)" "SKIPPED" "no interpreter on this machine"
         continue
     }
     if (-not (Test-Path -LiteralPath $c.Path)) {
