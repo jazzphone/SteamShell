@@ -96,13 +96,39 @@ $helperVersionMatch = [regex]::Match(
 Assert-True ($helperVersionMatch.Success) (
     "SteamShell-Helper.ahk does not declare a file version.")
 $helperVersionPattern = [regex]::Escape($helperVersionMatch.Groups[1].Value)
+
+# The SAME treatment for the other two binaries, and it should have been applied
+# at the same time as the helper's.
+#
+# The comment above says "the next bump cannot desynchronise it, because there is
+# nothing left to forget". That was true of the helper and false of everything
+# else: one line below it sat a literal 1.9.9.0 for the main executable, and two
+# more pairs further down for the companion and the helper's expected version.
+# The 2.0.0 bump failed on exactly the fault this passage describes being fixed --
+# a correct, consistent tree rejected with a message about embedding.
+#
+# RAW sources, not the #Include-resolved one, so the directive read is the file's
+# own. And escaped, because these land inside -match patterns.
+$mainVersionMatch = [regex]::Match(
+    $rawSource, '@Ahk2Exe-SetVersion (\d+\.\d+\.\d+\.\d+)')
+Assert-True ($mainVersionMatch.Success) (
+    "SteamShell.ahk does not declare a file version.")
+$mainVersionPattern = [regex]::Escape($mainVersionMatch.Groups[1].Value)
+
+$xfeSourceForVersion = Get-Content -LiteralPath (
+    Join-Path $projectRoot "SteamShell-XFE.ahk") -Raw
+$xfeVersionMatch = [regex]::Match(
+    $xfeSourceForVersion, '@Ahk2Exe-SetVersion (\d+\.\d+\.\d+\.\d+)')
+Assert-True ($xfeVersionMatch.Success) (
+    "SteamShell-XFE.ahk does not declare a file version.")
+$xfeVersionPattern = [regex]::Escape($xfeVersionMatch.Groups[1].Value)
 Assert-True (
     $buildScript -match 'SteamShell-Helper\.ahk' -and
     $buildScript -match
         '(?s)helperEmbedDirectory.*?"build".*?' +
         'helperOutputPath.*?"SteamShell-Helper\.exe"' -and
     $buildScript -match "\`$helperVersion -ne `"$helperVersionPattern`"" -and
-    $buildScript -match 'SteamShell version verification failed.*?1\.9\.9\.0') (
+    $buildScript -match "SteamShell version verification failed.*?$mainVersionPattern") (
     "The build no longer compiles and version-checks the helper before embedding SteamShell.exe.")
 
 Assert-AhkStructure -Text $source -Label "SteamShell.ahk"
@@ -2141,9 +2167,9 @@ Assert-True (
     $buildScript -match
         '(?s)xfeEmbedPath.*?"SteamShell-XFE\.exe".*?' +
         '/in", \$xfeSourcePath.*?' +
-        'xfeEmbedVersion\s+-ne\s+"1\.9\.9\.0"' -and
+        "xfeEmbedVersion\s+-ne\s+`"$xfeVersionPattern`"" -and
     $source -match 'FileInstall\s+"build\\SteamShell-XFE\.exe"' -and
-    $source -match 'XfeExpectedVersion\s*:=\s*"1\.9\.9\.0"' -and
+    $source -match "XfeExpectedVersion\s*:=\s*`"$xfeVersionPattern`"" -and
     $source -match
         '(?sm)^ExtractEmbeddedXfe\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?' +
         'FileGetVersion(?:(?!\n\})[\s\S])*?XfeExpectedVersion(?:(?!\n\})[\s\S])*?FileMove') (
@@ -3434,9 +3460,9 @@ Assert-True (
     "Main/helper startup ownership or explicit administrator Setup takeover is disconnected.")
 Assert-True (
     $helperSource -match '#NoTrayIcon' -and
-    $helperSource -match '@Ahk2Exe-SetVersion 1\.9\.9\.4' -and
+    $helperSource -match "@Ahk2Exe-SetVersion $helperVersionPattern" -and
     $source -match
-        'ElevatedHelperExpectedVersion\s*:=\s*"1\.9\.9\.4"' -and
+        "ElevatedHelperExpectedVersion\s*:=\s*`"$helperVersionPattern`"" -and
     $helperSource -match 'if\s*!A_IsAdmin' -and
     $helperSource -match 'ProcessIsElevatedIntegrity\(pid\)' -and
     $helperSource -match 'ParentPid\s*&&\s*!ProcessExist\(ParentPid\)' -and
