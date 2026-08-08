@@ -1930,11 +1930,25 @@ Assert-True (
     "Legacy game-window detection is missing ownership or activation safeguards.")
 Assert-True (
     $source -match
-        '(?s)GetTaskSwitcherWindows\(\)\s*\{.*?' +
+        '(?s)SharedTaskSwitcherWindows\(\)\s*\{.*?' +
         'WindowEngineIsLegacyApplicationSurface\(item,\s*true\).*?' +
         'item\["minMax"\]\s*=\s*-1.*?' +
         'legacy fullscreen window') (
     "Task Switcher no longer includes safe untitled legacy game surfaces.")
+# The other half of the shared filter, asserted from the product that used to be
+# missing it. Steam is resolved before the gates that reject it, not after: three
+# of them -- cloaking, an empty title, no usable size -- rejected Steam Big
+# Picture under Xbox FSE before the tool-window exception at the end of the chain
+# was ever reached.
+Assert-True (
+    $source -match
+        '(?s)SharedTaskSwitcherWindows\(\)\s*\{.*?' +
+        'steam\s*:=\s*item\["steam"\].*?' +
+        'item\["cloaked"\]\s*&&\s*!steam.*?' +
+        'item\["title"\]\s*=\s*""\s*&&\s*!steam.*?' +
+        'item\["toolWindow"\]\s*&&\s*!steam') (
+    "Task Switcher no longer waives cloaking, an empty title and the tool-window " +
+    "rule for Steam, which is how Big Picture vanished from it under Xbox FSE.")
 Assert-True (
     $source -match
         '(?s)WindowEngineIsMinimizedLegacyGameSurface\(item\)\s*\{.*?' +

@@ -4211,6 +4211,92 @@ SharedWindowInventoryBuild(includeHidden := false) {
     return items
 }
 
+; The windows the Task Switcher offers, for both products.
+;
+; IT EXISTED TWICE, under names sharing no word -- GetTaskSwitcherWindows in the
+; shell against GetSwitchableWindows in the companion, with
+; SelectTaskSwitcherWindow / RequestCloseTaskSwitcherWindow against
+; ActivateSwitchableWindow / CloseSwitchableWindow around them. Same Quick Menu
+; row, same page:TASKS, same question. The fingerprint gate compares functions
+; DEFINED IN BOTH TREES UNDER THE SAME NAME, so it could not see the pair, and a
+; grep for the shell's identifier reported the feature missing from the companion
+; entirely -- which is how a whole architectural justification once got built on
+; top of an absence that was really a naming difference.
+;
+; NEITHER FILTER WAS ADOPTED WHOLESALE, because each carried something the other
+; lacked.
+;
+; From the companion: STEAM IS RESOLVED FIRST and waives the gates below it.
+; Steam Big Picture vanished from the switcher under Xbox FSE, and there was
+; already a tool-window exception for it -- but it sat at the END of the chain
+; and three earlier gates rejected Steam before it was reached. Windows cloaks
+; Steam while Xbox FSE owns the screen, which is exactly when the user wants to
+; switch to it; a cloaked window frequently reports no title; and frequently no
+; usable size either. Losing that re-breaks a bug somebody spent real time
+; finding.
+;
+; From the shell: the legacy-surface waiver. An older DirectX game can publish an
+; untitled, tool-window-styled or minimized render surface, and
+; WindowEngineIsLegacyApplicationSurface is what tells one of those from an
+; overlay. The companion had no equivalent and simply dropped them.
+;
+; THE SHELL GAINS THE CLOAKING WAIVER by sharing this, and that is a fix rather
+; than a side effect. Windows cloaks windows for reasons beyond Xbox FSE, so the
+; shell had the same latent bug and only triggered it less often. It is kept
+; narrow -- Steam only -- because relaxing it generally would bring back every
+; virtual desktop's worth of hidden windows.
+;
+; The enumeration is FRESH, not WindowEngineGetFreshSnapshot's cache. The cache
+; cannot answer this question: it drops cloaked windows on the way in, which is
+; precisely the case the Steam waiver exists for.
+SharedTaskSwitcherWindows() {
+    windows := []
+    for _, item in SharedWindowInventoryBuild(true) {
+        if (item["scriptOwned"] || item["desktop"])
+            continue
+        ; The Xbox game bar's host surface. Never a thing to switch to, and it
+        ; is not one of the four shell classes.
+        if (item["classLower"] = "windowsdashboard")
+            continue
+        if !item["visible"]
+            continue
+
+        steam := item["steam"]
+        legacy := WindowEngineIsLegacyApplicationSurface(item, true)
+        ; Deliberately Steam only. A legacy game surface that is cloaked is not
+        ; on screen for any reason worth offering.
+        if (item["cloaked"] && !steam)
+            continue
+        if (item["title"] = "" && !steam && !legacy)
+            continue
+        if (item["toolWindow"] && !steam && !legacy)
+            continue
+        ; A minimized legacy surface reports off-screen geometry, so the size
+        ; gate has to let it through or an exclusive-fullscreen game that
+        ; minimized itself can never be restored.
+        if ((item["w"] < 120 || item["h"] < 80)
+            && !steam && !(legacy && item["minMax"] = -1))
+            continue
+
+        ; A cloaked Steam window reports no title, and an untitled legacy surface
+        ; has none to report. Either way the row gets something readable rather
+        ; than a blank entry.
+        displayTitle := item["title"]
+        if (displayTitle = "") {
+            displayTitle := steam
+                ? item["proc"] " (Steam)"
+                : item["proc"] " (legacy fullscreen window)"
+        }
+        windows.Push(Map(
+            "hwnd", item["hwnd"],
+            "title", displayTitle,
+            "exe", item["proc"],
+            "pid", item["pid"],
+            "legacy", legacy))
+    }
+    return windows
+}
+
 SettingsEditorRepaint() {
     global SettingsGui
     if !IsSet(SettingsGui) || !IsObject(SettingsGui)

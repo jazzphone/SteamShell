@@ -2657,7 +2657,7 @@ ProcessNameSetFromList(list) {
 ;
 ; THE FILTER IS THE WHOLE FUNCTION NOW. It used to be an enumeration with the
 ; filter woven through it, which is how the same three rules ended up written a
-; second time in GetSwitchableWindows and a third in RunScreenProbe, each
+; second time in the Task Switcher and a third in RunScreenProbe, each
 ; slightly different. Enumerating is SharedWindowInventoryBuild's job; deciding
 ; what this product does with the result is this one's.
 ;
@@ -3404,80 +3404,10 @@ AssistTick() {
 }
 
 GetSwitchableWindowsSummary() {
-    count := GetSwitchableWindows().Length
+    count := SharedTaskSwitcherWindows().Length
     if (count = 0)
         return "No Windows"
     return count " window" (count = 1 ? "" : "s")
-}
-
-GetSwitchableWindows() {
-    static WS_EX_TOOLWINDOW := 0x00000080
-    static WS_EX_APPWINDOW := 0x00040000
-    static SHELL_CLASSES := Map(
-        "Progman", true, "WorkerW", true, "Shell_TrayWnd", true,
-        "Shell_SecondaryTrayWnd", true, "WindowsDashboard", true)
-    windows := []
-    for hwnd in WinGetList() {
-        if IsOurWindow(hwnd)
-            continue
-        if !DllCall("IsWindowVisible", "Ptr", hwnd, "Int")
-            continue
-        title := "", cls := "", exe := ""
-        try title := WinGetTitle("ahk_id " hwnd)
-        try cls := WinGetClass("ahk_id " hwnd)
-        try exe := WinGetProcessName("ahk_id " hwnd)
-        ; Steam is resolved FIRST, because every gate below it had to be waived
-        ; for Steam and only one of them ever was.
-        ;
-        ; Steam Big Picture vanished from the switcher under Xbox FSE. There was
-        ; already an exception for the tool-window rule -- Steam publishes a
-        ; titled, full-sized window as WS_EX_TOOLWINDOW without WS_EX_APPWINDOW
-        ; -- but it sat at the END of the chain, and three earlier gates rejected
-        ; Steam before it was ever reached:
-        ;
-        ;   cloaked      Windows cloaks Steam while Xbox FSE owns the screen,
-        ;                which is exactly when the user wants to switch to it.
-        ;   empty title  a cloaked window frequently reports none.
-        ;   size         and frequently reports no usable size either.
-        ;
-        ; The shell tree never hit this because Xbox FSE is not running there, so
-        ; Steam is never cloaked. Same rule, different world -- which is why the
-        ; fix belongs here and the shell's own filter is left alone.
-        isSteamWindow := IsSteamProcess(exe)
-        if (!isSteamWindow && IsCloaked(hwnd))
-            continue
-        if (SHELL_CLASSES.Has(cls))
-            continue
-        if (title = "" && !isSteamWindow)
-            continue
-        exStyle := 0
-        try exStyle := WinGetExStyle("ahk_id " hwnd)
-        ; Tool windows are palettes and overlays, not applications, unless they
-        ; explicitly ask to appear in the task list.
-        ;
-        ; Steam Big Picture under current Xbox FSE builds is the exception: its
-        ; visible, titled, full-sized window can be published by steamwebhelper
-        ; as WS_EX_TOOLWINDOW without WS_EX_APPWINDOW. Applying the generic rule
-        ; made Steam disappear from the switcher entirely. Keep the exception
-        ; process-specific; relaxing the rule globally would bring back every
-        ; overlay, popup and helper palette.
-        if ((exStyle & WS_EX_TOOLWINDOW) && !(exStyle & WS_EX_APPWINDOW)
-            && !isSteamWindow)
-            continue
-        w := 0, h := 0
-        try {
-            WinGetPos(, , &posW, &posH, "ahk_id " hwnd)
-            w := posW, h := posH
-        }
-        if ((w < 120 || h < 80) && !isSteamWindow)
-            continue
-        ; A cloaked Steam window reports no title, so give the row something the
-        ; user can read rather than a blank entry.
-        if (title = "")
-            title := exe " (Steam)"
-        windows.Push(Map("hwnd", hwnd, "title", title, "exe", exe))
-    }
-    return windows
 }
 
 ActivateSwitchableWindow(hwnd) {
@@ -3662,7 +3592,7 @@ QuickMenuGetRows() {
                 "settingsEditor"))
         case "TASKS":
             rows.Push(MenuRow("back", "Back", "", "back"))
-            QuickMenuTaskWindows := GetSwitchableWindows()
+            QuickMenuTaskWindows := SharedTaskSwitcherWindows()
             if (QuickMenuTaskWindows.Length = 0) {
                 rows.Push(MenuRow("tasksUnavailable", "No Switchable Windows", "", "none"))
             } else {
@@ -4782,7 +4712,7 @@ QuickMenuRender() {
         return
     ; Rows are composed in QuickMenuBuildGui, not here. This used to rebuild the
     ; list on EVERY repaint, which re-ran QuickMenuGetRows -- and that function
-    ; assigns QuickMenuTaskWindows from GetSwitchableWindows(), so every nudge of
+    ; assigns QuickMenuTaskWindows from SharedTaskSwitcherWindows(), so every nudge of
     ; the D-pad re-enumerated every window on the desktop. Worse, the rebuilt
     ; list was only re-CLAMPED, not re-matched: a window closing between repaints
     ; shifted every row below it up and left the highlight on a different window

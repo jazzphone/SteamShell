@@ -5899,36 +5899,6 @@ GetAudioMenuSummary() {
     return ShortenText(outputName, 22) "  •  " volumeText
 }
 
-GetTaskSwitcherWindows() {
-    windows := []
-    for _, item in WindowEngineGetFreshSnapshot() {
-        legacySurface := WindowEngineIsLegacyApplicationSurface(item, true)
-        if (item["scriptOwned"] || item["desktop"])
-            continue
-        if (item["title"] = "" && !legacySurface)
-            continue
-        if ((item["exStyle"] & 0x00000080)
-            && !(item["exStyle"] & 0x00040000)
-            && !legacySurface)
-            continue
-        if ((item["w"] < 120 || item["h"] < 80)
-            && !(legacySurface && item["minMax"] = -1))
-            continue
-
-        displayTitle := item["title"] != ""
-            ? item["title"]
-            : item["proc"] " (legacy fullscreen window)"
-        windows.Push(Map(
-            "hwnd", item["hwnd"],
-            "title", displayTitle,
-            "exe", item["proc"],
-            "pid", item["pid"],
-            "legacy", legacySurface
-        ))
-    }
-    return windows
-}
-
 FindTaskSwitcherWindow(hwnd) {
     global QuickMenuTaskWindows
     for _, item in QuickMenuTaskWindows {
@@ -5941,12 +5911,12 @@ FindTaskSwitcherWindow(hwnd) {
 GetPinnedForegroundSummary() {
     global PinnedForegroundHwnd, PinnedForegroundTitle
     if (!PinnedForegroundHwnd) {
-        count := GetTaskSwitcherWindows().Length
+        count := SharedTaskSwitcherWindows().Length
         return count ? count " Window" (count = 1 ? "" : "s") : "No Windows"
     }
     if !DllCall("IsWindow", "Ptr", PinnedForegroundHwnd) {
         ReleasePinnedForeground(false)
-        count := GetTaskSwitcherWindows().Length
+        count := SharedTaskSwitcherWindows().Length
         return count ? count " Window" (count = 1 ? "" : "s") : "No Windows"
     }
     return "Locked  •  " ShortenText(PinnedForegroundTitle, 18)
@@ -6551,7 +6521,7 @@ OpenQuickMenuDisplayPage() {
 
 OpenQuickMenuTaskPage() {
     global QuickMenuPage, QuickMenuSelected, QuickMenuTaskPage, QuickMenuTaskWindows
-    QuickMenuTaskWindows := GetTaskSwitcherWindows()
+    QuickMenuTaskWindows := SharedTaskSwitcherWindows()
     QuickMenuTaskPage := 1
     QuickMenuPage := "TASKS"
     QuickMenuSelected := 1
@@ -6609,7 +6579,7 @@ RequestCloseTaskSwitcherWindow(hwnd) {
 
     item := FindTaskSwitcherWindow(hwnd)
     if (!IsObject(item) || !DllCall("IsWindow", "Ptr", hwnd)) {
-        QuickMenuTaskWindows := GetTaskSwitcherWindows()
+        QuickMenuTaskWindows := SharedTaskSwitcherWindows()
         QuickMenuBuildGui()
         return
     }
@@ -6636,7 +6606,7 @@ RequestCloseTaskSwitcherWindow(hwnd) {
         }
         return
     }
-    QuickMenuTaskWindows := GetTaskSwitcherWindows()
+    QuickMenuTaskWindows := SharedTaskSwitcherWindows()
     QuickMenuBuildGui()
 }
 
@@ -6644,7 +6614,7 @@ ForceCloseTaskSwitcherWindow(hwnd) {
     global QuickMenuTaskWindows, PinnedForegroundHwnd
     item := FindTaskSwitcherWindow(hwnd)
     if (!IsObject(item) || !DllCall("IsWindow", "Ptr", hwnd)) {
-        QuickMenuTaskWindows := GetTaskSwitcherWindows()
+        QuickMenuTaskWindows := SharedTaskSwitcherWindows()
         QuickMenuBuildGui()
         return
     }
@@ -6672,7 +6642,7 @@ ForceCloseTaskSwitcherWindow(hwnd) {
         ShowNotification("The selected process is still running", "Warning")
         return
     }
-    QuickMenuTaskWindows := GetTaskSwitcherWindows()
+    QuickMenuTaskWindows := SharedTaskSwitcherWindows()
     QuickMenuBuildGui()
 }
 

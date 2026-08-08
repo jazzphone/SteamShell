@@ -335,6 +335,7 @@ SettingsSelectChoiceByText
 SettingsSliderReadoutRegistry
 SettingsUpdateScrollBar
 SharedNotify
+SharedTaskSwitcherWindows
 SharedWindowInventoryBuild
 ShouldLogRateLimited
 ShowControllerLearner

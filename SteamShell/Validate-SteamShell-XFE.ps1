@@ -656,9 +656,26 @@ Assert-True (
         'QuickMenuGui\.Destroy\(\).*?QuickMenuGui\s*:=\s*unset') (
     "Closing the Quick Menu must destroy its HWND and detach its owned bitmap.")
 
+# ONE enumeration, matching the rule the shell's validator has always enforced.
+#
+# This product had three -- the assist inventory, the screen probe and the task
+# switcher -- each with its own filter, and the filters had drifted apart. They
+# all read SharedWindowInventoryBuild now, and the count is what stops a fourth
+# appearing. Measured over the effective source, so it covers Shared.
+$fullWindowScans = [regex]::Matches($source, 'WinGetList\(\)')
+Assert-True ($fullWindowScans.Count -eq 1) (
+    "Only SharedWindowInventoryBuild may perform an unfiltered full-window " +
+    "enumeration; found $($fullWindowScans.Count).")
+
 Assert-True (
-    $source -match '(?s)GetSwitchableWindows\(\).*?isSteamWindow\s*:=\s*IsSteamProcess\(exe\).*?WS_EX_TOOLWINDOW.*?&&\s*!isSteamWindow') (
-    "The task switcher must retain Steam Big Picture when Steam publishes it as a tool window.")
+    $source -match
+        '(?s)SharedTaskSwitcherWindows\(\)\s*\{.*?' +
+        'steam\s*:=\s*item\["steam"\].*?' +
+        'item\["cloaked"\]\s*&&\s*!steam.*?' +
+        'item\["title"\]\s*=\s*""\s*&&\s*!steam.*?' +
+        'item\["toolWindow"\]\s*&&\s*!steam') (
+    "The task switcher must retain Steam Big Picture when Steam publishes it as a " +
+    "cloaked, untitled tool window under Xbox FSE.")
 Assert-True (
     $source -match '(?s)AssistInventoryBuild\(\).*?item\["toolWindow"\].*?&&\s*!item\["steam"\]' -and
     $source -match '(?s)AssistFindSteamWindow\([^)]*\).*?IsSteamProcess\(item\["exe"\]\).*?area\s*:=\s*item\["w"\]\s*\*\s*item\["h"\].*?area\s*>\s*bestArea') (
