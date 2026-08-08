@@ -1230,7 +1230,34 @@ def check_ambiguous_deindented_blocks(sources):
             if not match:
                 continue
             indent, keyword, rest = match.group(1), match.group(2), match.group(3).rstrip()
-            if rest.endswith("{") or _has_inline_body(keyword, rest):
+
+            # Asked FIRST, of the first line only. `try Foo("a"` + `. "b")` is one
+            # statement whose argument list wraps, and walking its parentheses
+            # would read the line after it as a de-indented body.
+            if _has_inline_body(keyword, rest):
+                continue
+
+            # A CONDITION SPANNING LINES IS STILL THE HEADER, not the body. The
+            # first version of this check read the `&& ...` continuation of a
+            # multi-line `if` as the statement being guarded and asked for it to
+            # be indented -- harmless, since AutoHotkey joins a line beginning
+            # with an operator whatever its indent, but the wrong reason. Walk to
+            # where the parentheses balance and start from there. Doing so also
+            # finds the real cases behind those headers, which the first version
+            # skipped: four of them, one in the controller poll.
+            depth = rest.count("(") - rest.count(")")
+            wrapped = depth > 0
+            while depth > 0 and position + 1 < len(live):
+                position += 1
+                rest = code[live[position]].rstrip()
+                depth += rest.count("(") - rest.count(")")
+            if depth > 0:
+                continue
+            if rest.endswith("{"):
+                continue
+            # The balancing ')' is on this line, so anything after it is a
+            # one-liner body: `... && b) return`.
+            if wrapped and not rest.rstrip().endswith(")"):
                 continue
             if position + 2 >= len(live):
                 continue

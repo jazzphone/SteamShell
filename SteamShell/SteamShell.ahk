@@ -7006,7 +7006,7 @@ PollController() {
     isControllerTestActive := ControllerTestActive()
     if (!EnableControllerMouseMode && !EnableQuickMenu
         && !settingsControllerActive && !isControllerTestActive)
-    return
+        return
 
     if !ControllerReadState(&state) {
         if isControllerTestActive {

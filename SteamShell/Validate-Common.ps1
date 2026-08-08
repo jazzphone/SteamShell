@@ -922,10 +922,37 @@ function Assert-NoAmbiguousDeindentedBlocks {
             }
         }
         # for/loop headers have no bracketing to strip, so no claim is made.
+        #
+        # Asked of the FIRST line only, and before the walk below. `try Foo("a"`
+        # continued by `. "b")` is one statement whose argument list wraps, and
+        # walking its parentheses would read the line after it as a body.
         if ($inline) { continue }
 
-        $bodyLine = $code[$live[$p + 1]]
-        $afterLine = $code[$live[$p + 2]]
+        # A CONDITION SPANNING LINES IS STILL THE HEADER, not the body. The first
+        # version of this check read the `&& ...` continuation of a multi-line
+        # `if` as the statement being guarded -- harmless, since AutoHotkey joins
+        # a line beginning with an operator whatever its indent, but the wrong
+        # reason. Walking to where the parentheses balance also finds the real
+        # cases hidden behind those headers, one of them in the controller poll.
+        # $q, not $p: reassigning the loop variable would advance the outer scan
+        # as a side effect, and the Python mirror's `for` does not work that way.
+        $q = $p
+        $depth = ([regex]::Matches($rest, '\(')).Count - ([regex]::Matches($rest, '\)')).Count
+        $wrapped = $depth -gt 0
+        while ($depth -gt 0 -and $q + 1 -lt $live.Count) {
+            $q++
+            $rest = $code[$live[$q]].TrimEnd()
+            $depth += ([regex]::Matches($rest, '\(')).Count - ([regex]::Matches($rest, '\)')).Count
+        }
+        if ($depth -gt 0) { continue }
+        if ($rest.EndsWith("{")) { continue }
+        # The balancing ')' is on this line, so anything after it is a one-liner
+        # body: `... && b) return`.
+        if ($wrapped -and -not $rest.TrimEnd().EndsWith(")")) { continue }
+        if ($q + 2 -ge $live.Count) { continue }
+
+        $bodyLine = $code[$live[$q + 1]]
+        $afterLine = $code[$live[$q + 2]]
         if ($bodyLine.TrimStart().StartsWith("{")) { continue }
         if (($bodyLine.Length - $bodyLine.TrimStart().Length) -ne $indent) { continue }
         if (($afterLine.Length - $afterLine.TrimStart().Length) -ne $indent) { continue }
