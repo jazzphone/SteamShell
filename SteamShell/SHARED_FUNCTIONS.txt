@@ -120,6 +120,7 @@ CommitRtssPendingFrameCap
 ConfirmPrimaryDisplayMode
 ControllerBindingSharedAction
 ControllerButtonBits
+ControllerDiagnosticTick
 ControllerLearnAccept
 ControllerLearnAxisStats
 ControllerLearnBeginSteps
@@ -357,6 +358,7 @@ VerifyElevatedHelperProcess
 ViewButtonReleased
 WaitForElevatedRtssRequest
 WaitForVerifiedElevatedHelper
+XInputGetCapabilities
 XInputGetState
 XInputResolveController
 

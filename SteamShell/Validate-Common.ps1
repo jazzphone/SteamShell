@@ -358,6 +358,11 @@ $sharedSeamAllowed = @(
     "ProductHealthResults", "ProductIdentity",
     "OpenOSK", "OpenTouchKeyboard",
     "ProductApplyQuickMenuSetting", "ProductControllerBindingAction",
+    # Widened for ControllerDiagnosticTick, which became shared when the shell
+    # turned out to have the DiagnosticLogging row and no tick behind it. The
+    # companion's half of the tick reports GameInput and a second backend name,
+    # neither of which the shell has; a seam is the honest way to say so.
+    "ProductControllerDiagnosticProbe",
     "ProductSetDialogActive",
     # Only SettingsRegisterBuiltField is CALLED from the shared file. The
     # browse, record and mark-dirty seams are passed as callbacks, and the
@@ -385,7 +390,7 @@ $sharedSeamAllowed = @(
 # Restated here, next to the list, and asserted in Assert-SharedParity: changing
 # one without the other fails the build. Update the expectation in the same
 # commit that changes the list, and say in the message why the seam moved.
-$sharedSeamExpectedCount = 36
+$sharedSeamExpectedCount = 37
 
 # Reports same-named functions in both trees whose difference is only naming and
 # formatting -- the drift that a raw similarity score hides.

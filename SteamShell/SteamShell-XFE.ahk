@@ -2076,43 +2076,21 @@ global LearnCaptureUntil := 0
 global LearnPeak := 0
 
 
-XInputGetCapabilities(index, &caps) {
-    global XInputDll
-    if (XInputDll = "" && !InitXInput())
-        return 1167
-    if !IsObject(caps)
-        caps := Buffer(20, 0)
-    try {
-        return DllCall(XInputDll "\XInputGetCapabilities", "UInt", index,
-            "UInt", 0, "Ptr", caps, "UInt")
-    } catch {
-        return 1
-    }
-}
-
-; ==============================================================================
-; Controller diagnostics
-; ==============================================================================
-; Samples EVERY XInput slot plus GameInput on one tick and logs the combined
-; state whenever it changes.
+; Per-tree seam required by SteamShell-Shared.ahk: what this product can add to
+; a controller diagnostic tick.
 ;
-; The normal poll stops at the first slot that answers, which cannot tell a
-; genuinely filtered pad from a virtualised one. When something captures a
-; physical controller and re-publishes a partial copy, the giveaway is two
-; devices present at once where one forwards only a subset of the buttons. The
-; reported capabilities (type/subtype/flags) also tend to differ between real
-; and synthesised devices. Logging the foreground process alongside them shows
-; which application owned focus at the moment a button went missing.
-ControllerDiagnosticTick() {
-    global EnableControllerDiagnostics, ControllerBackend, ActiveInputBackend
-    global GameInputReady, GameInputFailed
+; GameInput is the companion's alone -- it reads all zeros outside Xbox FSE, so
+; the shell cannot offer it honestly -- and so is the second backend name. Those
+; two facts are the whole of the difference between the two ticks, which is why
+; the rest of it is shared rather than written twice.
+;
+; Returned as three strings rather than one so the log line keeps its shape:
+; the backend suffix sits with the backend, the GameInput reading after the
+; slots, and the signature feeds the tick's change detection without appearing
+; in the output at all.
+ProductControllerDiagnosticProbe() {
+    global ActiveInputBackend, GameInputReady, GameInputFailed
     global GameInputLastRawButtons, GameInputLastHr
-    static lastSignature := ""
-    static capsLogged := Map()
-    static lastKeepaliveTick := 0
-
-    if !EnableControllerDiagnostics
-        return
 
     ; Initialise GameInput for OBSERVATION even when it is not the active input
     ; backend. The comparison between the two stacks is the entire point of this
@@ -2121,68 +2099,24 @@ ControllerDiagnosticTick() {
     if (!GameInputReady && !GameInputFailed)
         InitGameInput()
 
-    slotText := ""
-    signature := ""
-    Loop 4 {
-        index := A_Index - 1
-        slotState := Buffer(16, 0)
-        if (XInputGetState(index, &slotState) != 0) {
-            slotText .= " s" index "=-"
-            signature .= "-|"
-            continue
-        }
-        buttons := NumGet(slotState, 4, "UShort")
-        lt := NumGet(slotState, 6, "UChar")
-        rt := NumGet(slotState, 7, "UChar")
-        slotText .= " s" index "=0x" Format("{:04X}", buttons)
-        if (lt > 30 || rt > 30)
-            slotText .= "(LT" lt "/RT" rt ")"
-        signature .= buttons "," lt "," rt "|"
-        ; Capabilities are static per device, so report them once per slot.
-        if !capsLogged.Has(index) {
-            capsLogged[index] := true
-            caps := Buffer(20, 0)
-            if (XInputGetCapabilities(index, &caps) = 0) {
-                LogLine("Diag slot " index " capabilities:"
-                    . " type=" NumGet(caps, 0, "UChar")
-                    . " subtype=" NumGet(caps, 1, "UChar")
-                    . " flags=0x" Format("{:04X}", NumGet(caps, 2, "UShort"))
-                    . " buttonmask=0x" Format("{:04X}", NumGet(caps, 4, "UShort")))
-            } else {
-                LogLine("Diag slot " index " capabilities unavailable.")
-            }
-        }
-    }
-
     giText := "off"
+    signature := ""
     if GameInputReady {
         giState := Buffer(16, 0)
         if GameInputReadState(&giState) {
             giText := "0x" Format("{:04X}", NumGet(giState, 4, "UShort"))
                 . " raw=0x" Format("{:08X}", GameInputLastRawButtons)
-            signature .= GameInputLastRawButtons
+            signature := GameInputLastRawButtons
         } else {
             giText := "noreading hr=0x" Format("{:08X}", GameInputLastHr & 0xFFFFFFFF)
-            signature .= "none"
+            signature := "none"
         }
     } else if GameInputFailed {
         giText := "initfailed"
     }
-
-    ; Change-only logging cannot distinguish a process reading constant zeros
-    ; from one that has been suspended or killed: both go silent. An unconditional
-    ; keepalive line every few seconds makes silence unambiguous evidence that the
-    ; companion stopped running, rather than something needing interpretation.
-    unchanged := signature = lastSignature
-    if (unchanged && lastKeepaliveTick && A_TickCount - lastKeepaliveTick < 5000)
-        return
-    lastKeepaliveTick := A_TickCount
-    lastSignature := signature
-
-    foreground := "unknown"
-    try foreground := WinGetProcessName("A")
-    LogLine("Diag " (unchanged ? "(alive) " : "") ControllerBackend "/" ActiveInputBackend
-        . slotText " | GI=" giText " | fg=" foreground)
+    return Map("suffix", "/" ActiveInputBackend,
+        "detail", " | GI=" giText,
+        "signature", signature)
 }
 
 ; Per-tree seam required by SteamShell-Shared.ahk: the builtin actions only

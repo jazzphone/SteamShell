@@ -185,6 +185,9 @@ global CompanionDisabled := false
 ; are the globals it drives, declared here because a shared function cannot
 ; declare a global into a tree that never names it.
 global EnableControllerDiagnostics := false
+; 50 ms, matching the companion. Fast enough to catch a button that appears in
+; one slot and not another, and it only runs while the diagnostic is on.
+global ControllerDiagnosticIntervalMs := 50
 global LearnActive := false
 global LearnAnalogBytes := Map()
 global LearnAnalogValues := Map()
@@ -3778,6 +3781,7 @@ ApplyRuntimeTimers() {
     global EnableLauncherCleanup, LauncherCleanupCheckIntervalMs
     global EnableControllerMouseMode, ControllerPollIntervalMs, EnableQuickMenu
     global SettingsGui, DesktopMode, SafeMode, EnableDesktopBlackout
+    global EnableControllerDiagnostics, ControllerDiagnosticIntervalMs
 
     StopTaskbarGuard()
     StopDesktopBlackout()
@@ -3785,6 +3789,7 @@ ApplyRuntimeTimers() {
     SetTimer(WindowEngineTick, 0)
     SetTimer(MouseWatch, 0)
     SetTimer(PollController, 0)
+    SetTimer(ControllerDiagnosticTick, 0)
     SetTimer(CheckLauncherCleanup, 0)
 
     ResetWindowEngineState(false)
@@ -3812,7 +3817,16 @@ ApplyRuntimeTimers() {
     }
 
     if (EnableControllerMouseMode || EnableQuickMenu || IsSet(SettingsGui))
-    SetTimer(PollController, ControllerPollIntervalMs)
+        SetTimer(PollController, ControllerPollIntervalMs)
+
+    ; Armed outside the DesktopMode guard, and outside the controller-mouse
+    ; condition above. A diagnostic the user has just switched on has to sample
+    ; whatever state the program is actually in -- including desktop mode, where
+    ; "my pad does nothing" is a question that gets asked.
+    if EnableControllerDiagnostics {
+        SetTimer(ControllerDiagnosticTick, ControllerDiagnosticIntervalMs)
+        LogLine("Controller diagnostic logging is enabled (all XInput slots).")
+    }
 }
 
 ReloadSettings() {
@@ -4919,6 +4933,18 @@ ControllerHandleElevatedForeground(buttons, lt, rt, pressed, released, now, chor
             longFired[trigger] := false
         }
     }
+}
+
+; Per-tree seam required by SteamShell-Shared.ahk: what this product can add to
+; a controller diagnostic tick.
+;
+; Nothing, and that is the honest answer rather than a gap. The companion's
+; version of this reports GameInput alongside XInput and names a second active
+; backend; GameInput reads all zeros outside Xbox FSE, so this product cannot
+; offer it, and there is no second backend here to name. Returning empty strings
+; leaves the log line exactly as short as the information behind it.
+ProductControllerDiagnosticProbe() {
+    return Map("suffix", "", "detail", "", "signature", "")
 }
 
 ; Per-tree seam required by SteamShell-Shared.ahk: the builtin actions only
@@ -15356,6 +15382,7 @@ PrepareForDesktopRestore() {
     SetTimer(WindowEngineTick, 0)
     SetTimer(MouseWatch, 0)
     SetTimer(PollController, 0)
+    SetTimer(ControllerDiagnosticTick, 0)
     SetTimer(CheckLauncherCleanup, 0)
 }
 

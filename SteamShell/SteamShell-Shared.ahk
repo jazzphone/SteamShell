@@ -2463,6 +2463,110 @@ XInputGetState(index, &bufState) {
     }
 }
 
+; XINPUT_CAPABILITIES: type, subtype, flags, then the gamepad struct. Static per
+; device, so the diagnostic reports it once per slot rather than every tick.
+XInputGetCapabilities(index, &caps) {
+    global XInputDll
+    if (XInputDll = "" && !InitXInput())
+        return 1167
+    if !IsObject(caps)
+        caps := Buffer(20, 0)
+    try {
+        return DllCall(XInputDll "\XInputGetCapabilities", "UInt", index,
+            "UInt", 0, "Ptr", caps, "UInt")
+    } catch {
+        return 1
+    }
+}
+
+; ==============================================================================
+; Controller diagnostics
+; ==============================================================================
+; Samples EVERY XInput slot on one tick and logs the combined state whenever it
+; changes.
+;
+; The normal poll stops at the first slot that answers, which cannot tell a
+; genuinely filtered pad from a virtualised one. When something captures a
+; physical controller and re-publishes a partial copy, the giveaway is two
+; devices present at once where one forwards only a subset of the buttons. The
+; reported capabilities (type/subtype/flags) also tend to differ between real
+; and synthesised devices. Logging the foreground process alongside them shows
+; which application owned focus at the moment a button went missing.
+;
+; SHARED, and it was not. The DiagnosticLogging row has shipped in BOTH products
+; since the settings spec was unified -- drawn in both Settings windows, read
+; into EnableControllerDiagnostics in both trees, labelled "Log all XInput slots
+; on every change" in both. Only the companion had a tick. In the shell the flag
+; reached exactly one consumer: PositionGuiCentered, which logs window centring.
+; A control that promises one thing and does another is worse than a missing
+; one, because it is evidence -- someone turns it on, sees no slot lines, and
+; concludes the pad is not being sampled.
+;
+; The per-product half is behind ProductControllerDiagnosticProbe(). The
+; companion has GameInput to compare XInput against and a second backend name to
+; report; the shell has neither, and inventing a placeholder for it would put
+; the fabrication in the log where the missing feature used to be.
+ControllerDiagnosticTick() {
+    global EnableControllerDiagnostics, ControllerBackend
+    static lastSignature := ""
+    static capsLogged := Map()
+    static lastKeepaliveTick := 0
+
+    if !EnableControllerDiagnostics
+        return
+
+    slotText := ""
+    signature := ""
+    Loop 4 {
+        index := A_Index - 1
+        slotState := Buffer(16, 0)
+        if (XInputGetState(index, &slotState) != 0) {
+            slotText .= " s" index "=-"
+            signature .= "-|"
+            continue
+        }
+        buttons := NumGet(slotState, 4, "UShort")
+        lt := NumGet(slotState, 6, "UChar")
+        rt := NumGet(slotState, 7, "UChar")
+        slotText .= " s" index "=0x" Format("{:04X}", buttons)
+        if (lt > 30 || rt > 30)
+            slotText .= "(LT" lt "/RT" rt ")"
+        signature .= buttons "," lt "," rt "|"
+        ; Capabilities are static per device, so report them once per slot.
+        if !capsLogged.Has(index) {
+            capsLogged[index] := true
+            caps := Buffer(20, 0)
+            if (XInputGetCapabilities(index, &caps) = 0) {
+                LogLine("Diag slot " index " capabilities:"
+                    . " type=" NumGet(caps, 0, "UChar")
+                    . " subtype=" NumGet(caps, 1, "UChar")
+                    . " flags=0x" Format("{:04X}", NumGet(caps, 2, "UShort"))
+                    . " buttonmask=0x" Format("{:04X}", NumGet(caps, 4, "UShort")))
+            } else {
+                LogLine("Diag slot " index " capabilities unavailable.")
+            }
+        }
+    }
+
+    probe := ProductControllerDiagnosticProbe()
+    signature .= probe["signature"]
+
+    ; Change-only logging cannot distinguish a process reading constant zeros
+    ; from one that has been suspended or killed: both go silent. An unconditional
+    ; keepalive line every few seconds makes silence unambiguous evidence that the
+    ; program stopped running, rather than something needing interpretation.
+    unchanged := signature = lastSignature
+    if (unchanged && lastKeepaliveTick && A_TickCount - lastKeepaliveTick < 5000)
+        return
+    lastKeepaliveTick := A_TickCount
+    lastSignature := signature
+
+    foreground := "unknown"
+    try foreground := WinGetProcessName("A")
+    LogLine("Diag " (unchanged ? "(alive) " : "") ControllerBackend probe["suffix"]
+        . slotText probe["detail"] " | fg=" foreground)
+}
+
 ; ==============================================================================
 ; RTSS per-game profile target
 ; ==============================================================================
