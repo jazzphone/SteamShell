@@ -118,6 +118,115 @@ companion reads the pad through RawInput instead, and can be taught unfamiliar h
 Roughly half the settings are shared between the two products, and the build fails if a
 shared behaviour drifts apart.
 
+## The window engine (SteamShell only)
+
+The biggest asymmetry in that table. The standalone shell owns window presentation, so it
+runs a single coordinated tick that handles **geometry** and **focus** together — they are
+one pass on purpose, because moving a window and deciding what should be in front are the
+same decision made twice if you split them.
+
+### Geometry — centring and maximising
+
+Every visible window is considered, and most are immediately ruled out. A window is only
+touched if it is:
+
+- titled, visible and in a **normal** state — already minimised or maximised is left alone
+- a real application window — not a child window, menu, tooltip, dropdown or a surface
+  that cannot take focus
+- large enough to be an application rather than a popup, if it has no title bar
+- not on your exclusion lists
+
+Surviving windows get two independent decisions:
+
+- **Centred** if it is off-centre by more than a couple of pixels.
+- **Maximised** if it is at least `MinWidthPercent` of the screen width (default **30%**)
+  *and* the window is actually resizable. A fixed-size dialog is centred, never stretched.
+
+The on-screen keyboard and Steam's own keyboard are skipped, and you can exclude anything
+else by **executable** or **window class**:
+
+```ini
+[WindowManagement]
+MinWidthPercent=0.30
+ExcludeExeList=GameBar.exe|YourTool.exe
+ExcludeClassList=UnityWndClass|Chrome_WidgetWin_1
+```
+
+**It gives up rather than fighting.** Each window gets a bounded correction budget inside a
+rolling window; an application that keeps moving itself back is left alone for a while
+instead of being wrestled every tick. That is why a stubborn launcher settles rather than
+flickering.
+
+**Administrator windows are handled by the elevated helper.** SteamShell itself runs at
+normal integrity and cannot move a High-integrity window, so it hands those to the small
+verified helper rather than elevating the whole shell.
+
+> **Known limitation:** geometry still centres against the *primary* monitor. Game
+> *detection* became per-monitor in 2.0.0; placement did not.
+
+### Focus
+
+The other half of the same tick, driven by the scoring described above — shape, then CPU,
+then audio, each gate deciding whether the more expensive check is worth running. Geometry
+changes defer focus for a tick, so the engine never activates a window it is mid-way
+through moving.
+
+Turn the whole thing off with `EnableWindowManagement=false`, or pause it temporarily from
+Settings → Advanced.
+
+## Assist Lite (XFE only)
+
+The companion deliberately does **not** have a window engine. Xbox FSE owns presentation,
+and a second program moving windows underneath it would be fighting the shell rather than
+helping it.
+
+> **Assist Lite never resizes, centres or maximises another application's window.** The
+> only geometry XFE applies is the initial window mode of a startup program you asked it
+> to launch.
+
+What it does instead is three narrow, independently switchable behaviours:
+
+| Setting | What it does |
+|---|---|
+| **Game Focus Lite** | Keeps the running game in front when something else steals focus |
+| **Steam Assist Lite** | Brings Steam back to the front when a game exits |
+| **Launcher Cleanup Lite** | Closes leftover store launchers once no game is running |
+
+All three are off-switchable from the Quick Menu, which writes the change immediately — no
+restart, and no need to open the Settings window.
+
+### The safety rules
+
+These matter more than the features, because an assist that misfires inside FSE is worse
+than no assist:
+
+- **It pauses entirely while any SteamShell XFE window owns the foreground**, so it can
+  never fight the Quick Menu, Settings or one of its own dialogs.
+- **The foreground must be stable** for `ForegroundStableSec` (default **30s**) before
+  cleanup may run. Nothing is closed during the churn of a game exiting.
+- **A game counts as running** if it is fullscreen or borderless, *or* if a process is
+  using more than `CpuThresholdPercent` (default **12%**) — which covers a game that has
+  minimised itself. Set it to 0 to use window shape alone.
+- **Protected processes are never closed**, and launcher cleanup only ever targets the
+  list you give it.
+- **Graceful close first.** A hard kill is available but is opt-in and time-boxed.
+- **The timer only exists when something is enabled.** A default install with all three
+  off does no extra polling at all.
+
+```ini
+[Assist]
+EnableGameFocusLite=true
+EnableSteamAssistLite=true
+EnableLauncherCleanupLite=true
+TickIntervalMs=2000
+ForegroundStableSec=30
+CpuThresholdPercent=12
+```
+
+The same window-scoring code decides which window is the game in both products — it also
+drives the per-game RTSS frame cap, where picking the wrong window would write your cap
+into another program's profile and report success.
+
 ## Download
 
 **[Latest release &rarr; SteamShell.exe](https://github.com/jazzphone/SteamShell/releases/latest)**
