@@ -2652,67 +2652,32 @@ ProcessNameSetFromList(list) {
     return set
 }
 
+; The companion's view of the shared inventory: things that can be activated or
+; closed.
+;
+; THE FILTER IS THE WHOLE FUNCTION NOW. It used to be an enumeration with the
+; filter woven through it, which is how the same three rules ended up written a
+; second time in GetSwitchableWindows and a third in RunScreenProbe, each
+; slightly different. Enumerating is SharedWindowInventoryBuild's job; deciding
+; what this product does with the result is this one's.
+;
+; Desktop and shell windows go, because Xbox FSE owns presentation and none of
+; them is a thing to activate. Tool windows go for the same reason -- palettes
+; and overlays -- except Steam's, which publishes a visible, titled, full-sized
+; Big Picture window as WS_EX_TOOLWINDOW without WS_EX_APPWINDOW under Xbox FSE.
+; Degenerate rectangles go; MINIMIZED windows stay, because a minimized window
+; reports off-screen coordinates rather than a zero size and "minMax" is the
+; question that identifies it.
 AssistInventoryBuild() {
-    static WS_EX_TOOLWINDOW := 0x00000080
-    static WS_EX_APPWINDOW := 0x00040000
-    static SHELL_CLASSES := Map(
-        "Progman", true, "WorkerW", true, "Shell_TrayWnd", true,
-        "Shell_SecondaryTrayWnd", true)
     items := []
-    for hwnd in WinGetList() {
-        visible := DllCall("IsWindowVisible", "Ptr", hwnd, "Int") != 0
-        if (!visible || IsCloaked(hwnd))
+    for _, item in SharedWindowInventoryBuild() {
+        if item["desktop"]
             continue
-        cls := "", title := "", exe := "", pid := 0
-        try cls := WinGetClass("ahk_id " hwnd)
-        if SHELL_CLASSES.Has(cls)
+        if (item["toolWindow"] && !item["steam"])
             continue
-        try title := WinGetTitle("ahk_id " hwnd)
-        try exe := WinGetProcessName("ahk_id " hwnd)
-        try pid := WinGetPID("ahk_id " hwnd)
-        exeLower := StrLower(exe)
-        exStyle := 0
-        try exStyle := WinGetExStyle("ahk_id " hwnd)
-        ; Steam Big Picture can be a visible, titled steamwebhelper tool window
-        ; without WS_EX_APPWINDOW under Xbox FSE. Keep the exception narrow;
-        ; every other palette and overlay remains excluded from the inventory.
-        if ((exStyle & WS_EX_TOOLWINDOW) && !(exStyle & WS_EX_APPWINDOW)
-            && !IsSteamProcess(exeLower))
+        if item["degenerate"]
             continue
-        x := 0, y := 0, w := 0, h := 0
-        try {
-            WinGetPos(&posX, &posY, &posW, &posH, "ahk_id " hwnd)
-            x := posX, y := posY, w := posW, h := posH
-        }
-        ; A minimized window reports off-screen coordinates rather than nothing,
-        ; so this guard is about genuinely degenerate rectangles and must not be
-        ; widened to exclude them -- WinGetMinMax below is what identifies them.
-        if (w <= 0 || h <= 0)
-            continue
-        minMax := 0
-        try minMax := WinGetMinMax("ahk_id " hwnd)
-        style := 0
-        try style := WinGetStyle("ahk_id " hwnd)
-        ; The extra fields exist for the shared legacy/minimized-game detectors in
-        ; SteamShell-Common.ahk. They are additive: the assist features read the
-        ; keys they always read and are unaffected.
-        ;
-        ; "proc" and "scriptOwned" duplicate "exe" and "ours" under the names the
-        ; shell's inventory uses, because the detectors were written against that
-        ; inventory and aliasing two keys is cheaper than forking them.
-        items.Push(Map(
-            "hwnd", hwnd, "title", title, "class", cls, "exe", exeLower,
-            "pid", pid, "x", x, "y", y, "w", w, "h", h,
-            "ours", IsOurWindow(hwnd),
-            "proc", exeLower,
-            "scriptOwned", IsOurWindow(hwnd),
-            "desktop", SHELL_CLASSES.Has(cls),
-            "steam", IsSteamProcess(exeLower),
-            "style", style,
-            "exStyle", exStyle,
-            "owner", DllCall("User32\GetWindow", "Ptr", hwnd, "UInt", 4, "Ptr"), ; GW_OWNER
-            "minMax", minMax,
-            "area", Max(0, w) * Max(0, h)))
+        items.Push(item)
     }
     return items
 }
@@ -3168,47 +3133,39 @@ RunScreenProbe() {
     ; Steam" while the switcher is filling the screen. Each excluded window is
     ; listed here with the reason it was excluded, because the reason is usually
     ; the interesting part.
-    static WS_EX_TOOLWINDOW := 0x00000080
-    static WS_EX_APPWINDOW := 0x00040000
+    ;
+    ; Hence includeHidden, rather than a third enumeration. The reasons printed
+    ; below are now the inventory's OWN flags, so the probe cannot disagree with
+    ; the list it is explaining -- which it could, and quietly would, while it
+    ; recomputed all four of them from the window a second time.
     shown := 0
     hidden := 0
-    for hwnd in WinGetList() {
-        cls := "", title := "", exe := ""
-        try cls := WinGetClass("ahk_id " hwnd)
-        try title := WinGetTitle("ahk_id " hwnd)
-        try exe := StrLower(WinGetProcessName("ahk_id " hwnd))
-        exStyle := 0
-        try exStyle := WinGetExStyle("ahk_id " hwnd)
-        x := 0, y := 0, w := 0, h := 0
-        try {
-            WinGetPos(&posX, &posY, &posW, &posH, "ahk_id " hwnd)
-            x := posX, y := posY, w := posW, h := posH
-        }
-        visible := DllCall("IsWindowVisible", "Ptr", hwnd, "Int") != 0
-        cloaked := IsCloaked(hwnd)
-        toolWindow := (exStyle & WS_EX_TOOLWINDOW) && !(exStyle & WS_EX_APPWINDOW)
+    for _, item in SharedWindowInventoryBuild(true) {
+        hwnd := item["hwnd"]
+        title := item["title"]
         isForeground := hwnd = foregroundHwnd
         ; An untitled, invisible, zero-sized window is noise. The foreground is
         ; always reported whatever shape it is in.
-        if (!isForeground && !visible && title = "") {
+        if (!isForeground && !item["visible"] && title = "") {
             hidden += 1
             continue
         }
         reasons := ""
-        if !visible
+        if !item["visible"]
             reasons .= " hidden"
-        if cloaked
+        if item["cloaked"]
             reasons .= " cloaked"
-        if toolWindow
+        if item["toolWindow"]
             reasons .= " toolwindow"
-        if (w <= 0 || h <= 0)
+        if item["degenerate"]
             reasons .= " zero-size"
         shown += 1
-        LogLine("Screen probe:   " (exe != "" ? exe : "?") " [" cls "]"
-            . " " w "x" h " at " x "," y
-            . ((exStyle & WS_EX_TOPMOST) ? " topmost" : "")
+        LogLine("Screen probe:   " (item["exe"] != "" ? item["exe"] : "?")
+            . " [" item["class"] "]"
+            . " " item["w"] "x" item["h"] " at " item["x"] "," item["y"]
+            . ((item["exStyle"] & WS_EX_TOPMOST) ? " topmost" : "")
             . (isForeground ? " FOREGROUND" : "")
-            . (IsOurWindow(hwnd) ? " (ours)" : "")
+            . (item["ours"] ? " (ours)" : "")
             . (reasons != "" ? "  excluded-from-inventory:" reasons : "")
             . " title='" ShortenText(title, 50) "'")
     }

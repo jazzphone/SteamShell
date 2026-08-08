@@ -4104,7 +4104,19 @@ IsCloaked(hwnd) {
 ; wrapper fills it in afterwards through WindowEngineTitleMatchesBpm. A seam
 ; would also have worked; a key the caller owns is cheaper and says the same
 ; thing.
-SharedWindowInventoryBuild() {
+;
+; includeHidden KEEPS THE WINDOWS THE DEFAULT DROPS, flagged rather than
+; filtered, and two callers need it for opposite reasons. The screen probe exists
+; precisely to report the windows an inventory scan cannot see, with the reason
+; each was excluded -- the Xbox FSE switcher is a cloaked tool window, so a probe
+; over the filtered list says "1 window, Steam" while the switcher fills the
+; screen. The Task Switcher needs it because Windows cloaks Steam Big Picture
+; while Xbox FSE owns the display, which is exactly when somebody wants to switch
+; to it.
+;
+; "visible" and "cloaked" are recorded either way, so a caller never has to ask
+; the window a second time to find out why it is or is not in the list.
+SharedWindowInventoryBuild(includeHidden := false) {
     global ScriptPid
     static WS_VISIBLE := 0x10000000
     static WS_EX_TOOLWINDOW := 0x00000080
@@ -4117,7 +4129,8 @@ SharedWindowInventoryBuild() {
     for hwnd in WinGetList() {
         if !DllCall("User32\IsWindow", "Ptr", hwnd, "Int")
             continue
-        if IsCloaked(hwnd)
+        cloaked := IsCloaked(hwnd)
+        if (cloaked && !includeHidden)
             continue
 
         id := "ahk_id " hwnd
@@ -4132,7 +4145,8 @@ SharedWindowInventoryBuild() {
             continue
         }
         try exStyle := WinGetExStyle(id) + 0
-        if !(style & WS_VISIBLE)
+        visible := (style & WS_VISIBLE) != 0
+        if (!visible && !includeHidden)
             continue
 
         pid := 0
@@ -4179,6 +4193,8 @@ SharedWindowInventoryBuild() {
             "area", Max(0, width) * Max(0, height),
             "scriptOwned", pid = ScriptPid,
             "ours", pid = ScriptPid,
+            "visible", visible,
+            "cloaked", cloaked,
             "desktop", SHELL_CLASSES.Has(classLower),
             "steam", IsSteamProcess(proc),
             ; A tool window that does not also declare itself an app window is a

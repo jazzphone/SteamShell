@@ -660,7 +660,7 @@ Assert-True (
     $source -match '(?s)GetSwitchableWindows\(\).*?isSteamWindow\s*:=\s*IsSteamProcess\(exe\).*?WS_EX_TOOLWINDOW.*?&&\s*!isSteamWindow') (
     "The task switcher must retain Steam Big Picture when Steam publishes it as a tool window.")
 Assert-True (
-    $source -match '(?s)AssistInventoryBuild\(\).*?WS_EX_TOOLWINDOW.*?&&\s*!IsSteamProcess\(exeLower\)' -and
+    $source -match '(?s)AssistInventoryBuild\(\).*?item\["toolWindow"\].*?&&\s*!item\["steam"\]' -and
     $source -match '(?s)AssistFindSteamWindow\([^)]*\).*?IsSteamProcess\(item\["exe"\]\).*?area\s*:=\s*item\["w"\]\s*\*\s*item\["h"\].*?area\s*>\s*bestArea') (
     "Steam Assist must retain Steam Big Picture tool windows and choose the largest Steam surface.")
 
