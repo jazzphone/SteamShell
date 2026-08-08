@@ -52,12 +52,12 @@ Assert-True (Test-Path $buildScriptPath) "Build-SteamShell.ps1 is missing."
 $source = Get-EffectiveSource -Path $sourcePath
 # The tree file WITHOUT its #Includes resolved -- see the XFE validator for why a
 # -notmatch has to read this rather than $source.
-$rawSource = Get-Content -LiteralPath $sourcePath -Raw
+$rawSource = Get-SourceText $sourcePath
 # Raw, NOT include-resolved. The point of several assertions below is what the
 # helper file itself does and does not contain -- resolving its #Include would
 # make every function in SteamShell-Common.ahk look like the helper's own, which
 # is precisely the duplication those assertions exist to forbid.
-$helperSource = Get-Content -LiteralPath $helperSourcePath -Raw
+$helperSource = Get-SourceText $helperSourcePath
 # ...and the same file WITH its #Include resolved, for the handful of assertions
 # that ask whether a BEHAVIOUR exists rather than where it is written. Keeping
 # both is the point: a -notmatch forbidding duplication has to read the raw file,
@@ -66,8 +66,8 @@ $helperSource = Get-Content -LiteralPath $helperSourcePath -Raw
 $helperEffective = Get-EffectiveSource -Path $helperSourcePath
 $commonSourcePath = Join-Path $projectRoot "SteamShell-Common.ahk"
 Assert-True (Test-Path $commonSourcePath) "SteamShell-Common.ahk is missing."
-$commonSource = Get-Content -LiteralPath $commonSourcePath -Raw
-$sample = Get-Content -LiteralPath $samplePath -Raw
+$commonSource = Get-SourceText $commonSourcePath
+$sample = Get-SourceText $samplePath
 
 Assert-True (
     $source -match '@Ahk2Exe-SetVersion 2\.0\.0\.0' -and
@@ -76,7 +76,7 @@ Assert-True (
     $helperSource -match 'HelperVersion\s*:=\s*"2\.0\.0"' -and
     $source -match 'ElevatedHelperExpectedVersion\s*:=\s*"2\.0\.0\.1"') (
     "SteamShell 2.0.0 main/helper version metadata is inconsistent.")
-$buildScript = Get-Content -LiteralPath $buildScriptPath -Raw
+$buildScript = Get-SourceText $buildScriptPath
 
 # The helper version is DERIVED from the helper source, not written down a fourth
 # time.
@@ -115,8 +115,8 @@ Assert-True ($mainVersionMatch.Success) (
     "SteamShell.ahk does not declare a file version.")
 $mainVersionPattern = [regex]::Escape($mainVersionMatch.Groups[1].Value)
 
-$xfeSourceForVersion = Get-Content -LiteralPath (
-    Join-Path $projectRoot "SteamShell-XFE.ahk") -Raw
+$xfeSourceForVersion = Get-SourceText (
+    Join-Path $projectRoot "SteamShell-XFE.ahk")
 $xfeVersionMatch = [regex]::Match(
     $xfeSourceForVersion, '@Ahk2Exe-SetVersion (\d+\.\d+\.\d+\.\d+)')
 Assert-True ($xfeVersionMatch.Success) (
@@ -1497,7 +1497,7 @@ $trailingWhitespaceFiles = @()
 foreach ($file in @("SteamShell.ahk", "SteamShell-Shared.ahk", "SteamShell-Common.ahk")) {
     $path = Join-Path $projectRoot $file
     if (-not (Test-Path -LiteralPath $path)) { continue }
-    $hits = [regex]::Matches((Get-Content -LiteralPath $path -Raw), '(?m)[ \t]+$')
+    $hits = [regex]::Matches((Get-SourceText $path), '(?m)[ \t]+$')
     if ($hits.Count -gt 0) {
         $trailingWhitespaceFiles += "$file ($($hits.Count))"
     }
@@ -3937,6 +3937,10 @@ if (-not $Quiet) {
         $embeddedSchema.Count,
         $quickMenuIds.Count,
         $callbackCount)
+    # Sources read, and what that cost. Printed so the next round of harness
+    # tuning has a number instead of an argument about whether this validator is
+    # bound by file I/O or by regex.
+    Write-Host ("  " + (Get-ReadStats))
 }
 
 # A row that only reports state must not be reachable with the D-pad.

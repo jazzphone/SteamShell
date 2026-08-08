@@ -33,12 +33,12 @@ $source = Get-EffectiveSource -Path $sourcePath
 # need this: $source now contains SteamShell-Common.ahk, where the very
 # constants a re-implementation would use legitimately live, so a -notmatch
 # against $source can never be satisfied and would pin nothing.
-$rawSource = Get-Content -LiteralPath $sourcePath -Raw
+$rawSource = Get-SourceText $sourcePath
 $commonSourcePath = Join-Path $projectRoot "SteamShell-Common.ahk"
 Assert-True (Test-Path $commonSourcePath) "SteamShell-Common.ahk is missing."
-$commonSource = Get-Content -LiteralPath $commonSourcePath -Raw
-$sample = Get-Content -LiteralPath $samplePath -Raw
-$buildScript = Get-Content -LiteralPath $buildScriptPath -Raw
+$commonSource = Get-SourceText $commonSourcePath
+$sample = Get-SourceText $samplePath
+$buildScript = Get-SourceText $buildScriptPath
 
 Assert-True (
     $source -match '@Ahk2Exe-SetVersion 2\.0\.0\.0' -and
@@ -993,7 +993,7 @@ Assert-True ($source -match 'RearmControllerInput') (
 # tuning constants are where drift would actually happen, so they are compared
 # directly.
 if (Test-Path $controllerSimulationPath) {
-    $simulation = Get-Content -LiteralPath $controllerSimulationPath -Raw
+    $simulation = Get-SourceText $controllerSimulationPath
     $sharedConstants = @{
         'MIN_NORMALISED_DELTA' = '(?m)^\s*static MIN_NORMALISED_DELTA\s*:=\s*([0-9.]+)'
         'MIN_BYTE_EXCURSION'   = '(?m)^\s*static MIN_BYTE_EXCURSION\s*:=\s*([0-9.]+)'
@@ -2337,6 +2337,7 @@ Report-StructuralDrift -ProjectRoot $projectRoot -Quiet:$Quiet | Out-Null
 
 if (-not $Quiet) {
     Write-Host "SteamShell XFE static validation passed."
+    Write-Host ("  " + (Get-ReadStats))
 }
 
 # A row that only reports state must not be reachable with the D-pad.

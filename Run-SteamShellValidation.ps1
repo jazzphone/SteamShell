@@ -324,10 +324,16 @@ foreach ($b in $builds) {
             ExeName = $b.ExeName
         })
         Write-Host "PASS" -ForegroundColor Green
-        if ($b.ValidatesMainSource) {
-            Add-Result "Syntax: SteamShell.ahk" "PASS" "validated after fresh helper compilation"
-        }
+        # BUILD FIRST, because Add-Result consumes the step clock and the first
+        # caller wins. Reversed, the whole 57 seconds of this step was attributed
+        # to "Syntax: SteamShell.ahk" -- which happens inside it, but is a
+        # fraction of it -- and the Build row printed blank. A timing column that
+        # names the wrong step is worse than none: it sends the next person
+        # optimising the wrong thing.
         Add-Result "Build: $($b.Name)" "PASS" "verified version $distVersion dist output"
+        if ($b.ValidatesMainSource) {
+            Add-Result "Syntax: SteamShell.ahk" "PASS" "validated inside the build, after the helper payload exists"
+        }
     } catch {
         Write-Host "FAIL: $($_.Exception.Message)" -ForegroundColor Red
         Add-Result "Build: $($b.Name)" "FAIL" $_.Exception.Message

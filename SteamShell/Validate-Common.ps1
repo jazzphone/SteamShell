@@ -27,6 +27,64 @@ function Assert-True {
     }
 }
 
+# Every source read once per process, and the cost of doing so reported.
+#
+# These validators read the same handful of files over and over -- around forty
+# Get-Content calls between this file and each product's, over five sources of
+# which one is 750 KB. In place that is wasteful; on the UNC root this project is
+# actually developed from, every one of them is a network round trip.
+#
+# THE COUNTERS ARE THE POINT AS MUCH AS THE CACHE. The harness now times each
+# step, which said the two validators are 60% of the run once the build's own
+# copies are counted -- but not whether that is file I/O or regex. Guessing sent
+# one round of optimisation at the wrong target already. Get-ReadStats prints
+# both numbers, so the next run answers it instead of another argument.
+#
+# Single-shot processes, so there is no staleness question: nothing writes to a
+# source while a validator is reading it.
+$script:sourceCache = @{}
+$script:readCount = 0
+$script:readHits = 0
+$script:readMs = 0.0
+
+function Get-SourceText {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    $key = "R:" + $Path
+    if ($script:sourceCache.ContainsKey($key)) {
+        $script:readHits++
+        return $script:sourceCache[$key]
+    }
+    $clock = [System.Diagnostics.Stopwatch]::StartNew()
+    $text = Get-Content -LiteralPath $Path -Raw
+    $script:readMs += $clock.Elapsed.TotalMilliseconds
+    $script:readCount++
+    $script:sourceCache[$key] = $text
+    return $text
+}
+
+function Get-SourceLines {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    $key = "L:" + $Path
+    if ($script:sourceCache.ContainsKey($key)) {
+        $script:readHits++
+        return $script:sourceCache[$key]
+    }
+    $clock = [System.Diagnostics.Stopwatch]::StartNew()
+    $lines = Get-Content -LiteralPath $Path
+    $script:readMs += $clock.Elapsed.TotalMilliseconds
+    $script:readCount++
+    # Always an array. Get-Content returns a bare string for a one-line file and
+    # $null for an empty one, and a caller doing .Count on either gets an answer
+    # it did not mean.
+    $script:sourceCache[$key] = @($lines)
+    return $script:sourceCache[$key]
+}
+
+function Get-ReadStats {
+    return ("{0} file reads ({1} served from cache) in {2:N0} ms" -f
+        $script:readCount, $script:readHits, $script:readMs)
+}
+
 # Reads a source as AutoHotkey actually sees it, with #Include inlined at the
 # point the directive appears.
 #
@@ -71,8 +129,16 @@ function Get-EffectiveSource {
     if ($Depth -gt 8) {
         throw "#Include nesting is too deep at '$Path'."
     }
+    # Cached whole, not just its reads. Resolving a tree means substring surgery
+    # on 750 KB with Shared and Common spliced in, and each validator asks for
+    # the same effective source three times.
+    $cacheKey = "E:" + $Path
+    if ($script:sourceCache.ContainsKey($cacheKey)) {
+        $script:readHits++
+        return $script:sourceCache[$cacheKey]
+    }
     $directory = Split-Path -Parent $Path
-    $text = Get-Content -LiteralPath $Path -Raw
+    $text = Get-SourceText $Path
     $pattern = '(?m)^[ \t]*#Include[ \t]+(?:\*i[ \t]+)?(.+?)[ \t]*\r?$'
     while ($true) {
         $match = [regex]::Match($text, $pattern)
@@ -92,6 +158,7 @@ function Get-EffectiveSource {
         $text = $text.Substring(0, $match.Index) + $replacement +
             $text.Substring($match.Index + $match.Length)
     }
+    $script:sourceCache[$cacheKey] = $text
     return $text
 }
 
@@ -310,7 +377,7 @@ function Assert-AhkStructure {
 function Get-AhkFunctionBodies {
     param([Parameter(Mandatory = $true)][string]$Path)
     $functions = @{}
-    foreach ($function in (Get-AhkFunctionMap -Text (Get-Content -LiteralPath $Path -Raw))) {
+    foreach ($function in (Get-AhkFunctionMap -Text (Get-SourceText $Path))) {
         $functions[$function.Name] = $function.Body
     }
     return $functions
@@ -676,7 +743,7 @@ function Assert-QuickMenuRows {
 
     $recorded = @{}
     $dynamic = @{}
-    foreach ($line in (Get-Content -LiteralPath $manifestPath)) {
+    foreach ($line in (Get-SourceLines $manifestPath)) {
         $trimmed = $line.Trim()
         if ($trimmed -eq "" -or $trimmed.StartsWith("#")) { continue }
         $space = $trimmed.IndexOf(" ")
@@ -697,7 +764,7 @@ function Assert-QuickMenuRows {
     }
 
     $families = @("layout:", "taskWindow:", "gamescore:", "toggle:", "page:")
-    $sharedText = Get-Content -LiteralPath (Join-Path $ProjectRoot "SteamShell-Shared.ahk") -Raw
+    $sharedText = Get-SourceText (Join-Path $ProjectRoot "SteamShell-Shared.ahk")
     $inert = New-Object System.Collections.Generic.HashSet[string]
     foreach ($m in [regex]::Matches(
         (Get-AhkFunctionBody -Source $sharedText -Name "QuickMenuRowIsInert"),
@@ -708,7 +775,7 @@ function Assert-QuickMenuRows {
     foreach ($pair in @(
         @{ Product = "standalone"; File = "SteamShell.ahk"; Builder = "QuickMenuGetDefinitions" },
         @{ Product = "xfe";        File = "SteamShell-XFE.ahk"; Builder = "QuickMenuGetRows" })) {
-        $text = Get-Content -LiteralPath (Join-Path $ProjectRoot $pair.File) -Raw
+        $text = Get-SourceText (Join-Path $ProjectRoot $pair.File)
         $rowsBody = Get-AhkFunctionBody -Source $text -Name $pair.Builder
         Assert-True ($rowsBody -ne "") (
             "$($pair.File) defines no $($pair.Builder)(); the Quick Menu row inventory cannot be checked.")
@@ -866,7 +933,7 @@ function Assert-NoAmbiguousDeindentedBlocks {
         [Parameter(Mandatory = $true)][string]$File,
         [switch]$Quiet
     )
-    $raw = Get-Content -LiteralPath (Join-Path $ProjectRoot $File)
+    $raw = Get-SourceLines (Join-Path $ProjectRoot $File)
 
     # Continuation sections are literal text, not code.
     $code = New-Object System.Collections.Generic.List[string]
@@ -1008,7 +1075,7 @@ function Assert-SettingsRowsReachConsumers {
         [Parameter(Mandatory = $true)][string]$ProjectRoot,
         [switch]$Quiet
     )
-    $sharedText = Get-Content -LiteralPath (Join-Path $ProjectRoot "SteamShell-Shared.ahk") -Raw
+    $sharedText = Get-SourceText (Join-Path $ProjectRoot "SteamShell-Shared.ahk")
     $tableStart = $sharedText.IndexOf("SettingsCategoryRows(category) {")
     $tableEnd = $sharedText.IndexOf("return table.Has(category)", [Math]::Max($tableStart, 0))
     Assert-True ($tableStart -ge 0 -and $tableEnd -gt $tableStart) (
@@ -1052,7 +1119,7 @@ function Assert-SettingsRowsReachConsumers {
         # exactly one such section in these sources, opened by a bare `(` line.
         $lines = @()
         foreach ($file in @($pair.Tree, "SteamShell-Shared.ahk", "SteamShell-Common.ahk")) {
-            $raw = Get-Content -LiteralPath (Join-Path $ProjectRoot $file)
+            $raw = Get-SourceLines (Join-Path $ProjectRoot $file)
             $literal = $false
             for ($i = 0; $i -lt $raw.Count; $i++) {
                 $trimmed = $raw[$i].Trim()
@@ -1183,12 +1250,12 @@ function Assert-SharedParity {
     $shared = Get-AhkFunctionBodies -Path $sharedPath
     $common = Get-AhkFunctionBodies -Path $commonPath
     $manifest = @(
-        Get-Content -LiteralPath $manifestPath |
+        Get-SourceLines $manifestPath |
             ForEach-Object { $_.Trim() } |
             Where-Object { $_ -ne "" -and -not $_.StartsWith("#") }
     )
     $commonManifest = @(
-        Get-Content -LiteralPath $commonManifestPath |
+        Get-SourceLines $commonManifestPath |
             ForEach-Object { $_.Trim() } |
             Where-Object { $_ -ne "" -and -not $_.StartsWith("#") }
     )
@@ -1203,7 +1270,7 @@ function Assert-SharedParity {
     # Checked mechanically rather than trusted, because SteamShell-Shared.ahk
     # documented a two-function seam and had quietly grown to eight before
     # anything noticed -- the validator only ever pinned the two it named.
-    $commonText = Get-Content -LiteralPath $commonPath -Raw
+    $commonText = Get-SourceText $commonPath
     $commonGlobals = @(
         [regex]::Matches($commonText, '(?m)^\s*global\s+(\w+)') |
             ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique)
@@ -1411,14 +1478,14 @@ function Assert-SharedParity {
     # All THREE must include it. This is the assertion that turns "the helper
     # happens to have similar code" into "the helper genuinely shares it".
     foreach ($program in @($standalonePath, $companionPath, $helperPath)) {
-        $text = Get-Content -LiteralPath $program -Raw
+        $text = Get-SourceText $program
         Assert-True ($text -match '(?m)^#Include\s+SteamShell-Common\.ahk\s*$') (
             "$([System.IO.Path]::GetFileName($program)) does not #Include " +
             "SteamShell-Common.ahk, so it carries its own copy of shared logic.")
     }
     # ...and the helper must NOT include the tree-coupled half, which reaches
     # into eight tree functions and would not compile there.
-    $helperText = Get-Content -LiteralPath $helperPath -Raw
+    $helperText = Get-SourceText $helperPath
     Assert-True (-not ($helperText -match '(?m)^#Include\s+SteamShell-Shared\.ahk\s*$')) (
         "SteamShell-Helper.ahk includes SteamShell-Shared.ahk, which is the " +
         "tree-coupled half and cannot resolve from the helper.")
@@ -1430,7 +1497,7 @@ function Assert-SharedParity {
     # them until now. Getting them out of step does not fail to compile and does
     # not log anything useful: main simply waits out its timeout on an event
     # nobody will ever set, once per button press, with Critical on.
-    $sharedText = Get-Content -LiteralPath $sharedPath -Raw
+    $sharedText = Get-SourceText $sharedPath
     foreach ($channel in @(
         @{ Label = "request"; Name = "SteamShellRtssApply" },
         @{ Label = "completion"; Name = "SteamShellRtssDone" })) {
@@ -1458,7 +1525,7 @@ function Assert-SharedParity {
     # read, that divergence comes back silently -- automatic mouse mode simply
     # stops engaging over elevated windows, which looks like a controller
     # problem and not like a name.
-    $standaloneText = Get-Content -LiteralPath $standalonePath -Raw
+    $standaloneText = Get-SourceText $standalonePath
     foreach ($end in @(
         @{ File = "SteamShell.ahk"; Text = $standaloneText; Role = "publishes" },
         @{ File = "SteamShell-Helper.ahk"; Text = $helperText; Role = "reads" })) {
@@ -1513,7 +1580,7 @@ function Assert-SharedParity {
     # Both trees must include the shared file, or one silently loses every
     # function in it and fails at run time rather than at build time.
     foreach ($tree in @($standalonePath, $companionPath)) {
-        $text = Get-Content -LiteralPath $tree -Raw
+        $text = Get-SourceText $tree
         Assert-True ($text -match '(?m)^#Include\s+SteamShell-Shared\.ahk\s*$') (
             "$([System.IO.Path]::GetFileName($tree)) does not #Include " +
             "SteamShell-Shared.ahk, so the shared functions are missing from it.")
@@ -1548,8 +1615,8 @@ function Assert-SharedParity {
     # Both directions, because they fail differently and neither is visible in a
     # build: the first is a dead binding, the second is a cosmetic leak, and the
     # only thing either costs at compile time is nothing at all.
-    $sharedText = Get-Content -LiteralPath (
-        Join-Path $projectRoot "SteamShell-Shared.ahk") -Raw
+    $sharedText = Get-SourceText (
+        Join-Path $projectRoot "SteamShell-Shared.ahk")
     $sharedActionBody = [regex]::Match(
         $sharedText,
         '(?ms)^ControllerBindingSharedAction\(action\)\s*\{.*?^\}\s*$').Value
@@ -1559,7 +1626,7 @@ function Assert-SharedParity {
         "ControllerBindingSharedAction could not be read; every controller " +
         "binding would be reported as unreachable.")
     foreach ($tree in @("SteamShell.ahk", "SteamShell-XFE.ahk")) {
-        $treeText = Get-Content -LiteralPath (Join-Path $projectRoot $tree) -Raw
+        $treeText = Get-SourceText (Join-Path $projectRoot $tree)
         $seamBody = [regex]::Match(
             $treeText,
             '(?ms)^ProductControllerBindingAction\(action\)\s*\{.*?^\}\s*$').Value
@@ -1617,7 +1684,7 @@ function Assert-SharedParity {
     # any other input arrives during the hold, or "hold View, press A" fires a
     # Steam shortcut underneath the mapping.
     foreach ($tree in @("SteamShell.ahk", "SteamShell-XFE.ahk")) {
-        $viewTreeText = Get-Content -LiteralPath (Join-Path $projectRoot $tree) -Raw
+        $viewTreeText = Get-SourceText (Join-Path $projectRoot $tree)
         Assert-True (
             $viewTreeText -match 'ViewButtonReleased\(\s*\r?\n?\s*now - viewPressTick, viewUsedAsModifier\)' -and
             $viewTreeText -match '(?s)if !viewWasDown \{[\s\S]{0,200}?viewPressTick := now' -and
@@ -1636,8 +1703,8 @@ function Assert-SharedParity {
     # it. A row built for a page nothing draws is the quietest way to ship a
     # setting nobody can reach, and it looks exactly like the feature not
     # working.
-    $shellText = Get-Content -LiteralPath (
-        Join-Path $projectRoot "SteamShell.ahk") -Raw
+    $shellText = Get-SourceText (
+        Join-Path $projectRoot "SteamShell.ahk")
     Assert-True (
         $shellText -match '(?s)SettingsEditorCategories := \[(?:(?!\]).)*?"Steam"' -and
         $shellText -match
@@ -1655,8 +1722,8 @@ function Assert-SharedParity {
     # SettingsPopulateFields reads it as the fallback when the key is absent, so
     # a spec saying true against a LoadSettings saying false shows the user a
     # window claiming the feature is on while the program runs with it off.
-    $sharedSpecText = Get-Content -LiteralPath (
-        Join-Path $projectRoot "SteamShell-Shared.ahk") -Raw
+    $sharedSpecText = Get-SourceText (
+        Join-Path $projectRoot "SteamShell-Shared.ahk")
     Assert-True (
         $sharedSpecText -match
             '(?s)"product", "standalone"[^)]*?"key", "EnableViewButtonActions"' +
@@ -1664,9 +1731,9 @@ function Assert-SharedParity {
         $sharedSpecText -match
             '(?s)"product", "xfe"[^)]*?"key", "EnableViewButtonActions"' +
             '[^)]*?"default", true' -and
-        (Get-Content -LiteralPath (Join-Path $projectRoot "SteamShell.ahk") -Raw) -match
+        (Get-SourceText (Join-Path $projectRoot "SteamShell.ahk")) -match
             'ReadBool\("Steam", "EnableViewButtonActions", false\)' -and
-        (Get-Content -LiteralPath (Join-Path $projectRoot "SteamShell-XFE.ahk") -Raw) -match
+        (Get-SourceText (Join-Path $projectRoot "SteamShell-XFE.ahk")) -match
             'ReadBool\("Steam", "EnableViewButtonActions", true\)') (
         "The View button action must default OFF in the shell and ON in the " +
         "companion, and each tree's settings-spec row must carry the same " +
@@ -1690,8 +1757,8 @@ function Assert-SharedParity {
     # with a string. Everything above this line had already run, so the failure
     # surfaced hundreds of lines later as "[System.String] does not contain a
     # method named 'ContainsKey'" -- nowhere near the assignment that caused it.
-    $sharedRtssText = Get-Content -LiteralPath (
-        Join-Path $projectRoot "SteamShell-Shared.ahk") -Raw
+    $sharedRtssText = Get-SourceText (
+        Join-Path $projectRoot "SteamShell-Shared.ahk")
     Assert-True (
         $sharedRtssText -match
             '(?ms)^RestoreRtssFrameLimitTick\([^)]*\)\s*\{[\s\S]*?' +
@@ -1726,7 +1793,7 @@ function Assert-SharedParity {
     $learnGuard =
         '(?ms)^PollController\(\)\s*\{(?:(?!\n\})[\s\S])*?\n[ \t]*if LearnActive \{'
     foreach ($tree in @("SteamShell.ahk", "SteamShell-XFE.ahk")) {
-        $treeText = Get-Content -LiteralPath (Join-Path $projectRoot $tree) -Raw
+        $treeText = Get-SourceText (Join-Path $projectRoot $tree)
         Assert-True (
             $treeText -match ($learnGuard +
                 '(?:(?!\breturn\b)[\s\S])*?\n[ \t]*Reset\w*State\(' +
@@ -1764,7 +1831,7 @@ function Assert-SharedParity {
     # a guard placed after it is unreachable in exactly the configuration where
     # this was reported.
     foreach ($tree in @("SteamShell.ahk", "SteamShell-XFE.ahk")) {
-        $treeText = Get-Content -LiteralPath (Join-Path $projectRoot $tree) -Raw
+        $treeText = Get-SourceText (Join-Path $projectRoot $tree)
         Assert-True (
             $treeText -match
                 '(?ms)^AutoMouseModeActive\(\)\s*\{(?:(?!\n\})[\s\S])*?' +
@@ -1828,8 +1895,8 @@ function Assert-SharedParity {
     # Where the two trees genuinely disagreed the union was taken, never the
     # intersection: widening accepts every value somebody has already
     # configured, narrowing silently reduces it.
-    $sharedText = Get-Content -LiteralPath (
-        Join-Path $projectRoot "SteamShell-Shared.ahk") -Raw
+    $sharedText = Get-SourceText (
+        Join-Path $projectRoot "SteamShell-Shared.ahk")
     $tableStart = $sharedText.IndexOf("SettingsCategoryRows(category) {")
     $tableEnd = $sharedText.IndexOf("return table.Has(category)", $tableStart)
     $tableText = $sharedText.Substring($tableStart, $tableEnd - $tableStart)
@@ -1853,7 +1920,7 @@ function Assert-SharedParity {
         foreach ($tree in @("SteamShell.ahk", "SteamShell-XFE.ahk")) {
             if ($product -eq "standalone" -and $tree -ne "SteamShell.ahk") { continue }
             if ($product -eq "xfe" -and $tree -ne "SteamShell-XFE.ahk") { continue }
-            $treeText = Get-Content -LiteralPath (Join-Path $projectRoot $tree) -Raw
+            $treeText = Get-SourceText (Join-Path $projectRoot $tree)
             $flat = $treeText -replace '\s+', ' '
             # EVERY read of the key, not the first. A tree reads most settings
             # twice -- once into its globals at load, once to fill the Settings
@@ -1935,7 +2002,7 @@ function Assert-SharedParity {
     foreach ($pair in @(
         @{ Name = "SteamShell.ahk"; Path = $standalonePath },
         @{ Name = "SteamShell-XFE.ahk"; Path = $companionPath })) {
-        $treeText = Get-Content -LiteralPath $pair.Path -Raw
+        $treeText = Get-SourceText $pair.Path
         $declared = @{}
         foreach ($m in [regex]::Matches($treeText, '(?m)^\s*global\s+([^\r\n]+)')) {
             foreach ($piece in ($m.Groups[1].Value -split ',')) {
@@ -1967,7 +2034,7 @@ function Assert-SharedParity {
     foreach ($pair in @(
         @{ Name = "SteamShell.ahk"; Path = $standalonePath },
         @{ Name = "SteamShell-XFE.ahk"; Path = $companionPath })) {
-        $treeText = Get-Content -LiteralPath $pair.Path -Raw
+        $treeText = Get-SourceText $pair.Path
         $supers = @{}
         foreach ($m in [regex]::Matches($treeText, '(?m)^global\s+([^\r\n]+)')) {
             $bare = $m.Groups[1].Value -replace '(?<!`);.*$', ''
@@ -2044,7 +2111,7 @@ function Assert-SharedParity {
     # down cannot hold two answers for the same name.
     $divergent = @{}
     if (Test-Path -LiteralPath $divergentPath) {
-        foreach ($line in (Get-Content -LiteralPath $divergentPath)) {
+        foreach ($line in (Get-SourceLines $divergentPath)) {
             $trimmed = $line.Trim()
             if ($trimmed -eq "" -or $trimmed.StartsWith("#")) { continue }
             $split = $trimmed.IndexOf(":")
