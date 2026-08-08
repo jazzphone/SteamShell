@@ -5162,6 +5162,18 @@ RawInputProbeEnumerate() {
         LogLine("RawInput probe: " got " devices enumerated, " hidCount " of them HID."
             . (hidCount ? "" : " No HID collection exists for RawInput to deliver."))
     }
+    ; A bare try here swallowed the one diagnostic that says whether Windows has
+    ; any HID collection to deliver at all. Losing it turns "RawInput sees no
+    ; controller" into a question with no evidence either way, which is the state
+    ; this whole function exists to prevent.
+    ;
+    ; Not rate-limited, unlike the WM_INPUT handler: this runs once, from
+    ; RawInputProbeStart.
+    catch as err {
+        LogLine("RawInput probe: device enumeration failed -- " err.Message
+            . " (" err.File ":" err.Line "). The probe cannot report which HID "
+            . "collections exist; controller detection may still work.", "Warning")
+    }
 }
 
 
@@ -5174,6 +5186,8 @@ RawInputProbeMessage(wParam, lParam, msg, hwnd) {
     static lastTick := 0
     static arrivals := 0
     static lastArrivalLog := 0
+    static failures := 0
+    static lastFailureLogTick := 0
     if CompanionDisabled
         return 0
 
@@ -5257,6 +5271,29 @@ RawInputProbeMessage(wParam, lParam, msg, hwnd) {
         try foreground := WinGetProcessName("A")
         LogLine("RawHID dev=0x" Format("{:X}", device)
             . " len=" sizeHid " n=" count " [" hex "] fg=" foreground)
+    }
+    ; THE CATCH IS NOT OPTIONAL, for the same reason it is not optional in
+    ; RawInputDeviceKey below: this whole body was a bare `try`, and a bare try
+    ; SWALLOWS. Nothing above can see a throw here either -- the caller is the
+    ; Windows message pump -- so a failure in GetRawInputData, a bad offset, or a
+    ; decoder fault stopped every controller report with no record anywhere. That
+    ; is the exact shape of the RIDI_DEVICENAME bug documented further down, which
+    ; made a device lookup appear to fail on every machine for as long as nobody
+    ; thought to question it.
+    ;
+    ; Rate-limited to once a minute rather than logged per report, because this
+    ; runs from WM_INPUT above 100 Hz and an unrated line here would bury the log
+    ; it is meant to make readable. The first failure is always logged; the count
+    ; carries how many followed.
+    catch as err {
+        failures++
+        if (!lastFailureLogTick || A_TickCount - lastFailureLogTick >= 60000) {
+            LogLine("RawInput: report handling threw -- " err.Message
+                . " (" err.File ":" err.Line "). Controller input from this "
+                . "backend is degraded or stopped. Total failures: " failures ".",
+                "Error")
+            lastFailureLogTick := A_TickCount
+        }
     }
 }
 
