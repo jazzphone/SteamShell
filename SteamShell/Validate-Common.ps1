@@ -331,6 +331,62 @@ function Get-AhkFunctionBodies {
 # sibling tree is absent" path any more. That skip existed only because a frozen
 # release snapshot held one tree; a snapshot is the whole folder now, and a
 # silent skip is the last thing this check should be capable of.
+# The per-product seam: functions SteamShell-Shared.ahk calls that each tree
+# answers for itself.
+#
+# SCRIPT SCOPE, not a local of Assert-SharedParity, because it now has two
+# readers -- the fingerprint gate down there and Report-StructuralDrift just
+# below. Both need the same list, and the alternative was a second copy, which is
+# how the counts in this project keep going wrong. Assert-SharedParity holds the
+# assertions ABOUT the list; the list itself lives here.
+#
+# Both Python replays read it out of this file by regex, so keep the literal
+# `$sharedSeamAllowed = @(` and `$sharedSeamExpectedCount = N` spellings.
+$sharedSeamAllowed = @(
+    "SharedPersistSettings",
+    # Each tree answers over its own foreground cache -- the companion
+    # through CurrentForegroundExe, the shell through LastRealFgHwnd --
+    # and ViewButtonReleased has to ask the question from the shared
+    # file. Widened deliberately when that function stopped being the
+    # companion's alone.
+    "SteamIsInFront",
+    "HideQuickMenu", "ShowQuickMenu",
+    "ProductLaunchMinimized", "ProductQuickMenuBlockedReason",
+    "MouseWatchDisabled", "MouseWatchHoldsCursorVisible",
+    "ProductBestGameExe",
+    "ProductCenterGui", "ProductDataDir", "ProductElevatedHelperAlive",
+    "ProductHealthResults", "ProductIdentity",
+    "OpenOSK", "OpenTouchKeyboard",
+    "ProductApplyQuickMenuSetting", "ProductControllerBindingAction",
+    "ProductSetDialogActive",
+    # Only SettingsRegisterBuiltField is CALLED from the shared file. The
+    # browse, record and mark-dirty seams are passed as callbacks, and the
+    # reachability check covers those by requiring a bare reference to
+    # resolve in both trees -- which is the check that caught the shell's
+    # own browse handler being wired into a companion that does not define it.
+    "SettingsProductAddSectionRow", "SettingsProductTrackControl",
+    "SettingsProductWireDependency",
+    "SettingsRegisterBuiltField",
+    "ProductSettingBool",
+    "ProductSettingsScrollBar", "ProductSettingsViewportHeight",
+    "ProductTrayBaseTip", "ProductTrayItems", "ProductVersionText",
+    "QuickMenuActivateSelected", "QuickMenuAdjustSelected",
+    "QuickMenuBuildGui", "QuickMenuCloseSelected",
+    "QuickMenuMouseChoose",
+    "QuickMenuRefresh", "QuickMenuValue")
+# The seam's SIZE is asserted, not just its contents.
+#
+# Both file headers used to state a count in prose -- "three", then "24" --
+# while the list itself grew to 28 and then 36. Twice the number was wrong,
+# and the second time the Common header actively promised "the check that
+# fails when it is wrong", which did not exist. Nothing read those numbers,
+# so nothing could contradict them.
+#
+# Restated here, next to the list, and asserted in Assert-SharedParity: changing
+# one without the other fails the build. Update the expectation in the same
+# commit that changes the list, and say in the message why the seam moved.
+$sharedSeamExpectedCount = 36
+
 # Reports same-named functions in both trees whose difference is only naming and
 # formatting -- the drift that a raw similarity score hides.
 #
@@ -345,6 +401,18 @@ function Get-AhkFunctionBodies {
 # a check that failed the build on similarity would be demanding they merge. The
 # point is that new drift becomes visible in the same pass that would otherwise
 # bury it.
+#
+# THE SEAM IS EXEMPT FROM THE REPORT, for the same reason it is exempt from the
+# gate a thousand lines below: $sharedSeamAllowed IS the record that these
+# functions differ per product, so reporting them as drift asks for a decision
+# that has already been made.
+#
+# It was not academic. Every green build printed `Structural drift: 1
+# function(s) ... ProductIdentity (1)`, and it was a false positive twice over:
+# both bodies are a static Map and a return, so the normalised forms match and
+# score 1.00, and the two can never be shared because answering differently per
+# product is the whole point of the function. A permanent warning-shaped line in
+# a passing run teaches you to skip the section it lives in.
 function Report-StructuralDrift {
     param(
         [Parameter(Mandatory = $true)][string]$ProjectRoot,
@@ -372,9 +440,15 @@ function Report-StructuralDrift {
         return $text
     }
 
+    $seamExempt = @{}
+    foreach ($seamName in $script:sharedSeamAllowed) {
+        $seamExempt[$seamName.ToLowerInvariant()] = $true
+    }
+
     $hits = @()
     foreach ($name in $a.Keys) {
         if (-not $b.ContainsKey($name)) { continue }
+        if ($seamExempt.ContainsKey($name.ToLowerInvariant())) { continue }
         $formA = Get-StructuralForm -Body $a[$name]
         $formB = Get-StructuralForm -Body $b[$name]
         if ($formA -eq $formB) {
@@ -1478,52 +1552,11 @@ function Assert-SharedParity {
         }
     }
 
-    $sharedSeamAllowed = @(
-        "SharedPersistSettings",
-        # Each tree answers over its own foreground cache -- the companion
-        # through CurrentForegroundExe, the shell through LastRealFgHwnd --
-        # and ViewButtonReleased has to ask the question from the shared
-        # file. Widened deliberately when that function stopped being the
-        # companion's alone.
-        "SteamIsInFront",
-        "HideQuickMenu", "ShowQuickMenu",
-        "ProductLaunchMinimized", "ProductQuickMenuBlockedReason",
-        "MouseWatchDisabled", "MouseWatchHoldsCursorVisible",
-        "ProductBestGameExe",
-        "ProductCenterGui", "ProductDataDir", "ProductElevatedHelperAlive",
-        "ProductHealthResults", "ProductIdentity",
-        "OpenOSK", "OpenTouchKeyboard",
-        "ProductApplyQuickMenuSetting", "ProductControllerBindingAction",
-        "ProductSetDialogActive",
-        # Only SettingsRegisterBuiltField is CALLED from the shared file. The
-        # browse, record and mark-dirty seams are passed as callbacks, and the
-        # reachability check covers those by requiring a bare reference to
-        # resolve in both trees -- which is the check that caught the shell's
-        # own browse handler being wired into a companion that does not define it.
-        "SettingsProductAddSectionRow", "SettingsProductTrackControl",
-        "SettingsProductWireDependency",
-        "SettingsRegisterBuiltField",
-        "ProductSettingBool",
-        "ProductSettingsScrollBar", "ProductSettingsViewportHeight",
-        "ProductTrayBaseTip", "ProductTrayItems", "ProductVersionText",
-        "QuickMenuActivateSelected", "QuickMenuAdjustSelected",
-        "QuickMenuBuildGui", "QuickMenuCloseSelected",
-        "QuickMenuMouseChoose",
-        "QuickMenuRefresh", "QuickMenuValue")
-    # The seam's SIZE is asserted, not just its contents.
-    #
-    # Both file headers used to state a count in prose -- "three", then "24" --
-    # while the list itself grew to 28 and then 36. Twice the number was wrong,
-    # and the second time the Common header actively promised "the check that
-    # fails when it is wrong", which did not exist. Nothing read those numbers,
-    # so nothing could contradict them.
-    #
-    # This is that check. Growing the seam is allowed and sometimes correct; doing
-    # it WITHOUT noticing is what produced two wrong headers, so the number has to
-    # be restated here, next to the list, where changing one and not the other
-    # fails the build. Update the expectation in the same commit that changes the
-    # list, and say in the message why the seam needed to move.
-    $sharedSeamExpectedCount = 36
+    # The list and its expected size both live at the top of this file, beside
+    # Report-StructuralDrift, which is the second reader. Only ONE copy of the
+    # number exists; restating it here is what produced two wrong headers.
+    $sharedSeamAllowed = $script:sharedSeamAllowed
+    $sharedSeamExpectedCount = $script:sharedSeamExpectedCount
     Assert-True ($sharedSeamAllowed.Count -eq $sharedSeamExpectedCount) (
         "The shared seam has $($sharedSeamAllowed.Count) entries but " +
         "`$sharedSeamExpectedCount says $sharedSeamExpectedCount. If the seam " +
