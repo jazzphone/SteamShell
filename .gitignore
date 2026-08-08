@@ -51,3 +51,9 @@ setup-admin-requested.tmp
 
 # Local tool settings, not project configuration
 .claude/settings.local.json
+
+# Captured harness output. logs.txt was a tracked run transcript at the repo
+# root, referenced by nothing, containing a LAN path and a machine account name.
+# Removing it does not purge it from history -- it is low-risk enough not to be
+# worth a rewrite -- but nothing new should land here.
+logs.txt
