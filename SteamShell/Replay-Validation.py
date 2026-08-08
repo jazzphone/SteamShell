@@ -1153,6 +1153,103 @@ def check_settings_rows_reach_consumers(sources):
                      "back. The setting is stored and never acted on.")
 
 
+AHK_CONTROL = re.compile(
+    r"^(\s*)(if|else\s+if|else|while|for|loop|try|catch|finally)\b(.*)$", re.I)
+
+
+def _has_inline_body(keyword, rest):
+    """Whether the control statement already carries its body on the same line."""
+    word = keyword.lower().replace(" ", "")
+    body = rest.strip()
+    if word in ("try", "else", "finally"):
+        return body != ""
+    if word == "catch":
+        # `catch Error as e` is still a header, not a body.
+        return body != "" and not re.fullmatch(r"[\w.]+(\s+as\s+\w+)?", body, re.I)
+    if word in ("if", "elseif", "while"):
+        if not body.startswith("("):
+            return False
+        depth = 0
+        for index, char in enumerate(body):
+            if char == "(":
+                depth += 1
+            elif char == ")":
+                depth -= 1
+                if depth == 0:
+                    return body[index + 1:].strip() != ""
+        return False
+    # for/loop headers have no bracketing to strip, so no claim is made.
+    return False
+
+
+def check_ambiguous_deindented_blocks(sources):
+    """A braceless control statement whose body is not indented under it.
+
+    KEPT IN STEP WITH Assert-NoAmbiguousDeindentedBlocks in Validate-Common.ps1.
+
+    AutoHotkey does not care about indentation, so this is legal and means what
+    the braces would mean -- exactly one statement. The problem is that it does
+    not READ that way when the next statement sits at the same indent:
+
+        if (sc)
+        raw := Trim(SubStr(raw, 1, sc - 1))   ; guarded
+        hc := InStr(raw, "#")                 ; NOT guarded, reads as though it is
+
+    That pair is real, from the shell's INI parsing, next door to a truncation
+    bug fixed in the same pass. It also breaks tools: `sed -n '/^Func/,/^}/p'`
+    truncates on these sources because a `}` can appear at column 0 INSIDE a
+    function, and that nearly produced a report of a PollController bug that did
+    not exist.
+
+    ONLY THE AMBIGUOUS ONES. A braceless body at the same indent that ENDS its
+    block reads fine, and there are roughly 150 of those in the oldest file;
+    reformatting them is a large diff for no gain. The rule here needs a third
+    statement at the same indent after the body -- the case where a reader
+    genuinely cannot tell where the body stops.
+    """
+    for name in ALL_FILES:
+        lines = sources[name].split("\n")
+        # Continuation sections are literal text, not code.
+        code = []
+        literal = False
+        for line in lines:
+            if not literal and line.strip() == "(":
+                literal = True
+                code.append(None)
+                continue
+            if literal:
+                if line.strip().startswith(")"):
+                    literal = False
+                code.append(None)
+                continue
+            code.append(re.sub(r"(?<!`);.*$", "", line))
+        live = [i for i, text in enumerate(code) if text and text.strip()]
+
+        for position, index in enumerate(live):
+            match = AHK_CONTROL.match(code[index])
+            if not match:
+                continue
+            indent, keyword, rest = match.group(1), match.group(2), match.group(3).rstrip()
+            if rest.endswith("{") or _has_inline_body(keyword, rest):
+                continue
+            if position + 2 >= len(live):
+                continue
+            body, after = code[live[position + 1]], code[live[position + 2]]
+            if body.strip().startswith("{"):
+                continue
+            if len(body) - len(body.lstrip()) != len(indent):
+                continue
+            if len(after) - len(after.lstrip()) != len(indent):
+                continue
+            if re.match(r"^\s*(\}|else\b|catch\b|finally\b)", after):
+                continue
+            fail(f"{name}:{index + 1} {keyword} has no brace and its body sits at the "
+                 f"same indent, with another statement after it at that indent: "
+                 f"`{body.strip()}` then `{after.strip()}`. Only the first is "
+                 "guarded, and nothing on the page says so. Indent the body or "
+                 "brace the block.")
+
+
 def check_learner_guard(sources):
     """The controller poll's learner stand-down, in both trees.
 
@@ -1368,6 +1465,7 @@ def main():
     check_view_button_default_split(sources)
     check_settings_row_keys(sources)
     check_settings_rows_reach_consumers(sources)
+    check_ambiguous_deindented_blocks(sources)
     check_quickmenu_rows(sources)
     check_schema_versions()
     check_cross_name_duplicates(sources)

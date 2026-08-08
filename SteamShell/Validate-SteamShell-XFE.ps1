@@ -2320,6 +2320,9 @@ Assert-True (
 Assert-SharedParity -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-QuickMenuRows -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-SettingsRowsReachConsumers -ProjectRoot $projectRoot -Quiet:$Quiet
+Assert-NoAmbiguousDeindentedBlocks -ProjectRoot $projectRoot -File "SteamShell-XFE.ahk" -Quiet:$Quiet
+Assert-NoAmbiguousDeindentedBlocks -ProjectRoot $projectRoot -File "SteamShell-Shared.ahk" -Quiet:$Quiet
+Assert-NoAmbiguousDeindentedBlocks -ProjectRoot $projectRoot -File "SteamShell-Common.ahk" -Quiet:$Quiet
 # Reports only. See Report-StructuralDrift in Validate-Common.ps1 for why a
 # high structural score is evidence rather than a verdict.
 Report-StructuralDrift -ProjectRoot $projectRoot -Quiet:$Quiet | Out-Null

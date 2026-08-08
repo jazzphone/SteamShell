@@ -2147,7 +2147,7 @@ StopElevatedHelper(reason) {
 RecordShortcutCancel(*) {
     global _ShortcutCap
     if !IsObject(_ShortcutCap)
-    return
+        return
     _ShortcutCap["cancelled"] := true
     try _ShortcutCap["input"].Stop()
     _ShortcutCap["done"] := true
@@ -2833,7 +2833,7 @@ LogRow(ts, evt, scoreStr, exe, pidStr, cpuStr, audChar, fsChar, rectStr, hwndStr
 
     if (GameLogIncludeTitles) {
     if (title = "")
-    title := "-"
+        title := "-"
     line .= " " . TruncPad(title, 60, true)
     }
     return line
@@ -3824,29 +3824,29 @@ NormalizeKeyForSend(keyName) {
     ; For multi-character names, wrap in braces: {Tab}, {Esc}, {F1}, {Left}, etc.
     k := keyName
     if (k = "Escape")
-    k := "Esc"
+        k := "Esc"
     if (k = "Return")
-    k := "Enter"
+        k := "Enter"
     if (StrLen(k) > 1)
-    return "{" k "}"
+        return "{" k "}"
     return k
 }
 
 GetLastLines(text, maxLines, newestFirst := false) {
     if (maxLines <= 0)
-    return ""
+        return ""
     ; StrSplit("", "`n") yields one empty element, not none, so an empty log came
     ; back as a single blank line -- a log viewer showing one blank row instead of
     ; nothing, and a support bundle with a line in it that was never logged.
     if (text = "")
-    return ""
+        return ""
     t := StrReplace(text, "`r`n", "`n")
     t := StrReplace(t, "`r", "`n")
     lines := StrSplit(t, "`n")
     total := lines.Length
     start := total - maxLines + 1
     if (start < 1)
-    start := 1
+        start := 1
 
     out := ""
     if (newestFirst) {

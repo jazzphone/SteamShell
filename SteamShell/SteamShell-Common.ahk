@@ -629,10 +629,10 @@ GetProcessTokenSecurity(pid, &sidText, &sessionId, &integrityName, &errorText) {
 
 StrRepeat(s, count) {
     if (count <= 0)
-    return ""
+        return ""
     out := ""
     Loop count
-    out .= s
+        out .= s
     return out
 }
 
@@ -1431,9 +1431,9 @@ CleanIniValue(v, default := "", blankUsesDefault := true) {
 NormalizeKeyForDisplay(keyName) {
     k := keyName
     if (k = "Escape")
-    return "Esc"
+        return "Esc"
     if (k = "Return")
-    return "Enter"
+        return "Enter"
     return k
 }
 
@@ -1478,9 +1478,9 @@ NormalizeMediaPath(p) {
     ; Trim whitespace and optional surrounding quotes.
     p := Trim(p)
     if (p = "")
-    return ""
+        return ""
     if (SubStr(p, 1, 1) = '"' && SubStr(p, -1) = '"')
-    p := SubStr(p, 2, StrLen(p) - 2)
+        p := SubStr(p, 2, StrLen(p) - 2)
     p := Trim(p)
 
     ; Expand environment variables like %USERPROFILE%
@@ -2037,7 +2037,7 @@ GetActiveAudioPidPeaks() {
 
     ComCall(4, enum, "UInt", eRender, "UInt", eMultimedia, "Ptr*", pDevice)
     if (!pDevice)
-    return pids
+        return pids
 
     dev := ComValue(13, pDevice)
     iidMgr := GuidBuf("{77AA99A0-1BD6-484F-8BC7-2C654C9A9B6F}") ; IAudioSessionManager2
@@ -2065,7 +2065,7 @@ GetActiveAudioPidPeaks() {
     pCtrl := 0
     ComCall(4, sesEnum, "Int", idx, "Ptr*", pCtrl) ; GetSession
     if (!pCtrl)
-    continue
+        continue
 
     ctrl := ComValue(13, pCtrl)
 
@@ -2106,7 +2106,7 @@ GetActiveAudioPidPeaksCached() {
     static lastTick := 0
     static lastMap := Map()
     if (A_TickCount - lastTick < 750)
-    return lastMap
+        return lastMap
     lastTick := A_TickCount
     lastMap := GetActiveAudioPidPeaks()
     return lastMap
@@ -2192,7 +2192,7 @@ TruncPad(s, width, leftAlign := true) {
     }
     pad := width - StrLen(s)
     if (pad <= 0)
-    return s
+        return s
     return leftAlign ? (s . StrRepeat(" ", pad)) : (StrRepeat(" ", pad) . s)
 }
 

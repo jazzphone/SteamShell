@@ -839,6 +839,112 @@ function Assert-QuickMenuRows {
     }
 }
 
+# A braceless control statement whose body is not indented under it.
+#
+# AutoHotkey does not care about indentation, so this is legal and means exactly
+# what the braces would mean -- one statement. The problem is that it does not
+# READ that way when the next statement sits at the same indent:
+#
+#     if (sc)
+#     raw := Trim(SubStr(raw, 1, sc - 1))   ; guarded
+#     hc := InStr(raw, "#")                 ; NOT guarded, reads as though it is
+#
+# That pair is real, from the shell's INI parsing, next door to a truncation bug
+# fixed in the same pass. It also breaks tools: `sed -n '/^Func/,/^}/p'`
+# truncates on these sources because a `}` can appear at column 0 INSIDE a
+# function, and that nearly produced a report of a PollController bug that did
+# not exist.
+#
+# ONLY THE AMBIGUOUS ONES. A braceless body at the same indent that ENDS its
+# block reads fine, and there are roughly 150 of those in the oldest file;
+# reformatting them is a large diff for no gain. The rule needs a third
+# statement at the same indent after the body -- the case where a reader
+# genuinely cannot tell where the body stops.
+function Assert-NoAmbiguousDeindentedBlocks {
+    param(
+        [Parameter(Mandatory = $true)][string]$ProjectRoot,
+        [Parameter(Mandatory = $true)][string]$File,
+        [switch]$Quiet
+    )
+    $raw = Get-Content -LiteralPath (Join-Path $ProjectRoot $File)
+
+    # Continuation sections are literal text, not code.
+    $code = New-Object System.Collections.Generic.List[string]
+    $literal = $false
+    foreach ($line in $raw) {
+        $trimmed = $line.Trim()
+        if (-not $literal -and $trimmed -eq "(") { $literal = $true; $code.Add($null); continue }
+        if ($literal) {
+            if ($trimmed.StartsWith(")")) { $literal = $false }
+            $code.Add($null)
+            continue
+        }
+        $code.Add(($line -replace '(?<!`);.*$', ''))
+    }
+    $live = @()
+    for ($i = 0; $i -lt $code.Count; $i++) {
+        if ($null -ne $code[$i] -and $code[$i].Trim() -ne "") { $live += $i }
+    }
+
+    $found = @()
+    for ($p = 0; $p -lt $live.Count - 2; $p++) {
+        $line = $code[$live[$p]]
+        $head = [regex]::Match(
+            $line, '^(\s*)(if|else\s+if|else|while|for|loop|try|catch|finally)\b(.*)$',
+            [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+        if (-not $head.Success) { continue }
+        $indent = $head.Groups[1].Value.Length
+        $keyword = $head.Groups[2].Value.ToLowerInvariant() -replace '\s+', ''
+        $rest = $head.Groups[3].Value.TrimEnd()
+        if ($rest.EndsWith("{")) { continue }
+
+        # Does the statement already carry its body on the same line?
+        $inline = $false
+        $body = $rest.Trim()
+        if ($keyword -in @("try", "else", "finally")) {
+            $inline = $body -ne ""
+        } elseif ($keyword -eq "catch") {
+            # `catch Error as e` is still a header, not a body.
+            $inline = $body -ne "" -and $body -notmatch '^[\w.]+(\s+as\s+\w+)?$'
+        } elseif ($keyword -in @("if", "elseif", "while")) {
+            if ($body.StartsWith("(")) {
+                $depth = 0
+                for ($c = 0; $c -lt $body.Length; $c++) {
+                    if ($body[$c] -eq "(") { $depth++ }
+                    elseif ($body[$c] -eq ")") {
+                        $depth--
+                        if ($depth -eq 0) {
+                            $inline = $body.Substring($c + 1).Trim() -ne ""
+                            break
+                        }
+                    }
+                }
+            }
+        }
+        # for/loop headers have no bracketing to strip, so no claim is made.
+        if ($inline) { continue }
+
+        $bodyLine = $code[$live[$p + 1]]
+        $afterLine = $code[$live[$p + 2]]
+        if ($bodyLine.TrimStart().StartsWith("{")) { continue }
+        if (($bodyLine.Length - $bodyLine.TrimStart().Length) -ne $indent) { continue }
+        if (($afterLine.Length - $afterLine.TrimStart().Length) -ne $indent) { continue }
+        if ($afterLine -match '^\s*(\}|else\b|catch\b|finally\b)') { continue }
+        $found += (
+            "${File}:$($live[$p] + 1) $keyword has no brace and its body sits at the " +
+            "same indent, with another statement after it at that indent: " +
+            "`"$($bodyLine.Trim())`" then `"$($afterLine.Trim())`"")
+    }
+
+    Assert-True ($found.Count -eq 0) (
+        "Only the first statement is guarded, and nothing on the page says so. " +
+        "Indent the body or brace the block: " + ($found -join "; "))
+
+    if (-not $Quiet) {
+        Write-Host "Braceless blocks in ${File}: none whose body is ambiguous."
+    }
+}
+
 # Every Settings row reaches something that reads it.
 #
 # The Quick Menu half of this question has been checked since the rows moved

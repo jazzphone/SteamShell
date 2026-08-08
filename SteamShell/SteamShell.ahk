@@ -2561,7 +2561,7 @@ LC_RecordGateIfChanged(gateText, cat) {
 SecondsLeft(tickUntil) {
     ms := tickUntil - A_TickCount
     if (ms <= 0)
-    return 0
+        return 0
     return Ceil(ms / 1000)
 }
 
@@ -3298,25 +3298,25 @@ ParseExeListPipe(raw) {
     if (raw != "") {
     sc := InStr(raw, ";")
     if (sc)
-    raw := Trim(SubStr(raw, 1, sc - 1))
+        raw := Trim(SubStr(raw, 1, sc - 1))
     hc := InStr(raw, "#")
     if (hc)
     raw := Trim(SubStr(raw, 1, hc - 1))
     }
 
     if (raw = "")
-    return list
+        return list
 
     for p in StrSplit(raw, "|") {
     token := Trim(p)
     if (token = "")
-    continue
+        continue
     if (SubStr(token, 1, 1) = ";" || SubStr(token, 1, 1) = "#")
-    continue
+        continue
 
     exe := StrLower(token)
     if !InStr(exe, ".exe")
-    exe .= ".exe"
+        exe .= ".exe"
     if !RegExMatch(exe, "i)^[a-z0-9][a-z0-9_. -]*\.exe$")
         continue
     list.Push(exe)
@@ -3333,21 +3333,21 @@ ParseClassListPipe(raw) {
     if (raw != "") {
     sc := InStr(raw, ";")
     if (sc)
-    raw := Trim(SubStr(raw, 1, sc - 1))
+        raw := Trim(SubStr(raw, 1, sc - 1))
     hc := InStr(raw, "#")
     if (hc)
     raw := Trim(SubStr(raw, 1, hc - 1))
     }
 
     if (raw = "")
-    return list
+        return list
 
     for p in StrSplit(raw, "|") {
     token := Trim(p)
     if (token = "")
-    continue
+        continue
     if (SubStr(token, 1, 1) = ";" || SubStr(token, 1, 1) = "#")
-    continue
+        continue
 
     cls := StrLower(token)
     list.Push(cls)
@@ -3367,7 +3367,7 @@ JoinPipe(listObj) {
     out := ""
     for _, v in listObj {
     if (v = "")
-    continue
+        continue
     out .= (out = "" ? v : "|" v)
     }
     return out
@@ -3596,11 +3596,11 @@ LoadSettings() {
 
     WmExcludeExeSet := Map()
     for _, exe in ParseExeListPipe(WmExcludeExeListRaw)
-    WmExcludeExeSet[exe] := true
+        WmExcludeExeSet[exe] := true
 
     WmExcludeClassSet := Map()
     for _, cls in ParseClassListPipe(WmExcludeClassListRaw)
-    WmExcludeClassSet[cls] := true
+        WmExcludeClassSet[cls] := true
 
     ; Automatic mouse mode (optional). Both gates must pass: the toggle allows the
     ; feature, the list decides where it applies.
@@ -3609,7 +3609,7 @@ LoadSettings() {
     AutoMouseExeListRaw := IniReadS("Controller", "AutoMouseExeList", "explorer.exe")
     AutoMouseExeSet := Map()
     for _, exe in ParseExeListPipe(AutoMouseExeListRaw)
-    AutoMouseExeSet[exe] := true
+        AutoMouseExeSet[exe] := true
     DesktopAutoMouseExcludeExeListRaw := IniReadS(
         "Controller", "DesktopAutoMouseExcludeExeList", "brave.exe")
     DesktopAutoMouseExcludeExeSet := Map()
@@ -3688,7 +3688,7 @@ LauncherCleanupAudioPeakThreshold := ReadNumber("LauncherCleanup", "AudioPeakThr
     ; Build exclude set (always includes Steam + SteamShell)
     LauncherCleanupExcludeSet := Map()
     for _, ex in ParseExeListPipe(LauncherCleanupExcludeExeListRaw)
-    LauncherCleanupExcludeSet[ex] := true
+        LauncherCleanupExcludeSet[ex] := true
     LauncherCleanupExcludeSet["steam.exe"] := true
     LauncherCleanupExcludeSet["steamwebhelper.exe"] := true
     LauncherCleanupExcludeSet["steamshell.exe"] := true
@@ -3810,7 +3810,7 @@ ApplyRuntimeTimers() {
             StartDesktopBlackout()
 
         if (EnableAutoHideCursor)
-        SetTimer(MouseWatch, MouseMonitorInterval)
+            SetTimer(MouseWatch, MouseMonitorInterval)
 
         if (EnableLauncherCleanup)
         SetTimer(CheckLauncherCleanup, LauncherCleanupCheckIntervalMs)
@@ -4003,7 +4003,7 @@ ShowSplash() {
     useVideo := (mode = "video") && (vp != "")
 
     if (!useVideo && mode = "video")
-    SplashFailReason := "Splash video requested but VideoPath is blank."
+        SplashFailReason := "Splash video requested but VideoPath is blank."
 
     if (useVideo) {
     ; If it's a local file path, verify it exists. (URLs are allowed too.)
@@ -4042,7 +4042,7 @@ StartSplashVideo_MPV(vp) {
     mpv := NormalizeMediaPath(SplashMpvPath)
     if (mpv = "" || !FileExist(mpv)) {
     if (SplashFailReason = "")
-    SplashFailReason := "MPV not configured (set [Splash] MpvPath=... to use MPV backend)."
+        SplashFailReason := "MPV not configured (set [Splash] MpvPath=... to use MPV backend)."
     return false
     }
 
@@ -4058,7 +4058,7 @@ StartSplashVideo_MPV(vp) {
     if (SplashVideoMute)
     args .= ' --mute=yes'
     else
-    args .= ' --mute=no'
+        args .= ' --mute=no'
     ; Ensure file path is quoted
     args .= ' "' vp '"'
 
@@ -4075,10 +4075,10 @@ StartSplashVideo_MPV(vp) {
     if (SplashMpvPid) {
     ; Keep mpv on top while splash visible
     if (SplashTopmostGuardMs > 0)
-    SetTimer(SplashKeepOnTop, SplashTopmostGuardMs)
+        SetTimer(SplashKeepOnTop, SplashTopmostGuardMs)
 
     if (SplashVideoPlayFull)
-    SetTimer(SplashMonitorExternalVideoEnd, 200)
+        SetTimer(SplashMonitorExternalVideoEnd, 200)
 
     return true
     }
@@ -4090,7 +4090,7 @@ StartSplashVideo_MPV(vp) {
 SplashMonitorExternalVideoEnd() {
     global SplashMpvPid, SplashMpvHwnd, SplashVideoPlayFull
     if (!SplashVideoPlayFull)
-    return
+        return
     ; Prefer window-handle existence over PID (avoids rare PID reuse edge cases).
     if (SplashMpvHwnd) {
     if (!WinExist("ahk_id " SplashMpvHwnd)) {
@@ -4099,7 +4099,7 @@ SplashMonitorExternalVideoEnd() {
     return
     }
     if (!SplashMpvPid)
-    return
+        return
     if (!ProcessExist(SplashMpvPid)) {
     FadeOutSplash()
     }
@@ -4202,7 +4202,7 @@ CreateSplashFadeOverlay() {
 FadeOutOverlay(ms) {
     global SplashOverlayGui
     if !IsSet(SplashOverlayGui)
-    return
+        return
     if (ms <= 0) {
     try SetGuiTransparency(0, SplashOverlayGui)
     return
@@ -4210,14 +4210,14 @@ FadeOutOverlay(ms) {
     steps := 30
     sleepMs := Ceil(ms / steps)
     if (sleepMs < 10)
-    sleepMs := 10
+        sleepMs := 10
     if (sleepMs > 60)
-    sleepMs := 60
+        sleepMs := 60
 
     Loop steps {
     trans := 255 - Round((A_Index / steps) * 255)
     if (trans < 0)
-    trans := 0
+        trans := 0
     try WinSetAlwaysOnTop(1, "ahk_id " SplashOverlayGui.Hwnd)
     try SetGuiTransparency(trans, SplashOverlayGui)
     Sleep(sleepMs)
@@ -4229,9 +4229,9 @@ FadeOutSplash() {
     global SplashOverlayGui, SplashMpvPid, SplashMpvHwnd, SplashClosing
 
     if (!EnableSplashScreen)
-    return
+        return
     if (SplashClosing)
-    return
+        return
     SplashClosing := true
 
     ; Stop any splash-related timers
@@ -4245,7 +4245,7 @@ FadeOutSplash() {
     ; Ensure we have a black cover and make it fully opaque BEFORE Steam is allowed through.
     try {
     if !IsSet(SplashOverlayGui)
-    CreateSplashFadeOverlay()
+        CreateSplashFadeOverlay()
     try SetGuiTransparency(255, SplashOverlayGui)
     try WinSetAlwaysOnTop(1, "ahk_id " SplashOverlayGui.Hwnd)
     } catch {
@@ -4293,14 +4293,14 @@ FadeOutSplash() {
     steps := 30
     sleepMs := Ceil(SplashFadeOutMs / steps)
     if (sleepMs < 10)
-    sleepMs := 10
+        sleepMs := 10
     if (sleepMs > 60)
-    sleepMs := 60
+        sleepMs := 60
 
     Loop steps {
     trans := 255 - Round((A_Index / steps) * 255)
     if (trans < 0)
-    trans := 0
+        trans := 0
     SetGuiTransparency(trans, SplashGui)
     Sleep(sleepMs)
     }
@@ -4971,11 +4971,11 @@ ProductControllerBindingAction(action) {
 RecordShortcutChord_OnKeyDown(ihObj, vk, sc) {
     global _ShortcutCap
     if !IsObject(_ShortcutCap)
-    return
+        return
 
     keyName := GetKeyName(Format("vk{:x}sc{:x}", vk, sc))
     if (keyName = "" || keyName = "Unknown")
-    return
+        return
 
     ; Esc cancels
     if (keyName = "Escape") {
@@ -4985,7 +4985,7 @@ RecordShortcutChord_OnKeyDown(ihObj, vk, sc) {
     ; Track modifiers robustly (InputHook key names vary by system).
     if RecordShortcutChord_TrySetMod(keyName, true) {
     if (_ShortcutCap["mainKey"] = "")
-    RecordShortcutChord_UpdatePreview()
+        RecordShortcutChord_UpdatePreview()
     return
     }
 
@@ -5000,16 +5000,16 @@ RecordShortcutChord_OnKeyDown(ihObj, vk, sc) {
 RecordShortcutChord_OnKeyUp(ihObj, vk, sc) {
     global _ShortcutCap
     if !IsObject(_ShortcutCap)
-    return
+        return
 
     keyName := GetKeyName(Format("vk{:x}sc{:x}", vk, sc))
     if (keyName = "" || keyName = "Unknown")
-    return
+        return
 
     ; Update live modifier state for preview purposes.
     if RecordShortcutChord_TrySetMod(keyName, false) {
     if (_ShortcutCap["mainKey"] = "")
-    RecordShortcutChord_UpdatePreview()
+        RecordShortcutChord_UpdatePreview()
     return
     }
 }
@@ -5017,7 +5017,7 @@ RecordShortcutChord_OnKeyUp(ihObj, vk, sc) {
 RecordShortcutChord_TrySetMod(keyName, isDown) {
     global _ShortcutCap
     if !IsObject(_ShortcutCap)
-    return false
+        return false
 
     mod := ""
     switch keyName {
@@ -5035,7 +5035,7 @@ RecordShortcutChord_TrySetMod(keyName, isDown) {
 
     try {
     if !IsObject(_ShortcutCap["liveMods"])
-    _ShortcutCap["liveMods"] := Map("Ctrl", false, "Alt", false, "Shift", false, "Win", false)
+        _ShortcutCap["liveMods"] := Map("Ctrl", false, "Alt", false, "Shift", false, "Win", false)
     _ShortcutCap["liveMods"][mod] := isDown
     } catch {
     return false
@@ -5086,7 +5086,7 @@ RecordShortcutChord_GetSnapshotMods() {
 RecordShortcutChord_UpdatePreview() {
     global _ShortcutCap
     if !IsObject(_ShortcutCap)
-    return
+        return
 
     mainKey := _ShortcutCap["mainKey"]
 
@@ -5096,25 +5096,25 @@ RecordShortcutChord_UpdatePreview() {
     ; After a main key is captured, show the snapped chord.
     mods := _ShortcutCap["snapMods"]
     if (mods["Ctrl"])
-    s .= "Ctrl+"
+        s .= "Ctrl+"
     if (mods["Alt"])
-    s .= "Alt+"
+        s .= "Alt+"
     if (mods["Shift"])
-    s .= "Shift+"
+        s .= "Shift+"
     if (mods["Win"])
-    s .= "Win+"
+        s .= "Win+"
     s .= NormalizeKeyForDisplay(mainKey)
     } else {
     ; Before capture, show live modifiers as the user holds them.
     mods := RecordShortcutChord_GetLiveMods()
     if (mods["Ctrl"])
-    s .= "Ctrl+"
+        s .= "Ctrl+"
     if (mods["Alt"])
-    s .= "Alt+"
+        s .= "Alt+"
     if (mods["Shift"])
-    s .= "Shift+"
+        s .= "Shift+"
     if (mods["Win"])
-    s .= "Win+"
+        s .= "Win+"
     if (s = "")
     s := "(none)"
     }
@@ -5125,11 +5125,11 @@ RecordShortcutChord_UpdatePreview() {
 RecordShortcutChord_Accept(*) {
     global _ShortcutCap
     if !IsObject(_ShortcutCap)
-    return
+        return
 
     ; Ensure we at least have a snapped mod map even if user never pressed a main key.
     if !IsObject(_ShortcutCap["snapMods"])
-    _ShortcutCap["snapMods"] := Map("Ctrl", false, "Alt", false, "Shift", false, "Win", false)
+        _ShortcutCap["snapMods"] := Map("Ctrl", false, "Alt", false, "Shift", false, "Win", false)
 
     _ShortcutCap["done"] := true
 }
@@ -6951,21 +6951,21 @@ PollController() {
     for def in btnDefs {
     name := def[1]
     if !downTick.Has(name)
-    downTick[name] := 0
+        downTick[name] := 0
     if !longFired.Has(name)
     longFired[name] := false
     }
     if !downTick.Has("LT")
-    downTick["LT"] := 0
+        downTick["LT"] := 0
     if !longFired.Has("LT")
-    longFired["LT"] := false
+        longFired["LT"] := false
     if !downTick.Has("RT")
-    downTick["RT"] := 0
+        downTick["RT"] := 0
     if !longFired.Has("RT")
-    longFired["RT"] := false
+        longFired["RT"] := false
 
     if (inPoll)
-    return
+        return
     ; Before the reentrancy guard: this is a wall-clock check, not controller
     ; work, and it must still run on the tick where a resume is first noticed.
     ;
@@ -7075,13 +7075,13 @@ PollController() {
 
     ; Deadzone
     if (Abs(lx) < ControllerDeadzone)
-    lx := 0
+        lx := 0
     if (Abs(ly) < ControllerDeadzone)
-    ly := 0
+        ly := 0
     if (Abs(rx) < ControllerDeadzone)
-    rx := 0
+        rx := 0
     if (Abs(ry) < ControllerDeadzone)
-    ry := 0
+        ry := 0
 
     ; Controller chord: LB+RB+L3+R3 opens Full Settings (works even without
     ; holding View/Back). This is the emergency route on a handheld with no
@@ -7380,9 +7380,9 @@ prevViewDown := true
     ; then. The Long slot is shown as reserved in the mapping editor.
     if ControllerBindingHoldsMouseButton(GetBindingValue(name ".Short")) {
     if (pressed & mask)
-    HoldControllerMouseButton("LButton")
+        HoldControllerMouseButton("LButton")
     if (released & mask)
-    ReleaseControllerMouseButtons()
+        ReleaseControllerMouseButtons()
     downTick[name] := 0
     longFired[name] := false
     continue
@@ -7402,7 +7402,7 @@ prevViewDown := true
 
     if ((released & mask) && downTick[name]) {
     if (!longFired[name])
-    ExecuteControllerBinding(name ".Short")
+        ExecuteControllerBinding(name ".Short")
     downTick[name] := 0
     longFired[name] := false
     }
@@ -7430,9 +7430,9 @@ prevViewDown := true
 
     if ControllerBindingHoldsMouseButton(GetBindingValue(triggerName ".Short")) {
     if (pressedEdge)
-    HoldControllerMouseButton("LButton")
+        HoldControllerMouseButton("LButton")
     if (releasedEdge)
-    ReleaseControllerMouseButtons()
+        ReleaseControllerMouseButtons()
     downTick[triggerName] := 0
     longFired[triggerName] := false
     continue
@@ -7443,7 +7443,7 @@ prevViewDown := true
     longFired[triggerName] := false
     }
     if (isDown && !longFired[triggerName] && downTick[triggerName]
-    && (now - downTick[triggerName]) >= ControllerChordHoldMs) {
+        && (now - downTick[triggerName]) >= ControllerChordHoldMs) {
     if HasLongBinding(triggerName) {
     longFired[triggerName] := true
     ExecuteControllerBinding(triggerName ".Long")
@@ -7451,7 +7451,7 @@ prevViewDown := true
     }
     if (releasedEdge && downTick[triggerName]) {
     if (!longFired[triggerName])
-    ExecuteControllerBinding(triggerName ".Short")
+        ExecuteControllerBinding(triggerName ".Short")
     downTick[triggerName] := 0
     longFired[triggerName] := false
     }
@@ -7459,13 +7459,13 @@ prevViewDown := true
 
     ; D-Pad arrows (one-shot per press)
     if (pressed & 0x0001)
-    try SendInput("{Up}")
+        try SendInput("{Up}")
     if (pressed & 0x0002)
-    try SendInput("{Down}")
+        try SendInput("{Down}")
     if (pressed & 0x0004)
-    try SendInput("{Left}")
+        try SendInput("{Left}")
     if (pressed & 0x0008)
-    try SendInput("{Right}")
+        try SendInput("{Right}")
 
     ; Best-effort: map Guide (if present) to Y.Short
     if (pressed & 0x0400)
@@ -7488,7 +7488,7 @@ IsExcludedForCenterMax(title, winClass, proc) {
     ; INI-driven exclusions for window-management (center/maximize)
     try {
     if (p != "" && IsObject(WmExcludeExeSet) && WmExcludeExeSet.Has(p))
-    return true
+        return true
     if (c != "" && IsObject(WmExcludeClassSet) && WmExcludeClassSet.Has(c))
     return true
     } catch {
@@ -7496,13 +7496,13 @@ IsExcludedForCenterMax(title, winClass, proc) {
 
     ; Built-in exclusions (OSK + Steam Keyboard)
     if (p = "osk.exe")
-    return true
+        return true
     if (c = "oskmainclass")
-    return true
+        return true
     if InStr(t, "on-screen keyboard")
-    return true
+        return true
     if (p = "steam.exe" && InStr(t, "keyboard"))
-    return true
+        return true
     return false
 }
 
@@ -8668,7 +8668,7 @@ IsSteamForeground() {
     ; If one of our GUIs is foreground, report based on the last non-script foreground window.
     if (WinGetPID(id) = ScriptPid) {
     if !LastRealFgHwnd
-    return false
+        return false
     try {
     proc := StrLower(WinGetProcessName("ahk_id " LastRealFgHwnd))
     return (proc = "steam.exe" || proc = "steamwebhelper.exe")
@@ -9231,7 +9231,7 @@ GetTopRunningApps(maxCount := 5) {
 RefreshAlwaysFocusManagerLists() {
     global AlwaysFocusGui, AlwaysFocusList
     if !IsSet(AlwaysFocusGui)
-    return
+        return
 
     try {
     lvRun := AlwaysFocusGui["LVRun"]
@@ -9314,7 +9314,7 @@ AF_SelectExecutable(prompt) {
 AF_AddSelected(*) {
     global AlwaysFocusGui, AlwaysFocusList, EnableAlwaysFocus, AlwaysFocusExeListRaw
     if !IsSet(AlwaysFocusGui)
-    return
+        return
 
     try {
     lvRun := AlwaysFocusGui["LVRun"]
@@ -9324,7 +9324,7 @@ AF_AddSelected(*) {
 
     row := lvRun.GetNext(0, "F")
     if (!row)
-    row := lvRun.GetNext()
+        row := lvRun.GetNext()
     if (!row) {
     AF_SetStatus("Select a running application to add first.")
     return
@@ -9332,10 +9332,10 @@ AF_AddSelected(*) {
 
     exe := StrLower(Trim(lvRun.GetText(row, 1)))
     if (exe = "")
-    return
+        return
 
     if !InStr(exe, ".exe")
-    exe .= ".exe"
+        exe .= ".exe"
 
     if IsExeInList(exe, AlwaysFocusList) {
     AF_SetStatus(exe " is already in the AlwaysFocus list.")
@@ -9389,7 +9389,7 @@ AF_BrowseAddExe(*) {
 AF_RemoveSelected(*) {
     global AlwaysFocusGui, AlwaysFocusList, AlwaysFocusExeListRaw
     if !IsSet(AlwaysFocusGui)
-    return
+        return
 
     try {
     lvAF := AlwaysFocusGui["LVAF"]
@@ -9399,7 +9399,7 @@ AF_RemoveSelected(*) {
 
     row := lvAF.GetNext(0, "F")
     if (!row)
-    row := lvAF.GetNext()
+        row := lvAF.GetNext()
     if (!row) {
     AF_SetStatus("Select an AlwaysFocus executable to remove first.")
     return
@@ -9407,7 +9407,7 @@ AF_RemoveSelected(*) {
 
     exe := StrLower(Trim(lvAF.GetText(row, 1)))
     if (exe = "")
-    return
+        return
 
     newList := []
     for _, v in AlwaysFocusList {
@@ -9496,7 +9496,7 @@ SyncControlPanel() {
     global EnableControllerMouseMode
     global ControllerMouseSpeed, CPCtlSpeedTextCtrl, CPCtlSpeedSliderCtrl
     if !IsSet(ControlGui)
-    return
+        return
     try {
     ControlGui["cbGame"].Value := EnableGameForegroundAssist ? 1 : 0
     ControlGui["cbSteam"].Value := EnableSteamRefocusMode ? 1 : 0
@@ -9531,7 +9531,7 @@ GetGuiSeconds(guiObj) {
 SetLiveLogging(enable) {
     global EnableGameScoreLogging, GameLogMode, GameLogIntervalMs, GameLogTopN, LiveLogSaved
     if (Type(LiveLogSaved) != "Map")
-    LiveLogSaved := Map()
+        LiveLogSaved := Map()
     if (enable) {
     if (!LiveLogSaved.Has("saved")) {
     LiveLogSaved["saved"] := true
@@ -9578,11 +9578,11 @@ UpdateStatusIndicators() {
     tick := 0
     try tick := HandsOffUntilTick
     if (Type(tick) != "Integer" && Type(tick) != "Float")
-    tick := 0
+        tick := 0
     if (A_TickCount < tick)
     hands := SecondsLeft(tick) "s"
     else
-    hands := "0s"
+        hands := "0s"
 
     ; AlwaysFocus count (support Array or Map safely)
     if IsObject(AlwaysFocusList) {
@@ -9693,7 +9693,7 @@ RefreshPanelLog(*) {
     global ControlGui, LiveLogGui, LogPath, PanelLogMaxLines, DetachedLogMaxLines
 
     if !(IsSet(ControlGui) || IsSet(LiveLogGui))
-    return
+        return
 
     txt := ""
     try {
@@ -9741,7 +9741,7 @@ ClearLogFile(*) {
 StartHandsOffFromGui(*) {
     global ControlGui, HandsOffUntilTick, LastActionText
     if !IsSet(ControlGui)
-    return
+        return
     secs := GetGuiSeconds(ControlGui)
     HandsOffUntilTick := A_TickCount + (secs * 1000)
     LastActionText := "Hands-Off enabled (" secs "s)"
@@ -9760,7 +9760,7 @@ ApplySessionFromGui(*) {
     global EnableGameForegroundAssist, EnableSteamRefocusMode, EnableWindowManagement
     global GameAssistLogEvenWhenSkipped, EnableControllerMouseMode, ControllerMouseSpeed
     if !IsSet(ControlGui)
-    return
+        return
 
     EnableGameForegroundAssist := (ControlGui["cbGame"].Value = 1)
     EnableSteamRefocusMode := (ControlGui["cbSteam"].Value = 1)
@@ -9790,21 +9790,21 @@ RevertPanelToRuntime(*) {
 TimedDisableFromGui(*) {
     global ControlGui
     if !IsSet(ControlGui)
-    return
+        return
 
     secs := GetGuiSeconds(ControlGui)
 
     if (ControlGui["cbGame"].Value = 1)
-    TempDisableFeature("Game", secs)
+        TempDisableFeature("Game", secs)
     if (ControlGui["cbSteam"].Value = 1)
-    TempDisableFeature("Steam", secs)
+        TempDisableFeature("Steam", secs)
     if (ControlGui["cbMax"].Value = 1)
-    TempDisableFeature("Max", secs)
+        TempDisableFeature("Max", secs)
     if (ControlGui["cbLiveLog"].Value = 1)
-    TempDisableFeature("LiveLog", secs)
+        TempDisableFeature("LiveLog", secs)
 
     if (ControlGui["cbSkipLog"].Value = 1)
-    TempDisableFeature("SkipLog", secs)
+        TempDisableFeature("SkipLog", secs)
 
     try {
     if (ControlGui["cbCtlMouse"].Value = 1)
@@ -9822,7 +9822,7 @@ WriteToIniFromGui(*) {
     global GameAssistLogEvenWhenSkipped
 
     if !IsSet(ControlGui)
-    return
+        return
 
     changes := [
         Map("section", "Features", "key", "EnableGameForegroundAssist",
@@ -9899,7 +9899,7 @@ SetFeatureState(feature, value) {
 TempDisableFeature(feature, seconds) {
     global TempDisables
     if !GetFeatureState(feature)
-    return
+        return
     entry := Map()
     entry["prev"] := true
     entry["until"] := A_TickCount + (seconds * 1000)
@@ -9926,7 +9926,7 @@ CheckTempDisables() {
     if (now >= entry["until"]) {
     SetFeatureState(feature, entry["prev"])
     if TempDisables.Has(feature)
-    TempDisables.Delete(feature)
+        TempDisables.Delete(feature)
     restoreAny := true
     }
     }
@@ -14571,9 +14571,9 @@ ShowControlPanel(*) {
     availW := A_ScreenWidth - (mx*2) - 40
     colW := Floor((availW - colGap) / 2)
     if (colW < 320)
-    colW := 320
+        colW := 320
     if (colW > 460)
-    colW := 460
+        colW := 460
 
     x1 := mx
     x2 := x1 + colW + colGap
@@ -14741,9 +14741,9 @@ stat8 := ControlGui.AddText("x" x2 " y+2 w" colW " vstat8 +Wrap", "LC Last: -")
     maxW := A_ScreenWidth - 40
     maxH := A_ScreenHeight - 80
     if (w > maxW)
-    w := maxW
+        w := maxW
     if (h > maxH)
-    h := maxH
+        h := maxH
 
     ControlGui.Show("w" w " h" h " Center")
     } catch {
@@ -14990,9 +14990,9 @@ ControllerMapUI_OnItemSelect(ctrl, item, selected) {
     try {
     global g_ControllerMapUI
     if !IsSet(g_ControllerMapUI)
-    return
+        return
     if !selected
-    return
+        return
 
     try g_ControllerMapUI["selectedBtn"] := ctrl.GetText(item, 1)
     ControllerMapUI_UpdateEditor()
@@ -15006,7 +15006,7 @@ ControllerMapUI_RefreshLv(*) {
     try {
     global g_ControllerMapUI
     if !IsSet(g_ControllerMapUI)
-    return
+        return
 
     lv := g_ControllerMapUI["lv"]
     buttons := g_ControllerMapUI["buttons"]
@@ -15029,7 +15029,7 @@ ControllerMapUI_RefreshLv(*) {
     }
     }
     if (row = 0)
-    row := 1
+        row := 1
     lv.Modify(row, "Select Focus")
 
     } catch {
@@ -15041,7 +15041,7 @@ ControllerMapUI_UpdateEditor(*) {
     try {
     global g_ControllerMapUI
     if !IsSet(g_ControllerMapUI)
-    return
+        return
 
     sel := g_ControllerMapUI["selectedBtn"]
     g_ControllerMapUI["txtSel"].Text := sel
@@ -15057,7 +15057,7 @@ ControllerMapUI_UpdateEditor(*) {
     ; not a rule to remember.
     holdsMouse := ControllerBindingHoldsMouseButton(GetBindingValue(sel ".Short"))
     for ctrlName in ["cbLong", "btnRecLong", "btnClrLong"]
-    g_ControllerMapUI[ctrlName].Enabled := !holdsMouse
+        g_ControllerMapUI[ctrlName].Enabled := !holdsMouse
     if holdsMouse {
     g_ControllerMapUI["cbLong"].Text := "None"
     g_ControllerMapUI["txtCustomLong"].Text :=
@@ -15096,7 +15096,7 @@ ControllerMapUI_ApplyChoice(which, *) {
     try {
     global g_ControllerMapUI, ControllerMap, ControllerMapDisplay
     if !IsSet(g_ControllerMapUI)
-    return
+        return
 
     sel := g_ControllerMapUI["selectedBtn"]
     key := sel "." which
@@ -15129,14 +15129,14 @@ ControllerMapUI_Record(which, *) {
     try {
     global g_ControllerMapUI, ControllerMap, ControllerMapDisplay
     if !IsSet(g_ControllerMapUI)
-    return
+        return
 
     sel := g_ControllerMapUI["selectedBtn"]
     key := sel "." which
 
     res := RecordShortcutChord()
     if !res["ok"]
-    return
+        return
 
     ControllerMap[key] := "Send:" res["send"]
     ControllerMapDisplay[key] := res["display"]
@@ -15145,7 +15145,7 @@ ControllerMapUI_Record(which, *) {
     if (which = "Short")
     g_ControllerMapUI["cbShort"].Text := "Custom shortcut…"
     else
-    g_ControllerMapUI["cbLong"].Text := "Custom shortcut…"
+        g_ControllerMapUI["cbLong"].Text := "Custom shortcut…"
 
     ControllerMapUI_RefreshLv()
     ControllerMapUI_UpdateEditor()
@@ -15159,7 +15159,7 @@ ControllerMapUI_Clear(which, *) {
     try {
     global g_ControllerMapUI, ControllerMap, ControllerMapDisplay
     if !IsSet(g_ControllerMapUI)
-    return
+        return
 
     sel := g_ControllerMapUI["selectedBtn"]
     key := sel "." which
@@ -15170,7 +15170,7 @@ ControllerMapUI_Clear(which, *) {
     if (which = "Short")
     g_ControllerMapUI["cbShort"].Text := "None"
     else
-    g_ControllerMapUI["cbLong"].Text := "None"
+        g_ControllerMapUI["cbLong"].Text := "None"
 
     ControllerMapUI_RefreshLv()
     ControllerMapUI_UpdateEditor()
@@ -15184,13 +15184,13 @@ ControllerBindingPretty(key) {
     global ControllerMap, ControllerMapDisplay
     v := GetBindingValue(key)
     if (v = "" || v = "Builtin:None")
-    return "None"
+        return "None"
 
     if (SubStr(v, 1, 5) = "Send:") {
     disp := ""
     try disp := ControllerMapDisplay[key]
     if (disp = "")
-    disp := SendToPretty(SubStr(v, 6))
+        disp := SendToPretty(SubStr(v, 6))
     return "Shortcut: " disp
     }
 
@@ -15221,7 +15221,7 @@ ControllerBindingPretty(key) {
 ControllerBindingChoice(key) {
     v := GetBindingValue(key)
     if (SubStr(v,1,5) = "Send:")
-    return "Custom shortcut…"
+        return "Custom shortcut…"
     return ControllerBindingPretty(key)
 }
 
@@ -15229,11 +15229,11 @@ ControllerCustomLine(key, which) {
     global ControllerMap, ControllerMapDisplay
     v := GetBindingValue(key)
     if (SubStr(v,1,5) != "Send:")
-    return ""
+        return ""
     disp := ""
     try disp := ControllerMapDisplay[key]
     if (disp = "")
-    disp := SendToPretty(SubStr(v, 6))
+        disp := SendToPretty(SubStr(v, 6))
     return which " shortcut: " disp
 }
 
@@ -15270,7 +15270,7 @@ HideLiveLogWindow() {
 CopyDetachedLog(*) {
     global LiveLogGui
     if !IsSet(LiveLogGui)
-    return
+        return
     try A_Clipboard := LiveLogGui["detLogView"].Value
 }
 
@@ -17297,7 +17297,7 @@ KickUserStartupPrograms() {
     ; Optional user-defined hidden programs to start with the shell.
     enable := ReadBool("StartupPrograms", "Enable", true)
     if (!enable)
-    return
+        return
 
     delayMs := ToInt(IniReadS("StartupPrograms", "DelayMs", "2000"), 2000)
     delayMs := ClampInt(delayMs, 0, 600000)
@@ -17313,7 +17313,7 @@ StartUserStartupProgramsNow() {
     global SettingsPath
     static started := false
     if (started)
-    return
+        return
     started := true
 
     windowMode := NormalizeStartupWindowMode(
@@ -17322,14 +17322,14 @@ StartUserStartupProgramsNow() {
     programs := ReadStartupProgramList(
         (key) => IniReadS("StartupPrograms", key, ""))
     if (programs.Length = 0)
-    return
+        return
     LogLine("Launching " programs.Length " startup program(s).")
     delay := 0
     for _, entry in programs {
     if (delay = 0)
     RunStartupCommandLine(entry, windowMode)
     else
-    SetTimer(RunStartupCommandLine.Bind(entry, windowMode), -delay)
+        SetTimer(RunStartupCommandLine.Bind(entry, windowMode), -delay)
     delay += staggerMs
     }
 }
@@ -17667,7 +17667,7 @@ HasGameRunningRobust(excludeSet, useWindowHeuristic := true) {
 
     ; CPU heuristic: any non-ignored pid above threshold means "something heavy is still active"
     if (LauncherCleanupCpuThreshold <= 0)
-    return false
+        return false
 
     pids := Map()
 
@@ -17680,7 +17680,7 @@ HasGameRunningRobust(excludeSet, useWindowHeuristic := true) {
     ; Also include audio pids (covers some cases where window is hidden/minimized)
     if IsObject(audioMap) {
     for pid, _ in audioMap
-    if (pid)
+        if (pid)
     pids[pid] := true
     }
 
@@ -17692,7 +17692,7 @@ HasGameRunningRobust(excludeSet, useWindowHeuristic := true) {
     }
 
     if (proc = "" || ignore.Has(proc))
-    continue
+        continue
 
     cpuSample := GetProcessCpuSample(pid)
     ; A first sample has no delta yet. Treat it as busy for one cleanup cycle
@@ -18096,7 +18096,7 @@ SplitTargetAndParams(cmdline, &target, &params) {
     params := ""
 
     if (s = "")
-    return
+        return
 
     if (SubStr(s, 1, 1) = '"') {
     q := InStr(s, '"', , 2)
@@ -18117,7 +18117,7 @@ SplitTargetAndParams(cmdline, &target, &params) {
 ArmSplashAutoClose() {
     global EnableSplashScreen, SplashScreenDuration, SplashMode, SplashVideoPlayFull, SplashVideoSafetyMaxMs
     if (!EnableSplashScreen)
-    return
+        return
 
     mode := StrLower(Trim(SplashMode))
     if (mode = "video" && SplashVideoPlayFull) {
@@ -18216,7 +18216,7 @@ if FirstRunSetupMode {
     if (EnableSplashScreen)
     ShowSplash()
     else
-    SetSystemReady()
+        SetSystemReady()
 
     ; Establish a medium-integrity desktop shell only after the startup cover is
     ; present, but before any optional startup entry can require file association
@@ -18519,7 +18519,7 @@ RecordShortcutChord() {
 
     ; Finalize
     if !IsObject(_ShortcutCap)
-    return res
+        return res
 
     cancelled := _ShortcutCap["cancelled"]
     mainKey := _ShortcutCap["mainKey"]
@@ -18537,7 +18537,7 @@ RecordShortcutChord() {
     _ShortcutCap := ""
 
     if (cancelled || mainKey = "")
-    return res
+        return res
 
     send := ""
     display := ""
