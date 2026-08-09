@@ -42,6 +42,41 @@ files by the build. `DesktopAutoMouseExcludeExeList` now ships **empty**: it
 shipped `brave.exe`, which is the opposite list, so automatic mouse was turned
 *off* for Brave on the desktop and never turned on in shell mode.
 
+**Fixed: the Learn Controller wizard left a button stuck down.** The wizard
+identifies the pad from the first report where a bit changed — which, for almost
+every controller, is the button going *down*. That report was then copied as the
+resting state, so the identifying button read as permanently pressed for the
+rest of the wizard, was saved into the profile's neutral, and stayed pressed
+after saving. The pre-press idle report is now the baseline, and nothing is
+measured until the button is released.
+
+**Fixed: the elevated helper only understood XInput.** Over a High-integrity
+window — Task Manager is the everyday case — the pointer is driven by the
+elevated helper, and the helper read XInput and nothing else. A pad that answers
+only RawInput, which is the reason the RawInput backend and the learning wizard
+exist at all, lost the pointer the moment such a window came forward while
+working perfectly everywhere else. The identity resolution, profile lookup and
+report decoding now live in `SteamShell-Common.ahk`, which all three programs
+compile, so the helper runs the same decoder against the same profile file as
+the shell. XInput remains the fallback, and it now finds a pad on any slot
+rather than only the configured one.
+
+**Fixed: the RTSS limiter came back off after a reboot.** The startup restore
+verifies its own write by re-reading RTSS's flag word immediately — and RTSS
+applies its own saved runtime state slightly later, as it finishes starting,
+overwriting the flag *after* the check had confirmed it. The log therefore said
+the cap had been restored while the machine ran uncapped. The restore now
+re-checks for 30 seconds and re-applies if the flag reverts, bounded by a
+deadline, a retry cap, a match on the FPS number, and never for a remembered
+selection of "off".
+
+**Fixed: the Quick Menu could report the frame limiter OFF when it was on.**
+RTSS answers `GetFlags` as soon as it is running but can fail to answer a
+profile read for a moment longer during startup, and a failed read was reported
+as a cap of zero — which the row renders as OFF. An unreadable cap now reads
+*Unavailable*, is never cached, and is never written into a game profile by
+**Save Limit to Profile**.
+
 **Fixed: Quick Menu pages that did not open.** Selecting Current Application in
 the shell appeared to do nothing. The page variable moved and the previous
 page's rows stayed on screen, because the four cases that navigate from the

@@ -1226,12 +1226,12 @@ Assert-True (
     $source -match 'ShowControllerLearner\(') (
     "The learned-controller profile path or wizard integration is incomplete.")
 Assert-True (
-    $source -match '(?s)LoadControllerProfile\([^)]*\).*?offset \+ width > length' -and
+    $source -match '(?s)LoadControllerProfileFrom\([^)]*\).*?offset \+ width > length' -and
     $source -match 'validAxisSizes := Map\("u8".*"u16le".*"u16be"') (
     "Learned profile fields must be bounds-checked and support 8-bit, little-endian, and big-endian axes.")
 Assert-True (
-    $source -match '(?s)RawInputProfileDecode\([^)]*\).*?\(value & button\["mask"\]\) = button\["pressed"\]' -and
-    $source -match '(?s)RawInputProfileDecode\([^)]*\).*?hat\["offset"\].*?hat\["mask"\]' -and
+    $source -match '(?s)RawInputProfileDecodeInto\([^)]*\).*?\(value & button\["mask"\]\) = button\["pressed"\]' -and
+    $source -match '(?s)RawInputProfileDecodeInto\([^)]*\).*?hat\["offset"\].*?hat\["mask"\]' -and
     $source -match 'ControllerLearnDpadButtons\(') (
     "Learned buttons and D-pad bits must preserve active-high or active-low pressed state.")
 Assert-True (
@@ -1262,10 +1262,28 @@ Assert-True (
     "Profile saving must retry identity lookup, fall back through HID VID/PID and descriptor identity, and reload a base profile from a later specific device path.")
 Assert-True ($source -notmatch 'LearnCandidate') (
     "Digital learning must not require duplicate held reports; change-only controllers send one press report.")
+# THIS RULE USED TO REQUIRE THE BUG, and is worth keeping as an example of how.
+#
+# It read: LearnBaseline must be ControllerLearnCopyReport(data, base, length),
+# and must NOT be ControllerLearnCopyReport(baseline, 0, length) -- the correct
+# line, forbidden by name. Its reasoning was sound as far as it went: a
+# change-only pad can first appear on a press and be identified by the release,
+# so the FIRST-SEEN report is the wrong baseline. It concluded that the
+# identifying report was therefore the right one. It is not. Identification
+# fires wherever a bit changed, which for almost every pad is the button going
+# DOWN, so this pinned "that button held" as the resting state -- and a user
+# reported the consequence: a button stuck down for the whole wizard and after
+# saving.
+#
+# The report that is neither first-seen nor identifying is the idle one the
+# identification loop already keeps to measure noise. Assert-ControllerLearner-
+# IdentifyRelease in Validate-Common.ps1 now owns this rule for both products,
+# bounded to ControllerLearnReport's body rather than matched against the whole
+# file.
 Assert-True (
-    $source -match 'LearnBaseline := ControllerLearnCopyReport\(data, base, length\)' -and
-    $source -notmatch 'LearnBaseline := ControllerLearnCopyReport\(baseline, 0, length\)') (
-    "A change-only controller must start rest sampling from the identifying release report, not its first-seen pressed report.")
+    $source -match 'LearnBaseline := ControllerLearnCopyReport\(baseline, 0, length\)' -and
+    $source -match 'LearnIdentifyHoldOffset') (
+    "Rest must be measured from the pre-press idle report, and only once the identifying control has been released.")
 # Visible confirmation after every detection, in words -- and the byte, mask and
 # neutral value still written to the log.
 #
@@ -2436,6 +2454,10 @@ Assert-AutoMouseDefaults -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-RecentApplicationPicker -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-CurrentApplicationTargets -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-QuickMenuPageChangesRebuild -ProjectRoot $projectRoot -Quiet:$Quiet
+Assert-ControllerLearnerIdentifyRelease -ProjectRoot $projectRoot -Quiet:$Quiet
+Assert-RtssUnreadableIsNotOff -ProjectRoot $projectRoot -Quiet:$Quiet
+Assert-RtssFrameLimitHoldIsBounded -ProjectRoot $projectRoot -Quiet:$Quiet
+Assert-ElevatedHelperReadsEveryBackend -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-ValidatorAssertionShapes -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-NoAmbiguousDeindentedBlocks -ProjectRoot $projectRoot -File "SteamShell-XFE.ahk" -Quiet:$Quiet
 Assert-NoAmbiguousDeindentedBlocks -ProjectRoot $projectRoot -File "SteamShell-Shared.ahk" -Quiet:$Quiet

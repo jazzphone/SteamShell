@@ -329,6 +329,110 @@ def test_change_only_identification_uses_release_baseline() -> None:
     assert b_changed & -b_changed == 0x02
 
 
+def identify_then_rest(reports: list[bytes], idle: bytes,
+                       wait_for_release: bool) -> tuple[bytes, bytes]:
+    """Model the wizard from device identification to the end of rest.
+
+    `reports` is what the pad publishes from the identifying press onwards.
+    Returns the baseline and rest-noise the wizard would end up with, which are
+    what every later step is measured against and what the profile's neutral is
+    saved from.
+
+    `wait_for_release` is the fix: hold everything until the control that
+    identified the device comes back up. With it False this reproduces the
+    shipped behaviour, which is why both are modelled here rather than only the
+    one that is correct.
+    """
+    length = len(idle)
+    press = reports[0]
+    # Identification fires on the report where something changed -- the press.
+    changed = [(p ^ i) & 0xFF for p, i in zip(press, idle)]
+    hold_offset = next(o for o, c in enumerate(changed) if c)
+    hold_mask = changed[hold_offset]
+
+    baseline = bytearray(press)          # what the shipped code copies
+    if wait_for_release:
+        baseline = bytearray(idle)       # the pre-press report, which it had
+
+    noise = bytearray(length)
+    rest_count = 0
+    holding = wait_for_release
+    for report in reports[1:]:
+        if holding:
+            if (report[hold_offset] & hold_mask) != (baseline[hold_offset] & hold_mask):
+                continue                 # still down; nothing is measured
+            holding = False
+            # falls through: this report is the first true rest report
+        rest_count += 1
+        for offset in range(length):
+            value = report[offset]
+            if rest_count > 1:
+                noise[offset] |= value ^ baseline[offset]
+            baseline[offset] = value
+    return bytes(baseline), bytes(noise)
+
+
+def test_identifying_press_never_becomes_the_resting_state() -> None:
+    """The button that chose the controller must not be learned as held.
+
+    The wizard identifies the pad on the report where a bit CHANGED, which for
+    almost every controller is the button going down. Measuring rest from that
+    report saves the press into the profile's neutral: the button then reads as
+    permanently held, during the wizard and after it is saved. Waiting for the
+    release is what makes the resting state actually resting.
+    """
+    idle = make_ally()
+    press = make_ally(face=0x01)
+
+    # A pad that keeps publishing while held, with the user letting go late.
+    held = [press, press, press, press]
+    broken_baseline, broken_noise = identify_then_rest(held, idle,
+                                                       wait_for_release=False)
+    assert broken_baseline[11] == 0x01, "expected the shipped bug to be modelled"
+    fixed_baseline, fixed_noise = identify_then_rest(held, idle,
+                                                     wait_for_release=True)
+    assert fixed_baseline[11] == 0x00
+    assert fixed_noise[11] == 0x00
+
+    # The same pad with the release arriving inside the rest window. The shipped
+    # path records the release as rest NOISE, and a noisy bit is skipped by every
+    # later step -- so A becomes unlearnable rather than stuck.
+    released = [press, press, idle, idle]
+    broken_baseline, broken_noise = identify_then_rest(released, idle,
+                                                       wait_for_release=False)
+    assert broken_noise[11] == 0x01, "expected the shipped bug to be modelled"
+    fixed_baseline, fixed_noise = identify_then_rest(released, idle,
+                                                     wait_for_release=True)
+    assert fixed_baseline[11] == 0x00
+    assert fixed_noise[11] == 0x00
+
+    # A change-only pad: one press report, silence while held, one release.
+    # Nothing is published at rest, so the baseline is whatever identification
+    # left behind. The release arriving inside the window rescued the shipped
+    # path here, which is why this case looked handled -- the comment in the
+    # source describes exactly this sequence. It is the only one it survives.
+    change_only = [press, idle]
+    broken_baseline, _ = identify_then_rest(change_only, idle,
+                                            wait_for_release=False)
+    assert broken_baseline[11] == 0x00
+    fixed_baseline, fixed_noise = identify_then_rest(change_only, idle,
+                                                     wait_for_release=True)
+    assert fixed_baseline[11] == 0x00
+    assert fixed_noise[11] == 0x00
+
+    # A change-only pad whose release lands after the 1.8s window closes
+    # publishes nothing at all during rest, so the baseline stays exactly as
+    # identification left it. This is the stuck-button report: with nothing
+    # touched, A decodes as pressed.
+    slow_release = [press]
+    broken_baseline, _ = identify_then_rest(slow_release, idle,
+                                            wait_for_release=False)
+    fixed_baseline, _ = identify_then_rest(slow_release, idle,
+                                           wait_for_release=True)
+    assert (idle[11] ^ broken_baseline[11]) & 0x01 == 0x01
+    assert (idle[11] ^ fixed_baseline[11]) & 0x01 == 0x00
+
+
 def test_axis_peak_survives_release_and_prevents_carryover() -> None:
     """The outward peak is retained, but neutral ends the step cleanly."""
     baseline = make_ally()
@@ -558,6 +662,7 @@ def main() -> None:
     test_masked_hat_shares_button_byte()
     test_change_only_digital_report_is_sufficient()
     test_change_only_identification_uses_release_baseline()
+    test_identifying_press_never_becomes_the_resting_state()
     test_axis_peak_survives_release_and_prevents_carryover()
     test_analog_scan_protects_stick_click_steps()
     test_learner_never_guesses_big_endian()

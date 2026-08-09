@@ -55,6 +55,36 @@ Also in this release:
   `DesktopAutoMouseExcludeExeList` now ships **empty**; it shipped `brave.exe`,
   which is the opposite list, so automatic mouse was turned *off* for Brave on
   the desktop and never turned on in shell mode.
+- **Fixed: the Learn Controller wizard left a button stuck down.** The wizard
+  identifies the pad from the first report where a bit changed, which for almost
+  every controller is the button going *down* — and that report was copied as
+  the resting state. The identifying button then read as permanently pressed for
+  the rest of the wizard, was saved into the profile's neutral, and stayed
+  pressed afterwards. The pre-press idle report is now the baseline, and nothing
+  is measured until the button comes back up.
+- **Fixed: the elevated helper only understood XInput.** Over a High-integrity
+  window — Task Manager is the everyday case — the pointer is driven by the
+  elevated helper, and it read XInput and nothing else. A pad that answers only
+  RawInput, which is what that backend and the learning wizard exist for, lost
+  the pointer the moment such a window came forward while working everywhere
+  else. Identity resolution, profile lookup and report decoding now live in
+  `SteamShell-Common.ahk`, which all three programs compile, so the helper runs
+  the same decoder against the same profile file as the shell. XInput remains
+  the fallback and now finds a pad on any slot rather than only the configured
+  one.
+- **Fixed: the RTSS limiter came back off after a reboot.** The startup restore
+  verifies its write by re-reading RTSS's flag word immediately; RTSS applies
+  its own saved runtime state slightly later while it finishes starting, and
+  overwrites the flag *after* that check. The log said the cap was restored
+  while the machine ran uncapped. The restore now re-checks for 30 seconds and
+  re-applies if it reverts — bounded by a deadline, a retry cap, a match on the
+  FPS number, and never for a remembered selection of "off".
+- **Fixed: the Quick Menu could report the frame limiter OFF when it was on.**
+  RTSS answers `GetFlags` as soon as it is running but can fail a profile read
+  for a moment longer during startup, and a failed read was reported as a cap of
+  zero — which the row renders as OFF. An unreadable cap now reads
+  *Unavailable*, is never cached, and is never written into a game profile by
+  **Save Limit to Profile**.
 - **Fixed: Quick Menu pages that did not open.** Selecting Current Application in
   the shell appeared to do nothing. The page variable moved while the previous
   page's rows stayed on screen, because the four cases that navigate from the
@@ -108,29 +138,37 @@ version assertion before the Windows build was started.
 ## Verification status
 
 Full harness run on Windows, 2026-08-09 — **all checks passed**, reported by the
-maintainer. `current\` was published as one directory transaction after every
+maintainer, on the tree locked here. `current\` was published as one directory transaction after every
 check passed, and the executable in this directory is byte-identical to the one
 the harness published (SHA-256 below).
 
 Structural facts about this exact source, from `SteamShell\Replay-Validation.py`,
 which replays both validators' assertions without Windows:
 
-- 292 functions defined once in `SteamShell-Shared.ahk` (both trees) and 130 in
+- 291 functions defined once in `SteamShell-Shared.ahk` (both trees) and 139 in
   `SteamShell-Common.ahk` (all three programs); no tree redefines any of them.
 - 58 functions are defined in both trees. 13 are flagged by the fingerprint gate
   and 37 are recorded in `DIVERGENT_FUNCTIONS.txt` with a stated reason.
 - 1,088 product assertions replayed from the two validators, all passing. A
   further 65 are written against a property subject and are only checked on
   Windows.
-- Function totals: SteamShell 527, SteamShell-XFE 229, SteamShell-Helper 42.
+- Function totals: SteamShell 527, SteamShell-XFE 229, SteamShell-Helper 46.
+
+Hardware-confirmed by the maintainer, each after its own build:
+
+- Current Application opens its destination page (the Quick Menu navigation fix).
+- The Learn Controller wizard no longer leaves the identifying button held.
+- The controller drives the pointer over an elevated window with the RawInput
+  backend.
+- The RTSS frame limiter survives a reboot.
 
 **Not claimed:** that every scenario in either Windows checklist was rerun
-immediately before locking. `SteamShell\WINDOWS_TEST_CHECKLIST.md` describes what
-to exercise. The maintainer hardware-tested the Quick Menu navigation fix — the
-defect that prompted this release — and confirmed Current Application opens its
-destination page. The write itself, the *(already added)* state on a second
-visit, and the Store-app refusal are covered by validator assertions rather than
-by a reported hardware pass.
+immediately before locking; `SteamShell\WINDOWS_TEST_CHECKLIST.md` describes what
+to exercise. Within the fixes above, what was observed is the user-visible
+outcome rather than every branch behind it — the *(already added)* state on a
+second visit, the Store-app refusal, the length-keyed profile fallback in the
+helper, and the limiter hold's retry and deadline bounds rest on validator
+assertions and the structural replay.
 
 ## Known limits
 
@@ -162,6 +200,10 @@ New in 2.0.1:
 - **The recent-application history does not survive a restart.** It is in memory
   by design, so the picker is empty on a fresh login until applications have been
   used.
+- **The RTSS limiter hold gives up after 30 seconds and three attempts.** If
+  something disables the limiter later than that, or keeps disabling it, the
+  hold stops rather than fighting — a program that argues with the user over a
+  setting is worse than the fault it is fixing. Each attempt is logged.
 
 ## Checksums (SHA-256)
 
@@ -176,8 +218,8 @@ the table itself.
 | `STEAMSHELL_PROJECT_OVERVIEW.md` | `86914bd54357b6d3c653f0ce4c93c0a627362c82356f3ef4c5f6550d0f217ac2` |
 | `SteamShell/Build-SteamShell.cmd` | `30a085ed1548c8cc3462dd3d31f0b5d4a02ca1594028d228a11ed68ad548b05a` |
 | `SteamShell/Build-SteamShell.ps1` | `402fa86e13e75ae6d5989ac4cd801a690d73aa3b522a768c47f2157612a6cc37` |
-| `SteamShell/CHANGELOG.md` | `7fad804d93105da7fb97681dec90427d790322249bbe52c56243a72a338291cd` |
-| `SteamShell/COMMON_FUNCTIONS.txt` | `835ded654e5153397ed6092c8316db973b75248fd08f9ccc32387a4a8f7da922` |
+| `SteamShell/CHANGELOG.md` | `5938d1cca9f963b891fb865bbf070a3280112f1169bf7d0c346ea023ec6e11ce` |
+| `SteamShell/COMMON_FUNCTIONS.txt` | `aedb586deeeadd3a42416fccbfe4e5acff9e8d45f24db64f3c298fbd2c8401e4` |
 | `SteamShell/CROSS_NAME_DUPLICATES.txt` | `aa82ec6549413f7d48bbd20b9a71ed23ccf38d12821f88fe96f234a49d00bca8` |
 | `SteamShell/DIVERGENT_FUNCTIONS.txt` | `e77c5284533b8ab8c19f2403064eb2b148c9f4751ad4433defc3c86de306c484` |
 | `SteamShell/INI_READER_MIGRATION.md` | `3e409f547efafc1fc103eb2705b37f59e044d148d862d29b6460b0d0d145b0bd` |
@@ -185,19 +227,19 @@ the table itself.
 | `SteamShell/README-XFE.md` | `5bc592af5f3ed3602e6df28fec4b504de80b49312cd64e7573e7a6ec3bb3d89f` |
 | `SteamShell/README.md` | `69f2061c55d71c5f489f495ee247adac317cd2c4f22db534711b38f22a40364f` |
 | `SteamShell/Replay-Validation.py` | `0f665748bd477eceb7eeb54cd584e19c2f9145c27e4e879d9c79984f2e65b14e` |
-| `SteamShell/SHARED_FUNCTIONS.txt` | `25fd8c5df4e83b33a1dee88c76d2ffbe6d153857628175b0099ddab60b0a3ba0` |
-| `SteamShell/SteamShell-Common.ahk` | `28faa6b963779b88f83eca811b41b19ba20c9ce4c0126faa9b0431d19c50303e` |
-| `SteamShell/SteamShell-Helper.ahk` | `405ed5eb87996e68e27933298c0158942f0c46d7e3fadc507005aa12c17cef92` |
-| `SteamShell/SteamShell-Shared.ahk` | `d583a27ea2ef99f2f596a861727adddf6e188e3107d36bc0916beae289dfc358` |
-| `SteamShell/SteamShell-XFE.ahk` | `622a9d2f8b701137610c4132100b2b8c3a9c3b950f168c140110f5d3266b987c` |
+| `SteamShell/SHARED_FUNCTIONS.txt` | `2554ce06c4e86a76f9f58ab8337ce06cf75a4a1508115282b3a9bf5776f06e96` |
+| `SteamShell/SteamShell-Common.ahk` | `469002de721978cce539903da4c1de29911b3712e07c32aa024f4c099094a197` |
+| `SteamShell/SteamShell-Helper.ahk` | `0b7a5c14f6638a266273364c73d82b703438c8cd85237cad8f8b66a99bf8f874` |
+| `SteamShell/SteamShell-Shared.ahk` | `8b7d4223f7c17487dcbe199a6b55611217052ab390115e07577cb0608cd4c0e1` |
+| `SteamShell/SteamShell-XFE.ahk` | `6225e49e6ee53d98f614b2198c93e1fa2814598dea267d3b1434a564cbbc572a` |
 | `SteamShell/SteamShell-XFE_SAMPLE.ini` | `2a4f3fa688a455eb07e42e1b69e2eb6e0568fe810de627fb0ae8dd42cfb74de5` |
-| `SteamShell/SteamShell.ahk` | `6ed9707599502fb68479ec14175226aa652fa48798792a7bf5a67c5e793f2218` |
+| `SteamShell/SteamShell.ahk` | `272a10a597d0a27765a08edcbf3330171b300f478fcf9fb503e8e9bc48bd6a4a` |
 | `SteamShell/SteamShell.reg` | `4e0fa881d4457ccb8be362908e7d9c378e32fc6a25eeb64851b7b396fca7220a` |
 | `SteamShell/SteamShellSettings_SAMPLE.ini` | `2116101fe6d3e20c6d29fe4db0ba9d5c93c1836f1cd12d5b1ad7cca11a87ce58` |
-| `SteamShell/Test-ControllerProfiles.py` | `4c8be166ae2836db9957984ed3b38e5dfa9b4f2186f38c79ddfa0cd64886e6ef` |
-| `SteamShell/Validate-Common.ps1` | `9fd5ca52c732beb83232aa125a5304d2596e7530e503262ba0b4d297875ed288` |
-| `SteamShell/Validate-SteamShell-XFE.ps1` | `b405f00f77e96bb6d49e5d73509707408b92749ee7c58c002a2c20cde383496e` |
-| `SteamShell/Validate-SteamShell.ps1` | `35cb1c8fcedc61d002e2d618fef68d8425534dbf6aea8c811d018a693b5a4329` |
+| `SteamShell/Test-ControllerProfiles.py` | `fc960e4f815351e2346de98a73c7bfef25f281b4f53d066012487834292e9f02` |
+| `SteamShell/Validate-Common.ps1` | `a9404f4818f87a70e3701b73ba173b789d7f389d6a2c248d292b2535dd9f58a4` |
+| `SteamShell/Validate-SteamShell-XFE.ps1` | `9c3a53a9bf9433e65489d33b7c2eba564278d3ee32f4e5b9eb9acd426b0f914a` |
+| `SteamShell/Validate-SteamShell.ps1` | `1071afd727e429f1ed4154c13602fdc100b6ba7816b66cf88cec8ebad662b807` |
 | `SteamShell/WINDOWS_TEST_CHECKLIST-XFE.md` | `e24a74b1c0b2ebf36d4038fdfe28034e74dd9ab92a1154c35baefd880ffb766b` |
 | `SteamShell/WINDOWS_TEST_CHECKLIST.md` | `764452032a2a62738ba076e929ab08f0277341dec53befdaf1adf33dbf02c119` |
 | `SteamShell/XFE_PARITY_NOTES.md` | `738115eea263245a0fbefdb9e17e9de5373ff66ea4198699fedde2c7c6595266` |
@@ -208,5 +250,4 @@ the table itself.
 | `SteamShell/extras/bigpicture_startup.webm` | `a12363458ace3a72a975c0ba650890960c439f39f96712805e896bf7c86f363b` |
 | `SteamShell/extras/black.png` | `0ab0900f03e8f2a825691374d5e063a177085dc6a572ef15e7750b4a2bd69b41` |
 | `SteamShell/images/control-panel.png` | `0199cfbf13f982031c536be47e312205b06960d5c206f6363d942830da25f42e` |
-| `current/SteamShell.exe` | `a66c4d6631374dce002350ffa4abe2188067055e63713647e813fb177a787324` |
-
+| `current/SteamShell.exe` | `c44b50c88a567466dd438b91ebcd085850688d6abd7c0dcbb60c70372dbc5195` |

@@ -110,6 +110,7 @@ ApplyElevatedRtssFrameLimit
 ApplyElevatedRtssProfileFrameLimit
 ApplyRtssGlobalState
 ApplyTrayIconImage
+ArmRtssFrameLimitHold
 AutoMouseProcessMatches
 BuildProductTrayMenu
 CachedInstallationVerdict
@@ -121,7 +122,6 @@ CloseControllerLearner
 CommitRtssPendingFrameCap
 ConfirmPrimaryDisplayMode
 ControllerBindingSharedAction
-ControllerButtonBits
 ControllerDiagnosticTick
 ControllerLearnAccept
 ControllerLearnAxisStats
@@ -139,6 +139,8 @@ ControllerLearnFriendlyName
 ControllerLearnHatText
 ControllerLearnHighByteQuality
 ControllerLearnIdentificationReady
+ControllerLearnIdentifyHoldTimeout
+ControllerLearnIdentifyReleased
 ControllerLearnLargestExcursion
 ControllerLearnNextStep
 ControllerLearnRecordButton
@@ -157,9 +159,6 @@ ControllerLearnUpdateUi
 ControllerLearnValidateDpad
 ControllerPollFrame
 ControllerResumeGapCheck
-ControllerProfileAxisRaw
-ControllerProfileAxisSpan
-ControllerProfileLengthKey
 ControllerProfilePath
 ControllerProfileRestCheck
 ControllerProfileRestCheckBegin
@@ -281,10 +280,8 @@ QuickMenuTaskPageSize
 QuickMenuTaskSlice
 QuickMenuTitleText
 QuickMenuToggleTable
-RawInputAxis
 RawInputClaimDevice
 RawInputDecodeReport
-RawInputDeviceKey
 RawInputDeviceName
 RawInputProbeEnumerate
 RawInputProbeMessage
@@ -322,7 +319,9 @@ RtssFrameCapBlockedReason
 RtssFrameCapModeForFps
 RtssFrameCapValueText
 RtssFrameCapWritable
+RtssFrameLimitHoldTick
 RtssGlobalFrameLimit
+RtssGlobalFrameLimitRead
 RtssProfileTargetExe
 RtssSaveProfileValueText
 SanitizeDiagnosticText

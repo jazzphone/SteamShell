@@ -558,7 +558,14 @@ GetRtssFrameCapState() {
     state := GetRtssGlobalState()
     if !IsObject(state)
         return 0
-    fps := RtssGlobalFrameLimit()
+    ; A cap that could not be READ is not a cap that is off. Returning 0 here
+    ; renders as "Unavailable", which is the honest answer and the one every
+    ; caller already handles; reporting mode "off" instead is what put "‹ OFF ›"
+    ; on the row while the limiter was on, and what let
+    ; PersistRtssFrameCapStateNow record "off" as the user's selection.
+    fps := 0
+    if !RtssGlobalFrameLimitRead(&fps)
+        return 0
     if (!state["limiter"] || fps <= 0)
         return Map("mode", "off", "fps", fps, "limiter", state["limiter"])
     if RtssFrameCapCustomMode
@@ -639,16 +646,52 @@ RtssFrameCapBlockedReason() {
     return ""
 }
 
-RtssGlobalFrameLimit() {
+; The global cap, with "could not read it" kept separate from "it is zero".
+;
+; THIS IS THE DIFFERENCE THAT MADE THE LIMITER LOOK OFF WHEN IT WAS ON.
+; GetRtssFrameLimit returns 0 for six different reasons -- integration off, DLL
+; integration off, RTSS not running, the API unavailable, GetProfileProperty
+; returning false, or an exception -- and only one of them means "uncapped".
+; Collapsing all six into 0 was fine until something read that 0 as a STATE:
+; GetRtssFrameCapState reports mode "off" when fps <= 0, so a failed profile
+; read displayed as a limiter that is off, while GetFlags in the very same pass
+; was reporting the limiter on.
+;
+; That is why it was intermittent and why it clustered around boot. GetFlags and
+; the profile store come up at different times: shared memory answers as soon as
+; RTSS is alive, while LoadProfile/GetProfileProperty can fail for a moment
+; longer while RTSS is still initialising. The window is short, which is exactly
+; what makes it look like a flicker rather than a fault.
+;
+; A failure is deliberately NOT cached. Caching it would hold the wrong reading
+; for 400 ms past the moment RTSS became readable, turning a one-report glitch
+; into a visible one.
+RtssGlobalFrameLimitRead(&fps) {
     global RtssFrameLimitCacheFps, RtssFrameLimitCacheTick
     static CACHE_MS := 400
     if (RtssFrameLimitCacheTick
-        && A_TickCount - RtssFrameLimitCacheTick < CACHE_MS)
-        return RtssFrameLimitCacheFps
+        && A_TickCount - RtssFrameLimitCacheTick < CACHE_MS) {
+        fps := RtssFrameLimitCacheFps
+        return true
+    }
     limit := GetRtssFrameLimit("")
-    RtssFrameLimitCacheFps := IsObject(limit) ? limit["fps"] : 0
+    if !IsObject(limit) {
+        fps := 0
+        return false
+    }
+    RtssFrameLimitCacheFps := limit["fps"]
     RtssFrameLimitCacheTick := A_TickCount
-    return RtssFrameLimitCacheFps
+    fps := RtssFrameLimitCacheFps
+    return true
+}
+
+; The number alone, for callers that only compare it. A failed read is 0 here,
+; which is the behaviour every one of them already had; the callers that must
+; not confuse the two use RtssGlobalFrameLimitRead.
+RtssGlobalFrameLimit() {
+    fps := 0
+    RtssGlobalFrameLimitRead(&fps)
+    return fps
 }
 
 ; Which entry of the cycle a bare FPS number corresponds to. Used when the
@@ -730,6 +773,78 @@ PersistRtssFrameCapStateNow() {
     fps := state["fps"] > 0 ? state["fps"] : RtssLastFrameCapFps
     return PersistRtssFrameCapSelection(state["mode"], fps)
 }
+
+; Opens the hold window. Thirty seconds, which is comfortably longer than RTSS
+; takes to finish starting and comfortably shorter than a user settling in.
+ArmRtssFrameLimitHold() {
+    global RtssFrameLimitHoldUntil, RtssFrameLimitHoldRetries
+    RtssFrameLimitHoldUntil := A_TickCount + 30000
+    RtssFrameLimitHoldRetries := 0
+    SetTimer(RtssFrameLimitHoldTick, 3000)
+}
+
+
+; Holds the limiter on for a short window after the startup restore.
+;
+; THE RESTORE WAS BEING UNDONE, NOT FAILING. ApplyRtssGlobalState confirms its
+; own write by re-reading the flag word immediately, and it confirmed -- the log
+; said "Restored the last Frame Limit selection: CONFIGURED at 158 FPS". By the
+; time the user opened the Quick Menu, bit 0x4 was set again and the machine was
+; running uncapped. The row was right; the write had not stuck.
+;
+; The restore fires as soon as RTSS answers, and answering is not the same as
+; having finished starting. RTSS applies its own saved runtime state during
+; initialisation, and anything written into the flag word before that point is
+; overwritten by it. An immediate read-back cannot see this: it happens while
+; the value is still ours.
+;
+; So the write is verified again after RTSS has settled, and re-applied if it
+; reverted. Bounded on both axes -- a short window and a small number of
+; attempts -- because the one thing this must never become is a loop that fights
+; the user. Turning the limiter off in RTSS's own UI during the first half
+; minute after boot is rare; a program that silently turns it back on forever
+; would be much worse than the fault being fixed.
+;
+; A change made through SteamShell stops it immediately and needs no check here:
+; the Quick Menu's own writes go through PersistRtssFrameCapStateNow, which
+; records mode "off" and fails the guard below on the next tick.
+RtssFrameLimitHoldTick(*) {
+    global RtssLastFrameCapMode, RtssLastFrameCapFps
+    global RtssFrameLimitHoldUntil, RtssFrameLimitHoldRetries
+    static MAX_RETRIES := 3
+    ; "off" is the one selection this must not defend. Re-applying it would mean
+    ; writing the disabled bit back over a user who has just turned the limiter
+    ; on in RTSS.
+    if (RtssLastFrameCapMode = "" || RtssLastFrameCapMode = "off"
+        || A_TickCount > RtssFrameLimitHoldUntil
+        || RtssFrameLimitHoldRetries >= MAX_RETRIES) {
+        SetTimer(RtssFrameLimitHoldTick, 0)
+        return
+    }
+    state := GetRtssGlobalState()
+    if !IsObject(state)
+        return
+    if state["limiter"]
+        return
+    ; The number is checked too. If RTSS came back with a different cap entirely
+    ; then this is not our write being reverted, it is a different state, and
+    ; re-enabling the limiter would cap at a number the user never chose.
+    fps := 0
+    if !RtssGlobalFrameLimitRead(&fps)
+        return
+    if (fps != RtssLastFrameCapFps) {
+        SetTimer(RtssFrameLimitHoldTick, 0)
+        LogLine("RTSS holds " fps " FPS rather than the restored "
+            . RtssLastFrameCapFps "; leaving the limiter alone.", "Warning")
+        return
+    }
+    RtssFrameLimitHoldRetries += 1
+    LogLine("The RTSS limiter was disabled again after the startup restore"
+        . " (attempt " RtssFrameLimitHoldRetries " of " MAX_RETRIES
+        . "); re-enabling it at " fps " FPS.", "Warning")
+    ApplyRtssGlobalState("limiter", true)
+}
+
 
 ; Reapplies the recorded selection once RTSS is available.
 ;
@@ -855,6 +970,10 @@ RestoreRtssFrameLimitTick(*) {
     LogLine(
         "Restored the last Frame Limit selection: " StrUpper(RtssLastFrameCapMode)
         . " at " RtssLastFrameCapFps " FPS.")
+    ; And watch that it stays restored. RTSS applies its own saved runtime state
+    ; while it finishes starting, which can overwrite the flag this just set --
+    ; after the read-back that confirmed it.
+    ArmRtssFrameLimitHold()
 }
 
 ; ==============================================================================
@@ -1686,7 +1805,7 @@ AdjustRtssCustomFrameCap(direction) {
 ; means the global disable override is clear. It does not prove that a game's
 ; profile has OSD support or a non-zero frame cap configured.
 GetRtssGlobalState() {
-    global EnableRTSSIntegration, RtssUseDllIntegration
+    global EnableRTSSIntegration, RtssUseDllIntegration, RtssLastFlagsSeen
     if (!EnableRTSSIntegration || !RtssUseDllIntegration
         || !ProcessExist("RTSS.exe"))
         return 0
@@ -1698,6 +1817,27 @@ GetRtssGlobalState() {
     catch as err {
         LogLine("RTSS state: GetFlags failed: " err.Message, "Warning")
         return 0
+    }
+    ; Logged when it CHANGES, not when it is read -- this runs on every repaint
+    ; of the RTSS page, so logging each read would be several lines a second and
+    ; would say nothing.
+    ;
+    ; A change is exactly what is worth seeing. The row reports the limiter from
+    ; bit 0x4, and the open question is whether something clears that bit after
+    ; the startup restore has set it: RTSS re-hooking, a profile reload, another
+    ; tool, or one of this program's own writes. Without a timestamped record of
+    ; the word itself there is nothing to tell those apart afterwards, and the
+    ; fault is intermittent enough that it has to be caught rather than
+    ; reproduced.
+    if (RtssLastFlagsSeen != flags) {
+        LogLine("RTSS flags: 0x" Format("{:08X}", flags)
+            . " (overlay " ((flags & 0x1) != 0 ? "on" : "off")
+            . ", limiter " ((flags & 0x4) = 0 ? "on" : "OFF")
+            . ", global FramerateLimit " RtssGlobalFrameLimit() ")"
+            . (RtssLastFlagsSeen = -1
+                ? ""
+                : " -- was 0x" Format("{:08X}", RtssLastFlagsSeen)))
+        RtssLastFlagsSeen := flags
     }
     return Map(
         "overlay", (flags & 0x1) != 0,       ; RTSSHOOKSFLAG_OSD_VISIBLE
@@ -3925,7 +4065,15 @@ SaveRtssFrameLimitToProfile() {
     ; named profile re-reads the copy SetProfileProperty just wrote and says yes.
     if (ProductElevatedHelperAlive() && ElevatedRtssWritesAvailable()) {
         CommitRtssPendingFrameCap()
-        fps := RtssGlobalFrameLimit()
+        ; A failed read must not be written. "Save Limit to Profile" copies the
+        ; global cap into the game's own profile, and a read that failed reports
+        ; 0 -- which would write "uncapped" over the profile the user was trying
+        ; to populate, and report success for it.
+        fps := 0
+        if !RtssGlobalFrameLimitRead(&fps) {
+            SharedNotify(exeName ": RTSS did not report the current cap", "Warning")
+            return false
+        }
         if ApplyElevatedRtssProfileFrameLimit(exeName, fps) {
             SharedNotify(
                 exeName ": " (fps > 0 ? fps " FPS" : "uncapped") " saved",
@@ -3943,7 +4091,12 @@ SaveRtssFrameLimitToProfile() {
 
     ; Flush anything still pending so the profile gets the value on screen.
     CommitRtssPendingFrameCap()
-    fps := RtssGlobalFrameLimit()
+    ; Same refusal as the elevated path above, for the same reason.
+    fps := 0
+    if !RtssGlobalFrameLimitRead(&fps) {
+        SharedNotify(exeName ": RTSS did not report the current cap", "Warning")
+        return false
+    }
     value := Buffer(4, 0)
     NumPut("UInt", fps, value, 0)
     LogLine("RTSS profile target " exeName " (foreground was '"
@@ -6855,214 +7008,9 @@ RawInputDecodeReport(data, base, length, device) {
 }
 
 
-; The XInput button bit for each name the learner knows.
-ControllerButtonBits() {
-    static bits := Map(
-        "Up", 0x0001, "Down", 0x0002, "Left", 0x0004, "Right", 0x0008,
-        "Menu", 0x0010, "View", 0x0020, "L3", 0x0040, "R3", 0x0080,
-        "LB", 0x0100, "RB", 0x0200, "Guide", 0x0400,
-        "A", 0x1000, "B", 0x2000, "X", 0x4000, "Y", 0x8000)
-    return bits
-}
-
-
-RawInputAxis(raw) {
-    value := raw - 0x8000
-    if (value < -32767)
-        return -32767
-    return value > 32767 ? 32767 : value
-}
-
-
-; The section name used when Windows will not identify a device at all.
-;
-; Keying a profile on report length is less precise than VID/PID, but it is
-; exactly as precise as the built-in layout it replaces -- that already matches on
-; nothing but `length = 16`. So this is not a new risk, it is the existing one
-; made writable, and it is what lets a controller whose metadata Windows withholds
-; still be taught.
-ControllerProfileLengthKey(length) {
-    return "LEN_" length
-}
-
-
 ControllerProfilePath() {
     global IniPath
-    return RegExReplace(IniPath, "\.ini$", "") "-Controllers.ini"
-}
-
-
-; A stable identity for a RawInput device.
-;
-; hDevice handles change across sleep and re-plugging, so they cannot key a saved
-; profile. The device interface path does contain a stable identity -- the USB
-; vendor and product IDs, plus the interface and collection when a device exposes
-; several -- so that is what is extracted. If the driver withholds both the path
-; and numeric IDs, the HID preparsed descriptor is hashed as a final stable
-; layout identity.
-RawInputDeviceKey(hDevice, refresh := false) {
-    static RIDI_DEVICENAME := 0x20000007
-    static RIDI_DEVICEINFO := 0x2000000B
-    static RIDI_PREPARSEDDATA := 0x20000005
-    static cache := Map()
-    ; Identity lookups that failed recently, and when they may be retried.
-    ;
-    ; Failure must not be cached permanently -- a metadata query can fail while
-    ; the HID stack is still settling, and Save needs a later attempt to be able
-    ; to succeed. But it must not be retried on every report either: this runs
-    ; from the WM_INPUT handler at over 100 Hz, and the fallback chain below costs
-    ; five syscalls plus a byte-at-a-time hash of the entire HID descriptor. For a
-    ; device that can never be identified, that is pure waste on the input hot
-    ; path of a handheld. So failure backs off for a couple of seconds instead.
-    static failedUntil := Map()
-    static IDENTITY_RETRY_MS := 2000
-    ; Map.Delete THROWS when the key is absent. The cache line below got that
-    ; right and this one did not, one line apart.
-    ;
-    ; It surfaced from the rest check: a profile that reads as pegged offers to
-    ; delete itself, DeleteControllerProfileForActiveDevice asks for the device
-    ; key with refresh := true, and this threw "Item has no value" out of a timer
-    ; -- so answering Yes to "delete the bad profile?" crashed instead of
-    ; deleting it, leaving the user with the runaway pointer they had just asked
-    ; to be rid of.
-    if (refresh && cache.Has(hDevice))
-        cache.Delete(hDevice)
-    if (refresh && failedUntil.Has(hDevice))
-        failedUntil.Delete(hDevice)
-    if cache.Has(hDevice)
-        return cache[hDevice]
-    if (failedUntil.Has(hDevice) && A_TickCount < failedUntil[hDevice])
-        return ""
-    ; Captured for the diagnostic at the end of this function.
-    infoVid := 0
-    infoPid := 0
-    infoResult := "not tried"
-    descriptorBytes := 0
-    descriptorResult := "not tried"
-    name := ""
-    size := 0
-    nameError := ""
-    ; NOT named "buffer", and the catch is not optional.
-    ;
-    ; AutoHotkey identifiers are case-insensitive, so a local called buffer IS
-    ; the Buffer class: the constructor on the right resolved to the unassigned
-    ; local and threw before it ever ran. Inside the bare try that used to be
-    ; here that throw was swallowed, so RIDI_DEVICENAME appeared to fail on every
-    ; device on every machine -- which silently removed the &MI_/&Col suffixes
-    ; below, collapsing every collection of a composite gamepad onto one profile
-    ; key, and made the DEV_ checksum fallback unreachable. The failure is
-    ; carried to the once-per-device diagnostic at the end of this function
-    ; rather than logged here, because this runs from WM_INPUT above 100 Hz.
-    ;
-    ; ElevatedRtssFinalPath in SteamShell-Helper.ahk carries the same note.
-    try {
-        DllCall("GetRawInputDeviceInfoW", "Ptr", hDevice, "UInt", RIDI_DEVICENAME,
-            "Ptr", 0, "UInt*", &size)
-        if size {
-            nameBuffer := Buffer(size * 2 + 2, 0)
-            if (DllCall("GetRawInputDeviceInfoW", "Ptr", hDevice, "UInt", RIDI_DEVICENAME,
-                "Ptr", nameBuffer, "UInt*", &size, "UInt") != 0xFFFFFFFF)
-                name := StrGet(nameBuffer, "UTF-16")
-        }
-    } catch as err {
-        nameError := err.Message
-    }
-    key := ""
-    if RegExMatch(name, "i)VID_([0-9A-F]{4})&PID_([0-9A-F]{4})", &match) {
-        key := "VID_" StrUpper(match[1]) "_PID_" StrUpper(match[2])
-        ; A composite device exposes several collections; the gamepad is only one
-        ; of them, so the interface and collection numbers are part of the identity.
-        if RegExMatch(name, "i)&MI_([0-9A-F]{2})", &mi)
-            key .= "_MI_" StrUpper(mi[1])
-        if RegExMatch(name, "i)&Col([0-9]{2})", &col)
-            key .= "_Col" col[1]
-    } else if (name != "") {
-        ; No VID/PID in the path. Fall back to a checksum of it, which is still
-        ; stable for this device on this machine.
-        sum := 0
-        Loop Parse name
-            sum := Mod(sum * 31 + Ord(A_LoopField), 0xFFFFFFF)
-        key := "DEV_" Format("{:07X}", sum)
-    }
-    if (key = "") {
-        ; Some HID stacks deliver reports but do not return an interface path
-        ; for RIDI_DEVICENAME. RIDI_DEVICEINFO carries the numeric HID VID/PID
-        ; independently, so use it before declaring the device unidentifiable.
-        try {
-            info := Buffer(32, 0)
-            NumPut("UInt", 32, info, 0)
-            infoSize := 32
-            infoResult := DllCall("GetRawInputDeviceInfoW", "Ptr", hDevice, "UInt",
-                RIDI_DEVICEINFO, "Ptr", info, "UInt*", &infoSize, "UInt")
-            infoVid := NumGet(info, 8, "UInt") & 0xFFFF
-            infoPid := NumGet(info, 12, "UInt") & 0xFFFF
-            if (infoResult != 0xFFFFFFFF) {
-                vid := NumGet(info, 8, "UInt")
-                pid := NumGet(info, 12, "UInt")
-                if (vid || pid)
-                    key := "VID_" Format("{:04X}", vid & 0xFFFF)
-                        . "_PID_" Format("{:04X}", pid & 0xFFFF)
-            }
-        }
-    }
-    if (key = "") {
-        ; RawInput cannot deliver HID reports without preparsed descriptor data.
-        ; Some virtualised/filtered Ally drivers expose that data while
-        ; returning neither a device path nor usable RID_DEVICE_INFO IDs. Hash
-        ; the descriptor so the learned layout still survives handle changes.
-        try {
-            descriptorSize := 0
-            result := DllCall("GetRawInputDeviceInfoW", "Ptr", hDevice, "UInt",
-                RIDI_PREPARSEDDATA, "Ptr", 0, "UInt*", &descriptorSize, "UInt")
-            descriptorResult := result
-            descriptorBytes := descriptorSize
-            if (result != 0xFFFFFFFF && descriptorSize > 0) {
-                descriptor := Buffer(descriptorSize, 0)
-                result := DllCall("GetRawInputDeviceInfoW", "Ptr", hDevice,
-                    "UInt", RIDI_PREPARSEDDATA, "Ptr", descriptor,
-                    "UInt*", &descriptorSize, "UInt")
-                if (result != 0xFFFFFFFF && descriptorSize > 0) {
-                    hash := 2166136261
-                    Loop descriptorSize
-                        hash := Mod((hash ^ NumGet(descriptor,
-                            A_Index - 1, "UChar")) * 16777619, 0x100000000)
-                    key := "HID_DESC_" Format("{:08X}", hash)
-                        . "_" descriptorSize
-                }
-            }
-        }
-    }
-    ; Record what each route actually returned the first time a device cannot be
-    ; identified. "No identity available" is unactionable on its own, and this
-    ; failed on real hardware -- the Ally's own controller -- so the three return
-    ; values are the diagnosis.
-    static reported := Map()
-    if (key = "" && !reported.Has(hDevice)) {
-        reported[hDevice] := true
-        LogLine("RawInput identity: device 0x" Format("{:X}", hDevice)
-            . " unidentifiable. RIDI_DEVICENAME chars=" size
-            . " path='" (name != "" ? name : "(none)") "'"
-            ; Without this, a throw inside the path lookup was indistinguishable
-            ; from the HID stack returning a size and no path, and pointed the
-            ; diagnosis at the driver instead of at this function.
-            . (nameError != "" ? " pathError='" nameError "'" : "")
-            . ", RIDI_DEVICEINFO vid=0x" Format("{:04X}", infoVid)
-            . " pid=0x" Format("{:04X}", infoPid) " rc=" infoResult
-            . ", RIDI_PREPARSEDDATA bytes=" descriptorBytes
-            . " rc=" descriptorResult ".", "Warning")
-    }
-    ; Success caches permanently; failure only backs off. See failedUntil above.
-    if (key != "") {
-        cache[hDevice] := key
-        ; Guarded for the same reason: a device that identifies on its first
-        ; attempt was never in failedUntil, and deleting a key that is not there
-        ; throws.
-        if failedUntil.Has(hDevice)
-            failedUntil.Delete(hDevice)
-    } else {
-        failedUntil[hDevice] := A_TickCount + IDENTITY_RETRY_MS
-    }
-    return key
+    return ControllerProfilePathFor(IniPath)
 }
 
 
@@ -7092,7 +7040,6 @@ RawInputDeviceName(hDevice) {
 }
 
 
-
 ; Loads a profile, or 0 when the device has none.
 ;
 ; Returns a Map of: length, buttons (array of name/offset/mask/pressed), hat
@@ -7101,239 +7048,32 @@ RawInputDeviceName(hDevice) {
 ; The optional fourth button field and sixth axis field were added after the
 ; first profile draft. Missing fields retain the original active-high and
 ; full-range behaviour, so hand-written or early profiles remain valid.
+; The profile for a device key, from THIS product's controller-profile file.
+;
+; The lookup, the fallback to a VID/PID-only base profile and the parsing are all
+; in SteamShell-Common.ahk now, so the elevated helper can do the same lookup
+; against the same file. What stayed here is the one thing the helper resolves
+; differently: where that file is.
 LoadControllerProfile(key, refresh := false) {
-    static cache := Map()
-    if (key = "")
-        return 0
-    ; Saving a VID/PID-only fallback must invalidate any previously cached miss
-    ; for the same device's more-specific MI/collection key.
-    if refresh
-        cache := Map()
-    if cache.Has(key)
-        return cache[key]
-    path := ControllerProfilePath()
-    if !FileExist(path) {
-        cache[key] := 0
-        return 0
-    }
-    section := key
-    length := 0
-    try length := Integer(IniRead(path, section, "ReportLength", "0"))
-    ; A device path may be available on one boot and unavailable on another.
-    ; Profiles saved from numeric RIDI_DEVICEINFO therefore use VID/PID only;
-    ; allow a later, more-specific MI/collection key to find that base profile.
-    if (length <= 0
-        && RegExMatch(key, "i)^(VID_[0-9A-F]{4}_PID_[0-9A-F]{4})", &base)
-        && base[1] != key) {
-        section := base[1]
-        try length := Integer(IniRead(path, section, "ReportLength", "0"))
-    }
-    if (length <= 0) {
-        cache[key] := 0
-        return 0
-    }
-    profile := Map("length", length, "buttons", [], "hat", 0, "axes", Map(),
-        "name", "", "key", section)
-    try profile["name"] := IniRead(path, section, "Name", "")
-
-    buttonText := ""
-    try buttonText := IniRead(path, section, "Buttons", "")
-    bits := ControllerButtonBits()
-    for _, entry in StrSplit(buttonText, "|") {
-        parts := StrSplit(Trim(entry), ":")
-        if (parts.Length < 3 || !bits.Has(parts[1]))
-            continue
-        try {
-            offset := Integer(parts[2])
-            mask := Integer(parts[3])
-            pressed := parts.Length >= 4 ? Integer(parts[4]) : mask
-            if (offset < 0 || offset >= length || mask < 1 || mask > 255)
-                continue
-            profile["buttons"].Push(Map(
-                "bit", bits[parts[1]],
-                "offset", offset,
-                "mask", mask,
-                "pressed", pressed & mask))
-        }
-    }
-
-    hatText := ""
-    try hatText := IniRead(path, section, "Hat", "")
-    parts := StrSplit(Trim(hatText), ":")
-    ; Current: offset : mask : released : N : NE : E : SE : S : SW : W : NW
-    ; Early profiles omitted mask; 0xFF preserves their whole-byte behaviour.
-    if (parts.Length >= 10) {
-        try {
-            offset := Integer(parts[1])
-            hasMask := parts.Length >= 11
-            mask := hasMask ? Integer(parts[2]) : 0xFF
-            releasedIndex := hasMask ? 3 : 2
-            firstDirectionIndex := hasMask ? 4 : 3
-            released := Integer(parts[releasedIndex])
-            if (offset < 0 || offset >= length || mask < 1 || mask > 255
-                || released < 0 || released > 255)
-                throw Error("Invalid hat")
-            directions := Map()
-            ; Same clockwise-from-north order the built-in layout uses.
-            order := [0x0001, 0x0001 | 0x0008, 0x0008, 0x0002 | 0x0008,
-                0x0002, 0x0002 | 0x0004, 0x0004, 0x0001 | 0x0004]
-            Loop 8 {
-                value := Integer(parts[firstDirectionIndex + A_Index - 1])
-                if (value < 0 || value > 255)
-                    throw Error("Invalid hat")
-                directions[value] := order[A_Index]
-            }
-            profile["hat"] := Map("offset", offset,
-                "mask", mask, "released", released, "directions", directions)
-        }
-    }
-
-    axisText := ""
-    try axisText := IniRead(path, section, "Axes", "")
-    validAxisNames := Map("LX", true, "LY", true, "RX", true, "RY", true,
-        "LT", true, "RT", true)
-    validAxisSizes := Map("u8", true, "u16le", true, "u16be", true)
-    for _, entry in StrSplit(axisText, "|") {
-        parts := StrSplit(Trim(entry), ":")
-        if (parts.Length < 5)
-            continue
-        try {
-            name := parts[1]
-            offset := Integer(parts[2])
-            size := parts[3]
-            neutral := Integer(parts[4])
-            direction := Integer(parts[5])
-            extent := parts.Length >= 6 ? Integer(parts[6]) : 0
-            width := size = "u8" ? 1 : 2
-            fullScale := size = "u8" ? 255 : 65535
-            if (!validAxisNames.Has(name) || !validAxisSizes.Has(size)
-                || offset < 0 || offset + width > length
-                || neutral < 0 || neutral > fullScale
-                || (direction != -1 && direction != 1)
-                || extent < 0 || extent > fullScale)
-                continue
-            profile["axes"][name] := Map(
-                "offset", offset,
-                "size", size,
-                "neutral", neutral,
-                "direction", direction,
-                "extent", extent)
-        }
-    }
-    if (profile["buttons"].Length = 0 && !IsObject(profile["hat"])
-        && profile["axes"].Count = 0) {
-        cache[key] := 0
-        return 0
-    }
-    cache[key] := profile
-    return profile
+    return LoadControllerProfileFrom(ControllerProfilePath(), key, refresh)
 }
-
-
-; Reads one axis field out of a report.
-ControllerProfileAxisRaw(data, base, axis) {
-    offset := base + axis["offset"]
-    if (axis["size"] = "u8")
-        return NumGet(data, offset, "UChar")
-    if (axis["size"] = "u16be") {
-        high := NumGet(data, offset, "UChar")
-        return (high << 8) | NumGet(data, offset + 1, "UChar")
-    }
-    return NumGet(data, offset, "UShort")
-}
-
-
-; Full scale of an axis field, used to normalise to XInput's ranges.
-ControllerProfileAxisSpan(axis) {
-    return axis["size"] = "u8" ? 255 : 65535
-}
-
-
 ; Decodes a report using a learned profile.
 ;
 ; Produces exactly the same XINPUT_STATE-shaped buffer as the built-in decoder,
 ; so every mapping, chord and the controller mouse behave identically no matter
 ; how the layout was obtained.
+; Decodes one report into this process's shared RawInput state buffer.
+;
+; The decode itself is in SteamShell-Common.ahk and writes into whatever buffer
+; it is handed, because the helper keeps its own. The buffer and the freshness
+; stamp are the only parts that were ever tree state.
 RawInputProfileDecode(profile, data, base, length) {
     global RawInputState, RawInputLastReportTick
-    if (length != profile["length"])
+    if !RawInputProfileDecodeInto(profile, data, base, length, RawInputState)
         return false
-
-    buttons := 0
-    for _, button in profile["buttons"] {
-        value := NumGet(data, base + button["offset"], "UChar")
-        if ((value & button["mask"]) = button["pressed"])
-            buttons |= button["bit"]
-    }
-    hat := profile["hat"]
-    if IsObject(hat) {
-        value := NumGet(data, base + hat["offset"], "UChar") & hat["mask"]
-        if (value != hat["released"] && hat["directions"].Has(value))
-            buttons |= hat["directions"][value]
-    }
-
-    lt := 0
-    rt := 0
-    axes := profile["axes"]
-    ; A shared trigger axis is not a special case here: LT and RT simply resolve
-    ; to the same offset with opposite directions, which is how the learner
-    ; records what it observed.
-    for _, name in ["LT", "RT"] {
-        if !axes.Has(name)
-            continue
-        axis := axes[name]
-        raw := ControllerProfileAxisRaw(data, base, axis)
-        delta := (raw - axis["neutral"]) * axis["direction"]
-        if (delta <= 0)
-            continue
-        ; The travel is only ever one side of neutral, and which side depends on
-        ; the direction, so the divisor has to follow it. Using the full span
-        ; would halve a trigger that rests at mid-scale -- which a shared trigger
-        ; axis does.
-        span := axis["extent"]
-        if (span <= 0) {
-            span := (axis["direction"] > 0)
-                ? ControllerProfileAxisSpan(axis) - axis["neutral"]
-                : axis["neutral"]
-        }
-        value := Min(255, Round(delta * 255 / Max(1, span)))
-        if (name = "LT")
-            lt := value
-        else
-            rt := value
-    }
-
-    thumbs := Map("LX", 8, "LY", 10, "RX", 12, "RY", 14)
-    NumPut("UInt", 0, RawInputState, 0)
-    NumPut("UShort", buttons, RawInputState, 4)
-    NumPut("UChar", lt, RawInputState, 6)
-    NumPut("UChar", rt, RawInputState, 7)
-    for name, stateOffset in thumbs {
-        value := 0
-        if axes.Has(name) {
-            axis := axes[name]
-            raw := ControllerProfileAxisRaw(data, base, axis)
-            offsetFromRest := raw - axis["neutral"]
-            ; Each side of neutral is scaled by its own travel, so an axis whose
-            ; rest point is not exactly mid-scale still reaches full deflection
-            ; both ways instead of clipping one side and falling short on the
-            ; other.
-            span := axis["extent"]
-            if (span <= 0) {
-                span := (offsetFromRest >= 0)
-                    ? ControllerProfileAxisSpan(axis) - axis["neutral"]
-                    : axis["neutral"]
-            }
-            scaled := Round(offsetFromRest * 32767 / Max(1, span))
-            value := ClampFloat(scaled * axis["direction"], -32767, 32767)
-        }
-        NumPut("Short", value, RawInputState, stateOffset)
-    }
     RawInputLastReportTick := A_TickCount
     return true
 }
-
-
 RawInputRegistered() {
     global RawInputProbeActive
     return RawInputProbeActive
@@ -8072,6 +7812,7 @@ CloseControllerLearner(*) {
     SetTimer(ControllerLearnNextStep, 0)
     SetTimer(ControllerLearnStartCapture, 0)
     SetTimer(ControllerLearnIdentificationReady, 0)
+    SetTimer(ControllerLearnIdentifyHoldTimeout, 0)
     if IsSet(LearnGui) {
         try LearnGui.Destroy()
         LearnGui := unset
@@ -8219,6 +7960,11 @@ ControllerLearnBeginSteps() {
         ; and the idle report captured before the identifying press is retained.
         ; Worth recording, because it also means a missed press produces no
         ; report to examine.
+        ;
+        ; This sentence used to be false. The baseline had been overwritten with
+        ; the report that identified the device -- the press -- so "the
+        ; pre-selection idle report" was exactly what it was NOT using. It is
+        ; now, which is what makes a change-only pad safe here.
         LogLine("Learn: no reports while at rest; this controller reports only "
             . "on change. Using the pre-selection idle report as the baseline.")
     }
@@ -8236,7 +7982,6 @@ ControllerLearnBufferAxisRaw(report, offset, size) {
             | NumGet(report, offset + 1, "UChar")
     return NumGet(report, offset, "UShort")
 }
-
 
 
 ; Chooses the field the axis actually occupies, once the whole movement has been
@@ -8329,7 +8074,6 @@ ControllerLearnCopyReport(data, base, length) {
 }
 
 
-
 ; Returns four active-high or active-low button entries when the D-pad is made
 ; from independent bits. A non-regular hat is not guessed into bits: doing so can
 ; map several directions to the same lowest bit and is worse than leaving it
@@ -8359,7 +8103,6 @@ ControllerLearnDpadButtons() {
     }
     return buttons
 }
-
 
 
 ; Compares one report against the baseline for the current step.
@@ -8568,7 +8311,6 @@ ControllerLearnHatText() {
 }
 
 
-
 ControllerLearnHighByteQuality(offset, sampleCount) {
     global LearnAxisSamples, LearnBaseline
     previous := NumGet(LearnBaseline, offset, "UChar")
@@ -8611,7 +8353,6 @@ ControllerLearnLargestExcursion() {
 }
 
 
-
 ControllerLearnNextStep() {
     global LearnActive, LearnStepIndex
     if !LearnActive
@@ -8651,7 +8392,6 @@ ControllerLearnRecordButton(name, offset, mask, pressed) {
 }
 
 
-
 ; A failed resolve must leave nothing behind.
 ;
 ; This function runs on every report of the gesture, so a provisional answer from
@@ -8667,6 +8407,48 @@ ControllerLearnRejectAxis(step, reason) {
     return false
 }
 
+
+; The identifying control came back up -- or ran out of patience. Either way the
+; hold is over and rest measurement can start.
+;
+; Both routes go through here so the rest phase has exactly one entry point. The
+; timeout is not a nicety: a pad that reports only on change and whose release
+; report is lost would otherwise leave the wizard waiting forever on a prompt
+; that has already been answered, with no clock on screen and no way forward but
+; Cancel.
+ControllerLearnIdentifyReleased(reason) {
+    global LearnActive, LearnIdentifyHoldOffset, LearnIdentifyHoldMask
+    global LearnRestSampling, LearnRestCount
+    if !LearnActive
+        return
+    if (LearnIdentifyHoldOffset < 0)
+        return
+    SetTimer(ControllerLearnIdentifyHoldTimeout, 0)
+    LogLine("Learn: identifying control " reason "; measuring rest.")
+    LearnIdentifyHoldOffset := -1
+    LearnIdentifyHoldMask := 0
+    LearnRestSampling := true
+    LearnRestCount := 0
+    ControllerLearnUpdateUi()
+    SetTimer(ControllerLearnBeginSteps, -1800)
+}
+
+
+; The identifying control never came back up. Proceed anyway, and say so.
+;
+; Measuring rest with it still held is the original defect, so this does not
+; pretend the reading is good: it warns, and the rest window that follows will
+; record the eventual release as noise exactly as before. That is a worse
+; outcome than waiting and a much better one than a wizard that cannot be
+; finished.
+ControllerLearnIdentifyHoldTimeout() {
+    global LearnActive, LearnIdentifyHoldOffset
+    if (!LearnActive || LearnIdentifyHoldOffset < 0)
+        return
+    LogLine("Learn: the identifying control was still held after 4 seconds. "
+        . "Measuring rest anyway; let go if the steps behave oddly.", "Warning")
+    ControllerLearnIdentifyReleased("timed out while held")
+}
 
 
 ; Watches for the accepted control to return to its resting state.
@@ -8698,6 +8480,7 @@ ControllerLearnReport(data, base, length, device) {
     global LearnStepIndex, LearnCaptureUntil, LearnPeak
     global LearnRestNoise, LearnRestSampling, LearnRestCount
     global LearnIdentifyDevices, LearnIdentifyReady
+    global LearnIdentifyHoldOffset, LearnIdentifyHoldMask
     global LearnReleaseOffset, LearnStepReports
     if !LearnActive
         return
@@ -8737,6 +8520,8 @@ ControllerLearnReport(data, base, length, device) {
             return
         }
         identified := false
+        holdOffset := -1
+        holdMask := 0
         Loop length {
             offset := A_Index - 1
             now := NumGet(data, base + offset, "UChar")
@@ -8744,6 +8529,8 @@ ControllerLearnReport(data, base, length, device) {
             changed := (now ^ was) & ~NumGet(noise, offset, "UChar") & 0xFF
             if changed {
                 identified := true
+                holdOffset := offset
+                holdMask := changed
                 break
             }
         }
@@ -8755,23 +8542,56 @@ ControllerLearnReport(data, base, length, device) {
         LearnDevice := device
         LearnDeviceKey := RawInputDeviceKey(device)
         LearnLength := length
-        ; Start the explicit rest phase from the report that completed device
-        ; identification, not the first report ever seen from that device.
+        ; THE IDLE REPORT, not the one that completed identification.
         ;
-        ; A change-only controller may first appear when A is pressed, then be
-        ; identified by the release report. Keeping the first report would make
-        ; "A held" the resting baseline: A would be learned on release, and B
-        ; would keep colliding with that false mapping forever.
-        LearnBaseline := ControllerLearnCopyReport(data, base, length)
+        ; Identification fires on the report where something CHANGED, and for
+        ; almost every pad that is the button going DOWN. Copying that report
+        ; made "the identifying button held" the resting state: it then differed
+        ; from rest in every later report, so it read as permanently pressed for
+        ; the rest of the wizard, was saved into the profile's neutral, and the
+        ; controller came out of the wizard with a button stuck down. On a pad
+        ; that does report at rest the release instead landed in LearnRestNoise,
+        ; which is quieter and just as wrong -- that bit is then skipped by every
+        ; later step, silently.
+        ;
+        ; `baseline` is the idle report this device was publishing before the
+        ; press. It stopped being updated the moment LearnIdentifyReady was set,
+        ; so it is exactly the pre-press state, and it was already being kept for
+        ; the noise measurement. It was there the whole time; it was simply
+        ; thrown away in favour of the report that happened to arrive last.
+        LearnBaseline := ControllerLearnCopyReport(baseline, 0, length)
         LearnRestNoise := Buffer(length, 0)
+        ; And nothing is measured until that control comes back up. The step
+        ; captures have always done this -- see LearnReleaseOffset, "a held
+        ; button cannot answer the next prompt" -- and identification is the one
+        ; place the same rule was never applied, even though it is the only
+        ; prompt whose answer the user is still holding when the next one
+        ; appears.
+        LearnIdentifyHoldOffset := holdOffset
+        LearnIdentifyHoldMask := holdMask
+        SetTimer(ControllerLearnIdentifyHoldTimeout, -4000)
         LogLine("Learn: capturing from device 0x" Format("{:X}", device)
             . " key=" (LearnDeviceKey != "" ? LearnDeviceKey : "unknown")
-            . " reportLength=" length ".")
+            . " reportLength=" length "; waiting for byte " holdOffset
+            . " bit 0x" Format("{:02X}", holdMask) " to be released.")
         ControllerLearnUpdateUi()
         return
     }
     if (device != LearnDevice || length != LearnLength)
         return
+    ; The identifying control has to come back up before anything is measured.
+    ; Until it does, every report is one where it is still held, and rest is the
+    ; one thing that must not be measured from those.
+    if (LearnIdentifyHoldOffset >= 0) {
+        if (LearnIdentifyHoldOffset < length) {
+            now := NumGet(data, base + LearnIdentifyHoldOffset, "UChar")
+            was := NumGet(LearnBaseline, LearnIdentifyHoldOffset, "UChar")
+            if ((now & LearnIdentifyHoldMask) != (was & LearnIdentifyHoldMask))
+                return
+        }
+        ControllerLearnIdentifyReleased("released")
+        return
+    }
     ; Rest sampling. The baseline is every detection's reference point, so it is
     ; taken while the user has explicitly let go, not from the report that
     ; happened to identify the device -- that one arrived with a button held.
@@ -8840,7 +8660,6 @@ ControllerLearnReportAxisActive(report, byteThreshold) {
     }
     return false
 }
-
 
 
 ; allowRestNoisy is set only by this function's own single retry -- see the
@@ -9055,6 +8874,7 @@ ControllerLearnResolveAxis(step, allowRestNoisy := false) {
 
 ControllerLearnRestart() {
     global LearnDevice, LearnDeviceKey, LearnLength, LearnBaseline
+    global LearnIdentifyHoldOffset, LearnIdentifyHoldMask
     global LearnRestNoise, LearnRestSampling, LearnRestCount
     global LearnStepIndex, LearnResultButtons, LearnResultAxes
     global LearnHatValues, LearnCaptureUntil
@@ -9080,6 +8900,8 @@ ControllerLearnRestart() {
     LearnCaptureUntil := 0
     LearnIdentifyDevices := Map()
     LearnIdentifyReady := false
+    LearnIdentifyHoldOffset := -1
+    LearnIdentifyHoldMask := 0
     SetTimer(ControllerLearnTick, 0)
     SetTimer(ControllerLearnBeginSteps, 0)
     SetTimer(ControllerLearnNextStep, 0)
@@ -9090,7 +8912,6 @@ ControllerLearnRestart() {
     SetTimer(ControllerLearnIdentificationReady, -1200)
     ControllerLearnUpdateUi()
 }
-
 
 
 ; Writes the learned profile and refreshes the decoder cache immediately.
@@ -9224,7 +9045,6 @@ ControllerLearnSkip() {
 }
 
 
-
 ControllerLearnStartCapture() {
     global LearnCaptureUntil, LearnPeak, LearnPromptCtrl, LearnProgressCtrl
     global LearnStepIndex, LearnDetailCtrl, LearnLength
@@ -9300,7 +9120,6 @@ ControllerLearnStartCapture() {
 }
 
 
-
 ; The prompts, in order. Buttons first: they are unambiguous and confirm the
 ; report is being read correctly before anything subtler is attempted.
 ControllerLearnSteps() {
@@ -9368,7 +9187,6 @@ ControllerLearnSteps() {
     ]
     return steps
 }
-
 
 
 ; Analogue steps normally finish on release. This timer only recovers from an
@@ -9473,7 +9291,7 @@ ControllerLearnTick() {
 ControllerLearnUpdateUi() {
     global LearnDevice, LearnStepIndex, LearnPromptCtrl, LearnDetailCtrl
     global LearnLength, LearnDeviceKey, LearnIdentifyReady
-    global LearnRestSampling, LearnRestCount
+    global LearnRestSampling, LearnRestCount, LearnIdentifyHoldOffset
     if !LearnDevice {
         if LearnIdentifyReady {
             try LearnPromptCtrl.Text := "Press any button on the controller you want to set up"
@@ -9486,14 +9304,23 @@ ControllerLearnUpdateUi() {
         }
         return
     }
+    ; Two states share LearnStepIndex = 0, and they used to be one. The rest
+    ; countdown started here, the moment the device was identified -- which is
+    ; the moment the identifying button was pressed, not released. The wizard
+    ; asked for hands off while the user was still mid-press, and measured rest
+    ; from it. Rest now starts from ControllerLearnIdentifyReleased, and this
+    ; only describes whichever of the two the wizard is actually in.
     if (LearnStepIndex = 0) {
+        if (LearnIdentifyHoldOffset >= 0) {
+            try LearnPromptCtrl.Text := "Let go of that button"
+            try LearnDetailCtrl.Text := "Got the controller. Release the button "
+                . "you just pressed and we will measure what resting looks like."
+            return
+        }
         try LearnPromptCtrl.Text := "Hands off — do not touch anything yet"
         try LearnDetailCtrl.Text := "Learning what resting looks like. Anything "
             . "you hold now will be ignored for the rest of the wizard, so let "
             . "go until the next prompt."
-        LearnRestSampling := true
-        LearnRestCount := 0
-        SetTimer(ControllerLearnBeginSteps, -1800)
     }
 }
 
@@ -9645,13 +9472,13 @@ ControllerProfileRestCheckBegin() {
 }
 
 
-
 ; ------------------------------------------------------------------------------
 ; Learning wizard UI
 ; ------------------------------------------------------------------------------
 ShowControllerLearner(*) {
     global LearnGui, LearnActive, LearnDevice, LearnDeviceKey, LearnLength
     global LearnBaseline, LearnRestNoise, LearnRestSampling, LearnRestCount
+    global LearnIdentifyHoldOffset, LearnIdentifyHoldMask
     global LearnStepIndex, LearnResultButtons, LearnResultAxes, LearnHatValues
     global LearnPromptCtrl, LearnDetailCtrl, LearnProgressCtrl, LearnCaptureUntil
     global LearnLastAccepted, LearnLastFriendly
@@ -9706,6 +9533,8 @@ ShowControllerLearner(*) {
     LearnCaptureUntil := 0
     LearnIdentifyDevices := Map()
     LearnIdentifyReady := false
+    LearnIdentifyHoldOffset := -1
+    LearnIdentifyHoldMask := 0
     ; The pointer is needed for the buttons on this window.
     if MouseHidden {
         SystemCursor("Show")
@@ -9820,7 +9649,6 @@ DeleteControllerProfileForActiveDevice(*) {
 }
 
 
-
 CenterGuiOnMonitorActual(guiObj, monitorIndex, width, height, noActivate := false,
         deferShow := false) {
     monitorIndex := ClampInt(monitorIndex, 1, MonitorGetCount())
@@ -9902,7 +9730,6 @@ GameShapeFactsForWindow(item, minimizedLegacy) {
         "titleLength", StrLen(item["title"]),
         "minimizedLegacy", minimizedLegacy)
 }
-
 
 
 ; Sizes and centres a window, never showing it at an intermediate position.

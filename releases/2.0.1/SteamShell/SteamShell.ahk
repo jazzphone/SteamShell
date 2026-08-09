@@ -227,6 +227,10 @@ global LearnLength := 0
 global LearnPeak := 0
 global LearnProgressCtrl := unset
 global LearnPromptCtrl := unset
+; The control that chose the device, held until it is let go. Rest cannot be
+; measured while it is down, because "rest" would then include it.
+global LearnIdentifyHoldMask := 0
+global LearnIdentifyHoldOffset := -1
 global LearnReleaseMask := 0
 global LearnReleaseOffset := -1
 global LearnReleaseUntil := 0
@@ -430,6 +434,13 @@ global RtssSetProfilePropertyProc := 0
 global RtssSaveProfileProc := 0
 global RtssUpdateProfilesProc := 0
 global RtssHooksLastFailure := ""
+; The last RTSS flag word seen, so a CHANGE can be logged without logging every
+; read. -1 is "nothing seen yet"; 0 is a real flag word.
+global RtssLastFlagsSeen := -1
+; The window after a startup restore during which the limiter flag is held
+; against RTSS re-asserting its own saved state. See RtssFrameLimitHoldTick.
+global RtssFrameLimitHoldUntil := 0
+global RtssFrameLimitHoldRetries := 0
 ; Quick Menu frame-cap presets, in cycle order. "Off" and "Custom" are derived
 ; states rather than list entries; see GetRtssFrameCapState.
 global RtssFrameCapPresets := [30, 40, 60, 90, 120]

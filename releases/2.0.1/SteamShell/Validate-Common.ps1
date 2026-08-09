@@ -1340,6 +1340,291 @@ function Assert-QuickMenuPageChangesRebuild {
     }
 }
 
+# Every input backend must reach the elevated helper, not just XInput.
+#
+# The helper drives the pointer while a High-integrity window owns the
+# foreground. Its only input source was XInputGetState, so a pad that answers
+# only RawInput -- which is what the RawInput backend and the whole learning
+# wizard exist for -- lost the pointer the instant Task Manager came forward,
+# while working everywhere else. From a user's side that is one input mode being
+# second-class; it was never a decision anyone made for this product, only the
+# XFE reasoning ("the remedy here is XInput") inherited by a product it was not
+# written about.
+#
+# The decode therefore lives in SteamShell-Common.ahk, which all three programs
+# compile. That placement is the rule worth holding: moved back into
+# SteamShell-Shared.ahk it would compile into the two trees and silently vanish
+# from the helper again, and nothing about that reads as a regression.
+#
+# Four things, and the last two are the ones a reimplementation gets wrong --
+# main's handler carries both rules with their reasons, and a helper that
+# disagreed with either would be a second opinion rather than the same decoder.
+function Assert-ElevatedHelperReadsEveryBackend {
+    param(
+        [Parameter(Mandatory = $true)][string]$ProjectRoot,
+        [switch]$Quiet
+    )
+    $commonText = Get-SourceText (Join-Path $ProjectRoot "SteamShell-Common.ahk")
+    $helperText = Get-SourceText (Join-Path $ProjectRoot "SteamShell-Helper.ahk")
+    foreach ($name in @("RawInputProfileDecodeInto", "LoadControllerProfileFrom",
+                        "RawInputDeviceKey", "ControllerProfilePathFor",
+                        "ControllerProfileLengthKey")) {
+        Assert-True ($commonText -match ('(?m)^' + $name + '\(')) (
+            "$name is not in SteamShell-Common.ahk. The elevated helper only " +
+            "compiles Common, so moving it out takes RawInput away from the " +
+            "one process that needs it to read a learned pad over an elevated " +
+            "window -- and nothing about that change looks like a regression.")
+    }
+    Assert-True ($helperText -match 'RegisterRawInputDevices') (
+        "The elevated helper no longer registers for RawInput, so a pad that " +
+        "XInput does not expose has no pointer over an elevated window.")
+    Assert-True ($helperText -match 'RIDEV_INPUTSINK') (
+        "The elevated helper's RawInput registration is not INPUTSINK. It " +
+        "reads the pad precisely when another window owns the foreground, " +
+        "which is the only thing INPUTSINK provides.")
+
+    $handler = Get-AhkFunctionBody -Source $helperText -Name "HelperRawInputMessage"
+    Assert-True ($handler -ne "") (
+        "HelperRawInputMessage is gone; nothing decodes RawInput in the helper.")
+    Assert-True ($handler -match 'ControllerProfileLengthKey\(') (
+        "The helper no longer falls back to a length-keyed profile. A device " +
+        "whose identity Windows withholds saves its profile under that key, so " +
+        "it would work in main and not over an elevated window -- the exact " +
+        "asymmetry this exists to remove.")
+    Assert-True ($handler -match '\(size - \(HEADER_SIZE \+ 8\)\) // sizeHid') (
+        "The helper trusts the packet header for its report count. count and " +
+        "sizeHid come out of the packet and are used to index straight into " +
+        "memory; in a High-integrity process that bound is not optional.")
+    Assert-True ($handler -match '(?s)Loop\s+Min\(count,\s*Max\(0,\s*available\)\)') (
+        "The helper decodes fewer than all the reports in a packet. Windows " +
+        "coalesces them under load, and on a change-only pad -- which is most " +
+        "of the pads needing a learned profile -- a coalesced press is not a " +
+        "late press, it is a press that never arrives.")
+
+    $read = Get-AhkFunctionBody -Source $helperText -Name "HelperRawInputRead"
+    Assert-True ($read -match 'STALE_MS') (
+        "The helper's RawInput state has no staleness rule. RawInput is " +
+        "event-driven, so an untouched pad stops reporting and the last stick " +
+        "position would drive the cursor forever over an elevated window.")
+    $poll = Get-AhkFunctionBody -Source $helperText -Name "PollController"
+    Assert-True ($poll -match 'HelperRawInputRead\(&state\)[\s\S]{0,80}GetXInputState\(&state\)') (
+        "PollController no longer tries RawInput before XInput, or has lost " +
+        "the XInput fallback. Both matter: RawInput only answers for a pad " +
+        "with a learned profile, and XInput is what every other pad uses.")
+    if (-not $Quiet) {
+        Write-Host ("Elevated helper input: RawInput and XInput, one shared " +
+            "decoder, every report in a packet.")
+    }
+}
+
+
+# The startup limiter hold must stay bounded, and must never defend "off".
+#
+# RTSS applies its own saved runtime state while it finishes starting, which
+# overwrites the limiter flag the startup restore had already set AND already
+# verified -- the read-back happens while the value is still ours. So the restore
+# re-checks after RTSS settles and re-applies if it reverted.
+#
+# That is a program writing a setting the user did not just ask it to write, and
+# the only thing keeping it honest is that it stops. Two bounds and one
+# exclusion, all three of which a tidy could remove without any test noticing:
+#
+#   - a deadline, so it cannot run for the session
+#   - a retry cap, so it cannot fight in a loop inside the deadline
+#   - never for mode "off", because re-applying THAT means writing the disabled
+#     bit over a user who has just turned the limiter on in RTSS's own UI
+function Assert-RtssFrameLimitHoldIsBounded {
+    param(
+        [Parameter(Mandatory = $true)][string]$ProjectRoot,
+        [switch]$Quiet
+    )
+    $sharedText = Get-SourceText (Join-Path $ProjectRoot "SteamShell-Shared.ahk")
+    $hold = Get-AhkFunctionBody -Source $sharedText -Name "RtssFrameLimitHoldTick"
+    Assert-True ($hold -ne "") (
+        "RtssFrameLimitHoldTick is gone. Without it the startup restore is " +
+        "confirmed by a read-back that happens before RTSS has finished " +
+        "applying its own state, so a reverted limiter is never noticed.")
+    Assert-True ($hold -match 'RtssLastFrameCapMode\s*=\s*"off"') (
+        "The RTSS limiter hold no longer excludes the 'off' selection. It " +
+        "would write the disabled bit back over a user who has just turned the " +
+        "limiter on in RTSS itself.")
+    Assert-True ($hold -match 'A_TickCount\s*>\s*RtssFrameLimitHoldUntil') (
+        "The RTSS limiter hold has no deadline and would run for the session.")
+    Assert-True ($hold -match 'RtssFrameLimitHoldRetries\s*>=\s*MAX_RETRIES') (
+        "The RTSS limiter hold has no retry cap. Inside its deadline it could " +
+        "re-enable the limiter every tick against a user turning it off.")
+    Assert-True ($hold -match 'fps\s*!=\s*RtssLastFrameCapFps') (
+        "The RTSS limiter hold no longer checks the cap it is defending. If " +
+        "RTSS came back holding a different number this would enable the " +
+        "limiter at an FPS the user never chose.")
+    $arm = Get-AhkFunctionBody -Source $sharedText -Name "ArmRtssFrameLimitHold"
+    Assert-True ($arm -ne "" -and $arm -match 'RtssFrameLimitHoldRetries\s*:=\s*0') (
+        "ArmRtssFrameLimitHold is missing or does not reset the retry count, " +
+        "so a later restore in the same session would start already exhausted.")
+    if (-not $Quiet) {
+        Write-Host ("RTSS limiter hold: bounded by deadline and retries, and " +
+            "never applied to an 'off' selection.")
+    }
+}
+
+
+# "Could not read the cap" must never render as "the limiter is off".
+#
+# GetRtssFrameLimit returns 0 for six different reasons and only one of them is
+# "uncapped": integration disabled, DLL integration disabled, RTSS not running,
+# the API unavailable, GetProfileProperty returning false, or an exception. That
+# was harmless until GetRtssFrameCapState read the 0 as a STATE -- it reports
+# mode "off" when fps <= 0 -- so a failed profile read displayed "OFF" on the
+# Quick Menu row while GetFlags, in the same pass, was reporting the limiter ON.
+#
+# Reported as intermittent and boot-clustered, which is exactly the shape: RTSS's
+# shared memory answers as soon as the process is alive, while its profile store
+# can fail to answer for a moment longer during startup. The two data sources
+# come up at different times and the row believed the one that had not.
+#
+# The same 0 also reached PersistRtssFrameCapStateNow, which records the live
+# state as the user's remembered selection -- so a failed read could persist
+# "off" and there would be nothing left to restore on the next boot. That is the
+# "does SteamShell turn it off?" report, and it is a write, not a toggle.
+#
+# Three rules, none of which a diff makes obvious:
+#   1. The distinguishing read exists and returns a success flag.
+#   2. GetRtssFrameCapState uses it and returns unavailable, not "off".
+#   3. A failed read is not cached, or the wrong answer outlives the fault.
+function Assert-RtssUnreadableIsNotOff {
+    param(
+        [Parameter(Mandatory = $true)][string]$ProjectRoot,
+        [switch]$Quiet
+    )
+    $sharedText = Get-SourceText (Join-Path $ProjectRoot "SteamShell-Shared.ahk")
+    $read = Get-AhkFunctionBody -Source $sharedText -Name "RtssGlobalFrameLimitRead"
+    Assert-True ($read -ne "") (
+        "RtssGlobalFrameLimitRead is gone. It is the only thing that tells a " +
+        "failed RTSS profile read apart from a genuine zero, and without it the " +
+        "Quick Menu reports the limiter off whenever the read fails.")
+    Assert-True ($read -match 'return\s+false') (
+        "RtssGlobalFrameLimitRead no longer reports failure to its caller.")
+    # The failure path must return before the cache is written. Anchored on the
+    # order of the two, because caching a failure holds the wrong reading for
+    # the full cache window past the moment RTSS became readable.
+    Assert-True ($read -match
+        '(?s)if\s*!IsObject\(limit\)\s*\{[^}]*return\s+false[^}]*\}(?:(?!\n\})[\s\S])*?RtssFrameLimitCacheTick\s*:=') (
+        "RtssGlobalFrameLimitRead caches the result before it has established " +
+        "the read succeeded. A cached failure keeps reporting 'off' for the " +
+        "whole cache window after RTSS became readable.")
+
+    $state = Get-AhkFunctionBody -Source $sharedText -Name "GetRtssFrameCapState"
+    Assert-True ($state -match 'if\s*!RtssGlobalFrameLimitRead\(&fps\)') (
+        "GetRtssFrameCapState no longer distinguishes an unreadable cap from " +
+        "zero. It reports mode 'off' when fps <= 0, so an unreadable cap would " +
+        "again display as a limiter that is off -- and would be persisted as " +
+        "the user's selection by PersistRtssFrameCapStateNow.")
+    Assert-True ($state -notmatch 'fps\s*:=\s*RtssGlobalFrameLimit\(\)') (
+        "GetRtssFrameCapState reads the cap through the number-only helper " +
+        "again, which cannot report a failed read.")
+
+    # The two profile writes must refuse a failed read rather than write 0 over
+    # the profile the user is populating.
+    $save = Get-AhkFunctionBody -Source $sharedText -Name "SaveRtssFrameLimitToProfile"
+    if ($save -ne "") {
+        Assert-True (([regex]::Matches($save,
+            'if\s*!RtssGlobalFrameLimitRead\(&fps\)')).Count -ge 2) (
+            "Save Limit to Profile no longer refuses an unreadable cap on both " +
+            "its paths. A failed read is 0, so it would write 'uncapped' over " +
+            "the game profile it was asked to populate and report success.")
+    }
+    if (-not $Quiet) {
+        Write-Host ("RTSS frame cap: an unreadable cap reports unavailable, " +
+            "is never cached, and is never written to a profile.")
+    }
+}
+
+
+# The learner must not measure rest while the identifying button is still down.
+#
+# The wizard picks the device from the first report where a bit changed, and for
+# almost every pad that is the button going DOWN. Two things then have to be true
+# and neither is visible in a diff:
+#
+# 1. The resting baseline is the PRE-PRESS idle report, which the identification
+#    loop already keeps in order to measure idle noise. Copying the report that
+#    completed identification instead makes "that button held" the resting state:
+#    it reads as permanently pressed for the rest of the wizard, is saved into
+#    the profile's neutral, and the controller comes out of the wizard with a
+#    button stuck down. That is what shipped in 2.0.0 and what a user reported.
+#
+# 2. Nothing is measured until the control comes back up. Without the gate the
+#    rest window opens while the user is mid-press -- the prompt changes from
+#    "press a button" to "hands off" underneath their thumb -- and either the
+#    press lands in the baseline (stuck button) or the release lands in
+#    LearnRestNoise, where that bit is skipped by every later step, silently.
+#
+# The step captures have always had this rule; see LearnReleaseOffset, "a held
+# button cannot answer the next prompt". Identification is the one prompt whose
+# answer the user is still holding when the next prompt appears, and it was the
+# one place the rule was missing.
+#
+# Checked against SteamShell-Shared.ahk, because both products compile it and
+# neither can fix or break this on its own. KEPT IN STEP WITH
+# test_identifying_press_never_becomes_the_resting_state in
+# Test-ControllerProfiles.py, which models the same sequence report by report.
+function Assert-ControllerLearnerIdentifyRelease {
+    param(
+        [Parameter(Mandatory = $true)][string]$ProjectRoot,
+        [switch]$Quiet
+    )
+    $sharedText = Get-SourceText (Join-Path $ProjectRoot "SteamShell-Shared.ahk")
+    $report = Get-AhkFunctionBody -Source $sharedText -Name "ControllerLearnReport"
+    Assert-True ($report -ne "") (
+        "ControllerLearnReport could not be read, so nothing below it is checked.")
+
+    Assert-True ($report -match 'LearnBaseline\s*:=\s*ControllerLearnCopyReport\(\s*baseline\s*,') (
+        "The learner no longer takes its resting baseline from the pre-press " +
+        "idle report. Identification fires on the button going DOWN, so any " +
+        "other report saves that button as the resting state: it reads as held " +
+        "for the rest of the wizard and stays held in the saved profile.")
+    Assert-True ($report -notmatch 'LearnBaseline\s*:=\s*ControllerLearnCopyReport\(\s*data\s*,') (
+        "The learner copies the live report into LearnBaseline at " +
+        "identification. That report is the identifying PRESS, which is exactly " +
+        "the state that must not become rest.")
+    Assert-True ($report -match 'LearnIdentifyHoldOffset\s*:=\s*holdOffset') (
+        "ControllerLearnReport no longer records which control identified the " +
+        "device, so it cannot wait for that control to be released before " +
+        "measuring rest.")
+    Assert-True ($report -match '(?s)if\s*\(LearnIdentifyHoldOffset\s*>=\s*0\)') (
+        "ControllerLearnReport no longer holds off while the identifying " +
+        "control is down. Rest would be measured from reports in which it is " +
+        "still held.")
+
+    $released = Get-AhkFunctionBody -Source $sharedText `
+        -Name "ControllerLearnIdentifyReleased"
+    Assert-True ($released -ne "" -and
+        $released -match 'LearnRestSampling\s*:=\s*true' -and
+        $released -match 'ControllerLearnBeginSteps') (
+        "ControllerLearnIdentifyReleased is missing or no longer starts the " +
+        "rest phase. It is the single entry point to rest measurement; without " +
+        "it the wizard either never measures rest or measures it too early.")
+    $timeout = Get-AhkFunctionBody -Source $sharedText `
+        -Name "ControllerLearnIdentifyHoldTimeout"
+    Assert-True ($timeout -ne "" -and $timeout -match 'ControllerLearnIdentifyReleased') (
+        "The identify hold has no timeout. A pad whose release report is lost " +
+        "would leave the wizard waiting forever on a prompt already answered, " +
+        "with no way forward but Cancel.")
+
+    # The rest phase must have exactly one entry point. This is where it used to
+    # start -- on identification, which is the press.
+    $ui = Get-AhkFunctionBody -Source $sharedText -Name "ControllerLearnUpdateUi"
+    Assert-True ($ui -ne "" -and $ui -notmatch 'LearnRestSampling\s*:=\s*true') (
+        "ControllerLearnUpdateUi starts rest sampling again. It runs the moment " +
+        "the device is identified, which is the moment the button went down, so " +
+        "rest would once more be measured with it held.")
+    if (-not $Quiet) {
+        Write-Host ("Controller learner: rest is measured from the pre-press " +
+            "idle report, and only after the identifying control is released.")
+    }
+}
+
+
 # The recent-application history, and the picker that reads it.
 #
 # Four things, none of which fails to compile and none of which a user can tell
