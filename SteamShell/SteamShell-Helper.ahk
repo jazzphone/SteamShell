@@ -895,12 +895,65 @@ LoadConfiguration() {
     return true
 }
 
+; XINPUT IS THE ONLY INPUT THIS PROCESS HAS.
+;
+; Main reads the pad through whichever backend is configured -- RawInput,
+; GameInput or XInput -- and a learned controller profile decodes RawInput
+; reports for pads XInput does not expose at all. None of that exists here: the
+; helper decodes nothing, loads no profile, and registers no RawInput window. So
+; over an elevated window, a pad that does not answer XInput produces no
+; pointer, and the only symptom is that the mouse stops working when Task
+; Manager comes forward.
+;
+; That is a real limitation and not a decision made for this product. The banner
+; at the top of this file argues elevated input can be XInput-only because "the
+; remedy here is XInput" -- which was reasoning about the XFE companion, where
+; elevated input was dropped entirely. It became the standalone helper's
+; behaviour by inheritance rather than by choice.
+;
+; Sweeping the slots rather than asking only the configured one.
+;
+; Main resolves the live slot into ActiveControllerIndex and has done since a pad
+; moved between slots mid-session under Steam Input. That value is in main's
+; memory and is never written to the settings file, so this process cannot read
+; it -- it had only the configured index, which is a starting guess. A pad on any
+; other slot was invisible here while working perfectly everywhere else.
 GetXInputState(&state) {
     global XInputDll, ControllerIndex
+    static activeIndex := -1
     if (XInputDll = "" && !InitXInput())
         return false
+    ; The slot that answered last time costs one call and is tried first.
+    if (activeIndex >= 0 && XInputSlotAnswers(activeIndex, &state))
+        return true
+    candidates := []
+    if (ControllerIndex >= 0 && ControllerIndex <= 3)
+        candidates.Push(ControllerIndex)
+    Loop 4 {
+        index := A_Index - 1
+        if (index != ControllerIndex)
+            candidates.Push(index)
+    }
+    for _, index in candidates {
+        if XInputSlotAnswers(index, &state) {
+            if (activeIndex != index) {
+                LogLine("Elevated input: XInput controller on slot " (index + 1)
+                    . (index != ControllerIndex
+                        ? " (configured slot " (ControllerIndex + 1) ")" : "")
+                    . ".")
+                activeIndex := index
+            }
+            return true
+        }
+    }
+    activeIndex := -1
+    return false
+}
+
+XInputSlotAnswers(index, &state) {
+    global XInputDll
     try return DllCall(
-        XInputDll "\XInputGetState", "UInt", ControllerIndex, "Ptr", state, "UInt") = 0
+        XInputDll "\XInputGetState", "UInt", index, "Ptr", state, "UInt") = 0
     catch {
         XInputDll := ""
         return false
@@ -1304,6 +1357,24 @@ PollController() {
         return
     }
     if !GetXInputState(&state) {
+        ; Say why, once a minute, while it actually matters.
+        ;
+        ; This branch is the whole of "the controller stopped working when Task
+        ; Manager came forward", and it was silent -- so the fault presented as
+        ; the pointer freezing over one window, with nothing in either log to
+        ; distinguish "no pad" from "a pad this process cannot read". It is
+        ; reported only when an elevated window is in front and mouse mode is
+        ; wanted, because at any other moment there is nothing wrong with having
+        ; no XInput reading.
+        static lastNoPadTick := 0
+        if (!lastNoPadTick || A_TickCount - lastNoPadTick >= 60000) {
+            lastNoPadTick := A_TickCount
+            LogLine("Elevated input: no XInput controller answered on any slot "
+                . "while '" foregroundExe "' was in front. This process reads "
+                . "XInput only -- a pad that needs RawInput or a learned "
+                . "profile cannot drive the pointer over an elevated window.",
+                "Warning")
+        }
         previousButtons := 0
         ResetControllerEdgeState(
             downTick, longFired, previousTriggers, buttonDefinitions)
