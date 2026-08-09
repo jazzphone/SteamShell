@@ -276,6 +276,200 @@ QuickMenuMeasuredBottomMargin(measuredStatusHeight) {
         measuredStatusHeight * QuickMenuBottomMargin() / QuickMenuStatusHeight())
 }
 
+; Every registered Settings control checked against its page: does it exist, is
+; it a real rectangle, does it stay inside the content column, does it overlap a
+; sibling.
+;
+; The state is FIVE PARAMETERS rather than six globals, which is the whole reason
+; this can live here. Both products kept their categories, their per-category
+; control lists and their recorded positions in differently-named globals, and
+; that -- plus a different content column and slightly different wording -- was
+; the entire difference between two copies of this algorithm.
+;
+; The bounds come from each product's own layout: the content column starts
+; further right in the companion and its right edge is the scrollbar rather than
+; a content width. Those are two numbers, so they are two arguments.
+;
+; Messages carry the control handle, which was the shell's wording and not the
+; companion's. "A control has no recorded position" cannot be acted on; "control
+; 0x1A03C2 was not registered" can be found in a window spy.
+SharedAuditSettingsLayout(categories, controlsByCategory, positions,
+        contentLeft, contentRight) {
+    issues := []
+    for _, category in categories {
+        if (!controlsByCategory.Has(category)
+            || controlsByCategory[category].Length = 0) {
+            issues.Push(category ": page has no registered controls.")
+            continue
+        }
+        positioned := []
+        for _, control in controlsByCategory[category] {
+            if !positions.Has(control.Hwnd) {
+                issues.Push(category ": control " control.Hwnd
+                    . " was not registered with a position.")
+                continue
+            }
+            pos := positions[control.Hwnd]
+            if (pos["w"] <= 0 || pos["h"] <= 0) {
+                issues.Push(category ": control " control.Hwnd
+                    . " has invalid dimensions.")
+                continue
+            }
+            ; Only a scrollable control is held to the content column. The fixed
+            ; furniture -- the category list, the footer -- lives outside it by
+            ; design.
+            if (pos["scrollable"]
+                && (pos["x"] < contentLeft
+                    || pos["x"] + pos["w"] > contentRight)) {
+                issues.Push(category ": control " control.Hwnd
+                    . " crosses the Settings content boundary.")
+            }
+            ; Against the ORIGINAL positions, not the scrolled ones: two controls
+            ; that overlap only after scrolling are one control off-screen, which
+            ; is the scroll working.
+            for _, previous in positioned {
+                other := previous["pos"]
+                overlaps := pos["x"] < other["x"] + other["w"]
+                    && pos["x"] + pos["w"] > other["x"]
+                    && pos["y"] < other["y"] + other["h"]
+                    && pos["y"] + pos["h"] > other["y"]
+                if overlaps {
+                    issues.Push(category ": controls " previous["hwnd"] " and "
+                        . control.Hwnd " overlap at their original positions.")
+                }
+            }
+            positioned.Push(Map("hwnd", control.Hwnd, "pos", pos))
+        }
+    }
+    return issues
+}
+
+; Run the audit and say what it found, in the log and on the product's own
+; status line.
+;
+; A FAILED AUDIT IS A WARNING IN BOTH PRODUCTS NOW. The shell logged it at the
+; default level while the companion logged "Warning" -- so on the product where
+; the Settings window can be the only thing on screen, a page with overlapping
+; or clipped controls produced a line indistinguishable from routine chatter.
+; The two copies were never decided to differ; one of them was just written
+; second.
+;
+; `report` is how each product shows a warning to the user, passed in because
+; that genuinely differs: a status control here, a notification there.
+SharedReportSettingsLayoutAudit(issues, report) {
+    if (issues.Length = 0) {
+        LogLine("Settings layout audit passed for all categories.")
+        return true
+    }
+    LogLine("Settings layout audit found " issues.Length " issue(s): "
+        . JoinWith(issues, " | "), "Warning")
+    report("Layout warning recorded in the log")
+    return false
+}
+
+; The controller-binding vocabulary, read three ways from ONE ordered table.
+;
+; SIX HAND-MAINTAINED COPIES became two. Each product had a forward table
+; (ControllerBindingPretty: Builtin:Esc -> a label), a separate backward one
+; (ChoiceToBinding in the shell, MappingBuiltinValue in the companion), and a
+; third hardcoded list of the same labels for its Settings dropdown. Three per
+; product, in three shapes: a switch, a Map, an array.
+;
+; They agreed, and nothing enforced it. Add an action to the forward table only
+; and the label resolves but the dropdown never offers it; add it to the dropdown
+; only and picking it saves Builtin:None -- the user chooses, saves, reopens and
+; finds something else. Nothing throws and nothing logs.
+;
+; AN ARRAY OF PAIRS, NOT A MAP, and that is not a style choice. AutoHotkey does
+; not promise an enumeration order for a Map, so deriving the dropdown from one
+; would reorder both products' menus into whatever the implementation felt like.
+; The array is the display order, and the two lookups are a scan of seventeen
+; entries in a handler that runs when a dropdown changes.
+;
+; The tables stay per-product, and correctly: the companion speaks Xbox FSE's
+; vocabulary and offers actions the shell does not. What is shared is the lookup,
+; not the words.
+SharedBindingLabelFor(action, labels) {
+    for _, pair in labels {
+        if (pair[1] = action)
+            return pair[2]
+    }
+    return action
+}
+
+; Label -> "Builtin:<action>", off the same table, so the two directions cannot
+; disagree because there are not two of them.
+SharedBindingActionFor(label, labels) {
+    for _, pair in labels {
+        if (pair[2] = label)
+            return "Builtin:" pair[1]
+    }
+    return "Builtin:None"
+}
+
+; The labels in table order, for a Settings dropdown to offer. Anything the
+; product wants to add that is not an action -- the shell's "Custom shortcut…" --
+; is the caller's to append, because it does not resolve to a binding.
+SharedBindingLabelList(labels) {
+    out := []
+    for _, pair in labels
+        out.Push(pair[2])
+    return out
+}
+
+; The current display mode as one line: resolution, refresh rate, scale.
+;
+; Both products put this in front of the user and both built the string the same
+; way, down to the two-space bullet separator and the multiplication sign. What
+; differs is what each appends afterwards -- the shell adds a KEEP? countdown
+; while a mode change waits to be confirmed, which is state the companion does
+; not have -- and appending is the caller's business.
+;
+; "Unavailable" when the mode cannot be read, which both already returned. The
+; word reaches a Quick Menu row and a Settings line, so it is a product string
+; and not a diagnostic.
+SharedDisplayModeText() {
+    mode := GetPrimaryDisplayMode()
+    if !IsObject(mode)
+        return "Unavailable"
+    text := mode["width"] "×" mode["height"] "  •  " mode["frequency"] " Hz"
+    scale := GetPrimaryDisplayScale()
+    if IsObject(scale)
+        text .= "  •  " scale["percent"] "%"
+    return text
+}
+
+; One wheel notch for the Settings window, or a refusal to handle the message.
+;
+; TRI-STATE ON PURPOSE, and it is the whole reason this takes a ByRef instead of
+; returning the step count. OnMessage reads the handler's return value: 0 means
+; "handled, stop", and returning nothing means "not handled, carry on to the
+; default". The original bodies distinguished three outcomes -- not our window
+; (nothing), a control that scrolls itself (nothing), and our window with a zero
+; delta (0, handled) -- and a helper that returned 0 for both kinds of "no
+; scroll" would silently start swallowing wheel messages meant for a ListBox.
+;
+; A list box owns its own wheel: scrolling the page out from under the
+; startup-program list while the user is picking a row is not helpful. That
+; sentence is the companion's; the shell had the same two class names and no
+; explanation of them.
+SettingsWheelNotch(wParam, hwnd, rootHwnd, &notch) {
+    notch := 0
+    if (DllCall("GetAncestor", "Ptr", hwnd, "UInt", 2, "Ptr") != rootHwnd)
+        return false
+    controlClass := ""
+    try controlClass := WinGetClass("ahk_id " hwnd)
+    if (controlClass = "ListBox" || controlClass = "SysListView32")
+        return false
+    ; WM_MOUSEWHEEL packs a signed delta in the high word of wParam.
+    delta := (wParam >> 16) & 0xFFFF
+    if (delta & 0x8000)
+        delta -= 0x10000
+    if (delta != 0)
+        notch := delta > 0 ? -1 : 1
+    return true
+}
+
 ; Grow the Quick Menu window if its content does not fit, and re-centre it.
 ;
 ; WRITTEN TWICE UNTIL THE ONE-PIXEL BUG ABOVE HAD TO BE FIXED IN BOTH COPIES.

@@ -2140,33 +2140,51 @@ ProductControllerBindingAction(action) {
     }
 }
 
+; The builtin actions this product offers, and what it calls them.
+;
+; One table, read in both directions through SharedBindingLabelFor and
+; SharedBindingActionFor. It used to be two -- this list and
+; MappingBuiltinValue's -- which could disagree without anything noticing.
+;
+; Xbox FSE's vocabulary, deliberately: "Game Bar" rather than Win+G, "Back /
+; Escape" rather than Esc, "Close window" rather than Alt+F4. This product sits
+; beside a console-style front end and a user reading these has not been looking
+; at a Windows desktop. TaskView, WindowsDesktop and Settings exist here and not
+; in the shell; ControlPanel is the shell's and not here.
+ControllerBindingLabels() {
+    static labels := [
+        ["None", "None"],
+        ["LeftClick", "Left click"],
+        ["RightClick", "Right click"],
+        ["Enter", "Enter"],
+        ["Esc", "Back / Escape"],
+        ["AltF4", "Close window"],
+        ["TabTip", "Touch keyboard"],
+        ["OSK", "Classic keyboard"],
+        ["WinG", "Game Bar"],
+        ["StartMenu", "Start menu"],
+        ["Explorer", "File Explorer"],
+        ["CtrlAltTab", "Application switcher"],
+        ["TaskManager", "Task Manager"],
+        ["TaskView", "Task View"],
+        ["WindowsDesktop", "Windows desktop"],
+        ["QuickMenu", "Quick Menu"],
+        ["Settings", "Settings"]]
+    return labels
+}
+
 ControllerBindingPretty(key) {
     global ControllerMapDisplay
     value := GetBindingValue(key)
     if (value = "")
         return "None"
     if (SubStr(value, 1, 5) = "Send:") {
-        ; The stored display text only wins if there IS some. `try return` falls
-        ; through on a THROW, so an entry that exists and is empty returned a
-        ; blank label rather than the shortcut -- the row simply went nameless.
-        ; Standalone tests the value; this now does too.
         display := ""
         try display := ControllerMapDisplay[key]
         return display != "" ? display : SendToPretty(SubStr(value, 6))
     }
-    if (SubStr(value, 1, 8) = "Builtin:") {
-        action := SubStr(value, 9)
-        labels := Map(
-            "None", "None", "LeftClick", "Left click", "RightClick", "Right click",
-            "Enter", "Enter", "Esc", "Back / Escape", "AltF4", "Close window",
-            "TabTip", "Touch keyboard", "OSK", "Classic keyboard",
-            "WinG", "Game Bar", "StartMenu", "Start menu", "Explorer", "File Explorer",
-            "CtrlAltTab", "Application switcher", "TaskManager", "Task Manager",
-            "TaskView", "Task View", "WindowsDesktop", "Windows desktop",
-            "QuickMenu", "Quick Menu", "Settings", "Settings"
-        )
-        return labels.Has(action) ? labels[action] : action
-    }
+    if (SubStr(value, 1, 8) = "Builtin:")
+        return SharedBindingLabelFor(SubStr(value, 9), ControllerBindingLabels())
     return value
 }
 
@@ -3965,15 +3983,6 @@ GetAudioSummary() {
     return ShortText(GetAudioOutputName(), 22) "  •  " GetVolumeText()
 }
 
-GetDisplaySummary() {
-    mode := GetPrimaryDisplayMode()
-    if !IsObject(mode)
-        return "Unavailable"
-    scale := GetPrimaryDisplayScale()
-    scaleText := IsObject(scale) ? "  •  " scale["percent"] "%" : ""
-    return mode["width"] "×" mode["height"] "  •  " mode["frequency"] " Hz"
-        . scaleText
-}
 
 ; ==============================================================================
 ; OPT-IN ELEVATED RTSS HELPER
@@ -4515,7 +4524,7 @@ QuickMenuValue(id) {
 
     switch id {
         case "audioMenu": return GetAudioSummary()
-        case "display": return GetDisplaySummary()
+        case "display": return SharedDisplayModeText()
         case "rtssMenu": return GetRtssMenuStatus()
         case "tasks": return GetSwitchableWindowsSummary()
         case "steamMenu":
@@ -5564,20 +5573,10 @@ SettingsMouseWheel(wParam, lParam, msg, hwnd) {
     global SettingsGui, SettingsVisible
     if (!IsSet(SettingsGui) || !SettingsVisible)
         return
-    rootHwnd := DllCall("GetAncestor", "Ptr", hwnd, "UInt", 2, "Ptr")
-    if (rootHwnd != SettingsGui.Hwnd)
+    if !SettingsWheelNotch(wParam, hwnd, SettingsGui.Hwnd, &notch)
         return
-    ; A list box owns its own wheel: scrolling the page out from under the
-    ; startup-program list while the user is picking a row is not helpful.
-    controlClass := ""
-    try controlClass := WinGetClass("ahk_id " hwnd)
-    if (controlClass = "ListBox" || controlClass = "SysListView32")
-        return
-    delta := (wParam >> 16) & 0xFFFF
-    if (delta & 0x8000)
-        delta -= 0x10000
-    if (delta != 0)
-        SettingsScroll(delta > 0 ? -1 : 1)
+    if notch
+        SettingsScroll(notch)
     return 0
 }
 
@@ -5588,63 +5587,24 @@ SettingsMouseWheel(wParam, lParam, msg, hwnd) {
 ; same cursor value, content crossing into the category list, and controls
 ; running under the scrollbar. It reports rather than blocking Settings, because
 ; Settings is also the recovery surface.
+; This product's state and content column, handed to the shared audit. See the
+; shell's twin: the algorithm is one function, the bounds are two numbers.
 SettingsAuditLayout() {
     global SettingsCategoryControls, SettingsControlPositions
     layout := SettingsLayout()
-    contentLeft := 286
-    contentRight := layout["scrollBarX"]
-    issues := []
-    for _, name in SettingsCategoryNames() {
-        if (!SettingsCategoryControls.Has(name)
-            || SettingsCategoryControls[name].Length = 0) {
-            issues.Push(name ": page has no controls.")
-            continue
-        }
-        positioned := []
-        for _, control in SettingsCategoryControls[name] {
-            if !SettingsControlPositions.Has(control.Hwnd) {
-                issues.Push(name ": a control has no recorded position.")
-                continue
-            }
-            pos := SettingsControlPositions[control.Hwnd]
-            if (pos["w"] <= 0 || pos["h"] <= 0) {
-                issues.Push(name ": a control has invalid dimensions.")
-                continue
-            }
-            if (pos["scrollable"]
-                && (pos["x"] < contentLeft
-                    || pos["x"] + pos["w"] > contentRight)) {
-                issues.Push(name ": a control crosses the content boundary.")
-            }
-            for _, previous in positioned {
-                other := previous["pos"]
-                overlaps := pos["x"] < other["x"] + other["w"]
-                    && pos["x"] + pos["w"] > other["x"]
-                    && pos["y"] < other["y"] + other["h"]
-                    && pos["y"] + pos["h"] > other["y"]
-                if overlaps
-                    issues.Push(name ": two controls overlap at "
-                        . pos["x"] "," pos["y"] ".")
-            }
-            positioned.Push(Map("pos", pos))
-        }
-    }
-    return issues
+    return SharedAuditSettingsLayout(
+        SettingsCategoryNames(), SettingsCategoryControls,
+        SettingsControlPositions,
+        286, layout["scrollBarX"])
+}
+
+SettingsShowLayoutWarning(text) {
+    SettingsUpdateStatus(text)
 }
 
 SettingsReportLayoutAudit() {
-    issues := SettingsAuditLayout()
-    if (issues.Length = 0) {
-        LogLine("Settings layout audit passed for all categories.")
-        return true
-    }
-    summary := ""
-    for _, issue in issues
-        summary .= (summary = "" ? "" : " | ") issue
-    LogLine("Settings layout audit found " issues.Length " issue(s): " summary,
-        "Warning")
-    SettingsUpdateStatus("Layout warning recorded in the log")
-    return false
+    return SharedReportSettingsLayoutAudit(
+        SettingsAuditLayout(), SettingsShowLayoutWarning)
 }
 
 SettingsRegisterField(category, key, control, eventName := "Change") {
@@ -6207,12 +6167,10 @@ ShowMappingEditor(*) {
     list := editor.AddListView("xm y+8 w720 h320 Grid -Multi", ["Input", "Action"])
     list.ModifyCol(1, 140)
     list.ModifyCol(2, 540)
-    builtins := editor.AddDropDownList("xm y+12 w220 Choose1", [
-        "None", "Left click", "Right click", "Enter", "Back / Escape",
-        "Close window", "Touch keyboard", "Classic keyboard", "Game Bar",
-        "Start menu", "File Explorer", "Application switcher", "Task Manager",
-        "Task View", "Windows desktop", "Quick Menu", "Settings"
-    ])
+    ; Derived, not typed. This list used to be a third copy of the binding
+    ; vocabulary alongside ControllerBindingPretty and MappingBuiltinValue.
+    builtins := editor.AddDropDownList("xm y+12 w220 Choose1",
+        SharedBindingLabelList(ControllerBindingLabels()))
     applyBuiltin := editor.AddButton("x+8 yp-1 w130 h28", "Set Built-in")
     recordButton := editor.AddButton("x+8 yp w150 h28", "Record Shortcut...")
     resetButton := editor.AddButton("x+8 yp w130 h28", "Restore Defaults")
@@ -6262,26 +6220,7 @@ SelectedMappingKey() {
 }
 
 MappingBuiltinValue(label) {
-    values := Map(
-        "None", "Builtin:None",
-        "Left click", "Builtin:LeftClick",
-        "Right click", "Builtin:RightClick",
-        "Enter", "Builtin:Enter",
-        "Back / Escape", "Builtin:Esc",
-        "Close window", "Builtin:AltF4",
-        "Touch keyboard", "Builtin:TabTip",
-        "Classic keyboard", "Builtin:OSK",
-        "Game Bar", "Builtin:WinG",
-        "Start menu", "Builtin:StartMenu",
-        "File Explorer", "Builtin:Explorer",
-        "Application switcher", "Builtin:CtrlAltTab",
-        "Task Manager", "Builtin:TaskManager",
-        "Task View", "Builtin:TaskView",
-        "Windows desktop", "Builtin:WindowsDesktop",
-        "Quick Menu", "Builtin:QuickMenu",
-        "Settings", "Builtin:Settings"
-    )
-    return values.Has(label) ? values[label] : "Builtin:None"
+    return SharedBindingActionFor(label, ControllerBindingLabels())
 }
 
 MappingSetBuiltin(dropDown, *) {

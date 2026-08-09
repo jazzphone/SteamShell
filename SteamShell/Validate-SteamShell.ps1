@@ -375,7 +375,7 @@ Assert-True (
     "100 when the control is populated, divided by 100 when it is saved.")
 Assert-True (
     $source -match
-        '(?s)SettingsEditorAuditLayout\(\)\s*\{.*?overlaps\s*:=' -and
+        '(?s)SharedAuditSettingsLayout\([^)]*\)\s*\{.*?overlaps\s*:=' -and
     $source -match
         '(?s)ShowSettingsEditor\([^)]*\)\s*\{.*?' +
         'SettingsEditorReportLayoutAudit\(\).*?' +
@@ -3923,6 +3923,7 @@ Assert-SharedParity -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-QuickMenuRows -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-SettingsRowsReachConsumers -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-CrossNameAnchors -ProjectRoot $projectRoot -Quiet:$Quiet
+Assert-BindingLabelTables -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-NoAmbiguousDeindentedBlocks -ProjectRoot $projectRoot -File "SteamShell.ahk" -Quiet:$Quiet
 Assert-NoAmbiguousDeindentedBlocks -ProjectRoot $projectRoot -File "SteamShell-Shared.ahk" -Quiet:$Quiet
 Assert-NoAmbiguousDeindentedBlocks -ProjectRoot $projectRoot -File "SteamShell-Common.ahk" -Quiet:$Quiet

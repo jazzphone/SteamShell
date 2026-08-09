@@ -918,6 +918,89 @@ function Assert-QuickMenuRows {
     }
 }
 
+# Each product's controller-binding table, and the two things it must be.
+#
+# KEPT IN STEP WITH check_binding_label_tables in Replay-Validation.py.
+#
+# One table per product now answers three questions -- the label for an action,
+# the action for a label, and the list the Settings dropdown offers -- which
+# collapsed six hand-maintained copies into two. That puts two requirements on
+# the table that nothing else would notice breaking.
+#
+# UNIQUE LABELS, because the reverse lookup takes the first pair whose label
+# matches. Two actions sharing a label makes one unreachable: the user picks it,
+# the other is saved, nothing is thrown and nothing is logged.
+#
+# AN ARRAY, NOT A MAP, because the same table supplies the dropdown's ORDER.
+# AutoHotkey promises no enumeration order for a Map, so a table written as one
+# would reorder the menu into whatever the implementation chose -- and it would
+# read as a cosmetic regression rather than a data-structure one.
+function Assert-BindingLabelTables {
+    param(
+        [Parameter(Mandatory = $true)][string]$ProjectRoot,
+        [switch]$Quiet
+    )
+    $sharedText = Get-SourceText (Join-Path $ProjectRoot "SteamShell-Shared.ahk")
+    $sharedActions = Get-AhkSwitchCaseLabels (
+        Get-AhkFunctionBody -Source $sharedText -Name "ControllerBindingSharedAction")
+
+    $total = 0
+    foreach ($tree in @("SteamShell.ahk", "SteamShell-XFE.ahk")) {
+        $text = Get-SourceText (Join-Path $ProjectRoot $tree)
+        $body = Get-AhkFunctionBody -Source $text -Name "ControllerBindingLabels"
+        Assert-True ($body -ne "") (
+            "$tree defines no ControllerBindingLabels(); the binding vocabulary " +
+            "would have no single source.")
+        if ($body -eq "") { continue }
+        Assert-True ($body -match 'static\s+labels\s*:=\s*\[') (
+            "${tree}: ControllerBindingLabels must be an ARRAY of [action, label] " +
+            "pairs. A Map has no promised enumeration order, and this table " +
+            "supplies the Settings dropdown's order.")
+        if ($body -notmatch 'static\s+labels\s*:=\s*\[') { continue }
+
+        $pairs = [regex]::Matches($body, '\[\s*"([^"]+)"\s*,\s*"([^"]*)"\s*\]')
+        Assert-True ($pairs.Count -ge 10) (
+            "${tree}: only $($pairs.Count) binding labels were read from " +
+            "ControllerBindingLabels; the scan is not seeing the table.")
+        if ($pairs.Count -lt 10) { continue }
+        $total += $pairs.Count
+
+        # Dispatch is two steps: the shared actions, then the product's seam.
+        # Both have to be consulted or every shared action reads as missing.
+        $productActions = Get-AhkSwitchCaseLabels (
+            Get-AhkFunctionBody -Source $text -Name "ProductControllerBindingAction")
+
+        foreach ($column in 1, 2) {
+            $what = $(if ($column -eq 1) { "action" } else { "label" })
+            $seen = @{}
+            foreach ($pair in $pairs) {
+                $value = $pair.Groups[$column].Value
+                $key = $value.ToLowerInvariant()
+                Assert-True (-not $seen.ContainsKey($key)) (
+                    "${tree}: ControllerBindingLabels repeats the $what '$value'. " +
+                    "The reverse lookup takes the first match, so one of the two " +
+                    "is unreachable from the Settings dropdown -- picked by the " +
+                    "user, saved as the other, with nothing thrown.")
+                $seen[$key] = $true
+            }
+        }
+        foreach ($pair in $pairs) {
+            $action = $pair.Groups[1].Value
+            if ($action -eq "None") { continue }
+            Assert-True (
+                $productActions.Contains($action) -or $sharedActions.Contains($action)) (
+                "${tree}: ControllerBindingLabels offers '$action', which neither " +
+                "ProductControllerBindingAction nor ControllerBindingSharedAction " +
+                "implements. The dropdown would offer it and selecting it would " +
+                "do nothing.")
+        }
+    }
+    if (-not $Quiet) {
+        Write-Host ("Controller binding labels: $total actions across 2 products; " +
+            "each label unique, ordered, and reaching an implementation.")
+    }
+}
+
 # The same routine in both trees under two DIFFERENT names.
 #
 # KEPT IN STEP WITH check_cross_name_anchors in Replay-Validation.py. See its

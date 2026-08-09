@@ -6801,13 +6801,9 @@ QuickMenuActivateSelected() {
 
 GetCurrentDisplayModeText() {
     global DisplayPendingOldMode, DisplayPendingUntilTick
-    mode := GetPrimaryDisplayMode()
-    if !IsObject(mode)
-        return "Unavailable"
-    text := mode["width"] "×" mode["height"] "  •  " mode["frequency"] " Hz"
-    scale := GetPrimaryDisplayScale()
-    if IsObject(scale)
-        text .= "  •  " scale["percent"] "%"
+    text := SharedDisplayModeText()
+    ; Shell-only: a mode change is staged and reverts unless confirmed, and the
+    ; countdown belongs on the row the user is looking at.
     if IsObject(DisplayPendingOldMode) {
         seconds := Max(0, Ceil((DisplayPendingUntilTick - A_TickCount) / 1000))
         text .= "  KEEP? " seconds "s"
@@ -9954,66 +9950,32 @@ SettingsEditorRegisterControl(category, ctrl) {
 ; regex cannot: font/DPI-aware control sizes, accidental duplicate placement,
 ; content crossing into the category list, and controls extending under the
 ; scrollbar. It reports rather than blocking Settings so recovery remains usable.
+; This product's state and content column, handed to the shared audit.
+;
+; contentLeft is 245 here and 286 in the companion, and the right edge is the
+; content column's width where the companion's is its scrollbar. Two numbers, so
+; two arguments -- the algorithm above them was identical.
 SettingsEditorAuditLayout() {
     global SettingsEditorCategories, SettingsEditorCategoryControls
     global SettingsEditorControlPositions
-    issues := []
-    contentLeft := 245
     ; From the layout, not restated. This was 945 written out, which happened to
     ; be right and would silently stop being right the moment a column moved.
-    contentRight := SettingsLayout()["contentX"] + SettingsLayout()["contentWidth"]
-    for _, category in SettingsEditorCategories {
-        if !SettingsEditorCategoryControls.Has(category) {
-            issues.Push(category ": category has no registered controls.")
-            continue
-        }
-        controls := SettingsEditorCategoryControls[category]
-        positioned := []
-        for _, ctrl in controls {
-            if !SettingsEditorControlPositions.Has(ctrl.Hwnd) {
-                issues.Push(category ": control " ctrl.Hwnd
-                    . " was not registered with a position.")
-                continue
-            }
-            pos := SettingsEditorControlPositions[ctrl.Hwnd]
-            if (pos["w"] <= 0 || pos["h"] <= 0) {
-                issues.Push(category ": control " ctrl.Hwnd " has invalid dimensions.")
-                continue
-            }
-            if (pos["scrollable"]
-                && (pos["x"] < contentLeft || pos["x"] + pos["w"] > contentRight)) {
-                issues.Push(category ": control " ctrl.Hwnd
-                    . " crosses the Settings content boundary.")
-            }
-            for _, previous in positioned {
-                other := previous["pos"]
-                overlaps := pos["x"] < other["x"] + other["w"]
-                    && pos["x"] + pos["w"] > other["x"]
-                    && pos["y"] < other["y"] + other["h"]
-                    && pos["y"] + pos["h"] > other["y"]
-                if overlaps {
-                    issues.Push(category ": controls " previous["hwnd"] " and "
-                        . ctrl.Hwnd " overlap at their original positions.")
-                }
-            }
-            positioned.Push(Map("hwnd", ctrl.Hwnd, "pos", pos))
-        }
-    }
-    return issues
+    layout := SettingsLayout()
+    return SharedAuditSettingsLayout(
+        SettingsEditorCategories, SettingsEditorCategoryControls,
+        SettingsEditorControlPositions,
+        245, layout["contentX"] + layout["contentWidth"])
+}
+
+SettingsEditorShowLayoutWarning(text) {
+    global SettingsEditorStatusCtrl
+    if IsObject(SettingsEditorStatusCtrl)
+        SettingsEditorStatusCtrl.Text := text
 }
 
 SettingsEditorReportLayoutAudit() {
-    global SettingsEditorStatusCtrl
-    issues := SettingsEditorAuditLayout()
-    if (issues.Length = 0) {
-        LogLine("Settings layout audit passed for all categories.")
-        return true
-    }
-    summary := JoinWith(issues, " | ")
-    LogLine("Settings layout audit found " issues.Length " issue(s): " summary)
-    if IsObject(SettingsEditorStatusCtrl)
-        SettingsEditorStatusCtrl.Text := "Layout warning recorded in SteamShell.log"
-    return false
+    return SharedReportSettingsLayoutAudit(
+        SettingsEditorAuditLayout(), SettingsEditorShowLayoutWarning)
 }
 
 SettingsEditorAddHeading(category, title, description) {
@@ -14839,24 +14801,13 @@ ShowControllerMappingWindow(*) {
     ControllerMapGui.AddText("xm y+10 w70", "Selected:")
     txtSel := ControllerMapGui.AddText("x+8 yp w80", "-")
 
-    choices := [
-    "None",
-    "Left click",
-    "Right click",
-    "Enter",
-    "Esc",
-    "Alt+F4",
-    "Win+G",
-    "Ctrl+Alt+Tab",
-    "Task Manager",
-    "Open Windows Start",
-    "Open File Explorer",
-    "Open Quick Menu",
-    "Open Control Panel",
-    "Open touch keyboard",
-    "Open OSK",
-    "Custom shortcut…"
-    ]
+    ; Derived, not typed. This list used to be a third copy of the binding
+    ; vocabulary alongside ControllerBindingPretty and ChoiceToBinding, and an
+    ; action added to one of the three was silently absent from the others.
+    ; "Custom shortcut…" is appended because it is not an action -- it opens the
+    ; recorder rather than resolving to a Builtin:.
+    choices := SharedBindingLabelList(ControllerBindingLabels())
+    choices.Push("Custom shortcut…")
 
     ; Short row
     ControllerMapGui.AddText("xm y+10 w70", "Short:")
@@ -15115,42 +15066,48 @@ ControllerMapUI_Clear(which, *) {
     }
 }
 
+; The builtin actions this product offers, and what it calls them.
+;
+; One table, read in both directions through SharedBindingLabelFor and
+; SharedBindingActionFor. It used to be two -- this list and ChoiceToBinding's
+; switch -- which could disagree without anything noticing.
+;
+; Windows' own names, because this product IS the Windows shell and a user
+; reading "Alt+F4" here has just read it in Windows. The companion names the
+; same actions the way Xbox FSE does.
+ControllerBindingLabels() {
+    static labels := [
+        ["None", "None"],
+        ["LeftClick", "Left click"],
+        ["RightClick", "Right click"],
+        ["Enter", "Enter"],
+        ["Esc", "Esc"],
+        ["AltF4", "Alt+F4"],
+        ["WinG", "Win+G"],
+        ["CtrlAltTab", "Ctrl+Alt+Tab"],
+        ["TaskManager", "Task Manager"],
+        ["StartMenu", "Open Windows Start"],
+        ["Explorer", "Open File Explorer"],
+        ["QuickMenu", "Open Quick Menu"],
+        ["ControlPanel", "Open Control Panel"],
+        ["TabTip", "Open touch keyboard"],
+        ["OSK", "Open OSK"]]
+    return labels
+}
+
 ControllerBindingPretty(key) {
-    global ControllerMap, ControllerMapDisplay
-    v := GetBindingValue(key)
-    if (v = "" || v = "Builtin:None")
+    global ControllerMapDisplay
+    value := GetBindingValue(key)
+    if (value = "" || value = "Builtin:None")
         return "None"
-
-    if (SubStr(v, 1, 5) = "Send:") {
-    disp := ""
-    try disp := ControllerMapDisplay[key]
-    if (disp = "")
-        disp := SendToPretty(SubStr(v, 6))
-    return "Shortcut: " disp
+    if (SubStr(value, 1, 5) = "Send:") {
+        display := ""
+        try display := ControllerMapDisplay[key]
+        return display != "" ? display : SendToPretty(SubStr(value, 6))
     }
-
-    if (SubStr(v, 1, 8) = "Builtin:") {
-    act := SubStr(v, 9)
-    switch act {
-        case "LeftClick": return "Left click"
-        case "RightClick": return "Right click"
-        case "Enter": return "Enter"
-        case "Esc": return "Esc"
-        case "AltF4": return "Alt+F4"
-        case "WinG": return "Win+G"
-        case "CtrlAltTab": return "Ctrl+Alt+Tab"
-        case "TaskManager": return "Task Manager"
-        case "StartMenu": return "Open Windows Start"
-        case "Explorer": return "Open File Explorer"
-        case "QuickMenu": return "Open Quick Menu"
-        case "ControlPanel": return "Open Control Panel"
-        case "TabTip": return "Open touch keyboard"
-        case "OSK": return "Open OSK"
-        case "None": return "None"
-        default: return act
-    }
-    }
-    return v
+    if (SubStr(value, 1, 8) = "Builtin:")
+        return SharedBindingLabelFor(SubStr(value, 9), ControllerBindingLabels())
+    return value
 }
 
 ControllerBindingChoice(key) {
@@ -15173,24 +15130,7 @@ ControllerCustomLine(key, which) {
 }
 
 ChoiceToBinding(choice) {
-    switch choice {
-        case "None": return "Builtin:None"
-        case "Left click": return "Builtin:LeftClick"
-        case "Right click": return "Builtin:RightClick"
-        case "Enter": return "Builtin:Enter"
-        case "Esc": return "Builtin:Esc"
-        case "Alt+F4": return "Builtin:AltF4"
-        case "Win+G": return "Builtin:WinG"
-        case "Ctrl+Alt+Tab": return "Builtin:CtrlAltTab"
-        case "Task Manager": return "Builtin:TaskManager"
-        case "Open Windows Start": return "Builtin:StartMenu"
-        case "Open File Explorer": return "Builtin:Explorer"
-        case "Open Quick Menu": return "Builtin:QuickMenu"
-        case "Open Control Panel": return "Builtin:ControlPanel"
-        case "Open touch keyboard":return "Builtin:TabTip"
-        case "Open OSK": return "Builtin:OSK"
-        default: return "Builtin:None"
-    }
+    return SharedBindingActionFor(choice, ControllerBindingLabels())
 }
 
 HideLiveLogWindow() {

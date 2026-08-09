@@ -2165,7 +2165,7 @@ Assert-True (
     $showCategoryIndex -ge 0 -and
     $auditIndex -lt $showCategoryIndex -and
     $source -match
-        '(?sm)^SettingsAuditLayout\(\)\s*\{(?:(?!\n\})[\s\S])*?overlap') (
+        '(?sm)^SharedAuditSettingsLayout\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?overlap') (
     "The Settings layout audit is missing or does not run before the window is shown.")
 
 # ==============================================================================
@@ -2334,6 +2334,7 @@ Assert-SharedParity -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-QuickMenuRows -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-SettingsRowsReachConsumers -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-CrossNameAnchors -ProjectRoot $projectRoot -Quiet:$Quiet
+Assert-BindingLabelTables -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-NoAmbiguousDeindentedBlocks -ProjectRoot $projectRoot -File "SteamShell-XFE.ahk" -Quiet:$Quiet
 Assert-NoAmbiguousDeindentedBlocks -ProjectRoot $projectRoot -File "SteamShell-Shared.ahk" -Quiet:$Quiet
 Assert-NoAmbiguousDeindentedBlocks -ProjectRoot $projectRoot -File "SteamShell-Common.ahk" -Quiet:$Quiet

@@ -1362,6 +1362,73 @@ def check_ambiguous_deindented_blocks(sources):
                  "brace the block.")
 
 
+def check_binding_label_tables(sources):
+    """Each product's controller-binding table, and why it must be an ordered
+    array of unique labels.
+
+    KEPT IN STEP WITH Assert-BindingLabelTables in Validate-Common.ps1.
+
+    One table per product now answers three questions -- the label for an action,
+    the action for a label, and the list a Settings dropdown offers. That
+    collapsed six hand-maintained copies into two, and it puts two new
+    requirements on the table that nothing else would notice breaking.
+
+    UNIQUE LABELS, because the reverse lookup scans for the first pair whose
+    label matches. Two actions sharing a label makes one of them unreachable
+    from the dropdown: the user picks it and gets the other one saved, with
+    nothing thrown and nothing logged.
+
+    AN ARRAY, NOT A MAP, because the same table supplies the dropdown's ORDER.
+    AutoHotkey does not promise an enumeration order for a Map, so a table
+    written as one would reorder the menu into whatever the implementation chose
+    -- and it would look like a cosmetic regression rather than a data-structure
+    one.
+    """
+    for name in ("SteamShell.ahk", "SteamShell-XFE.ahk"):
+        body = function_body(sources[name], "ControllerBindingLabels")
+        if not body:
+            fail(f"{name} defines no ControllerBindingLabels(); the binding "
+                 "vocabulary would have no single source.")
+            continue
+        if not re.search(r"static\s+labels\s*:=\s*\[", body):
+            fail(f"{name}: ControllerBindingLabels must be an ARRAY of "
+                 "[action, label] pairs. A Map has no promised enumeration "
+                 "order, and this table supplies the Settings dropdown's order.")
+            continue
+        pairs = re.findall(r'\[\s*"([^"]+)"\s*,\s*"([^"]*)"\s*\]', body)
+        if len(pairs) < 10:
+            fail(f"{name}: only {len(pairs)} binding labels were read from "
+                 "ControllerBindingLabels; the scan is not seeing the table.")
+            continue
+        for column, what in ((0, "action"), (1, "label")):
+            seen = {}
+            for pair in pairs:
+                key = pair[column].lower()
+                if key in seen:
+                    fail(f"{name}: ControllerBindingLabels repeats the {what} "
+                         f"'{pair[column]}'. The reverse lookup takes the first "
+                         "match, so one of the two is unreachable from the "
+                         "Settings dropdown -- picked by the user, saved as the "
+                         "other, with nothing thrown.")
+                seen[key] = True
+        # Every action must be one the product can actually execute.
+        actions = switch_case_labels(
+            function_body(sources[name], "ProductControllerBindingAction"))
+        # Builtin: values are dispatched in two steps -- the shared actions
+        # first, then the product's own seam. Both have to be consulted or every
+        # shared action reads as unimplemented.
+        shared = switch_case_labels(
+            function_body(sources["SteamShell-Shared.ahk"],
+                          "ControllerBindingSharedAction"))
+        for action, _ in pairs:
+            if action in ("None",) or action in actions or action in shared:
+                continue
+            fail(f"{name}: ControllerBindingLabels offers '{action}', which "
+                 "neither ProductControllerBindingAction nor the shared "
+                 "binding executor implements. The dropdown would offer it and "
+                 "selecting it would do nothing.")
+
+
 def check_learner_guard(sources):
     """The controller poll's learner stand-down, in both trees.
 
@@ -1569,6 +1636,7 @@ def main():
     maps = {name: function_map(text) for name, text in sources.items()}
     check_powershell_scope_colons()
     check_powershell_variable_shapes()
+    check_binding_label_tables(sources)
     check_learner_guard(sources)
     check_rtss_limiter_restore(sources)
     check_source_encoding()

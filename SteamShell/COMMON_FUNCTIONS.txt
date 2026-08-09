@@ -101,6 +101,13 @@ RtssFrameCapModeIsKnown
 SendChordReleasingModifiers
 SendToPretty
 SetDefaultAudioEndpointId
+SettingsWheelNotch
+SharedAuditSettingsLayout
+SharedBindingActionFor
+SharedBindingLabelFor
+SharedBindingLabelList
+SharedDisplayModeText
+SharedReportSettingsLayoutAudit
 ShortenText
 SortCandidatesByScoreAreaDesc
 SplitStartupCommandLine
