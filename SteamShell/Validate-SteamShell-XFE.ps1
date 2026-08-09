@@ -115,17 +115,17 @@ foreach ($required in $requiredFunctions) {
 
 Assert-True (
     $source -match
-        '(?s)LoadSettings\(\)\s*\{.*?global[^\r\n]*LogRotateMaxKB[^\r\n]*LogRotateBackups.*?' +
+        '(?s)LoadSettings\(\)\s*\{(?:(?!\n\})[\s\S])*?global[^\r\n]*LogRotateMaxKB[^\r\n]*LogRotateBackups.*?' +
         'LogRotateMaxKB\s*:=.*?LogRotateBackups\s*:=' ) (
     "LoadSettings no longer writes log-rotation settings to their declared globals.")
 Assert-True (
     $source -match
-        '(?s)ResolveRtssExecutablePath\(\)\s*\{.*?ProgramFiles\(x86\).*?' +
+        '(?s)ResolveRtssExecutablePath\(\)\s*\{(?:(?!\n\})[\s\S])*?ProgramFiles\(x86\).*?' +
         'RivaTuner Statistics Server\\RTSS\.exe' -and
     $source -match
         '(?s)EnsureRtssRunning\(\)\s*\{\s*path\s*:=\s*ResolveRtssExecutablePath\(\)' -and
     $source -match
-        '(?s)GetRtssHooksApi\(\)\s*\{.*?ResolveRtssExecutablePath\(\)') (
+        '(?s)GetRtssHooksApi\(\)\s*\{(?:(?!\n\})[\s\S])*?ResolveRtssExecutablePath\(\)') (
     "RTSS discovery is no longer centralized across launch, status, and DLL lookup paths.")
 
 Assert-True ($source -match '(?m)^#Requires AutoHotkey v2\.0\.19 64-bit$') (
@@ -310,8 +310,8 @@ Assert-True (
     $source -match '(?s)QuickMenuAdjustSelected\([^)]*\).*?case "displayScale":\s*\r?\n\s*CycleDisplayScale\(direction\)') (
     "The Quick Menu Scale row or its Left/Right adjustment is missing.")
 Assert-True (
-    $source -match '(?s)QueueQuickMenuDisplayReflow\(\)\s*\{.*?SetTimer\(QuickMenuDisplayReflow,\s*-350\)' -and
-    $source -match '(?s)QuickMenuDisplayReflow\(\)\s*\{.*?QuickMenuBuildGui\(\)' -and
+    $source -match '(?s)QueueQuickMenuDisplayReflow\(\)\s*\{(?:(?!\n\})[\s\S])*?SetTimer\(QuickMenuDisplayReflow,\s*-350\)' -and
+    $source -match '(?s)QuickMenuDisplayReflow\(\)\s*\{(?:(?!\n\})[\s\S])*?QuickMenuBuildGui\(\)' -and
     $source -match '(?s)ApplyDisplaySelection\(\).*?DisplayPendingUntilTick\s*:=\s*A_TickCount\s*\+\s*15000.*?QueueQuickMenuDisplayReflow\(\)' -and
     $source -match '(?s)DisplayChangeSafetyTick\(\).*?ApplyPrimaryDisplayScale\(oldScale\["percent"\]\).*?QueueQuickMenuDisplayReflow\(\)') (
     "Display apply and revert must reflow the Quick Menu after Windows DPI settles.")
@@ -598,7 +598,7 @@ Assert-True (
 # static cannot draw a rounded corner, an outline or a glow, which is why the
 # pool was replaced rather than restyled.
 Assert-True (
-    $source -match '(?s)QuickMenuRender\(\)\s*\{.*?QuickMenuPaintRows\(\)' -and
+    $source -match '(?s)QuickMenuRender\(\)\s*\{(?:(?!\n\})[\s\S])*?QuickMenuPaintRows\(\)' -and
     $source -notmatch 'QuickMenuLabelCtrls' -and
     $source -notmatch 'QuickMenuValueCtrls') (
     "The Quick Menu rows are no longer painted as a single GDI+ surface.")
@@ -674,7 +674,7 @@ Assert-True ($fullWindowScans.Count -eq 1) (
 
 Assert-True (
     $source -match
-        '(?s)SharedTaskSwitcherWindows\([^)]*\)\s*\{.*?' +
+        '(?s)SharedTaskSwitcherWindows\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?' +
         'steam\s*:=\s*item\["steam"\].*?' +
         'item\["cloaked"\]\s*&&\s*!steam.*?' +
         'item\["title"\]\s*=\s*""\s*&&\s*!steam.*?' +
@@ -904,7 +904,7 @@ Assert-True (
     # Persistent mode reaches the poll loop through AutoMouseModeActive now, so
     # the short-circuit that makes it unconditional is what has to be asserted.
     $source -match
-        '(?s)AutoMouseModeActive\(\)\s*\{.*?if EnablePersistentMouseMode\s*\r?\n\s*return true') (
+        '(?s)AutoMouseModeActive\(\)\s*\{(?:(?!\n\})[\s\S])*?if EnablePersistentMouseMode\s*\r?\n\s*return true') (
     "Persistent Mouse Mode is not persisted or connected to controller polling.")
 Assert-True (
     $source -match
@@ -1038,8 +1038,8 @@ if (Test-Path $controllerSimulationPath) {
 # prompt. Measured: B ran Builtin:Esc and closed the wizard; A, X, Y and Start all
 # had side effects too. The whole pipeline must be inert while learning.
 Assert-True (
-    $source -match '(?s)PollController\(\)\s*\{.*?global[^\r\n]*LearnActive' -and
-    $source -match '(?s)PollController\(\)\s*\{.*?if LearnActive\s*\{.*?ResetControllerEdgeState[^\r\n]*\r?\n\s*return.*?if !ControllerReadState') (
+    $source -match '(?s)PollController\(\)\s*\{(?:(?!\n\})[\s\S])*?global[^\r\n]*LearnActive' -and
+    $source -match '(?s)PollController\(\)\s*\{(?:(?!\n\})[\s\S])*?if LearnActive\s*\{.*?ResetControllerEdgeState[^\r\n]*\r?\n\s*return.*?if !ControllerReadState') (
     "PollController must ignore controller input entirely while the learning wizard is open.")
 # With the controller inert, Skip is unreachable from the couch, so a digital step
 # that never sees its control has to advance by itself.
@@ -1067,7 +1067,7 @@ Assert-True (
 # rather than compute from logical units.
 Assert-True (
     $source -match 'QuickMenuEnsureContentFits\(' -and
-    $source -match '(?s)QuickMenuFitContent\([^)]*\)\s*\{.*?ControlGetPos\(') (
+    $source -match '(?s)QuickMenuFitContent\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?ControlGetPos\(') (
     "The Quick Menu must verify its height against the measured control positions.")
 # WinSetRegion CLIPS the window, and a hidden window can report a wrong size. A
 # region built from a hidden measurement cut the menu off with a rounded edge
@@ -1133,7 +1133,7 @@ Assert-True (
 Assert-True (
     $source -match 'CenterGuiOnMonitorActual\(settings,\s*monitorIndex,\s*920,\s*660\)' -and
     $source -match 'RecenterVisibleGuiOnMonitorActual\(settings,\s*monitorIndex\)' -and
-    $source -match '(?s)RecenterVisibleGuiOnMonitorActual\([^)]*\)\s*\{.*?WinGetPos\(&visibleX,\s*&visibleY,\s*&visibleW,\s*&visibleH.*?CenteredPosition\(.*?MoveWindowPhysical\(') (
+    $source -match '(?s)RecenterVisibleGuiOnMonitorActual\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?WinGetPos\(&visibleX,\s*&visibleY,\s*&visibleW,\s*&visibleH.*?CenteredPosition\(.*?MoveWindowPhysical\(') (
     "Settings must be recentered from its actual visible outer size.")
 Assert-True (
     $simulation -match 'test_settings_layout_has_no_overlaps') (
@@ -1206,7 +1206,7 @@ Assert-True (
 # can never be identified must not repeat the full fallback chain -- five syscalls
 # plus a byte-at-a-time descriptor hash -- at over 100 Hz.
 Assert-True (
-    $source -match '(?s)RawInputDeviceKey\([^)]*\)\s*\{.*?failedUntil' -and
+    $source -match '(?s)RawInputDeviceKey\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?failedUntil' -and
     $source -match 'A_TickCount < failedUntil\[hDevice\]') (
     "Failed controller identity lookups must back off instead of retrying on every report.")
 
@@ -1370,8 +1370,15 @@ foreach ($toggleAction in $toggleActions) {
         "Quick Menu toggle action '$toggleAction' reaches no handler: it is " +
         "neither qPersistentMouse nor a QuickMenuToggleTable id.")
 }
+# ANCHORED WHERE THE BEHAVIOUR IS. This named QuickMenuToggleSetting, which does
+# not re-apply the timers and never did -- it persists through
+# ProductApplyQuickMenuSetting, and that is where the reload happens. The
+# assertion passed anyway because an unbounded .*? ran past the end of the
+# function and found the call in a later one. Bounding it to the body is what
+# exposed that, which is the whole point of the rule.
 Assert-True (
-    $source -match '(?s)QuickMenuToggleSetting\([^)]*\)\s*\{.*?ApplyRuntimeTimers\(\)') (
+    $source -match '(?s)ProductApplyQuickMenuSetting\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?LoadSettings\((?:(?!\n\})[\s\S])*?ApplyRuntimeTimers\(\)' -and
+    $source -match '(?s)QuickMenuToggleSetting\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?ProductApplyQuickMenuSetting\(') (
     "Toggling an assist feature must re-apply the timers so it starts or stops.")
 
 # The View tap and hold actions are independently switchable, and a disabled
@@ -1613,7 +1620,7 @@ Assert-True (
     $source -match
         '(?s)LogLine\([^)]*\)\s*\{[^}]*?LogRawLine\(' -and
     $source -match
-        '(?s)LogRawLine\([^)]*\)\s*\{.*?RotateLogIfNeeded\(StrLen\(line\).*?FileAppend') (
+        '(?s)LogRawLine\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?RotateLogIfNeeded\(StrLen\(line\).*?FileAppend') (
     "Log rotation is missing, or LogLine reaches the file without consulting it.")
 
 # Per-edge controller logging is a diagnostic, not a lifecycle record. Ungated
@@ -1640,7 +1647,7 @@ Assert-True (
         '(?s)GetPrimaryDisplayModes\(\)\s*\{.*?Loop\s*\{.*?' +
         'EnumDisplaySettingsW.*?if\s*\(?!ok\)?\s*\r?\n\s*break' -and
     $source -notmatch
-        '(?s)GetPrimaryDisplayModes\(\)\s*\{.*?Loop\s+512') (
+        '(?s)GetPrimaryDisplayModes\(\)\s*\{(?:(?!\n\})[\s\S])*?Loop\s+512') (
     "Display mode enumeration must continue until Windows reports the true end of the driver list.")
 
 # A malformed custom hex or an unknown preset must fall back to a readable
@@ -2352,6 +2359,7 @@ Assert-BindingLabelTables -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-GameScoreWeightKeys -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-ElevatedHelperProtocol -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-ControllerPollFrame -ProjectRoot $projectRoot -Quiet:$Quiet
+Assert-ValidatorAssertionShapes -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-NoAmbiguousDeindentedBlocks -ProjectRoot $projectRoot -File "SteamShell-XFE.ahk" -Quiet:$Quiet
 Assert-NoAmbiguousDeindentedBlocks -ProjectRoot $projectRoot -File "SteamShell-Shared.ahk" -Quiet:$Quiet
 Assert-NoAmbiguousDeindentedBlocks -ProjectRoot $projectRoot -File "SteamShell-Common.ahk" -Quiet:$Quiet
@@ -2369,7 +2377,7 @@ Assert-NoAmbiguousDeindentedBlocks -ProjectRoot $projectRoot -File "SteamShell-C
 # define the layout, so it cannot disagree with what the layout actually does.
 Assert-True (
     $source -match
-        '(?s)QuickMenuFitContent\([^)]*\)\s*\{.*?' +
+        '(?s)QuickMenuFitContent\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?' +
         'QuickMenuMeasuredBottomMargin\(statusHeight\)' -and
     $source -notmatch 'statusHeight \* 0\.45') (
     "The Quick Menu fit check restates the layout's bottom margin instead of " +

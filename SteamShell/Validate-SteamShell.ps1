@@ -322,7 +322,7 @@ foreach ($match in $editorFieldMatches) {
 }
 $settingsCategoryListMatch = [regex]::Match(
     $source,
-    '(?s)ShowSettingsEditor\([^)]*\)\s*\{.*?' +
+    '(?s)ShowSettingsEditor\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?' +
     'SettingsEditorCategories\s*:=\s*\[(.*?)\]')
 Assert-True $settingsCategoryListMatch.Success (
     "The Full Settings category list could not be extracted.")
@@ -375,9 +375,9 @@ Assert-True (
     "100 when the control is populated, divided by 100 when it is saved.")
 Assert-True (
     $source -match
-        '(?s)SharedAuditSettingsLayout\([^)]*\)\s*\{.*?overlaps\s*:=' -and
+        '(?s)SharedAuditSettingsLayout\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?overlaps\s*:=' -and
     $source -match
-        '(?s)ShowSettingsEditor\([^)]*\)\s*\{.*?' +
+        '(?s)ShowSettingsEditor\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?' +
         'SettingsEditorReportLayoutAudit\(\).*?' +
         'SettingsEditorRefreshDependencies\(\)') (
     "The all-category Settings geometry audit is missing or disconnected.")
@@ -612,7 +612,7 @@ foreach ($required in $requiredFunctions) {
 }
 Assert-True (
     $source -match
-        '(?s)RegisterCurrentSteamShellAsShell\([^)]*\)\s*\{.*?A_IsCompiled.*?A_ScriptFullPath.*?PreviousShell.*?WriteAndVerifyShellValue.*?RegisteredPath' -and
+        '(?s)RegisterCurrentSteamShellAsShell\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?A_IsCompiled.*?A_ScriptFullPath.*?PreviousShell.*?WriteAndVerifyShellValue.*?RegisteredPath' -and
     $source -match
         '(?s)"Register Current EXE as Shell".*?SettingsEditorRegisterCurrentShell') (
     "Direct current-EXE shell registration is missing or disconnected from Full Settings.")
@@ -635,9 +635,9 @@ Assert-True (
     "Cursor parking must move the pointer without injecting idle-resetting mouse input.")
 Assert-True (
     $source -match
-        '(?s)GetWindowsLastInputTick\(\)\s*\{.*?GetLastInputInfo' -and
+        '(?s)GetWindowsLastInputTick\(\)\s*\{(?:(?!\n\})[\s\S])*?GetLastInputInfo' -and
     $source -match
-        '(?s)GetWindowsInputIdleMs\(\)\s*\{.*?GetWindowsLastInputTick.*?GetTickCount') (
+        '(?s)GetWindowsInputIdleMs\(\)\s*\{(?:(?!\n\})[\s\S])*?GetWindowsLastInputTick.*?GetTickCount') (
     "Health diagnostics can no longer inspect Windows' last-input clock.")
 Assert-True (
     $source -match
@@ -744,7 +744,7 @@ Assert-True (
     "A recovery dialog has returned to a fixed-height, clipping message control.")
 Assert-True (
     $source -match
-        '(?s)GetDefaultQuickMenuOrder\(\)\s*\{.*?' +
+        '(?s)GetDefaultQuickMenuOrder\(\)\s*\{(?:(?!\n\})[\s\S])*?' +
         '"audio".*?"display".*?"rtss".*?"steammenu".*?' +
         '"steamquickaccess".*?"tasks".*?"gamebar".*?"keyboard".*?"mousemode".*?' +
         '"settings".*?"system"' -and
@@ -879,7 +879,7 @@ Assert-True (
     "Steam shortcuts must remain Ctrl+1/Ctrl+2 and format without a false Shift modifier.")
 Assert-True (
     $source -match
-        '(?s)SendSteamOverlayChord\(\)\s*\{.*?' +
+        '(?s)SendSteamOverlayChord\(\)\s*\{(?:(?!\n\})[\s\S])*?' +
         'SetKeyDelay\(35,\s*80\).*?SendEvent\(SteamOverlayShortcut\)' -and
     $source -match
         '(?s)QuickMenuHideThenSteamMenu\(steamInFront\)\s*\{.*?' +
@@ -1301,8 +1301,12 @@ Assert-True (
     $helperEffective -match
         '(?sm)^ControllerMouseSafetyTick\(\)\s*\{(?:(?!\n\})[\s\S])*?' +
         'ExpireControllerMouseButtons\(30000\)' -and
+    # The helper has no ApplyRuntimeTimers at all, so constraining its body was
+    # true whatever the code did. What the sentence below actually promises is
+    # that the watchdog is armed unconditionally, which is checkable: the arming
+    # call must not sit inside an `if`.
     $helperSource -notmatch
-        '(?sm)^ApplyRuntimeTimers\(\)\s*\{(?:(?!\n\})[\s\S])*?ControllerMouseSafetyTick') (
+        '(?m)^\s+if\b[^\r\n]*\r?\n\s+SetTimer\(ControllerMouseSafetyTick') (
     "The elevated helper must release held mouse buttons on exit and on an uncaught error, and arm the watchdog unconditionally.")
 
 
@@ -1821,7 +1825,7 @@ Assert-True (
     "Unexpected-exit Explorer recovery is no longer suppressed in desktop and safe modes.")
 Assert-True (
     $source -match
-        '(?s)ExitSteamShell\(\)\s*\{.*?if\s*\(!DesktopMode\)\s*\{.*?' +
+        '(?s)ExitSteamShell\(\)\s*\{(?:(?!\n\})[\s\S])*?if\s*\(!DesktopMode\)\s*\{.*?' +
         'ExitToDesktop\(false,\s*true\)') (
     "A full exit from shell mode must restore the desktop instead of leaving the user without a shell.")
 
@@ -1830,12 +1834,12 @@ Assert-True (
 # presentation to Explorer.
 Assert-True (
     $source -match
-        '(?s)EnsureDesktopBackdrop\(\)\s*\{.*?Gui\("-Caption \+ToolWindow -DPIScale \+E0x08000000"\).*?' +
+        '(?s)EnsureDesktopBackdrop\(\)\s*\{(?:(?!\n\})[\s\S])*?Gui\("-Caption \+ToolWindow -DPIScale \+E0x08000000"\).*?' +
         'BackColor\s*:=\s*"000000"') (
     "The blackout backdrop is no longer a non-activating, DPI-neutral black window.")
 Assert-True (
     $source -match
-        '(?s)StartDesktopBlackout\(\)\s*\{.*?if\s*\(AllowExplorer\s*\|\|\s*!EnableDesktopBlackout\).*?' +
+        '(?s)StartDesktopBlackout\(\)\s*\{(?:(?!\n\})[\s\S])*?if\s*\(AllowExplorer\s*\|\|\s*!EnableDesktopBlackout\).*?' +
         'FitDesktopBackdrop\(true\).*?SinkDesktopBackdrop\(\).*?HideDesktopShellWindows\(\)' -and
     $source -match
         '(?s)StopDesktopBlackout\(releaseCallback\s*:=\s*false\)\s*\{.*?' +
@@ -1855,11 +1859,11 @@ foreach ($blackoutRelease in @(
 }
 Assert-True (
     $source -match
-        '(?s)ApplySafeModeOverrides\(\)\s*\{.*?EnableDesktopBlackout\s*:=\s*false') (
+        '(?s)ApplySafeModeOverrides\(\)\s*\{(?:(?!\n\})[\s\S])*?EnableDesktopBlackout\s*:=\s*false') (
     "Safe Mode no longer disables the desktop blackout.")
 Assert-True (
     $source -match
-        '(?s)DesktopBlackoutTick\(\)\s*\{.*?GetForegroundWindow.*?DesktopBackdropHwnd.*?' +
+        '(?s)DesktopBlackoutTick\(\)\s*\{(?:(?!\n\})[\s\S])*?GetForegroundWindow.*?DesktopBackdropHwnd.*?' +
         'SinkDesktopBackdrop\(\).*?HideDesktopShellWindows\(\)') (
     "The blackout safety tick no longer re-sinks the backdrop or re-hides the desktop.")
 # The blackout must stay switchable from the controller, because a misbehaving
@@ -1931,7 +1935,7 @@ Assert-True (
     "Taskbar Guard must use a normal AutoHotkey callback thread, not Fast mode.")
 Assert-True (
     $source -match
-        '(?s)PrepareForDesktopRestore\(\)\s*\{.*?' +
+        '(?s)PrepareForDesktopRestore\(\)\s*\{(?:(?!\n\})[\s\S])*?' +
         'DestroyQuickMenuForSurfaceTransition\(\).*?' +
         'AllowExplorer\s*:=\s*true.*?StopTaskbarGuard\(\)') (
     "Desktop restoration does not stop Taskbar Guard before rebuilding Explorer.")
@@ -1959,7 +1963,7 @@ Assert-True (
     "Legacy game-window detection is missing ownership or activation safeguards.")
 Assert-True (
     $source -match
-        '(?s)SharedTaskSwitcherWindows\([^)]*\)\s*\{.*?' +
+        '(?s)SharedTaskSwitcherWindows\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?' +
         'WindowEngineIsLegacyApplicationSurface\(item,\s*true\).*?' +
         'item\["minMax"\]\s*=\s*-1.*?' +
         'legacy fullscreen window') (
@@ -1971,7 +1975,7 @@ Assert-True (
 # was ever reached.
 Assert-True (
     $source -match
-        '(?s)SharedTaskSwitcherWindows\([^)]*\)\s*\{.*?' +
+        '(?s)SharedTaskSwitcherWindows\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?' +
         'steam\s*:=\s*item\["steam"\].*?' +
         'item\["cloaked"\]\s*&&\s*!steam.*?' +
         'item\["title"\]\s*=\s*""\s*&&\s*!steam.*?' +
@@ -3708,7 +3712,7 @@ Assert-True (
 # deleted the only record of it.
 Assert-True (
     $source -match
-        '(?s)ResolveSavedPreviousShell\(\)\s*\{.*?RegRead\([^)]*"PreviousShell"\).*?' +
+        '(?s)ResolveSavedPreviousShell\(\)\s*\{(?:(?!\n\})[\s\S])*?RegRead\([^)]*"PreviousShell"\).*?' +
         'ShellCommandExecutablePath') (
     "The saved PreviousShell value is no longer read back and verified.")
 Assert-True (
@@ -3718,7 +3722,7 @@ Assert-True (
     "Uninstall no longer reinstates the shell registered before SteamShell.")
 Assert-True (
     $source -match
-        '(?s)RemoveSteamShellRegistration\([^)]*\)\s*\{.*?' +
+        '(?s)RemoveSteamShellRegistration\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?' +
         'could not be reinstated.*?PreviousShell metadata were retained.*?' +
         'return false.*?try FileDelete.*?RegDelete') (
     "A failed PreviousShell restore no longer retains recovery metadata before returning.")
@@ -3729,12 +3733,12 @@ Assert-True (
     "Winlogon shell commands no longer resolve unquoted paths with spaces and PATH executables.")
 Assert-True (
     $source -match
-        '(?s)ResolveRtssExecutablePath\(\)\s*\{.*?ProgramFiles\(x86\).*?' +
+        '(?s)ResolveRtssExecutablePath\(\)\s*\{(?:(?!\n\})[\s\S])*?ProgramFiles\(x86\).*?' +
         'RivaTuner Statistics Server\\RTSS\.exe' -and
     $source -match
         '(?s)EnsureRtssRunning\(\)\s*\{\s*path\s*:=\s*ResolveRtssExecutablePath\(\)' -and
     $source -match
-        '(?s)GetRtssHooksApi\(\)\s*\{.*?ResolveRtssExecutablePath\(\)') (
+        '(?s)GetRtssHooksApi\(\)\s*\{(?:(?!\n\})[\s\S])*?ResolveRtssExecutablePath\(\)') (
     "RTSS discovery is no longer centralized across launch, status, and DLL lookup paths.")
 # /restore is the emergency path and must stay pinned to explorer.exe, and must
 # stay product-independent: it is what a user reaches for when the desktop is
@@ -3888,7 +3892,7 @@ Assert-True (
 Assert-True (
     $source -match
         '(?s)ControllerReadState\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?XInputResolveController\(' -and
-    $source -match '(?s)XInputResolveController\([^)]*\)\s*\{.*?Loop\s+4' -and
+    $source -match '(?s)XInputResolveController\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?Loop\s+4' -and
     $source -notmatch 'XInputGetState\(ControllerIndex') (
     "Automatic four-slot XInput discovery is missing, or ControllerReadState " +
     "went back to reading only the configured index.")
@@ -3905,7 +3909,7 @@ Assert-True (
 # controller would be throttled too, which would put input latency behind a
 # backoff interval -- far worse than the cost this removes.
 Assert-True (
-    $source -match '(?ms)^XInputScanGate\([^)]*\)\s*\{.*?nextAllowedTick' -and
+    $source -match '(?ms)^XInputScanGate\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?nextAllowedTick' -and
     $source -match
         '(?ms)^XInputResolveController\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?XInputGetState\(ActiveControllerIndex(?:(?!\n\})[\s\S])*?XInputScanGate\(\)') (
     "The all-slots XInput sweep must be rate-limited by XInputScanGate, and the " +
@@ -3966,6 +3970,7 @@ Assert-BindingLabelTables -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-GameScoreWeightKeys -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-ElevatedHelperProtocol -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-ControllerPollFrame -ProjectRoot $projectRoot -Quiet:$Quiet
+Assert-ValidatorAssertionShapes -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-NoAmbiguousDeindentedBlocks -ProjectRoot $projectRoot -File "SteamShell.ahk" -Quiet:$Quiet
 Assert-NoAmbiguousDeindentedBlocks -ProjectRoot $projectRoot -File "SteamShell-Shared.ahk" -Quiet:$Quiet
 Assert-NoAmbiguousDeindentedBlocks -ProjectRoot $projectRoot -File "SteamShell-Common.ahk" -Quiet:$Quiet
@@ -3983,7 +3988,7 @@ Assert-NoAmbiguousDeindentedBlocks -ProjectRoot $projectRoot -File "SteamShell-C
 # define the layout, so it cannot disagree with what the layout actually does.
 Assert-True (
     $source -match
-        '(?s)QuickMenuFitContent\([^)]*\)\s*\{.*?' +
+        '(?s)QuickMenuFitContent\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?' +
         'QuickMenuMeasuredBottomMargin\(statusHeight\)' -and
     $source -notmatch 'statusHeight \* 0\.45') (
     "The Quick Menu fit check restates the layout's bottom margin instead of " +

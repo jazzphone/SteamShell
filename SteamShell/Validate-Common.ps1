@@ -918,6 +918,89 @@ function Assert-QuickMenuRows {
     }
 }
 
+# Two ways an assertion stops checking anything without failing.
+#
+# KEPT IN STEP WITH check_validator_assertion_shapes in Replay-Validation.py.
+#
+# When code moves, an assertion that NAMES the moved function fails loudly and
+# gets fixed. That case needs no help. The two that hurt keep passing:
+#
+# UNBOUNDED FORWARD SCANS. `(?s)Name\(\)\s*\{.*?Thing` reads as "Thing appears
+# inside Name" and does not mean it: `.*?` runs to the end of the file, so once
+# Thing moves out of Name the pattern finds it in a later function and the
+# assertion passes for the wrong reason. Two real cases were found by writing
+# this: the shell's untitled-legacy-surface rule, where deleting the rule did not
+# fail the build, and the companion's assist-timer rule, which named a function
+# that has never re-applied the timers. The bounded form is
+# `(?:(?!\n\})[\s\S])*?`, already used widely here.
+#
+# A pattern terminating on `^}` bounds itself and is left alone -- combining the
+# two makes the body scan stop before the newline the `^}` needs, which broke ten
+# extractors when this rule was first applied indiscriminately.
+#
+# VACUOUS BODY CONSTRAINTS. `-notmatch '(?sm)^Name\(\)\s*\{...X'` says "Name's
+# body must not contain X", and if the subject does not define Name it is true
+# forever. Asserting a function is ABSENT is legitimate and reads as
+# `-notmatch '(?m)^Name\('` with nothing after it; that form is not flagged.
+function Assert-ValidatorAssertionShapes {
+    param(
+        [Parameter(Mandatory = $true)][string]$ProjectRoot,
+        [switch]$Quiet
+    )
+    $definition = '([A-Za-z_]\w*)\\\((?:\[\^\)\]\*|)\\\)\\s\*\\\{'
+    $checked = 0
+    foreach ($pair in @(
+        @{ Validator = "Validate-SteamShell.ps1";     Tree = "SteamShell.ahk" },
+        @{ Validator = "Validate-SteamShell-XFE.ps1"; Tree = "SteamShell-XFE.ahk" })) {
+        $text = Get-SourceText (Join-Path $ProjectRoot $pair.Validator)
+        # $source is the EFFECTIVE source; $rawSource is the tree's own text.
+        $subjects = @{
+            "source" = Get-EffectiveSource -Path (Join-Path $ProjectRoot $pair.Tree)
+            "rawsource" = Get-SourceText (Join-Path $ProjectRoot $pair.Tree)
+            "commonsource" = Get-SourceText (Join-Path $ProjectRoot "SteamShell-Common.ahk")
+            "helpersource" = Get-SourceText (Join-Path $ProjectRoot "SteamShell-Helper.ahk")
+            "sharedsource" = Get-SourceText (Join-Path $ProjectRoot "SteamShell-Shared.ahk")
+        }
+        foreach ($m in [regex]::Matches(
+            $text,
+            "\`$(\w+)(?:\.\w+)*\s+-(not)?match\s+((?:\s*(?:\+\s*)?'(?:[^']|'')*'\s*)+)")) {
+            $subject = $m.Groups[1].Value.ToLowerInvariant()
+            $negated = $m.Groups[2].Success
+            $pattern = ""
+            foreach ($piece in [regex]::Matches($m.Groups[3].Value, "'((?:[^']|'')*)'")) {
+                $pattern += $piece.Groups[1].Value.Replace("''", "'")
+            }
+            $line = ($text.Substring(0, $m.Index) -split "`n").Count
+            $found = [regex]::Match($pattern, $definition)
+            if (-not $found.Success) { continue }
+            $checked++
+            $name = $found.Groups[1].Value
+            $rest = $pattern.Substring($found.Index + $found.Length)
+            if ($rest.StartsWith(".*?") -and $rest -notmatch '\^\\?\}') {
+                Assert-True $false (
+                    "$($pair.Validator):${line} anchors to $name()'s body and then " +
+                    "scans forward with .*?, which runs past the end of it. Once " +
+                    "the thing it looks for moves out of that function the " +
+                    "assertion passes against some later one. Use " +
+                    "(?:(?!``n``})[``s``S])*? to bound it to the body.")
+            }
+            if ($negated -and $rest.Trim() -ne "" -and $subjects.ContainsKey($subject) -and
+                $subjects[$subject] -notmatch ("(?m)^" + [regex]::Escape($name) + "\(")) {
+                Assert-True $false (
+                    "$($pair.Validator):${line} constrains $name()'s body with " +
+                    "-notmatch, but `$$($m.Groups[1].Value) does not define $name " +
+                    "-- so it is true whatever the code does. Assert against a " +
+                    "subject that has the function, or, if the point is that the " +
+                    "function must not exist, drop the body constraint.")
+            }
+        }
+    }
+    if (-not $Quiet) {
+        Write-Host ("Validator assertions: $checked anchored to a function body; " +
+            "all bounded to it and all against a subject that defines it.")
+    }
+}
+
 # The shared mapping tail of the controller poll, and the two things it resolved.
 #
 # KEPT IN STEP WITH check_controller_poll_frame in Replay-Validation.py.

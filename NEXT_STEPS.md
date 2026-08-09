@@ -250,6 +250,36 @@ The one cheap cut left: the first negative test in 5b still runs both validators
 different path. Dropping it saves a fifth of the run and loses that one
 guarantee.
 
+### An assertion that stops checking anything does not fail
+
+The reflex after moving code is "remember to update the validators." It is not
+enough, and the build already covers the case it addresses: an assertion that
+NAMES a moved function fails loudly and gets fixed. The two that hurt keep
+passing.
+
+**Unbounded forward scans.** `(?s)Name\(\)\s*\{.*?Thing` reads as "Thing appears
+inside Name" and does not mean it -- `.*?` runs to the end of the file. Once
+Thing moves out of Name, the pattern finds it in a later function and the
+assertion passes for the wrong reason. Two real cases were found by encoding
+this rule: the shell's untitled-legacy-surface rule, where deleting the rule
+outright did not fail the build, and the companion's assist-timer rule, which
+named a function that has never re-applied the timers. Use
+`(?:(?!\n\})[\s\S])*?`.
+
+A pattern that terminates on `^}` bounds itself. Applying the body-scan idiom to
+one of those breaks it -- the scan stops before the newline the `^}` needs --
+which is how the first, indiscriminate pass at this broke ten extractors.
+
+**Vacuous body constraints.** `$helperSource -notmatch '(?sm)^Name\(\)\s*\{...X'`
+is true forever if the subject does not define `Name`. One real case: a rule
+about the helper's `ApplyRuntimeTimers`, which the helper does not have.
+Asserting a function is ABSENT is legitimate and reads as `-notmatch
+'(?m)^Name\('` with nothing after it.
+
+Both are checked now, in both harnesses, by `Assert-ValidatorAssertionShapes`
+and `check_validator_assertion_shapes`. That is the durable version of "update
+the validators": not a reminder, a build failure.
+
 ### `Replay-Validation.py` cannot see an assertion written against a property
 
 It replays `$source -match '...'`. It does **not** replay

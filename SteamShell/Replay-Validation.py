@@ -937,6 +937,83 @@ POWERSHELL_SCOPES = ("env", "script", "global", "local", "using", "private",
                      "variable", "function")
 
 
+def check_validator_assertion_shapes():
+    """Two ways an assertion stops checking anything without failing.
+
+    KEPT IN STEP WITH Assert-ValidatorAssertionShapes in Validate-Common.ps1.
+
+    When code moves, an assertion that NAMES the moved function fails, loudly,
+    and gets fixed -- that case needs no help. The two that hurt are the ones
+    that keep passing:
+
+    UNBOUNDED FORWARD SCANS. `(?s)Name\(\)\s*\{.*?Thing` reads as "Thing appears
+    inside Name", and it does not: `.*?` runs to the end of the file, so once
+    Thing moves out of Name the pattern finds it in some later function and the
+    assertion passes for the wrong reason. It happened here -- the shell's rule
+    about untitled legacy surfaces kept passing after the exclusions moved into
+    another function, and deleting the rule outright did not fail the build. The
+    bounded form these validators already use elsewhere is
+    `(?:(?!\n\})[\s\S])*?`, which stops at the end of the body.
+
+    A pattern that terminates on `^}` bounds itself and is left alone: combining
+    the two makes the body scan stop before the newline the `^}` needs.
+
+    VACUOUS BODY CONSTRAINTS. `$helperSource -notmatch '(?sm)^Name\(\)\s*\{...X'`
+    says "Name's body must not contain X" -- but if the subject does not define
+    Name at all, it is true no matter what, forever. Asserting that a function is
+    ABSENT is a different and legitimate thing, and reads as `-notmatch
+    '(?m)^Name\('` with nothing after it; that form is not flagged.
+    """
+    trees = {
+        "Validate-SteamShell.ps1": "SteamShell.ahk",
+        "Validate-SteamShell-XFE.ps1": "SteamShell-XFE.ahk",
+    }
+    # An anchor is a FUNCTION DEFINITION, not a call: a name followed by a
+    # parameter list and an opening brace.
+    definition = re.compile(r"([A-Za-z_]\w*)\\\((?:\[\^\)\]\*|)\\\)\\s\*\\\{")
+    for validator, tree in trees.items():
+        text = (ROOT / validator).read_text(encoding="utf-8", errors="replace")
+        # $source is the EFFECTIVE source -- the tree with its #Includes
+        # inlined -- and $rawSource is the tree's own text. Handing the tree file
+        # to both is a bug this check made about itself on its first run, and it
+        # reported every Shared function as absent.
+        effective = "\n".join((read_source(tree),
+                               read_source("SteamShell-Common.ahk"),
+                               read_source("SteamShell-Shared.ahk")))
+        subjects = {
+            "source": effective,
+            "rawsource": read_source(tree),
+            "commonsource": read_source("SteamShell-Common.ahk"),
+            "helpersource": read_source("SteamShell-Helper.ahk"),
+            "sharedsource": read_source("SteamShell-Shared.ahk"),
+        }
+        for match in re.finditer(
+                r"\$(\w+)(?:\.\w+)*\s+-(not)?match\s+"
+                r"((?:\s*(?:\+\s*)?'(?:[^']|'')*'\s*)+)", text):
+            subject, negated = match.group(1).lower(), bool(match.group(2))
+            pattern = "".join(part.replace("''", "'") for part in
+                              re.findall(r"'((?:[^']|'')*)'", match.group(3)))
+            line = text[:match.start()].count("\n") + 1
+            found = definition.search(pattern)
+            if not found:
+                continue
+            name, rest = found.group(1), pattern[found.end():]
+            if rest.startswith(".*?") and not re.search(r"\^\\?\}", rest):
+                fail(f"{validator}:{line} anchors to {name}()'s body and then "
+                     "scans forward with .*?, which runs past the end of it. "
+                     "Once the thing it looks for moves out of that function the "
+                     "assertion passes against some later one. Use "
+                     "(?:(?!\\n\\})[\\s\\S])*? to bound it to the body.")
+            if (negated and rest.strip() and subject in subjects
+                    and not re.search(r"(?m)^" + re.escape(name) + r"\(",
+                                      subjects[subject])):
+                fail(f"{validator}:{line} constrains {name}()'s body with "
+                     f"-notmatch, but ${match.group(1)} does not define {name} -- "
+                     "so it is true whatever the code does. Assert against a "
+                     "subject that has the function, or, if the point is that the "
+                     "function must not exist, drop the body constraint.")
+
+
 def check_powershell_variable_shapes():
     """A variable that holds a lookup TABLE must not be reassigned to TEXT.
 
@@ -1813,6 +1890,7 @@ def main():
     maps = {name: function_map(text) for name, text in sources.items()}
     check_powershell_scope_colons()
     check_powershell_variable_shapes()
+    check_validator_assertion_shapes()
     check_binding_label_tables(sources)
     check_game_score_weight_keys(sources)
     check_elevated_helper_protocol(sources)
