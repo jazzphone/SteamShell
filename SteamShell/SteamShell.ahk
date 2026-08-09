@@ -14198,318 +14198,19 @@ ll8 := LiveLogGui.AddText("xm y+2 w860 vstat8 +Wrap", "LC Last: -")
     UpdateStatusIndicators()
 }
 
-ShowControllerMappingWindow(*) {
-    global ControllerMapGui, ControllerChordHoldMs, ControllerPollIntervalMs
-    global ControllerMap, ControllerMapDisplay
-    global g_ControllerMapUI
-
-    CaptureLastRealForeground()
-
-    ; Rebuild each time so the editor stays consistent.
-    try {
-    if IsSet(ControllerMapGui)
-    ControllerMapGui.Destroy()
-    } catch {
-    }
-
-    ControllerMapGui := Gui("+AlwaysOnTop +ToolWindow", "Controller Mapping")
-    ControllerMapGui.SetFont("s10", "Segoe UI")
-    ControllerMapGui.MarginX := 12
-    ControllerMapGui.MarginY := 12
-
-    ControllerMapGui.AddText("xm", "Controller mouse is automatic in SteamShell settings. Mappings use View/Back or persistent Mouse Mode elsewhere. Long-press threshold: " ControllerChordHoldMs " ms")
-    ControllerMapGui.SetFont("s9", "Segoe UI")
-    ControllerMapGui.AddText(
-        "xm y+3 w640",
-        "Default: hold L3+R3 for the Quick Menu. The fallback six-button chord opens Full Settings.")
-    ControllerMapGui.SetFont("s10", "Segoe UI")
-
-    lv := ControllerMapGui.AddListView("xm y+10 w640 r10 -Multi +LV0x10000", ["Button", "Short press", "Long press"])
-    lv.ModifyCol(1, 70)
-    lv.ModifyCol(2, 270)
-    lv.ModifyCol(3, 270)
-
-    buttons := ["A","B","X","Y","LB","RB","LT","RT","Start","L3","R3"]
-    for btn in buttons {
-    lv.Add("", btn, ControllerBindingPretty(btn ".Short"),
-    ControllerBindingHoldsMouseButton(GetBindingValue(btn ".Short"))
-    ? "Reserved for mouse (hold to drag)"
-    : ControllerBindingPretty(btn ".Long"))
-    }
-    lv.Modify(1, "Select Focus")
-
-    ; Editor (below list, avoids width overflow/overlap)
-    ControllerMapGui.SetFont("s10 Bold")
-    ControllerMapGui.AddText("xm y+12", "Edit selected button")
-    ControllerMapGui.SetFont("s10 Norm")
-
-    ControllerMapGui.AddText("xm y+10 w70", "Selected:")
-    txtSel := ControllerMapGui.AddText("x+8 yp w80", "-")
-
-    ; Derived, not typed. This list used to be a third copy of the binding
-    ; vocabulary alongside ControllerBindingPretty and ChoiceToBinding, and an
-    ; action added to one of the three was silently absent from the others.
-    ; "Custom shortcut…" is appended because it is not an action -- it opens the
-    ; recorder rather than resolving to a Builtin:.
-    choices := SharedBindingLabelList(ControllerBindingLabels())
-    choices.Push("Custom shortcut…")
-
-    ; Short row
-    ControllerMapGui.AddText("xm y+10 w70", "Short:")
-    cbShort := ControllerMapGui.AddComboBox("x+8 yp w330", choices)
-    btnRecShort := ControllerMapGui.AddButton("x+8 yp w90", "Record…")
-    btnClrShort := ControllerMapGui.AddButton("x+8 yp w70", "Clear")
-    txtCustomShort := ControllerMapGui.AddText("xm y+6 w640", "")
-
-    ; Long row
-    ControllerMapGui.AddText("xm y+10 w70", "Long:")
-    cbLong := ControllerMapGui.AddComboBox("x+8 yp w330", choices)
-    btnRecLong := ControllerMapGui.AddButton("x+8 yp w90", "Record…")
-    btnClrLong := ControllerMapGui.AddButton("x+8 yp w70", "Clear")
-    txtCustomLong := ControllerMapGui.AddText("xm y+6 w640", "")
-
-    ; Bottom buttons
-    btnSave := ControllerMapGui.AddButton("xm y+14 w140", "Save to INI")
-    btnRevert := ControllerMapGui.AddButton("x+10 yp w140", "Revert")
-    btnClose := ControllerMapGui.AddButton("x+10 yp w140", "Close")
-
-    ; Store UI refs
-    g_ControllerMapUI := Map()
-    g_ControllerMapUI["gui"] := ControllerMapGui
-    g_ControllerMapUI["lv"] := lv
-    g_ControllerMapUI["buttons"] := buttons
-    g_ControllerMapUI["txtSel"] := txtSel
-    g_ControllerMapUI["cbShort"] := cbShort
-    g_ControllerMapUI["cbLong"] := cbLong
-    g_ControllerMapUI["btnRecLong"] := btnRecLong
-    g_ControllerMapUI["btnClrLong"] := btnClrLong
-    g_ControllerMapUI["txtCustomShort"] := txtCustomShort
-    g_ControllerMapUI["txtCustomLong"] := txtCustomLong
-    g_ControllerMapUI["selectedBtn"] := "A"
-
-    ; Wire events
-    lv.OnEvent("ItemSelect", ControllerMapUI_OnItemSelect)
-
-    cbShort.OnEvent("Change", ControllerMapUI_OnShortChange)
-    cbLong.OnEvent("Change", ControllerMapUI_OnLongChange)
-
-    btnRecShort.OnEvent("Click", ControllerMapUI_OnRecShort)
-    btnRecLong.OnEvent("Click", ControllerMapUI_OnRecLong)
-
-    btnClrShort.OnEvent("Click", ControllerMapUI_OnClrShort)
-    btnClrLong.OnEvent("Click", ControllerMapUI_OnClrLong)
-
-    btnSave.OnEvent("Click", (*) => (SaveControllerMappingsToIni(), ControllerMapGui.Hide()))
-    btnRevert.OnEvent("Click", (*) => (LoadControllerMappings(), ControllerMapUI_RefreshLv(), ControllerMapUI_UpdateEditor()))
-    btnClose.OnEvent("Click", (*) => ControllerMapGui.Hide())
-
-    ControllerMapGui.OnEvent("Close", (*) => ControllerMapGui.Hide())
-
-    ControllerMapGui.OnEvent("Escape", (*) => ControllerMapGui.Hide())
-    ; Initialize editor for first item
-    ControllerMapUI_UpdateEditor()
-
-    ControllerMapGui.Show("w680 Center")
-    SetTimer(PollController, ControllerPollIntervalMs)
-}
 
 ; ==============================================================================
 ; Controller Mapping UI helpers (config window)
 ; ==============================================================================
 
-ControllerMapUI_OnItemSelect(ctrl, item, selected) {
-    try {
-    global g_ControllerMapUI
-    if !IsSet(g_ControllerMapUI)
-        return
-    if !selected
-        return
 
-    try g_ControllerMapUI["selectedBtn"] := ctrl.GetText(item, 1)
-    ControllerMapUI_UpdateEditor()
 
-    } catch {
-    return
-    }
-}
-
-ControllerMapUI_RefreshLv(*) {
-    try {
-    global g_ControllerMapUI
-    if !IsSet(g_ControllerMapUI)
-        return
-
-    lv := g_ControllerMapUI["lv"]
-    buttons := g_ControllerMapUI["buttons"]
-
-    lv.Delete()
-    for btn in buttons {
-    lv.Add("", btn, ControllerBindingPretty(btn ".Short"),
-    ControllerBindingHoldsMouseButton(GetBindingValue(btn ".Short"))
-    ? "Reserved for mouse (hold to drag)"
-    : ControllerBindingPretty(btn ".Long"))
-    }
-
-    ; Reselect current button if possible
-    sel := g_ControllerMapUI["selectedBtn"]
-    row := 0
-    Loop lv.GetCount() {
-    if (lv.GetText(A_Index, 1) = sel) {
-    row := A_Index
-    break
-    }
-    }
-    if (row = 0)
-        row := 1
-    lv.Modify(row, "Select Focus")
-
-    } catch {
-    return
-    }
-}
-
-ControllerMapUI_UpdateEditor(*) {
-    try {
-    global g_ControllerMapUI
-    if !IsSet(g_ControllerMapUI)
-        return
-
-    sel := g_ControllerMapUI["selectedBtn"]
-    g_ControllerMapUI["txtSel"].Text := sel
-
-    g_ControllerMapUI["cbShort"].Text := ControllerBindingChoice(sel ".Short")
-    g_ControllerMapUI["cbLong"].Text := ControllerBindingChoice(sel ".Long")
-
-    g_ControllerMapUI["txtCustomShort"].Text := ControllerCustomLine(sel ".Short", "Short")
-
-    ; Left click on Short makes that button press-and-hold, so its Long can never
-    ; fire: Short is resolved on RELEASE, and holding is the whole point. Disable
-    ; the row rather than warning about it afterwards -- an unreachable control is
-    ; not a rule to remember.
-    holdsMouse := ControllerBindingHoldsMouseButton(GetBindingValue(sel ".Short"))
-    for ctrlName in ["cbLong", "btnRecLong", "btnClrLong"]
-        g_ControllerMapUI[ctrlName].Enabled := !holdsMouse
-    if holdsMouse {
-    g_ControllerMapUI["cbLong"].Text := "None"
-    g_ControllerMapUI["txtCustomLong"].Text :=
-    "Reserved for mouse: hold " sel " to drag."
-    } else {
-    g_ControllerMapUI["txtCustomLong"].Text := ControllerCustomLine(sel ".Long", "Long")
-    }
-
-    } catch {
-    return
-    }
-}
 
 ; ----- Controller Mapping UI event wrappers (avoid .Bind / #Warn issues) -----
-ControllerMapUI_OnShortChange(*) {
-    try ControllerMapUI_ApplyChoice("Short")
-}
-ControllerMapUI_OnLongChange(*) {
-    try ControllerMapUI_ApplyChoice("Long")
-}
-ControllerMapUI_OnRecShort(*) {
-    try ControllerMapUI_Record("Short")
-}
-ControllerMapUI_OnRecLong(*) {
-    try ControllerMapUI_Record("Long")
-}
-ControllerMapUI_OnClrShort(*) {
-    try ControllerMapUI_Clear("Short")
-}
-ControllerMapUI_OnClrLong(*) {
-    try ControllerMapUI_Clear("Long")
-}
 ; --------------------------------------------------------------------------
 
-ControllerMapUI_ApplyChoice(which, *) {
-    try {
-    global g_ControllerMapUI, ControllerMap, ControllerMapDisplay
-    if !IsSet(g_ControllerMapUI)
-        return
 
-    sel := g_ControllerMapUI["selectedBtn"]
-    key := sel "." which
-    cb := (which = "Short") ? g_ControllerMapUI["cbShort"] : g_ControllerMapUI["cbLong"]
-    choice := cb.Text
 
-    if (choice = "Custom shortcut…") {
-    res := RecordShortcutChord()
-    if !res["ok"] {
-    ; Revert selection to current binding
-    cb.Text := ControllerBindingChoice(key)
-    return
-    }
-    ControllerMap[key] := "Send:" res["send"]
-    ControllerMapDisplay[key] := res["display"]
-    } else {
-    ControllerMap[key] := ChoiceToBinding(choice)
-    try ControllerMapDisplay.Delete(key)
-    }
-
-    ControllerMapUI_RefreshLv()
-    ControllerMapUI_UpdateEditor()
-
-    } catch {
-    return
-    }
-}
-
-ControllerMapUI_Record(which, *) {
-    try {
-    global g_ControllerMapUI, ControllerMap, ControllerMapDisplay
-    if !IsSet(g_ControllerMapUI)
-        return
-
-    sel := g_ControllerMapUI["selectedBtn"]
-    key := sel "." which
-
-    res := RecordShortcutChord()
-    if !res["ok"]
-        return
-
-    ControllerMap[key] := "Send:" res["send"]
-    ControllerMapDisplay[key] := res["display"]
-
-    ; Keep dropdown consistent
-    if (which = "Short")
-    g_ControllerMapUI["cbShort"].Text := "Custom shortcut…"
-    else
-        g_ControllerMapUI["cbLong"].Text := "Custom shortcut…"
-
-    ControllerMapUI_RefreshLv()
-    ControllerMapUI_UpdateEditor()
-
-    } catch {
-    return
-    }
-}
-
-ControllerMapUI_Clear(which, *) {
-    try {
-    global g_ControllerMapUI, ControllerMap, ControllerMapDisplay
-    if !IsSet(g_ControllerMapUI)
-        return
-
-    sel := g_ControllerMapUI["selectedBtn"]
-    key := sel "." which
-
-    ControllerMap[key] := "Builtin:None"
-    try ControllerMapDisplay.Delete(key)
-
-    if (which = "Short")
-    g_ControllerMapUI["cbShort"].Text := "None"
-    else
-        g_ControllerMapUI["cbLong"].Text := "None"
-
-    ControllerMapUI_RefreshLv()
-    ControllerMapUI_UpdateEditor()
-
-    } catch {
-    return
-    }
-}
 
 ; The builtin actions this product offers, and what it calls them.
 ;
@@ -14555,28 +14256,8 @@ ControllerBindingPretty(key) {
     return value
 }
 
-ControllerBindingChoice(key) {
-    v := GetBindingValue(key)
-    if (SubStr(v,1,5) = "Send:")
-        return "Custom shortcut…"
-    return ControllerBindingPretty(key)
-}
 
-ControllerCustomLine(key, which) {
-    global ControllerMap, ControllerMapDisplay
-    v := GetBindingValue(key)
-    if (SubStr(v,1,5) != "Send:")
-        return ""
-    disp := ""
-    try disp := ControllerMapDisplay[key]
-    if (disp = "")
-        disp := SendToPretty(SubStr(v, 6))
-    return which " shortcut: " disp
-}
 
-ChoiceToBinding(choice) {
-    return SharedBindingActionFor(choice, ControllerBindingLabels())
-}
 
 HideLiveLogWindow() {
     global LiveLogGui
@@ -17645,6 +17326,20 @@ ProductCenterGui(guiObj) {
 ; companion needs but is what this product already had.
 ProductElevatedHelperAlive() {
     return ElevatedHelperIsVerified()
+}
+
+; Seams for the shared controller mapping editor.
+;
+; This tree stages a batch through CommitIniChanges, which writes into a copy and
+; moves it over the original, so a failure part-way leaves the old file intact.
+ProductSaveControllerMappings() {
+    return SaveControllerMappingsToIni()
+}
+
+; Shell bookkeeping: which real window was in front before one of ours took the
+; foreground. The companion has no equivalent and needs none.
+ProductCaptureLastRealForeground() {
+    CaptureLastRealForeground()
 }
 
 ; Seams for the shared settings scrollbar. This tree keeps the content bounds

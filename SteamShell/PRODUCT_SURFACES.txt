@@ -80,6 +80,9 @@ ShowSettings: the companion's Settings implementation, the other half of the pai
 # ------------------------------------------------------------------------------
 # An entry here is a reason to act, not a reason to stay. It fails nothing today
 # and is meant to stop being true.
-
-ShowControllerMappingWindow: DUPLICATED with the companion's ShowMappingEditor -- the same editor over the same ControllerMap data, written twice. 13 functions and 299 lines here against 11 and 145 there. Neither gate could see it: different names keep it out of the fingerprint comparison, and the cross-name detector scores the pair 0.33 with three shared calls, which is what two hand-written UIs over one data model look like. Unify onto one implementation in SteamShell-Shared.ahk; the feature sets differ, so which one survives is a decision and not a merge.
-ShowMappingEditor: the companion half of the pair above, and the smaller of the two. See ShowControllerMappingWindow for the measurement and the plan.
+#
+# EMPTY, and it did stop being true. The mapping editor was the pair recorded
+# here -- ShowControllerMappingWindow against ShowMappingEditor, 299 lines
+# against 145, the same editor over the same data written twice and invisible to
+# both similarity gates. It is one window in SteamShell-Shared.ahk now, so it
+# needs no entry at all, which is what this file's absence of an entry means.

@@ -507,8 +507,11 @@ global SettingsCategoryList := 0
 global SettingsCategoryTitleCtrl := 0
 global SettingsCategoryDescriptionCtrl := 0
 global SettingsCurrentCategory := 1
-global MappingGui := unset
-global MappingList := 0
+; The controller mapping editor is in SteamShell-Shared.ahk now, and keeps
+; its state in ControllerMapGui and g_ControllerMapUI like the shell's copy
+; always did. MappingGui and MappingList went with the second implementation.
+global ControllerMapGui := unset
+global g_ControllerMapUI := unset
 global _ShortcutCap := ""
 
 DefaultSettings() {
@@ -4204,9 +4207,13 @@ ProductApplyQuickMenuSetting(section, key, value) {
 ; Standalone had already solved this properly, so the loop is gone rather than
 ; patched: CommitIniChangesAt stages a copy, writes into the copy and moves it
 ; over the original, so the file is either fully updated or untouched.
-SharedPersistSettings(changes) {
+; `deletes` is optional and defaults to none, which is every caller but the
+; mapping editor's -- it clears a stale .Display key whenever a binding stops
+; being a custom Send:. CommitIniChangesAt has always taken them; this wrapper
+; simply never passed any.
+SharedPersistSettings(changes, deletes := 0) {
     global IniPath, ScriptPid
-    return CommitIniChangesAt(IniPath, ScriptPid, changes)
+    return CommitIniChangesAt(IniPath, ScriptPid, changes, deletes)
 }
 
 ; Staging means the occasional abandoned staging file, so the companion sweeps
@@ -4811,7 +4818,7 @@ QuickMenuActivateSelected() {
             return
         case "setControllerMappings":
             HideQuickMenuForOwnWindow()
-            SetTimer(ShowMappingEditor, -100)
+            SetTimer(ShowControllerMappingWindow, -100)
             return
         case "rtssSettings":
             HideQuickMenuForOwnWindow()
@@ -5159,7 +5166,7 @@ ShowSettings(*) {
     SettingsAddButtonRow(settings, category, [
         ["Add Recent Application...", XfeAddRecentAutoMouseApp]], &y)
     SettingsAddButtonRow(settings, category, [
-        ["Controller Mappings...", ShowMappingEditor],
+        ["Controller Mappings...", ShowControllerMappingWindow],
         ["Learn Controller...", ShowControllerLearner],
         ["Delete Learned Profile", DeleteControllerProfileForActiveDevice]], &y)
     ; The window is shared with the shell, which had it first and had it alone.
@@ -6110,159 +6117,19 @@ SettingsRecordShortcut(key, *) {
 ; ==============================================================================
 ; Controller mapping editor
 ; ==============================================================================
-ControllerMappingKeys() {
-    return [
-        "A.Short", "A.Long", "B.Short", "B.Long", "X.Short", "X.Long",
-        "Y.Short", "Y.Long", "LB.Short", "LB.Long", "RB.Short", "RB.Long",
-        "LT.Short", "LT.Long", "RT.Short", "RT.Long", "Start.Short",
-        "Start.Long", "L3.Short", "L3.Long", "R3.Short", "R3.Long"
-    ]
-}
 
-ShowMappingEditor(*) {
-    global MappingGui, MappingList
-    if IsSet(MappingGui) {
-        try MappingGui.Show()
-        return
-    }
-    editor := Gui("+AlwaysOnTop +Resize +MinSize680x460", "Controller Mappings")
-    editor.SetFont("s10", "Segoe UI")
-    editor.AddText("xm ym w720 h42 +Wrap",
-        "Controller mouse is automatic in companion settings. These actions run "
-        . "elsewhere while View/Back is held or Mouse Mode is enabled. "
-        . "Select a row, then choose a built-in action or record a shortcut.")
-    list := editor.AddListView("xm y+8 w720 h320 Grid -Multi", ["Input", "Action"])
-    list.ModifyCol(1, 140)
-    list.ModifyCol(2, 540)
-    ; Derived, not typed. This list used to be a third copy of the binding
-    ; vocabulary alongside ControllerBindingPretty and MappingBuiltinValue.
-    builtins := editor.AddDropDownList("xm y+12 w220 Choose1",
-        SharedBindingLabelList(ControllerBindingLabels()))
-    applyBuiltin := editor.AddButton("x+8 yp-1 w130 h28", "Set Built-in")
-    recordButton := editor.AddButton("x+8 yp w150 h28", "Record Shortcut...")
-    resetButton := editor.AddButton("x+8 yp w130 h28", "Restore Defaults")
-    closeButton := editor.AddButton("xm y+12 w140 h32", "Close")
-    applyBuiltin.OnEvent("Click", MappingSetBuiltin.Bind(builtins))
-    recordButton.OnEvent("Click", MappingRecordShortcut)
-    resetButton.OnEvent("Click", MappingRestoreDefaults)
-    closeButton.OnEvent("Click", CloseMappingEditor)
-    editor.OnEvent("Close", CloseMappingEditor)
-    editor.OnEvent("Escape", CloseMappingEditor)
-    MappingGui := editor
-    MappingList := list
-    RefreshMappingList()
-    editor.Show("AutoSize Center")
-}
 
 ; A .Long key whose matching .Short is Left click can never fire: that button is
 ; press-and-hold, and Short is resolved on RELEASE. The editor shows it as
 ; reserved and refuses to set it, rather than accepting a binding that would
 ; silently do nothing.
-MappingKeyIsReservedForMouse(key) {
-    global ControllerMap
-    if (StrLower(SubStr(key, -5)) != ".long")
-        return false
-    shortKey := SubStr(key, 1, StrLen(key) - 5) ".Short"
-    return ControllerBindingHoldsMouseButton(GetBindingValue(shortKey))
-}
 
-RefreshMappingList() {
-    global MappingList
-    if !IsObject(MappingList)
-        return
-    MappingList.Delete()
-    for _, key in ControllerMappingKeys()
-        MappingList.Add("", key, MappingKeyIsReservedForMouse(key)
-            ? "Reserved for mouse (hold to drag)"
-            : ControllerBindingPretty(key))
-}
 
-SelectedMappingKey() {
-    global MappingList
-    row := 0
-    try row := MappingList.GetNext()
-    if !row
-        return ""
-    return MappingList.GetText(row, 1)
-}
 
-MappingBuiltinValue(label) {
-    return SharedBindingActionFor(label, ControllerBindingLabels())
-}
 
-MappingSetBuiltin(dropDown, *) {
-    global ControllerMap, ControllerMapDisplay, IniPath
-    key := SelectedMappingKey()
-    if (key = "") {
-        ShowNotification("Select a controller mapping first", "Warning")
-        return
-    }
-    if MappingKeyIsReservedForMouse(key) {
-        ShowNotification(key " is reserved: that button is held to drag the mouse",
-            "Warning")
-        return
-    }
-    value := MappingBuiltinValue(dropDown.Text)
-    ControllerMap[key] := value
-    if ControllerMapDisplay.Has(key)
-        ControllerMapDisplay.Delete(key)
-    IniWrite(value, IniPath, "ControllerMap", key)
-    try IniDelete(IniPath, "ControllerMap", key ".Display")
-    RefreshMappingList()
-    ShowNotification(key " updated")
-}
 
-MappingRecordShortcut(*) {
-    global ControllerMap, ControllerMapDisplay, IniPath, SettingsDialogActive
-    key := SelectedMappingKey()
-    if (key = "") {
-        ShowNotification("Select a controller mapping first", "Warning")
-        return
-    }
-    if MappingKeyIsReservedForMouse(key) {
-        ShowNotification(key " is reserved: that button is held to drag the mouse",
-            "Warning")
-        return
-    }
-    SettingsDialogActive := true
-    result := RecordShortcutChord()
-    SettingsDialogActive := false
-    if result["ok"] {
-        ControllerMap[key] := "Send:" result["send"]
-        ControllerMapDisplay[key] := result["display"]
-        IniWrite("Send:" result["send"], IniPath, "ControllerMap", key)
-        IniWrite(result["display"], IniPath, "ControllerMap", key ".Display")
-        RefreshMappingList()
-        ShowNotification(key " recorded as " result["display"])
-    }
-}
 
-MappingRestoreDefaults(*) {
-    global ControllerMap, ControllerMapDisplay, IniPath
-    answer := TopmostMsgBox("Restore every controller mapping to its default?",
-        "Controller Mappings", "YesNo Icon?")
-    if (answer != "Yes")
-        return
-    InitDefaultControllerMappings()
-    for key, value in ControllerMap {
-        IniWrite(value, IniPath, "ControllerMap", key)
-        if ControllerMapDisplay.Has(key)
-            IniWrite(ControllerMapDisplay[key], IniPath, "ControllerMap", key ".Display")
-        else
-            try IniDelete(IniPath, "ControllerMap", key ".Display")
-    }
-    RefreshMappingList()
-    ShowNotification("Controller mappings restored to defaults")
-}
 
-CloseMappingEditor(*) {
-    global MappingGui, MappingList, SettingsDialogActive
-    if IsSet(MappingGui)
-        try MappingGui.Destroy()
-    MappingGui := unset
-    MappingList := 0
-    SettingsDialogActive := false
-}
 
 RecordShortcutKeyDown(inputObj, vk, sc) {
     global _ShortcutCap
@@ -7077,6 +6944,35 @@ CheckXfeInstallationRecord() {
 ; the shell re-verifies identity as well, which is the stronger check.
 ProductElevatedHelperAlive() {
     return EnsureElevatedRtssHelperAlive()
+}
+
+; Seams for the shared controller mapping editor.
+;
+; A batch, to match the editor's explicit Save. This product used to write each
+; mapping with its own IniWrite the instant it changed, which is what an editor
+; with no Save button can do and an editor with Revert cannot.
+ProductSaveControllerMappings() {
+    global ControllerMap, ControllerMapDisplay
+    changes := []
+    deletes := []
+    for key, value in ControllerMap {
+        changes.Push(Map("section", "ControllerMap", "key", key, "value", value))
+        display := ""
+        if (SubStr(value, 1, 5) = "Send:" && ControllerMapDisplay.Has(key))
+            display := ControllerMapDisplay[key]
+        if (display != "")
+            changes.Push(Map("section", "ControllerMap",
+                "key", key ".Display", "value", display))
+        else
+            deletes.Push(Map("section", "ControllerMap", "key", key ".Display"))
+    }
+    return SharedPersistSettings(changes, deletes)
+}
+
+; Nothing to capture. The shell records which real window was in front before
+; one of its own took the foreground; Xbox FSE owns presentation here and this
+; product keeps no such record, so the honest seam is empty rather than absent.
+ProductCaptureLastRealForeground() {
 }
 
 ; Seam for SteamShell-Shared.ahk: where this product keeps files it writes.

@@ -497,13 +497,19 @@ Assert-True (
 # XFE's editor is a flat key list, so the reserved row is a .Long whose matching
 # .Short is Left click. It must be shown as reserved AND refuse to be set --
 # accepting a binding that can never fire is the failure being prevented.
+#
+# This product had its own editor and its own copy of the rule --
+# MappingKeyIsReservedForMouse, checked in two places. Both are gone: there is
+# one editor in SteamShell-Shared.ahk and the reserved rule is checked once, in
+# the shell's validator, against the same bytes this product compiles. What is
+# left to pin here is that the companion reaches THAT editor and has not grown a
+# second one back.
 Assert-True (
-    $source -match 'Reserved for mouse \(hold to drag\)' -and
-    $source -match
-        '(?sm)^MappingKeyIsReservedForMouse\(key\)\s*\{(?:(?!\n\})[\s\S])*?' +
-        'ControllerBindingHoldsMouseButton\(GetBindingValue\(shortKey\)\)' -and
-    ([regex]::Matches($source, 'if MappingKeyIsReservedForMouse\(key\) \{').Count -ge 2)) (
-    "XFE's mapping editor must show a reserved Long slot and refuse to set it.")
+    $rawSource -notmatch '(?m)^ShowMappingEditor\(' -and
+    $rawSource -notmatch '(?m)^MappingKeyIsReservedForMouse\(' -and
+    $source -match 'ShowControllerMappingWindow' -and
+    $source -match 'Reserved for mouse \(hold to drag\)') (
+    "XFE must use the shared controller mapping editor, not a second copy.")
 # The companion must release a held mouse button on EVERY route out, and must arm the
 # watchdog at top level. The watchdog is deliberately not beside the poll timer:
 # a poll loop that has stopped is exactly the case it covers, so anything that
@@ -925,7 +931,7 @@ Assert-True (
         '"Set Controller Mappings".*?"setControllerMappings"\)' -and
     $source -match
         '(?s)case\s+"setControllerMappings":.*?' +
-        'SetTimer\(ShowMappingEditor,\s*-100\)') (
+        'SetTimer\(ShowControllerMappingWindow,\s*-100\)') (
     "Holding Y must open the Quick Settings mapping page and its editor action.")
 Assert-True (
     $source -match 'Hold Y for Controller Mappings') (
@@ -2453,7 +2459,7 @@ Assert-True (
 # IniWrite would now pin the defect rather than the requirement.
 Assert-True (
     $source -match
-        '(?s)SharedPersistSettings\(changes\)\s*\{(?:(?!\n\})[\s\S])*?CommitIniChangesAt\(') (
+        '(?s)SharedPersistSettings\(changes, deletes := 0\)\s*\{(?:(?!\n\})[\s\S])*?CommitIniChangesAt\(') (
     "XFE no longer provides SharedPersistSettings over the staged commit, " +
     "which shared code depends on.")
 

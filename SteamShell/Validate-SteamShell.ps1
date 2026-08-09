@@ -1201,8 +1201,12 @@ Assert-True (
 # whose Short is Left click cannot have a Long, because Short resolves on RELEASE
 # and holding is the point. The editor disables the row and says why.
 Assert-True (
-    $rawSource -match 'Reserved for mouse \(hold to drag\)' -and
-    $rawSource -match
+    # $source, not $rawSource: the editor is one window in
+    # SteamShell-Shared.ahk now, so this tree no longer contains it. Checked
+    # here and not in the companion's validator because there is one copy to
+    # check -- both products compile these same bytes.
+    $source -match 'Reserved for mouse \(hold to drag\)' -and
+    $source -match
         '(?sm)^ControllerMapUI_UpdateEditor\(\*\)\s*\{(?:(?!\n\})[\s\S])*?' +
         'holdsMouse := ControllerBindingHoldsMouseButton\((?:(?!\n\})[\s\S])*?' +
         '\["cbLong", "btnRecLong", "btnClrLong"\](?:(?!\n\})[\s\S])*?Enabled := !holdsMouse') (

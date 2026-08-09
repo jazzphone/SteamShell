@@ -467,6 +467,16 @@ $sharedSeamAllowed = @(
     # the helper on the tick it is computed, so both processes act on one
     # answer instead of two that could disagree.
     "AutoMouseModeActive",
+    # Widened for the controller mapping editor, which became one window in
+    # SteamShell-Shared.ahk instead of two. Four of these are the binding
+    # VOCABULARY and its persistence, which are genuinely per product: the
+    # companion speaks Xbox FSE's names and offers actions the shell does not,
+    # and the two trees write their INI differently. The other two are the new
+    # pair the editor needed -- saving a whole map, and the shell-only
+    # bookkeeping of what was in front before one of our windows took over.
+    "ControllerBindingLabels", "ControllerBindingPretty",
+    "LoadControllerMappings", "RecordShortcutChord",
+    "ProductSaveControllerMappings", "ProductCaptureLastRealForeground",
     # Only SettingsRegisterBuiltField is CALLED from the shared file. The
     # browse, record and mark-dirty seams are passed as CALLBACKS --
     # OnEvent("Click", SettingsProductBrowsePath.Bind(...)) -- and they are on
@@ -502,7 +512,7 @@ $sharedSeamAllowed = @(
 # Restated here, next to the list, and asserted in Assert-SharedParity: changing
 # one without the other fails the build. Update the expectation in the same
 # commit that changes the list, and say in the message why the seam moved.
-$sharedSeamExpectedCount = 43
+$sharedSeamExpectedCount = 49
 
 # Reports same-named functions in both trees whose difference is only naming and
 # formatting -- the drift that a raw similarity score hides.
