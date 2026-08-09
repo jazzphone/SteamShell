@@ -444,13 +444,22 @@ $sharedSeamAllowed = @(
     "ProductControllerDiagnosticProbe",
     "ProductSetDialogActive",
     # Only SettingsRegisterBuiltField is CALLED from the shared file. The
-    # browse, record and mark-dirty seams are passed as callbacks, and the
-    # reachability check covers those by requiring a bare reference to
-    # resolve in both trees -- which is the check that caught the shell's
-    # own browse handler being wired into a companion that does not define it.
+    # browse, record and mark-dirty seams are passed as CALLBACKS --
+    # OnEvent("Click", SettingsProductBrowsePath.Bind(...)) -- and they are on
+    # this list because the leak scan below now reads bare references as well as
+    # calls. They were left off while it read only calls, which made the header's
+    # "nothing may leave this file that is not on it" untrue of four names and
+    # meant widening the seam here was not the decision it is supposed to be.
+    #
+    # The cross-tree reachability check still catches ONE tree dropping such a
+    # handler. It cannot catch both dropping it; the leak scan can.
     "SettingsProductAddSectionRow", "SettingsProductTrackControl",
     "SettingsProductWireDependency",
+    "SettingsProductBrowsePath", "SettingsProductMarkDirty",
+    "SettingsProductRecordShortcut",
     "SettingsRegisterBuiltField",
+    # Reached the same way, from the Health Check's Export button.
+    "ExportDiagnosticBundle",
     "ProductSettingBool",
     "ProductSettingsScrollBar", "ProductSettingsViewportHeight",
     "ProductTrayBaseTip", "ProductTrayItems", "ProductVersionText",
@@ -469,7 +478,7 @@ $sharedSeamAllowed = @(
 # Restated here, next to the list, and asserted in Assert-SharedParity: changing
 # one without the other fails the build. Update the expectation in the same
 # commit that changes the list, and say in the message why the seam moved.
-$sharedSeamExpectedCount = 37
+$sharedSeamExpectedCount = 41
 
 # Reports same-named functions in both trees whose difference is only naming and
 # formatting -- the drift that a raw similarity score hides.
@@ -775,7 +784,8 @@ function Assert-QuickMenuRows {
         }
     }
 
-    $families = @("layout:", "taskWindow:", "gamescore:", "toggle:", "page:")
+    $families = @("layout:", "taskWindow:", "gamescore:", "toggle:", "page:",
+        "currentapp:")
     $sharedText = Get-SourceText (Join-Path $ProjectRoot "SteamShell-Shared.ahk")
     $inert = New-Object System.Collections.Generic.HashSet[string]
     foreach ($m in [regex]::Matches(
@@ -1146,6 +1156,345 @@ function Assert-ElevatedHelperProtocol {
     if (-not $Quiet) {
         Write-Host ("Elevated helper protocol: $($built.Count) flags, built in one " +
             "place and all read by the helper.")
+    }
+}
+
+# The Quick Menu's Current Application page.
+#
+# Three contracts:
+#
+# 1. EVERY DESTINATION WRITES SOMEWHERE ITS PRODUCT READS. A row that appends to
+#    a section and key nothing consumes would report success, write the value,
+#    and change nothing -- and the user would have watched it say "added". The
+#    table is product-tagged, so the check follows the tag: a "standalone" row is
+#    held against the shell's reads, an "xfe" row against the companion's, and a
+#    "both" row against both.
+#
+# 2. THE STORE-APP REFUSAL STAYS. A packaged UWP application's visible window
+#    belongs to ApplicationFrameHost.exe, so adding "the current application"
+#    when one is in front would write the name of a HOST shared by Settings,
+#    Photos, Calculator and the Store into a list meant to name one program.
+#    The picker avoids this by filtering the host out of its history; this page
+#    cannot, because the user is pointing at the window, so it refuses and says
+#    why. Removing the refusal is how that decision gets quietly undone.
+#
+# 3. BOTH PRODUCTS OFFER THE PAGE AND HANDLE ITS ROWS. The table, the write and
+#    the refusal are all shared; a tree that stops building the row or stops
+#    dispatching "currentapp:" leaves working code with no way in.
+function Assert-CurrentApplicationTargets {
+    param(
+        [Parameter(Mandatory = $true)][string]$ProjectRoot,
+        [switch]$Quiet
+    )
+    $sharedText = Get-SourceText (Join-Path $ProjectRoot "SteamShell-Shared.ahk")
+    $blocked = Get-AhkFunctionBody `
+        -Source $sharedText -Name "QuickMenuCurrentAppBlockedReason"
+    Assert-True ($blocked -match '(?i)applicationframehost\.exe') (
+        "QuickMenuCurrentAppBlockedReason no longer refuses " +
+        "applicationframehost.exe. Every windowed Store app's visible window " +
+        "belongs to that process, so Current Application would write one name " +
+        "into an exe list that silently stands for all of them.")
+
+    $table = Get-AhkFunctionBody -Source $sharedText -Name "QuickMenuAppTargets"
+    $targets = @([regex]::Matches($table,
+        '"product",\s*"(\w+)",\s*"section",\s*"(\w+)",\s*"key",\s*"(\w+)"'))
+    Assert-True ($targets.Count -ge 4) (
+        "Only $($targets.Count) Current Application destinations were read from " +
+        "QuickMenuAppTargets, and there are at least four. The scan is not " +
+        "seeing the table, which would make every check below it vacuous.")
+
+    # Section/key pairs each product NAMES anywhere. String bodies are kept --
+    # the names being looked for are themselves string literals.
+    $namedBy = @{}
+    foreach ($pair in @(
+        @{ Product = "standalone"; Files = @("SteamShell.ahk", "SteamShell-Shared.ahk") },
+        @{ Product = "xfe";        Files = @("SteamShell-XFE.ahk", "SteamShell-Shared.ahk") })) {
+        $seen = @{}
+        foreach ($file in $pair.Files) {
+            foreach ($line in (Get-SourceLines (Join-Path $ProjectRoot $file))) {
+                $code = $line -replace '(?<!`);.*$', ''
+                foreach ($m in [regex]::Matches(
+                    $code, '"([A-Za-z][\w &]*)"\s*,\s*"([A-Za-z]\w*)"')) {
+                    $seen["$($m.Groups[1].Value).$($m.Groups[2].Value)"] = $true
+                }
+            }
+        }
+        $namedBy[$pair.Product] = $seen
+    }
+
+    foreach ($m in $targets) {
+        $product = $m.Groups[1].Value
+        $setting = "$($m.Groups[2].Value).$($m.Groups[3].Value)"
+        foreach ($who in @("standalone", "xfe")) {
+            if ($product -ne "both" -and $product -ne $who) { continue }
+            Assert-True ($namedBy[$who].ContainsKey($setting)) (
+                "Current Application offers '$setting' to $who, and $who never " +
+                "reads it. The row would append the executable, report success, " +
+                "and change nothing.")
+        }
+    }
+
+    foreach ($pair in @(
+        @{ Name = "SteamShell.ahk";     Product = "standalone" },
+        @{ Name = "SteamShell-XFE.ahk"; Product = "xfe" })) {
+        $code = (((Get-SourceLines (Join-Path $ProjectRoot $pair.Name)) |
+            ForEach-Object { $_ -replace '(?<!`);.*$', '' }) -join "`n")
+        Assert-True ($code -match '"currentApp"') (
+            "$($pair.Name) never builds the Current Application row, so the " +
+            "shared destination table has no way in on this product.")
+        Assert-True ($code -match
+            ('QuickMenuAddCurrentAppTo\([^)]*"' + $pair.Product + '"')) (
+            "$($pair.Name) never dispatches currentapp: rows to " +
+            "QuickMenuAddCurrentAppTo with its own product name. Its " +
+            "destination rows would render and do nothing, or offer the other " +
+            "product's list.")
+    }
+    if (-not $Quiet) {
+        Write-Host ("Current Application: $($targets.Count) destinations, all " +
+            "read by the product offered them, Store apps refused.")
+    }
+}
+
+# The recent-application history, and the picker that reads it.
+#
+# Four things, none of which fails to compile and none of which a user can tell
+# apart from "the list is just empty":
+#
+# 1. BOTH trees run RecentAppsTick. It is a shared function with no caller of its
+#    own -- a timer is the only thing that drives it -- so a tree that stops
+#    arming it gets a picker that is permanently empty, and an empty picker looks
+#    like a feature that has nothing to offer rather than one that is unwired.
+#
+# 2. It is armed OUTSIDE the conditional blocks. The shell's other foreground
+#    observer runs inside WindowEngineTick, which stops in desktop mode; the
+#    companion's ApplyRuntimeTimers returns early when disabled. Arming the
+#    history inside either would leave a hole in it in exactly the state a user
+#    is in when they go looking for the setting.
+#
+# 3. The picker is REACHABLE in both products. It is defined in the shared file
+#    and compiled into both, which is not the same as being on a button.
+#
+# 4. ApplicationFrameHost stays excluded. Every windowed Store app's visible
+#    window belongs to it, so admitting it would put one entry into the picker
+#    that silently stands for Settings, Photos, Calculator and the Store at once
+#    -- and the exe lists this feeds would then match all of them. It is kept out
+#    until the hosted process can be resolved, and this is what stops it being
+#    "fixed" back in.
+function Assert-RecentApplicationPicker {
+    param(
+        [Parameter(Mandatory = $true)][string]$ProjectRoot,
+        [switch]$Quiet
+    )
+    $sharedText = Get-SourceText (Join-Path $ProjectRoot "SteamShell-Shared.ahk")
+    foreach ($name in @("RecentAppsTick", "RecentAppsRecord", "RecentAppsGet",
+                        "RecentAppsExcluded", "ShowApplicationPicker")) {
+        Assert-True ((Get-AhkFunctionBody -Source $sharedText -Name $name) -ne "") (
+            "SteamShell-Shared.ahk defines no $name(); the recent-application " +
+            "picker is no longer shared and this check cannot see what replaced it.")
+    }
+
+    $excluded = Get-AhkFunctionBody -Source $sharedText -Name "RecentAppsExcluded"
+    Assert-True ($excluded -match '(?i)"applicationframehost\.exe",\s*true') (
+        "RecentAppsExcluded no longer excludes applicationframehost.exe. Every " +
+        "windowed Store app's visible window belongs to that process, so the " +
+        "picker would offer one entry that stands for all of them and write it " +
+        "into an exe list as if it named a single application.")
+
+    foreach ($pair in @(
+        @{ Name = "SteamShell.ahk";     Product = "the shell" },
+        @{ Name = "SteamShell-XFE.ahk"; Product = "the companion" })) {
+        $treeText = Get-SourceText (Join-Path $ProjectRoot $pair.Name)
+        $timers = Get-AhkFunctionBody -Source $treeText -Name "ApplyRuntimeTimers"
+        Assert-True ($timers -match 'SetTimer\(RecentAppsTick,\s*RecentAppsIntervalMs\(\)\)') (
+            "$($pair.Name): ApplyRuntimeTimers never arms RecentAppsTick, so " +
+            "$($pair.Product) records no application history and its picker is " +
+            "permanently empty.")
+
+        # Armed at the function's own indent level, not inside an if or a block.
+        # Anything more deeply indented is conditional on something, and the
+        # whole point is that this one is not.
+        Assert-True ($timers -match '(?m)^    SetTimer\(RecentAppsTick,') (
+            "$($pair.Name) arms RecentAppsTick inside a conditional block. The " +
+            "history has to be recorded in every mode -- desktop mode in the " +
+            "shell, disabled in the companion -- because those are the states " +
+            "somebody is in when they open Settings to work out what to add.")
+
+        # Reachable means WIRED. Comments naming it are not a route to it.
+        $code = (((Get-SourceLines (Join-Path $ProjectRoot $pair.Name)) |
+            ForEach-Object { $_ -replace '(?<!`);.*$', '' }) -join "`n")
+        Assert-True ($code -match 'ShowApplicationPicker\(') (
+            "$($pair.Name) never opens ShowApplicationPicker. It is compiled " +
+            "into $($pair.Product) from the shared file and would be dead: the " +
+            "history would be recorded and never offered to anybody.")
+    }
+    if (-not $Quiet) {
+        Write-Host ("Recent applications: history armed unconditionally and a " +
+            "picker reachable in both products.")
+    }
+}
+
+# The shipped AutoMouseExeList is one list, not nine.
+#
+# DefaultAutoMouseExeList in SteamShell-Common.ahk is the single source, and
+# every CODE path calls it. Three copies cannot: the shell's embedded default INI
+# text and the two shipped sample INIs are literal text a user reads and edits.
+# Those are held to the function here.
+#
+# This is the version-string trap in another key. NEXT_STEPS.md records five
+# literals missed on the 2.0.0 bump because one spelling was escaped and the grep
+# only found the other; a default duplicated across two products, a text blob and
+# two samples drifts exactly the same way, and the failure is quiet -- a user
+# whose INI came from the sample gets a different allowlist from a user who let
+# the shell write its own.
+#
+# It also catches the direction that matters most: a NEW entry added to the
+# function and not to the samples, so the feature works on a fresh install and
+# not for anyone who started from the shipped file.
+function Assert-AutoMouseDefaults {
+    param(
+        [Parameter(Mandatory = $true)][string]$ProjectRoot,
+        [switch]$Quiet
+    )
+    $commonText = Get-SourceText (Join-Path $ProjectRoot "SteamShell-Common.ahk")
+    $body = Get-AhkFunctionBody -Source $commonText -Name "DefaultAutoMouseExeList"
+    Assert-True ($body -ne "") (
+        "SteamShell-Common.ahk defines no DefaultAutoMouseExeList(); the shipped " +
+        "automatic-mouse allowlist has no single source and this check is blind.")
+    if ($body -eq "") { return }
+
+    # The return is a concatenation across lines, so join every literal in it.
+    $expected = -join ([regex]::Matches($body, '"([^"]*)"') |
+        ForEach-Object { $_.Groups[1].Value })
+    Assert-True ($expected -match '^[a-z0-9.|_-]+$' -and $expected.Contains("|")) (
+        "DefaultAutoMouseExeList() did not read as a pipe-separated list of " +
+        "executables; it came out as '$expected'. The scan cannot check the " +
+        "copies against something it has misread.")
+
+    foreach ($copy in @(
+        @{ File = "SteamShell.ahk";                What = "the shell's embedded default INI text" },
+        @{ File = "SteamShellSettings_SAMPLE.ini"; What = "the shell's sample INI" },
+        @{ File = "SteamShell-XFE_SAMPLE.ini";     What = "the companion's sample INI" })) {
+        $path = Join-Path $ProjectRoot $copy.File
+        Assert-True (Test-Path -LiteralPath $path) (
+            "$($copy.File) is missing; it carries a copy of the automatic-mouse " +
+            "allowlist that has to match DefaultAutoMouseExeList().")
+        if (-not (Test-Path -LiteralPath $path)) { continue }
+        $found = @([regex]::Matches(
+            (Get-SourceText $path), '(?m)^AutoMouseExeList=([^\s;\r\n]*)'))
+        Assert-True ($found.Count -ge 1) (
+            "$($copy.File) states no AutoMouseExeList=; $($copy.What) has lost " +
+            "the allowlist, so a user starting from it gets an empty one.")
+        foreach ($m in $found) {
+            Assert-True ($m.Groups[1].Value -eq $expected) (
+                "$($copy.File) ships AutoMouseExeList=$($m.Groups[1].Value) but " +
+                "DefaultAutoMouseExeList() is $expected. $($copy.What) has " +
+                "drifted from the code, so what a user gets depends on whether " +
+                "their INI came from the sample or from the shell writing one.")
+        }
+    }
+
+    # Nobody may restate the default instead of calling the function.
+    #
+    # Two traps here, both met before this settled.
+    #
+    # The string next to "AutoMouseExeList" is usually the row's LABEL --
+    # "Shell-mode automatic mouse allowlist", "Automatic mouse applications
+    # (pipe-separated)" -- or the following Map key, so asserting on the quoted
+    # neighbour failed three legitimate call sites. A DEFAULT is told apart by
+    # naming an executable, which no label does.
+    #
+    # And the call WRAPS, so the default can be two lines below the key. The
+    # obvious pattern for that -- `(?:[^\n]|\n[ \t]+){0,300}?` -- backtracks
+    # catastrophically and does not finish. A LINE WINDOW is used instead: the
+    # key's line and the two after it, joined. That is linear, cannot hang, and
+    # is wide enough for every wrapped form in either tree. A hang is the worst
+    # failure mode a check can have, which is why this is not a cleverer regex.
+    foreach ($tree in @("SteamShell.ahk", "SteamShell-XFE.ahk")) {
+        $lines = @((Get-SourceLines (Join-Path $ProjectRoot $tree)) |
+            ForEach-Object { $_ -replace '(?<!`);.*$', '' })
+        for ($i = 0; $i -lt $lines.Count; $i++) {
+            if ($lines[$i] -notmatch '"AutoMouseExeList"') { continue }
+            $window = ($lines[$i..([Math]::Min($i + 2, $lines.Count - 1))] -join " ")
+            $literal = [regex]::Match($window, '"([^"]*\.exe[^"]*)"')
+            Assert-True (-not $literal.Success) (
+                "$tree line $($i + 1) passes a literal " +
+                "'$($literal.Groups[1].Value)' as the AutoMouseExeList default " +
+                "instead of calling DefaultAutoMouseExeList(). One more copy is " +
+                "how the other nine got out of step.")
+        }
+    }
+    if (-not $Quiet) {
+        Write-Host ("Automatic-mouse allowlist: one default, matched by both " +
+            "samples and the embedded INI text.")
+    }
+}
+
+# The controller surface both products present, and the wiring behind it.
+#
+# Three contracts, none of which fails to compile and none of which a user can
+# tell apart from "the controller is just like that on this machine":
+#
+# 1. BOTH health reports build the shared controller rows. They were the
+#    companion's alone; the shell inferred its backend from the wrong question
+#    and reported neither the backend setting nor RawInput at all. A tree that
+#    stops calling SharedControllerHealthRows loses four rows silently, on the
+#    report a user is asked to send when their controller does not work.
+#
+# 2. BOTH trees record which backend answered. ActiveInputBackend is written only
+#    by SetActiveBackend, so a ControllerReadState that stops calling it leaves
+#    the global at its initial "none" -- and the shared row then reports
+#    "Active: none" beside a controller that is plainly working. Nothing throws;
+#    the report just quietly lies.
+#
+# 3. The learned-profile escape hatch is REACHABLE in both. The function is in
+#    SteamShell-Shared.ahk and compiled into both products, and the shell bound
+#    it to nothing at all for as long as it existed -- so a mis-learned axis,
+#    which reads as a stick held over and sends the pointer off the screen, had
+#    no undo on the product that replaces the Windows shell. Being defined is not
+#    being reachable, which is the whole point of this check.
+function Assert-ControllerSurfaceParity {
+    param(
+        [Parameter(Mandatory = $true)][string]$ProjectRoot,
+        [switch]$Quiet
+    )
+    $sharedText = Get-SourceText (Join-Path $ProjectRoot "SteamShell-Shared.ahk")
+    foreach ($name in @("SharedControllerHealthRows", "SetActiveBackend",
+                        "DeleteControllerProfileForActiveDevice")) {
+        Assert-True ((Get-AhkFunctionBody -Source $sharedText -Name $name) -ne "") (
+            "SteamShell-Shared.ahk defines no $name(); the controller surface " +
+            "is no longer shared and this check cannot see what replaced it.")
+    }
+    foreach ($pair in @(
+        @{ Name = "SteamShell.ahk";     Product = "the shell" },
+        @{ Name = "SteamShell-XFE.ahk"; Product = "the companion" })) {
+        $treeText = Get-SourceText (Join-Path $ProjectRoot $pair.Name)
+        $health = Get-AhkFunctionBody -Source $treeText -Name "ProductHealthResults"
+        Assert-True ($health -match 'SharedControllerHealthRows\(') (
+            "$($pair.Name): ProductHealthResults does not build the shared " +
+            "controller rows. $($pair.Product) would report nothing about the " +
+            "backend, RawInput, or duplicate mappings.")
+
+        $read = Get-AhkFunctionBody -Source $treeText -Name "ControllerReadState"
+        Assert-True ($read -match 'SetActiveBackend\(') (
+            "$($pair.Name): ControllerReadState never calls SetActiveBackend, so " +
+            "ActiveInputBackend stays 'none' and the shared Health Check row " +
+            "reports no active backend while the controller works.")
+
+        # Reachable means WIRED: a hotkey, a tray entry or a control. A bare
+        # mention in a comment is not a route to it, so comments come out first.
+        $code = (((Get-SourceLines (Join-Path $ProjectRoot $pair.Name)) |
+            ForEach-Object { $_ -replace '(?<!`);.*$', '' }) -join "`n")
+        $routes = @([regex]::Matches(
+            $code, 'DeleteControllerProfileForActiveDevice')).Count
+        Assert-True ($routes -ge 1) (
+            "$($pair.Name) never reaches DeleteControllerProfileForActiveDevice. " +
+            "It is compiled into this product from SteamShell-Shared.ahk and " +
+            "would be dead: a badly learned controller profile could not be " +
+            "undone without hand-editing the profile file.")
+    }
+    if (-not $Quiet) {
+        Write-Host ("Controller surface: shared health rows, recorded backend " +
+            "and a reachable profile reset in both products.")
     }
 }
 
@@ -2514,19 +2863,56 @@ function Assert-SharedParity {
     $sharedCode = (($sharedText -split "`n") |
         Where-Object { $_ -notmatch '^\s*;' }) -join "`n"
     $sharedCode = $sharedCode -replace '"(?:[^"`]|`.)*"', '""'
+    # CALLS AND CALLBACKS BOTH COUNT.
+    #
+    # This matched `Name(` only, and the file's own header promises something
+    # wider: "nothing may leave this file that is not on it". Four names left it
+    # anyway, as bare references rather than calls --
+    #
+    #   exportButton.OnEvent("Click", ExportDiagnosticBundle)
+    #   browseButton.OnEvent("Click", SettingsProductBrowsePath.Bind(...))
+    #
+    # -- so the allowlist was not the record it claims to be, and widening it was
+    # not the decision somebody had to make. The cross-tree reachability check
+    # above does cover the case where ONE tree drops such a handler, because the
+    # name is then still defined in the other file. It cannot cover both trees
+    # dropping it: there is no file left holding the name, nothing to iterate,
+    # and Shared goes on naming an identifier AutoHotkey reads as an unassigned
+    # local. Nothing fails to load and one control silently does nothing, which
+    # is the failure this seam exists to make impossible.
+    #
+    # A bare word is not automatically a callback. Shared has locals that
+    # collide with tree function names case-insensitively, so a name ASSIGNED
+    # anywhere in the shared file is excluded -- the same test, and the same
+    # reason, as the cross-tree scan above.
+    #
+    # FILTERED BEFORE THE ASSIGNMENT TEST, not after. The bare-word scan matches
+    # tens of thousands of identifiers, and testing each one against a 1.5 MB
+    # source would add minutes to a run this project has already measured as
+    # regex-bound. Only a word that is otherwise about to be REPORTED is worth
+    # the second scan, and there are a handful of those.
+    $sharedRefs = New-Object System.Collections.Generic.HashSet[string]
+    foreach ($m in [regex]::Matches($sharedCode, '(?<![.\w])([A-Za-z_]\w*)\s*\(')) {
+        [void]$sharedRefs.Add($m.Groups[1].Value)
+    }
+    foreach ($m in [regex]::Matches($sharedCode, '(?<![.\w$])([A-Za-z_]\w*)(?![\w(])')) {
+        [void]$sharedRefs.Add($m.Groups[1].Value)
+    }
     $sharedLeaks = @(
-        [regex]::Matches($sharedCode, '(?<![.\w])([A-Za-z_]\w*)\s*\(') |
-            ForEach-Object { $_.Groups[1].Value } |
+        $sharedRefs |
             Sort-Object -Unique |
             Where-Object {
                 -not $shared.ContainsKey($_) -and
                 -not $common.ContainsKey($_) -and
                 $sharedSeamAllowed -notcontains $_ -and
                 ($standalone.ContainsKey($_) -or $companion.ContainsKey($_) -or
-                 $helper.ContainsKey($_)) })
+                 $helper.ContainsKey($_)) } |
+            Where-Object {
+                -not ($sharedCode -match
+                    ('(?<![.\w])' + [regex]::Escape($_) + '\s*(?::=|\+=|-=|\.=)')) })
     Assert-True ($sharedLeaks.Count -eq 0) (
-        "SteamShell-Shared.ahk calls into a tree through functions that are not " +
-        "on its seam allowlist: " + ($sharedLeaks -join ", ") +
+        "SteamShell-Shared.ahk reaches into a tree through functions that are " +
+        "not on its seam allowlist: " + ($sharedLeaks -join ", ") +
         ". Move the callee into the shared file, pass the value as a parameter, " +
         "or widen `$sharedSeamAllowed deliberately -- the point of the list is " +
         "that widening it is a decision somebody made.")

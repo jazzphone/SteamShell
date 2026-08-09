@@ -50,6 +50,9 @@
 standalone audioMenu
 standalone back
 standalone audioOutput
+standalone currentApp
+standalone currentAppBack
+standalone currentAppBlocked
 standalone desktop
 standalone display
 standalone displayApply
@@ -135,6 +138,8 @@ standalone windowsSettings
 xfe audioMenu
 xfe audioOutput
 xfe back
+xfe currentApp
+xfe currentAppBlocked
 xfe display
 xfe displayApply
 xfe displayRefresh

@@ -107,6 +107,73 @@ Everything below was written or changed statically and has not been run.
   roughly double, the ×32 migration factor is wrong for this hardware and 62.5 is
   correct -- a one-line change in both migrations.
 
+**Added by the 2026-08-09 parity pass, none of it run:**
+
+- **The shell's four controller Health Check rows.** New. Controller, Input
+  backend, RawInput and Controller mappings now come from
+  `SharedControllerHealthRows`. Read them with a pad on XInput and again with
+  `Backend=RawInput`: the "Input backend" row must say `Active: xinput` /
+  `Active: rawinput` and not `none`, which is what it says if
+  `ControllerReadState` ever stops calling `SetActiveBackend`.
+  The slot is now shown for XInput ONLY -- it used to be printed beside a
+  RawInput reading, where it was whatever XInput last left in
+  `ActiveControllerIndex`. In the companion the slot is now 1-based; it was 0.
+- **`Ctrl+Alt+Shift+D` in the shell,** plus the tray entry and the Settings
+  button beside "Learn Controller…". The shell had no route to
+  `DeleteControllerProfileForActiveDevice` at all. Confirm the Settings button
+  does not collide with the auto-mouse fields below it -- it is a second button
+  row, and the page grew 43 px.
+- **The Quick Menu's A button in the companion,** on Quick Menu Accent,
+  Controller Mouse Speed, Cursor Hide Delay and Preset Frame Cap. Those four did
+  nothing on A and stepped on Left/Right; A should now step them forward like
+  Right. The other toggle rows must still flip, not step.
+- **The shipped automatic-mouse allowlist,** now
+  `explorer.exe|brave.exe|chrome.exe|msedge.exe|firefox.exe|notepad.exe|taskmgr.exe`
+  from `DefaultAutoMouseExeList()` in SteamShell-Common.ahk, and empty for
+  `DesktopAutoMouseExcludeExeList`. `brave.exe` was the default EXCLUSION, which
+  is the opposite list -- it turned auto-mouse OFF for Brave in desktop mode and
+  never turned it on in shell mode. Open each of the seven and confirm the
+  controller drives the pointer without holding View/Back. Task Manager is the
+  one to watch: it is often elevated, so it goes through the helper, which asks
+  main for the answer via `ParentAutoMouseModeActive`.
+  **Windows Settings is deliberately absent** -- `ms-settings:` opens a window
+  owned by `ApplicationFrameHost.exe`, so `SystemSettings.exe` would never match
+  a foreground lookup. Control Panel is absent because it is an Explorer window
+  and `explorer.exe` already covers it.
+- **The recent-application picker, in both products.** New, and the only part of
+  this pass that is a GUI -- which is what static checking is worst at, so it
+  needs eyes.
+  Shell: Settings → any exe-list field now has three buttons, **Browse… /
+  Recent… / Remove**, where it had two. Check the third fits inside the field
+  width and that the auto-mouse pair on Controller & Cursor still lines up.
+  Also **AlwaysFocus Manager → Add Recent App…**.
+  Companion: Settings → Controller & Cursor → **Add Recent Application…**, which
+  appends to the pipe-separated automatic-mouse box.
+  What to actually test: use two or three applications, CLOSE them, then open
+  Settings and confirm they are still offered -- that is the whole point of the
+  feature, and a live list would show none of them. The picker must never offer
+  SteamShell's own windows, the desktop, Start, Search, or anything hosted by
+  ApplicationFrameHost.exe. Five entries maximum, most recent first, one row per
+  executable however many windows it had.
+- **Quick Menu → System → Current Application, in both products.** New, and the
+  companion piece to the picker above: this names what you were just looking at,
+  the picker names what you closed. It works here and cannot work in Settings for
+  the same reason -- both trees snapshot `QuickMenuPreviousHwnd` before the menu
+  takes the foreground, and Settings has no equivalent moment.
+  Open an ordinary application, then the Quick Menu, then System: the row's value
+  should be that application's executable. Selecting it lists the destinations --
+  four in the shell, two in the companion -- and choosing one should notify, log
+  the section and key, and show "(already added)" on a second visit.
+  **The case worth testing hardest is a Store app.** With Windows Settings,
+  Photos or Calculator in front, the row must read *"Store app — cannot be added
+  by name"* and refuse to open the page. If it ever offers destinations there, it
+  is about to write `applicationframehost.exe` into a list, which matches every
+  windowed Store app at once -- the whole reason the refusal exists.
+- **StartMenu bound to a controller button, in both products.** It goes through
+  `SendChordSafe` now rather than a bare `SendInput`, so it matches what the
+  elevated helper always did. Test it with a normal foreground and with an
+  elevated one; both should open Start.
+
 ### J. Cross-name consolidation — one left, and it needs hardware
 
 Batches A to D landed. Seventeen candidates became ten, nine QUEUED entries
@@ -317,6 +384,39 @@ Breaking the big-endian decode in `SteamShell-Shared.ahk` does **not** fail the
 simulation. It guards the design against regression in its own Python model; it
 does not detect an AutoHotkey-side change. Its docstring says so. Worth knowing
 now that it actually runs.
+
+### A regex for `$sharedSeamAllowed` finds the COMMENT above it first
+
+The comment over that list quotes both spellings verbatim -- *"keep the literal
+`$sharedSeamAllowed = @(` and `$sharedSeamExpectedCount = N` spellings"* -- so an
+unanchored search matches the sentence, not the assignment.
+
+`Replay-Validation.py` did exactly that, and it read correctly for as long as the
+real list happened to contain no `)` for `@\((.*?)\)` to stop at. Adding one
+comment containing `OnEvent("Click", ExportDiagnosticBundle)` truncated the list
+to its first two entries and produced **eighteen failures from a comment**, every
+one of them naming a seam that was listed the whole time.
+
+Both readers use `read_shared_seam` now, anchored with `(?m)^` -- the assignment
+is the only one of the two at column zero -- and bounded by
+`^$sharedSeamExpectedCount` rather than by a parenthesis.
+
+### An assertion whose only subject is its own exemption
+
+`Validate-SteamShell-XFE.ps1` checked that every Quick Menu toggle action reaches
+a handler by scanning for a literal `MenuRow(..."toggle:x"...)`. Exactly one
+exists -- Mouse Mode -- and the assertion's first clause permits
+`qPersistentMouse` outright, so the rule looped once and passed on the name it
+was written to excuse.
+
+The other nineteen toggle rows are built by `QuickMenuSettingsRows` as
+`MenuRow("toggle:" id, ...)`, a **concatenation no literal scan can see**. Four of
+them were reached by nothing on A.
+
+This is the "unbounded forward scan" trap wearing different clothes, and
+`Assert-ValidatorAssertionShapes` does not catch it: the shape is fine, the
+subject SET is empty. When a rule iterates, assert how many subjects it found --
+the rule now requires at least fifteen and says not to lower the number.
 
 ### Windows App Execution Aliases are not interpreters
 

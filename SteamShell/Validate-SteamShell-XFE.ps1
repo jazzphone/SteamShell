@@ -546,9 +546,16 @@ Assert-True (
 # Asserted in BOTH directions on purpose. Pinning only the allowlist would let
 # the removed mode be reintroduced silently; the -notmatch half is what makes
 # bringing it back a decision someone has to take deliberately.
+#
+# The DEFAULT VALUE is deliberately not restated here. It used to be, in two of
+# the clauses below, which made this the eighth and ninth copy of a literal that
+# already had seven -- and both went stale the moment the shipped allowlist grew
+# past explorer.exe. What this rule is about is the SHAPE: one allowlist, no
+# desktop mode. Assert-AutoMouseDefaults owns the value, in one place, and holds
+# the samples and the embedded INI text to it.
 Assert-True (
     $source -match '(?m)^global EnableAutoMouseMode := true$' -and
-    $source -match '(?m)^global AutoMouseExeListRaw := "explorer\.exe"$' -and
+    $source -match '(?m)^global AutoMouseExeListRaw := DefaultAutoMouseExeList\(\)$' -and
     $source -notmatch 'EnableDesktopAutoMouseMode\s*:=' -and
     $source -notmatch 'DesktopAutoMouseExcludeExeSet' -and
     $source -match
@@ -558,7 +565,7 @@ Assert-True (
         '(?:(?!\n\})[\s\S])*?' +
         'cachedResult := AutoMouseProcessMatches\(foregroundExe\)' -and
     $sample -match '(?m)^EnableAutoMouseMode=true$' -and
-    $sample -match '(?m)^AutoMouseExeList=explorer\.exe(?:\s*;.*)?$' -and
+    $sample -match '(?m)^AutoMouseExeList=\S' -and
     $sample -notmatch '(?m)^DesktopAutoMouseExcludeExeList=') (
     "XFE automatic mouse mode must be the master switch and AutoMouseExeList alone.")
 # The retired keys have to be actively removed from an existing INI, not merely
@@ -1359,17 +1366,82 @@ Assert-True (
 # nothing, the toggle returned early, and the row rendered and selected and did
 # nothing at all. QUICKMENU_ROWS.txt could not see it because it records row IDS
 # and dispatch happens on row ACTIONS -- so the id is what the action must be
-# built from, and any literal toggle action naming something that is neither a
-# table id nor qPersistentMouse is the bug coming back.
-$toggleActions = [regex]::Matches($source, 'MenuRow\([^)]*?"(toggle:[A-Za-z]+)"') |
-    ForEach-Object { $_.Groups[1].Value.Substring(7) } | Sort-Object -Unique
-foreach ($toggleAction in $toggleActions) {
-    Assert-True (
-        $toggleAction -eq 'qPersistentMouse' -or
-        $source -match ('"' + [regex]::Escape($toggleAction) + '", Map\("section"')) (
-        "Quick Menu toggle action '$toggleAction' reaches no handler: it is " +
-        "neither qPersistentMouse nor a QuickMenuToggleTable id.")
+# built from, and any toggle action naming something no handler answers to is
+# the bug coming back.
+#
+# THIS RULE USED TO CHECK ONE ROW, AND THAT ROW WAS ITS OWN EXEMPTION.
+#
+# It scanned for a LITERAL `MenuRow(..."toggle:x"...)`. Exactly one exists --
+# Mouse Mode on MAIN, spelled "toggle:qPersistentMouse" -- and the assertion's
+# first clause permits qPersistentMouse outright. Every other toggle row is
+# built by QuickMenuSettingRow as `MenuRow("toggle:" id, ...)`, a CONCATENATION
+# that no literal scan can see, so nineteen rows across the three settings pages
+# were unchecked while the rule reported success. That is the "assertion that
+# stops checking anything does not fail" trap, in the check written to stop
+# precisely this class of bug.
+#
+# So the ids are collected where they are WRITTEN -- the entry arrays in
+# QuickMenuSettingsRows -- rather than where they are assembled, and the subject
+# count is asserted so the scan can never quietly return to finding nothing.
+$toggleActions = New-Object System.Collections.Generic.HashSet[string]
+foreach ($m in [regex]::Matches($source, 'MenuRow\([^)]*?"toggle:([A-Za-z]\w*)"')) {
+    [void]$toggleActions.Add($m.Groups[1].Value)
 }
+$settingsRowsBody = Get-AhkFunctionBody -Source $source -Name "QuickMenuSettingsRows"
+Assert-True ($settingsRowsBody -ne "") (
+    "SteamShell-XFE.ahk defines no QuickMenuSettingsRows(); the Quick Menu " +
+    "settings rows cannot be checked for a handler.")
+foreach ($m in [regex]::Matches($settingsRowsBody, '\["([A-Za-z]\w*)",\s*"')) {
+    [void]$toggleActions.Add($m.Groups[1].Value)
+}
+foreach ($m in [regex]::Matches($settingsRowsBody, 'QuickMenuSettingRow\("([A-Za-z]\w*)"')) {
+    [void]$toggleActions.Add($m.Groups[1].Value)
+}
+# The four handler paths QuickMenuToggleSetting and QuickMenuAdjustSelected
+# between them offer. A row reaching none of these renders and does nothing.
+$toggleHandled = New-Object System.Collections.Generic.HashSet[string]
+[void]$toggleHandled.Add('qPersistentMouse')
+foreach ($m in [regex]::Matches(
+    (Get-AhkFunctionBody -Source $source -Name "QuickMenuToggleTable"),
+    '"([A-Za-z]\w*)",\s*Map\("section"')) {
+    [void]$toggleHandled.Add($m.Groups[1].Value)
+}
+foreach ($fn in @("QuickMenuCycleSharedSetting", "QuickMenuAdjustSharedSetting")) {
+    foreach ($label in (Get-AhkSwitchCaseLabels (
+        Get-AhkFunctionBody -Source $source -Name $fn))) {
+        [void]$toggleHandled.Add($label)
+    }
+}
+Assert-True ($toggleActions.Count -ge 15) (
+    "Only $($toggleActions.Count) Quick Menu toggle rows were found, and there " +
+    "are at least fifteen. The scan has stopped seeing them, which makes every " +
+    "assertion below it pass for the wrong reason -- fix the scan, do not " +
+    "lower this number.")
+foreach ($toggleAction in ($toggleActions | Sort-Object)) {
+    Assert-True ($toggleHandled.Contains($toggleAction)) (
+        "Quick Menu toggle action '$toggleAction' reaches no handler: it is " +
+        "not qPersistentMouse, not a QuickMenuToggleTable id, and not a case " +
+        "in QuickMenuCycleSharedSetting or QuickMenuAdjustSharedSetting. The " +
+        "row would render and do nothing.")
+}
+
+# A steps an adjustable row FORWARD; it does not flip it and it does not fall
+# through to a toggle that cannot answer.
+#
+# QuickMenuAdjustSelected asked QuickMenuAdjustSharedSetting first and
+# QuickMenuActivateSelected did not, so Left and Right stepped Quick Menu
+# Accent, Controller Mouse Speed, Cursor Hide Delay and Preset Frame Cap while A
+# on the same four rows reached QuickMenuToggleSetting, which answers to none of
+# them, and returned early. Standalone has always stepped them on A, through
+# IsQuickMenuAdjustSetting over those same four ids.
+#
+# Both entry points are pinned, so the pair cannot drift apart again.
+Assert-True (
+    $source -match '(?s)QuickMenuActivateSelected\(\)\s*\{(?:(?!\n\})[\s\S])*?QuickMenuAdjustSharedSetting\(' -and
+    $source -match '(?s)QuickMenuAdjustSelected\(direction\)\s*\{(?:(?!\n\})[\s\S])*?QuickMenuAdjustSharedSetting\(') (
+    "Both QuickMenuActivateSelected and QuickMenuAdjustSelected must consult " +
+    "QuickMenuAdjustSharedSetting before QuickMenuToggleSetting, or an " +
+    "adjustable row does nothing on whichever button skips it.")
 # ANCHORED WHERE THE BEHAVIOUR IS. This named QuickMenuToggleSetting, which does
 # not re-apply the timers and never did -- it persists through
 # ProductApplyQuickMenuSetting, and that is where the reload happens. The
@@ -2359,6 +2431,10 @@ Assert-BindingLabelTables -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-GameScoreWeightKeys -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-ElevatedHelperProtocol -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-ControllerPollFrame -ProjectRoot $projectRoot -Quiet:$Quiet
+Assert-ControllerSurfaceParity -ProjectRoot $projectRoot -Quiet:$Quiet
+Assert-AutoMouseDefaults -ProjectRoot $projectRoot -Quiet:$Quiet
+Assert-RecentApplicationPicker -ProjectRoot $projectRoot -Quiet:$Quiet
+Assert-CurrentApplicationTargets -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-ValidatorAssertionShapes -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-NoAmbiguousDeindentedBlocks -ProjectRoot $projectRoot -File "SteamShell-XFE.ahk" -Quiet:$Quiet
 Assert-NoAmbiguousDeindentedBlocks -ProjectRoot $projectRoot -File "SteamShell-Shared.ahk" -Quiet:$Quiet

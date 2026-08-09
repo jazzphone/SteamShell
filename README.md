@@ -64,11 +64,14 @@ companion reads the pad through RawInput instead, and can be taught unfamiliar h
   audio output, frame cap, open windows, and the settings worth changing from a sofa
 - **Controller pointer**, with remappable short and long press on every button
 - **Task list** — switch to or close any window, including force-close
+- **Current Application** — name whatever you were just looking at into an executable
+  list, from the Quick Menu, without typing it
 - **Windows Start menu and File Explorer** on a controller chord
 
 ### Making the controller actually work
 - **Three input backends** — RawInput, XInput and GameInput, selected automatically
-- **Controller Learner** — teach it any pad it does not recognise, by pressing buttons
+- **Controller Learner** — teach it any pad it does not recognise, by pressing buttons,
+  and delete a profile that learned wrongly from a hotkey, the tray or Settings
 - **Input recovery after sleep**, including the case where Windows never tells you the
   machine woke
 - **Smooth cursor** — velocity scaled by real elapsed time, not a fixed step per poll
@@ -84,6 +87,8 @@ companion reads the pad through RawInput instead, and can be taught unfamiliar h
 - **Emergency restore** on a hotkey, and a **Safe Mode** launch that keeps Explorer alive
 - **Health Check** and a sanitised **diagnostic bundle**
 - Settings **migrate in place** across versions, with versioned backups
+- Every executable-list field has a **Recent…** picker offering the last five
+  applications you used — including ones you have since closed
 
 ## Feature comparison
 
@@ -100,6 +105,8 @@ companion reads the pad through RawInput instead, and can be taught unfamiliar h
 | Setup Assistant and install modes | Yes | — |
 | Task list, switch and force-close | Yes | — |
 | **Quick Menu** | Yes | Yes |
+| Current Application → executable list | 4 destinations | 2 destinations |
+| Recent-application picker in Settings | Yes | Yes |
 | Controller pointer and mappings | Yes | Yes |
 | Controller Learner | Yes | Yes |
 | Input recovery after sleep | Yes | Yes |
@@ -262,6 +269,7 @@ newer, 64-bit.
 | `Ctrl+Alt+Shift+R` | Reload settings |
 | `Ctrl+Alt+Shift+G` | Run Game Foreground Assist once |
 | `Ctrl+Alt+Shift+I` | Re-arm controller input |
+| `Ctrl+Alt+Shift+D` | Delete the learned controller profile |
 
 On a controller: hold **L3 + R3** for the Quick Menu, hold **View/Back** for the pointer,
 and **View/Back + Start** for the Windows Start menu.

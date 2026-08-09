@@ -8,6 +8,8 @@
 ; Ctrl+Alt+Shift+P => Open Control Panel (session toggles / diagnostics)
 ; Ctrl+Alt+Shift+Q => Open the controller-first Quick Menu
 ; Ctrl+Alt+Shift+S => Open persistent Settings editor
+; Ctrl+Alt+Shift+I => Re-arm controller input after a backend stall
+; Ctrl+Alt+Shift+D => Delete the learned controller profile for this device
 ; ==============================================================================
 #Requires AutoHotkey v2.0.19 64-bit
 #SingleInstance Force
@@ -251,6 +253,14 @@ global RestCheckSamples := 0
 ; is every pad that does not speak it -- now has a path that reaches this
 ; program instead of leaving the shell with no input at all.
 global ControllerBackend := "auto"
+; Which backend last ANSWERED, as opposed to which one the setting asks for.
+;
+; The two are not the same and the difference is the whole diagnostic: "auto"
+; with a pad on RawInput and "auto" with a pad on XInput are the same setting and
+; very different machines. This tree selected a backend exactly as the companion
+; does and then discarded which one won, so neither its log nor its Health Check
+; could say. Recorded through the shared SetActiveBackend.
+global ActiveInputBackend := "none"
 ; Logs raw HID gamepad reports as they arrive. Diagnostic use only.
 global EnableRawInputProbe := false
 global RawInputProbeActive := false
@@ -565,13 +575,13 @@ global WmExcludeClassSet := Map() ; Built from WmExcludeClassListRaw
 ; that took effort to build, and "is this feature causing what I am seeing?" is
 ; a question worth being able to answer without destroying it.
 global EnableAutoMouseMode := true
-global AutoMouseExeListRaw := "explorer.exe"
+global AutoMouseExeListRaw := DefaultAutoMouseExeList()
 global AutoMouseExeSet := Map()
 ; Desktop mode is an explicit request to operate Windows rather than a game.
 ; Make controller mouse automatic across ordinary apps there, with a user-owned
 ; exclusion list for games or applications where controller input must stay raw.
 global EnableDesktopAutoMouseMode := true
-global DesktopAutoMouseExcludeExeListRaw := "brave.exe"
+global DesktopAutoMouseExcludeExeListRaw := ""
 global DesktopAutoMouseExcludeExeSet := Map()
 
 ; AlwaysFocus list
@@ -2760,8 +2770,8 @@ ControllerMouseFastMultiplier=2.5                           ; Multiplier while R
 ControllerScrollIntervalMs=80                               ; Min ms between scroll ticks
 ControllerScrollStep=1                                      ; Wheel notches per scroll tick
 ControllerChordHoldMs=500                                   ; Long-press threshold (ms) for View/Back + button actions
-AutoMouseExeList=explorer.exe                               ; EXEs where the View/Back mappings apply WITHOUT holding View/Back
-DesktopAutoMouseExcludeExeList=brave.exe                    ; Games/apps where desktop-wide automatic mouse must stay disabled
+AutoMouseExeList=explorer.exe|brave.exe|chrome.exe|msedge.exe|firefox.exe|notepad.exe|taskmgr.exe  ; EXEs where the View/Back mappings apply WITHOUT holding View/Back
+DesktopAutoMouseExcludeExeList=                             ; Games/apps where desktop-wide automatic mouse must stay disabled
 
 [QuickMenu]
 Enable=true                                                 ; Hold L3+R3 to open/close the living-room quick menu
@@ -3400,13 +3410,17 @@ JoinPipe(listObj) {
 ; input still worked, which looked like RawInput recovering when it was XInput
 ; the whole time.
 ControllerReadState(&state) {
-    global ControllerBackend
+    global ControllerBackend, ActiveInputBackend
     wanted := StrLower(ControllerBackend)
     if (wanted = "rawinput" || wanted = "auto") {
-        if RawInputReadState(&state)
+        if RawInputReadState(&state) {
+            SetActiveBackend("rawinput")
             return true
-        if (wanted = "rawinput")
+        }
+        if (wanted = "rawinput") {
+            SetActiveBackend("none")
             return false
+        }
     }
     ; Every slot, not just the configured one -- see XInputResolveController.
     ; This asked XInput for the configured index and nothing else, so a pad that
@@ -3417,7 +3431,12 @@ ControllerReadState(&state) {
     ; The buffer allocation that stood here is gone with it: XInputGetState
     ; already creates one when it is handed something that is not a Buffer, so
     ; the guard was a second answer to a question the callee had settled.
-    return XInputResolveController(&state)
+    if XInputResolveController(&state) {
+        SetActiveBackend("xinput")
+        return true
+    }
+    SetActiveBackend("none")
+    return false
 }
 
 ; Per-tree seam required by SteamShell-Shared.ahk: a modal dialog is up, so
@@ -3602,12 +3621,13 @@ LoadSettings() {
     ; feature, the list decides where it applies.
     EnableAutoMouseMode := ReadBool("Features", "EnableAutoMouseMode", true)
     EnableDesktopAutoMouseMode := ReadBool("Features", "EnableDesktopAutoMouseMode", true)
-    AutoMouseExeListRaw := IniReadS("Controller", "AutoMouseExeList", "explorer.exe")
+    AutoMouseExeListRaw := IniReadS("Controller", "AutoMouseExeList",
+        DefaultAutoMouseExeList())
     AutoMouseExeSet := Map()
     for _, exe in ParseExeListPipe(AutoMouseExeListRaw)
         AutoMouseExeSet[exe] := true
     DesktopAutoMouseExcludeExeListRaw := IniReadS(
-        "Controller", "DesktopAutoMouseExcludeExeList", "brave.exe")
+        "Controller", "DesktopAutoMouseExcludeExeList", "")
     DesktopAutoMouseExcludeExeSet := Map()
     for _, exe in ParseExeListPipe(DesktopAutoMouseExcludeExeListRaw)
         DesktopAutoMouseExcludeExeSet[exe] := true
@@ -3823,6 +3843,16 @@ ApplyRuntimeTimers() {
         SetTimer(ControllerDiagnosticTick, ControllerDiagnosticIntervalMs)
         LogLine("Controller diagnostic logging is enabled (all XInput slots).")
     }
+
+    ; Outside every guard above, and on its own timer rather than inside the
+    ; window engine's.
+    ;
+    ; The history exists to be READ from the Settings window, and Settings is
+    ; reachable in desktop mode and in Safe Mode -- both of which stop
+    ; WindowEngineTick, where this tree's other foreground observer lives. A tick
+    ; that stopped with the window engine would leave the picker empty in exactly
+    ; the modes where somebody is working out which application to add to a list.
+    SetTimer(RecentAppsTick, RecentAppsIntervalMs())
 }
 
 ReloadSettings() {
@@ -3957,6 +3987,12 @@ ProductTrayItems() {
     ; who needs it is the one whose controller does not work yet -- so it cannot
     ; require a controller to get to.
     items.Push(Map("label", "Learn Controller…", "handler", ShowControllerLearner))
+    ; Its undo, by the same argument and more so. A profile learned wrongly does
+    ; not merely fail to help -- it reads as a stick held over, so the pointer
+    ; runs off and Settings becomes hard to reach with the very device the
+    ; profile broke. The tray is reachable with a keyboard alone.
+    items.Push(Map("label", "Delete Learned Profile",
+        "handler", DeleteControllerProfileForActiveDevice))
     items.Push("")
     if (DesktopMode) {
         items.Push(Map(
@@ -5357,6 +5393,10 @@ QuickMenuGetDefinitions() {
             rows.Push(Map("id", "desktop", "label", "Exit Steam To Desktop"))
         if EnableGameDetectionMenu
             rows.Push(Map("id", "gameDetection", "label", "Game Detection"))
+        ; Beside Game Detection, not folded into it. That page is a read-only
+        ; explanation of what the scorer decided; this one WRITES settings, and a
+        ; user should not have to enter a diagnostic to configure something.
+        rows.Push(Map("id", "currentApp", "label", "Current Application"))
         rows.Push(Map("id", "exitApp", "label", "Exit SteamShell"))
         rows.Push(Map("id", "sleep", "label", "Sleep"))
         rows.Push(Map("id", "restart", "label", "Restart PC"))
@@ -5379,6 +5419,21 @@ QuickMenuGetDefinitions() {
         }
         for _, rowId in QuickMenuGameScoreIds()
             rows.Push(Map("id", rowId, "label", QuickMenuGameScoreLabel(rowId)))
+        return rows
+    }
+
+    ; The destinations are decided in SteamShell-Shared.ahk; only the row shape
+    ; is this tree's. Same split as GAMESCORE above.
+    if (QuickMenuPage = "CURRENTAPP") {
+        rows.Push(Map("id", "currentAppBack", "label", "Back To System"))
+        reason := QuickMenuCurrentAppBlockedReason()
+        if (reason != "") {
+            rows.Push(Map("id", "currentAppBlocked", "label", reason))
+            return rows
+        }
+        for _, rowId in QuickMenuAppTargetIds("standalone")
+            rows.Push(Map("id", rowId,
+                "label", QuickMenuAppTargetLabel(rowId, "standalone")))
         return rows
     }
 
@@ -5931,6 +5986,12 @@ QuickMenuValue(id) {
         return GetControllerLayoutText(SubStr(id, 8))
     if (SubStr(id, 1, 10) = "gamescore:")
         return QuickMenuGameScoreValue(id)
+    if (SubStr(id, 1, 11) = "currentapp:")
+        return "Add"
+    if (id = "currentApp")
+        return QuickMenuCurrentAppValue()
+    if (id = "currentAppBack")
+        return "‹"
     ; Back To System. Not a "back" row -- QuickMenuGoBack would leave GAMESCORE
     ; for MAIN rather than for the page it came from -- so it keeps its own case
     ; and states the glyph here, which is what every other back row displays.
@@ -5969,7 +6030,11 @@ QuickMenuValue(id) {
             return "‹ " (hdrState["enabled"] ? "ON" : "OFF") " ›"
         case "gameDetection":
             return QuickMenuGameDetectionValue()
-        case "gameScoreEmpty":
+        ; Both rows say everything they have to say in the label -- "nothing
+        ; scored yet", or why the current application cannot be added -- so the
+        ; value column is deliberately empty. The companion says the same thing
+        ; by passing "" as the row's value; this is that, on this side.
+        case "gameScoreEmpty", "currentAppBlocked":
             return ""
         case "hdrUnavailable":
             hdrState := GetPrimaryHdrState()
@@ -6653,6 +6718,14 @@ QuickMenuActivateSelected() {
         SelectTaskSwitcherWindow(ToInt(SubStr(id, 12), 0))
         return
     }
+    ; The destination rows on CURRENTAPP. The write, the duplicate check and the
+    ; refusal all live in SteamShell-Shared.ahk, so this tree names the product
+    ; and nothing else.
+    if (SubStr(id, 1, 11) = "currentapp:") {
+        QuickMenuAddCurrentAppTo(id, "standalone")
+        QuickMenuRefresh()
+        return
+    }
 
     ; Actions both products implement identically.
     if QuickMenuActivateShared(id) {
@@ -6757,6 +6830,22 @@ QuickMenuActivateSelected() {
             ExitSteamShell()
         case "gameDetection":
             QuickMenuPage := "GAMESCORE"
+            QuickMenuSelected := 1
+            QuickMenuRefresh()
+            return
+        case "currentApp":
+            ; Nothing to offer, and the row already says why. Opening a page of
+            ; destinations that would all refuse is worse than not opening one.
+            if !QuickMenuCurrentAppSelectable() {
+                ShowNotification(QuickMenuCurrentAppBlockedReason(), "Warning")
+                return
+            }
+            QuickMenuPage := "CURRENTAPP"
+            QuickMenuSelected := 1
+            QuickMenuRefresh()
+            return
+        case "currentAppBack":
+            QuickMenuPage := "SYSTEM"
             QuickMenuSelected := 1
             QuickMenuRefresh()
             return
@@ -8934,6 +9023,16 @@ AF_SelectExecutable(prompt) {
     return selectedPath
 }
 
+; Adds an application from the shared recent-application history.
+;
+; Routed through the same AF_AddExe body as the live list, so the two entry
+; points cannot disagree about deduplication, about enabling AlwaysFocus, or
+; about the reminder that nothing is persistent until Write to INI.
+AF_AddRecent(*) {
+    ShowApplicationPicker(
+        "Add a recently used application to the AlwaysFocus list.", AF_AddExe)
+}
+
 AF_AddSelected(*) {
     global AlwaysFocusGui, AlwaysFocusList, EnableAlwaysFocus, AlwaysFocusExeListRaw
     if !IsSet(AlwaysFocusGui)
@@ -8953,7 +9052,17 @@ AF_AddSelected(*) {
     return
     }
 
-    exe := StrLower(Trim(lvRun.GetText(row, 1)))
+    AF_AddExe(lvRun.GetText(row, 1))
+}
+
+; The half of adding to the AlwaysFocus list that does not care where the name
+; came from -- the live list, the recent-application picker, or a file browse.
+AF_AddExe(exe) {
+    global AlwaysFocusGui, AlwaysFocusList, EnableAlwaysFocus, AlwaysFocusExeListRaw
+    if !IsSet(AlwaysFocusGui)
+        return
+
+    exe := StrLower(Trim(exe))
     if (exe = "")
         return
 
@@ -9083,6 +9192,14 @@ ShowAlwaysFocusManager(*) {
 
     btn := AlwaysFocusGui.AddButton("xs y+8 w240 h30", "Browse / Add EXE…")
     btn.OnEvent("Click", AF_BrowseAddExe)
+
+    ; The list above is LIVE, and this is the same list with a memory. Both are
+    ; useful and neither replaces the other: the live one can offer a window that
+    ; has no history yet, and this one can offer an application that was closed
+    ; before the manager was opened -- which is the ordinary case, because
+    ; somebody comes here after noticing a focus problem, not during one.
+    btn := AlwaysFocusGui.AddButton("xs y+8 w240 h30", "Add Recent App…")
+    btn.OnEvent("Click", AF_AddRecent)
 
     btn := AlwaysFocusGui.AddButton("xs y+8 w240 h30", "Remove Selected")
     btn.OnEvent("Click", AF_RemoveSelected)
@@ -9885,24 +10002,34 @@ SettingsEditorAddExeListField(category, section, key, label, x, y, width := 335
         listCtrl.Add("", exe)
     listCtrl.ModifyCol(1, width - 24)
 
+    ; Three across the same row, not a third button on a new one. Every one of
+    ; these fields is hand-placed at a literal y, and the two on this page sit
+    ; above the auto-mouse lists -- growing the row downward would push into
+    ; them and SharedAuditSettingsLayout fails overlapping controls. Labels are
+    ; shortened to fit a third of 335px rather than the row being widened.
     buttonGap := 8
-    buttonWidth := Floor((width - buttonGap) / 2)
+    buttonWidth := Floor((width - (buttonGap * 2)) / 3)
     addButton := SettingsGui.AddButton(
-        "x" x " y" (y + 164) " w" buttonWidth " h30", "Browse / Add…")
-    removeButton := SettingsGui.AddButton(
+        "x" x " y" (y + 164) " w" buttonWidth " h30", "Browse…")
+    recentButton := SettingsGui.AddButton(
         "x" (x + buttonWidth + buttonGap) " y" (y + 164)
-        " w" buttonWidth " h30", "Remove Selected")
+        " w" buttonWidth " h30", "Recent…")
+    removeButton := SettingsGui.AddButton(
+        "x" (x + ((buttonWidth + buttonGap) * 2)) " y" (y + 164)
+        " w" buttonWidth " h30", "Remove")
 
     field := Map(
         "category", category, "section", section, "key", key,
         "label", label, "type", "exe-list", "ctrl", listCtrl,
-        "controls", [labelCtrl, listCtrl, addButton, removeButton])
+        "controls", [labelCtrl, listCtrl, addButton, recentButton, removeButton])
     addButton.OnEvent("Click", SettingsEditorBrowseAddExe.Bind(field))
+    recentButton.OnEvent("Click", SettingsEditorAddRecentExe.Bind(field))
     removeButton.OnEvent("Click", SettingsEditorRemoveSelectedExe.Bind(field))
 
     SettingsEditorRegisterControl(category, labelCtrl)
     SettingsEditorRegisterControl(category, listCtrl)
     SettingsEditorRegisterControl(category, addButton)
+    SettingsEditorRegisterControl(category, recentButton)
     SettingsEditorRegisterControl(category, removeButton)
     SettingsEditorFields.Push(field)
     return field
@@ -9925,6 +10052,30 @@ SettingsEditorBrowseAddExe(field, *) {
     exe := Trim(exe)
     if (selectedDir != "")
         lastBrowseDirs[fieldId] := selectedDir
+    SettingsEditorInsertExe(field, exe)
+}
+
+; Adds a recently used application, chosen from the shared picker.
+;
+; The picker offers a HISTORY rather than what is running now, because this is
+; reached from the Settings window -- at which point Settings is the foreground
+; application and "what is in front" names the wrong thing every time.
+SettingsEditorAddRecentExe(field, *) {
+    ShowApplicationPicker(
+        "Add a recently used application to " field["label"] ".",
+        SettingsEditorInsertExe.Bind(field))
+}
+
+; The half of adding an executable that does not care where the name came from.
+;
+; Split out when the recent-application picker arrived: browsing for a file and
+; choosing from the history disagree about how to NAME an executable and agree
+; about everything after -- validate, reject a duplicate by selecting the row
+; that already holds it, add, mark dirty, say so. Two copies of that would have
+; been two places to fix the next time the status line changed.
+SettingsEditorInsertExe(field, exe) {
+    global SettingsEditorStatusCtrl
+    exe := Trim(exe)
     if !RegExMatch(exe, "i)^[a-z0-9][a-z0-9_. -]*\.exe$") {
         SettingsEditorMsgBox(
             "The selected file does not have a supported executable filename.", "Icon!")
@@ -11674,41 +11825,19 @@ ProductHealthResults() {
     ; detected" to somebody whose pad is working over RawInput would be wrong
     ; for exactly the user RawInput exists to serve -- and it is the first place
     ; they would look.
-    controllerConnected := ControllerReadState(&state)
-    controllerVia := RawInputRegistered() && RawInputLastReportTick
-        ? "RawInput" : "XInput"
-    ; The slot that ANSWERED, not the one that was configured. Those are no
-    ; longer the same question: the slot is discovered now, so reporting the
-    ; configured index told the user where SteamShell was told to look rather
-    ; than where the controller actually is -- and the gap between those two is
-    ; exactly what the discovery exists to close and what a health check should
-    ; therefore surface.
-    HealthResult(results, controllerConnected ? "pass" : "warn", "Controller",
-        controllerConnected
-            ? controllerVia " controller is connected"
-                . (ActiveControllerIndex >= 0
-                    ? " on slot " (ActiveControllerIndex + 1)
-                        . (ActiveControllerIndex != ControllerIndex
-                            ? " (configured: " (ControllerIndex + 1) ")" : "")
-                    : "") "."
-            : "No controller was detected on any XInput slot, on backend "
-                ControllerBackend ".")
-
-    bindingOwners := Map()
-    duplicateBindings := []
-    for mappingKey, bindingValue in ControllerMap {
-        normalizedBinding := StrLower(Trim(bindingValue))
-        if (normalizedBinding = "" || normalizedBinding = "builtin:none")
-            continue
-        if bindingOwners.Has(normalizedBinding)
-            duplicateBindings.Push(bindingOwners[normalizedBinding] " + " mappingKey)
-        else
-            bindingOwners[normalizedBinding] := mappingKey
-    }
-    HealthResult(results, duplicateBindings.Length ? "warn" : "pass", "Controller mappings",
-        duplicateBindings.Length
-            ? "Shared actions: " JoinWith(duplicateBindings, ", ")
-            : "No duplicate mapped actions were found.")
+    ;
+    ; Detection stays HERE because ControllerReadState is the one part that
+    ; still differs per product: the companion tries a GameInput backend this
+    ; one does not offer, for the reason the Backend setting's own note gives.
+    ; The four rows it feeds -- Controller, Input backend, RawInput and
+    ; Controller mappings -- are the same in both products and are built in
+    ; SteamShell-Shared.ahk.
+    ;
+    ; The backend named there is the one that ANSWERED, recorded by
+    ; SetActiveBackend. This tree used to infer it from "is RawInput registered
+    ; and has it ever reported", which is a different question and answered
+    ; RawInput for a pad XInput was reading.
+    SharedControllerHealthRows(results, ControllerReadState(&state))
 
     rawLauncherCount := SettingsEditorParseExeList(LauncherCleanupLauncherExeListRaw).Length
     rawBackgroundCount := SettingsEditorParseExeList(LauncherCleanupBackgroundExeListRaw).Length
@@ -13972,7 +14101,24 @@ ShowSettingsEditor(*) {
     SettingsEditorAddActionButton(category, "Open Controller Mapping…", ShowControllerMappingWindow, 255, y + 5, 220)
     SettingsEditorAddActionButton(category, "Test / Calibrate Controller…", ShowControllerTest, 490, y + 5, 220)
     SettingsEditorAddActionButton(category, "Learn Controller…", ShowControllerLearner, 725, y + 5, 220)
-    autoMouseY := y + 48
+    ; A second row rather than a fourth button on the first. The three above are
+    ; 220 wide at 255, 490 and 725, which ends at 945 -- exactly the content
+    ; right edge -- so there is no fourth slot, and SharedAuditSettingsLayout
+    ; fails a control that crosses that boundary rather than letting it hang off
+    ; the window the way the two-plus-one layout used to.
+    ;
+    ; 43 px below the row above, the same gap that row keeps from the fields
+    ; below it, so a 30 px button clears both by 13.
+    ;
+    ; It sits under Learn Controller because it undoes exactly what Learn
+    ; Controller does. This product offers the learner in two places and offered
+    ; no way to undo it: a mis-learned axis reads as permanently deflected, the
+    ; pointer runs across the screen, and this is the Windows shell, so there is
+    ; no desktop to fall back to while you fix it. Also on Ctrl+Alt+Shift+D, for
+    ; the case where the pointer is exactly what you have lost.
+    SettingsEditorAddActionButton(category, "Delete Learned Profile",
+        DeleteControllerProfileForActiveDevice, 725, y + 48, 220)
+    autoMouseY := y + 91
     SettingsEditorAddExeListField(
         category, "Controller", "AutoMouseExeList",
         "Shell-mode automatic mouse allowlist", 255, autoMouseY, 335)
@@ -17797,6 +17943,19 @@ Hotkey("^!+s", (*) => ShowSettingsEditor())
 ; with. A keyboard is not always present either, but when one is, this is one
 ; keystroke instead of a restart.
 Hotkey("^!+i", RearmControllerInput)
+; The escape hatch for a bad learned controller profile, on the chord
+; SteamShell-Shared.ahk's own comment beside DeleteControllerProfileForActiveDevice
+; already states it is on. That function is defined in the shared file and
+; compiled into both products, and the companion bound it here and in its
+; Settings; this tree bound neither, so the only way to reach it was the
+; automatic rest-check prompt.
+;
+; It matters MORE here than in the companion. A mis-learned axis reads as
+; permanently deflected and the pointer runs across the screen, and this product
+; is the Windows shell -- there is no desktop, no taskbar and no other
+; application to fall back to. Both surfaces that CREATE such a profile, the
+; tray's "Learn Controller…" and the Settings button, are offered by this tree.
+Hotkey("^!+d", DeleteControllerProfileForActiveDevice)
 RegisterQuickMenuKeys()
 
 ; Registers for WM_INPUT and starts decoding HID reports. Safe to call whichever

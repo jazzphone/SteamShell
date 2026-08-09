@@ -3970,6 +3970,10 @@ Assert-BindingLabelTables -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-GameScoreWeightKeys -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-ElevatedHelperProtocol -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-ControllerPollFrame -ProjectRoot $projectRoot -Quiet:$Quiet
+Assert-ControllerSurfaceParity -ProjectRoot $projectRoot -Quiet:$Quiet
+Assert-AutoMouseDefaults -ProjectRoot $projectRoot -Quiet:$Quiet
+Assert-RecentApplicationPicker -ProjectRoot $projectRoot -Quiet:$Quiet
+Assert-CurrentApplicationTargets -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-ValidatorAssertionShapes -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-NoAmbiguousDeindentedBlocks -ProjectRoot $projectRoot -File "SteamShell.ahk" -Quiet:$Quiet
 Assert-NoAmbiguousDeindentedBlocks -ProjectRoot $projectRoot -File "SteamShell-Shared.ahk" -Quiet:$Quiet

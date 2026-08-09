@@ -103,6 +103,8 @@
 # ---------------------------------------------------------------------------
 AddInstallationRecordHealthRow
 AdjustRtssCustomFrameCap
+ApplicationPickerChoose
+ApplicationPickerClose
 ApplyDisplaySelection
 ApplyElevatedRtssFrameLimit
 ApplyElevatedRtssProfileFrameLimit
@@ -235,9 +237,19 @@ QuickMenuAccentPresetHex
 QuickMenuActivateShared
 QuickMenuAccentPresetNames
 QuickMenuAccentValueText
+QuickMenuAddCurrentAppTo
 QuickMenuAdjustSharedSetting
+QuickMenuAppTargetFromId
+QuickMenuAppTargetIds
+QuickMenuAppTargetLabel
+QuickMenuAppTargets
+QuickMenuAppTargetsFor
 QuickMenuApplyAccent
 QuickMenuConfirm
+QuickMenuCurrentAppBlockedReason
+QuickMenuCurrentAppExe
+QuickMenuCurrentAppSelectable
+QuickMenuCurrentAppValue
 QuickMenuCycleSharedSetting
 QuickMenuDestroyWindow
 QuickMenuDisplayReflow
@@ -288,6 +300,13 @@ ReadNumber
 ReadText
 RearmControllerInput
 ReassertTrayIcon
+RecentAppsAll
+RecentAppsExcluded
+RecentAppsGet
+RecentAppsIntervalMs
+RecentAppsMax
+RecentAppsRecord
+RecentAppsTick
 RefreshQuickMenuLayoutManager
 RecordShortcutCancel
 RefreshHealthCheck
@@ -323,6 +342,7 @@ SettingsEditorRepaint
 SettingsEditorSetRedraw
 SettingsEditorGetScrollTrackPosition
 SendSteamOverlayChord
+SetActiveBackend
 SetQuickMenuHdrState
 SetRtssFrameLimiterState
 SetRtssGlobalFrameLimit
@@ -336,12 +356,16 @@ SettingsRowLabel
 SettingsSelectChoiceByText
 SettingsSliderReadoutRegistry
 SettingsUpdateScrollBar
+SharedAppendExeToListSetting
+SharedControllerHealthRows
+SharedExeListContains
 SharedNotify
 SharedScoreGameCandidates
 SharedTaskSwitcherWindows
 SharedWindowInventoryBuild
 SharedWindowInventoryGet
 ShouldLogRateLimited
+ShowApplicationPicker
 ShowControllerLearner
 ShowNotification
 ShowHealthCheck

@@ -10,6 +10,8 @@
 ; Ctrl+Alt+Shift+S  Settings
 ; Ctrl+Alt+Shift+P  Settings (matches SteamShell 1.5's Control Panel shortcut)
 ; Ctrl+Alt+Shift+R  Reload settings
+; Ctrl+Alt+Shift+I  Re-arm controller input after a backend stall
+; Ctrl+Alt+Shift+D  Delete the learned controller profile for this device
 ; Ctrl+Alt+Shift+X  Exit companion
 ;
 ; While the Quick Menu is focused: arrows navigate, Left/Right adjust, Enter or
@@ -100,7 +102,7 @@ global EnablePersistentMouseMode := false
 ; the controller should be a mouse. Xbox FSE needs no exclusion because it is
 ; simply never on the list.
 global EnableAutoMouseMode := true
-global AutoMouseExeListRaw := "explorer.exe"
+global AutoMouseExeListRaw := DefaultAutoMouseExeList()
 global AutoMouseExeSet := Map()
 ; "auto" (default), "rawinput", "xinput", or "gameinput".
 ;
@@ -530,7 +532,7 @@ DefaultSettings() {
         "Controller", Map(
             "EnableControllerMouseMode", "true",
             "EnablePersistentMouseMode", "false",
-            "AutoMouseExeList", "explorer.exe",
+            "AutoMouseExeList", DefaultAutoMouseExeList(),
             "Backend", "auto",
             "DiagnosticLogging", "false",
             "RawInputProbe", "false",
@@ -1019,7 +1021,8 @@ LoadSettings() {
     ; Automatic mouse mode. Both gates must pass: the toggle allows the feature,
     ; the list decides where it applies.
     EnableAutoMouseMode := ReadBool(MovedSettingSection("Features", "Controller", "EnableAutoMouseMode"), "EnableAutoMouseMode", true)
-    AutoMouseExeListRaw := ReadText("Controller", "AutoMouseExeList", "explorer.exe")
+    AutoMouseExeListRaw := ReadText("Controller", "AutoMouseExeList",
+        DefaultAutoMouseExeList())
     AutoMouseExeSet := ProcessNameSetFromList(AutoMouseExeListRaw)
     ControllerBackend := StrLower(ReadText("Controller", "Backend", "auto"))
     if (ControllerBackend != "xinput" && ControllerBackend != "gameinput"
@@ -1180,6 +1183,11 @@ ApplyRuntimeTimers() {
         SetTimer(AssistHardKillLaunchers, 0)
         AssistPendingHardKillPids := Map()
     }
+    ; BEFORE the disabled return, deliberately. Disabling the companion stops it
+    ; ACTING; this only observes, and the tray still offers Open Settings while
+    ; disabled. Stopping the history here would empty the picker in precisely the
+    ; state somebody is in when they are working out what to configure.
+    SetTimer(RecentAppsTick, RecentAppsIntervalMs())
     if CompanionDisabled
         return
     SetTimer(PollController, ControllerPollIntervalMs)
@@ -1927,23 +1935,9 @@ ControllerReadState(&state) {
 ; throttle window. Suppressing it once cost a whole test cycle: the switch to
 ; GameInput happened seconds after startup, was throttled away, and the log
 ; gave no indication which backend produced the button readings that followed.
-SetActiveBackend(backend) {
-    global ActiveInputBackend
-    static lastLoggedBackend := ""
-    static lastLogTick := 0
-    static everLogged := Map()
-    if (ActiveInputBackend = backend)
-        return
-    ActiveInputBackend := backend
-    if (backend = lastLoggedBackend)
-        return
-    if (everLogged.Has(backend) && lastLogTick && A_TickCount - lastLogTick < 5000)
-        return
-    everLogged[backend] := true
-    lastLoggedBackend := backend
-    lastLogTick := A_TickCount
-    LogLine("Controller backend is now " backend ".")
-}
+; SetActiveBackend lives in SteamShell-Shared.ahk now, with the throttle and the
+; always-log-the-first-time rule intact. The shell needed the same answer for its
+; Health Check and had no way to record it.
 
 
 
@@ -3613,7 +3607,23 @@ QuickMenuGetRows() {
             rows.Push(MenuRow("shutdown", "Shut Down", "", "shutdown"))
             if EnableGameDetectionMenu
                 rows.Push(MenuRow("gameDetection", "Game Detection", "", "page:GAMESCORE"))
+            ; Beside Game Detection, not folded into it. That page is a read-only
+            ; explanation of what the scorer decided; this one WRITES settings.
+            rows.Push(MenuRow("currentApp", "Current Application",
+                QuickMenuCurrentAppValue(), "currentApp"))
             rows.Push(MenuRow("exitApp", "Exit Companion", "", "exitApp"))
+        ; The destinations are decided in SteamShell-Shared.ahk; only the row
+        ; shape is this tree's. Same split as GAMESCORE below.
+        case "CURRENTAPP":
+            rows.Push(MenuRow("back", "Back", "", "back"))
+            reason := QuickMenuCurrentAppBlockedReason()
+            if (reason != "") {
+                rows.Push(MenuRow("currentAppBlocked", reason, "", "none"))
+            } else {
+                for _, rowId in QuickMenuAppTargetIds("xfe")
+                    rows.Push(MenuRow(rowId,
+                        QuickMenuAppTargetLabel(rowId, "xfe"), "Add", rowId))
+            }
         ; Read-only. Every number was already computed to choose a game; this
         ; only shows the losers beside the winner.
         case "GAMESCORE":
@@ -4396,6 +4406,8 @@ QuickMenuValue(id) {
     }
     if (SubStr(id, 1, 10) = "gamescore:")
         return QuickMenuGameScoreValue(id)
+    if (id = "currentApp")
+        return QuickMenuCurrentAppValue()
 
     switch id {
         case "audioMenu": return GetAudioSummary()
@@ -4675,7 +4687,35 @@ QuickMenuActivateSelected() {
         ActivateSwitchableWindow(Round(SubStr(action, 12) + 0))
         return
     }
+    ; The destination rows on CURRENTAPP. The write, the duplicate check and the
+    ; refusal all live in SteamShell-Shared.ahk, so this tree names the product
+    ; and nothing else.
+    if (SubStr(action, 1, 11) = "currentapp:") {
+        QuickMenuAddCurrentAppTo(action, "xfe")
+        QuickMenuRefresh()
+        return
+    }
 
+    ; An adjustable row STEPS FORWARD on A, exactly as Right does; only a
+    ; two-state row flips. Ordered the same way as QuickMenuAdjustSelected
+    ; below, so the two entry points cannot disagree about what a row is.
+    ;
+    ; Without the first step, the four adjustable rows -- Quick Menu Accent,
+    ; Controller Mouse Speed, Cursor Hide Delay and Preset Frame Cap -- reached
+    ; QuickMenuToggleSetting, which answers only to qPersistentMouse, the cycle
+    ; settings and QuickMenuToggleTable. None of those four is any of them, so
+    ; the call returned early and the row rendered, selected and did nothing.
+    ; Standalone has always stepped them, through IsQuickMenuAdjustSetting over
+    ; the same four ids and the same shared QuickMenuAdjustSharedSetting.
+    ;
+    ; QUICKMENU_ROWS.txt could not see this: these rows are built by
+    ; QuickMenuSettingsRows as "toggle:<id>", which is a FAMILY id, and the
+    ; inventory deliberately does not list families one by one.
+    if (SubStr(action, 1, 7) = "toggle:"
+        && QuickMenuAdjustSharedSetting(SubStr(action, 8), 1)) {
+        QuickMenuRefresh()
+        return
+    }
     if (SubStr(action, 1, 7) = "toggle:") {
         QuickMenuToggleSetting(SubStr(action, 8),
             QuickMenuRows[QuickMenuSelected]["label"])
@@ -4690,6 +4730,21 @@ QuickMenuActivateSelected() {
             return
         case "taskNext":
             ChangeQuickMenuTaskPage(1)
+            return
+        ; A `case` and not an `if`, deliberately. Assert-QuickMenuRows reads the
+        ; CASE LABELS of this function to decide whether a row's action reaches a
+        ; handler, so a row handled by an if-block reads to it as a row that does
+        ; nothing -- which is the exact failure that check exists to catch.
+        case "currentApp":
+            ; Nothing to offer, and the row already says why. Opening a page of
+            ; destinations that would all refuse is worse than not opening one.
+            if !QuickMenuCurrentAppSelectable() {
+                ShowNotification(QuickMenuCurrentAppBlockedReason(), "Warning")
+                return
+            }
+            QuickMenuPage := "CURRENTAPP"
+            QuickMenuSelected := 1
+            QuickMenuBuildGui()
             return
     }
     ; Actions both products implement identically.
@@ -5104,11 +5159,14 @@ ShowSettings(*) {
     ; page and the shell's cannot describe the same settings differently.
     SettingsAddRowsForCategory(settings, category, "xfe", &y)
     SettingsAddTextField(settings, category, "Controller", "AutoMouseExeList",
-        "Automatic mouse applications (pipe-separated)", &y, "explorer.exe")
+        "Automatic mouse applications (pipe-separated)", &y,
+        DefaultAutoMouseExeList())
     SettingsAddNote(settings, category,
         "The controller acts as a mouse in these applications without holding "
         . "View/Back. Leave Xbox FSE off the list: it is controller-driven and "
         . "a pointer inside it gets in the way.", &y, 40)
+    SettingsAddButtonRow(settings, category, [
+        ["Add Recent Application...", XfeAddRecentAutoMouseApp]], &y)
     SettingsAddButtonRow(settings, category, [
         ["Controller Mappings...", ShowMappingEditor],
         ["Learn Controller...", ShowControllerLearner],
@@ -5296,9 +5354,10 @@ SettingsFirstRowY() {
 
 ; Records the control against its category AND its original geometry.
 ;
-; Every control reaches this function -- SettingsRegisterField calls it too -- so
-; it is the one choke point where positions can be captured without a builder
-; being able to forget. "scrollable" separates page content from the fixed frame
+; Every control reaches this function -- the shared row builders through
+; SettingsProductTrackControl, the hand-placed ones directly -- so it is the one
+; choke point where positions can be captured without a builder being able to
+; forget. "scrollable" separates page content from the fixed frame
 ; (title, description, category list, footer), which must never move.
 SettingsTrackControl(category, control) {
     global SettingsCategoryControls, SettingsControlPositions
@@ -5482,13 +5541,6 @@ SettingsReportLayoutAudit() {
         SettingsAuditLayout(), SettingsShowLayoutWarning)
 }
 
-SettingsRegisterField(category, key, control, eventName := "Change") {
-    global SettingsFields
-    SettingsFields[key] := control
-    SettingsTrackControl(category, control)
-    control.OnEvent(eventName, SettingsMarkDirty)
-}
-
 ; ------------------------------------------------------------------------------
 ; Flowing row builders
 ; ------------------------------------------------------------------------------
@@ -5631,6 +5683,41 @@ SetFieldText(key, value) {
     global SettingsFields
     if SettingsFields.Has(key)
         try SettingsFields[key].Text := value
+}
+
+; Appends a recently used application to a pipe-separated exe-list field.
+;
+; This tree has no ListView exe editor -- its lists are a single edit control
+; holding "a.exe|b.exe" -- so the shared picker's answer is appended as text
+; rather than added as a row. That is the whole reason ShowApplicationPicker
+; hands the choice to a CALLBACK instead of returning it: the shell inserts a
+; ListView row, this appends to a string, and the picker has to know neither.
+;
+; Reads the CONTROL rather than the saved setting, so choosing twice before
+; saving adds two applications rather than the second replacing the first.
+XfeAppendRecentExeToField(key, exe) {
+    exe := StrLower(Trim(exe))
+    if (exe = "")
+        return
+    current := Trim(GetFieldText(key, ""))
+    ; ProcessNameSetFromList and not the shell's ParseExeListPipe: this is the
+    ; parser this tree uses to build the live set from this very field, so the
+    ; duplicate check answers the same question the product will ask of the value
+    ; after it is saved. The shell's parser also strips inline comments and
+    ; appends a missing ".exe", which are not this field's rules.
+    if ProcessNameSetFromList(current).Has(exe) {
+        SettingsUpdateStatus(exe " is already in that list.")
+        return
+    }
+    SetFieldText(key, current = "" ? exe : current "|" exe)
+    SettingsMarkDirty()
+    SettingsUpdateStatus("Added " exe ". Save to keep it.")
+}
+
+XfeAddRecentAutoMouseApp(*) {
+    ShowApplicationPicker(
+        "Add a recently used application to the automatic mouse list.",
+        XfeAppendRecentExeToField.Bind("Controller.AutoMouseExeList"))
 }
 
 ; A text field with a Browse button, for a path. Wider than a plain edit row
@@ -5803,7 +5890,7 @@ SettingsCategoryCount() {
 SettingsCompanionFieldSpecs() {
     static specs := [
         Map("section", "Controller", "key", "AutoMouseExeList",
-            "type", "edit", "default", "explorer.exe")
+            "type", "edit", "default", DefaultAutoMouseExeList())
     ]
     return specs
 }
@@ -6363,28 +6450,14 @@ ProductHealthResults() {
 
     AddInstallationRecordHealthRow(results, A_ScriptDir, A_ScriptDir, "Portable")
 
+    ; Controller, Input backend and RawInput are the same three rows in both
+    ; products and are built in SteamShell-Shared.ahk. Detection stays here
+    ; because ControllerReadState is the part that still differs -- this tree
+    ; tries GameInput in between, and the shell deliberately does not offer it.
     controller := Buffer(16, 0)
-    if ControllerReadState(&controller) {
-        HealthResult(results, "PASS", "Controller",
-            ActiveInputBackend = "rawinput"
-                ? "Reading through RawInput, which works inside Xbox FSE."
-                : (ActiveInputBackend = "gameinput"
-                    ? "Reading through GameInput."
-                    : "Detected at XInput slot " ActiveControllerIndex "."))
-    } else {
-        HealthResult(results, "WARN", "Controller",
-            "No controller detected on any backend.")
-    }
-    HealthResult(results, "INFO", "Input backend",
-        "Setting: " ControllerBackend ". Active: " ActiveInputBackend ".")
-    HealthResult(results,
-        !RawInputProbeActive ? "INFO" : (RawInputLastReportTick ? "PASS" : "INFO"),
-        "RawInput",
-        !RawInputProbeActive
-            ? "Not registered."
-            : (RawInputLastReportTick
-                ? "Registered and receiving HID reports."
-                : "Registered, no reports yet. Expected outside Xbox FSE."))
+    SharedControllerHealthRows(results, ControllerReadState(&controller))
+    ; The companion's own fourth row. GameInput exists in this product only, so
+    ; the shared builder does not describe it.
     HealthResult(results,
         GameInputReady ? "PASS" : (GameInputFailed ? "WARN" : "INFO"),
         "GameInput",

@@ -52,6 +52,7 @@ in a temporary copy and replace the live INI only after every change succeeds.
 - Ctrl+Alt+Shift+Q : Open the controller-first Quick Menu
 - Ctrl+Alt+Shift+S : Open the persistent Settings editor
 - Ctrl+Alt+Shift+I : Re-arm controller input (recovery and diagnosis after sleep)
+- Ctrl+Alt+Shift+D : Delete the learned controller profile (recovery from a bad one)
 
 ## Controller shortcuts
 
@@ -163,8 +164,20 @@ hold and never triggers it either; only the physical button counts.
 ### Automatic mouse mode
 
 `[Controller] AutoMouseExeList` names executables where those same mappings apply **without holding View/Back**.
-Settings ▸ Controller & Cursor ▸ **Automatic mouse mode for these EXEs** edits the list; it contains
-`explorer.exe` by default so Windows shell surfaces work without holding View/Back.
+Settings ▸ Controller & Cursor ▸ **Automatic mouse mode for these EXEs** edits the list.
+
+Both products ship the same default list:
+`explorer.exe|brave.exe|chrome.exe|msedge.exe|firefox.exe|notepad.exe|taskmgr.exe`
+— the Windows shell surfaces, the four browsers most likely to be installed, and
+the two utilities a sofa user is most likely to need. `DesktopAutoMouseExcludeExeList`
+ships **empty**. It previously shipped `brave.exe`, which is the opposite list: it
+turned automatic mouse *off* for Brave in desktop mode while never turning it on
+in shell mode, so a browser was the one place the pointer did not work.
+
+Windows Settings is deliberately absent, and cannot be added by name at all:
+`ms-settings:` opens a window owned by `ApplicationFrameHost.exe`, so
+`SystemSettings.exe` never matches a foreground lookup. Control Panel is absent
+because it is an Explorer window and `explorer.exe` already covers it.
 
 `[Features] EnableAutoMouseMode` (Settings ▸ Controller & Cursor ▸ **Enable
 automatic mouse mode (master switch)**) is a separate switch, on by default. It
@@ -214,6 +227,79 @@ the tray disables automatic mouse throughout desktop mode; it does not erase the
 allowlist or exclusion list. Enabling it also enables the master automatic-mouse
 switch if that prerequisite was off, so a checked tray item always means the
 feature is genuinely active.
+
+## Naming an application without typing it
+
+Every list above is a list of executable names, and every one of them used to be
+filled in the same way: know what the process is called, then type it. On a
+machine being driven from a sofa that is the step that does not happen, so the
+lists stay empty and the features that read them look like they do not work.
+
+Two answers, deliberately kept separate, because they answer different questions.
+
+### Recent… — what you were using
+
+A picker of the last **five** applications you had in the foreground, most recent
+first, one row per executable however many windows it had, with the last window
+title beside the name so `brave.exe` is recognisable as the thing you were
+reading.
+
+- **Shell:** every executable-list field in Settings now has three buttons —
+  **Browse… / Recent… / Remove** — where it had two. Also **AlwaysFocus Manager ▸
+  Add Recent App…**.
+- **Companion:** Settings ▸ Controller & Cursor ▸ **Add Recent Application…**,
+  which appends to the automatic-mouse list.
+
+The history is sampled on its own one-second timer rather than from either tree's
+foreground observer, because the shell's observer runs inside the window-engine
+tick and that stops in desktop mode — the history would have been silently empty
+in one mode of one product, which is worse than having none.
+
+It is held **in memory and never written to disk**. It lasts as long as the
+process, which for a shell is the whole login session; persisting it would mean an
+INI that grows, a pruning rule, and a record of every application the user has
+opened sitting inside a diagnostic bundle they were asked to send to somebody.
+
+The point of a history rather than a live window list is the applications you have
+**closed**: those are exactly the ones whose executable name you no longer have any
+way to look up.
+
+Excluded from it: SteamShell's own windows, the desktop, taskbar, Start, Search,
+the touch keyboard, the lock screen — things Windows shows rather than things a
+user ran — and everything hosted by `ApplicationFrameHost.exe`.
+
+### Current Application — what you are looking at now
+
+Quick Menu ▸ System ▸ **Current Application**, in both products. The row's value is
+the executable that was in front when the menu opened; selecting it lists the
+executable lists that application can be added to, and choosing one writes it,
+logs the section and key, and notifies. A second visit shows **(already added)**
+beside a destination it is already on.
+
+| Destination | Setting | Shell | Companion |
+|---|---|:---:|:---:|
+| Automatic Mouse | `[Controller] AutoMouseExeList` | Yes | Yes |
+| Always In Focus | `[AlwaysFocus] ExeList` | Yes | — |
+| Protect From Cleanup | `[LauncherCleanup] ExcludeExeList` | Yes | — |
+| Protect From Cleanup | `[Assist] ProtectedProcesses` | — | Yes |
+| Exclude From Desktop Mouse | `[Controller] DesktopAutoMouseExcludeExeList` | Yes | — |
+
+The two "protect from cleanup" rows are one destination under two spellings: each
+product has always stored that list in its own place, and inventing a third
+location to make the table shorter would break both products' existing settings.
+
+This works in the Quick Menu and cannot work in Settings, for the same reason:
+both trees snapshot the previous foreground window before the menu takes it, and
+Settings has no equivalent moment.
+
+**A Store app is refused, out loud.** With Windows Settings, Photos or Calculator
+in front the row reads *"Store app — cannot be added by name"* and will not open
+the destination page. A packaged app's visible window belongs to
+`ApplicationFrameHost.exe`, so adding it by name would write one entry that
+silently matches Settings, Photos, Calculator, the Store and everything else of
+that shape. The picker above handles the same case by filtering the frame host out
+of its history; here the user is pointing *at* the window, so filtering would look
+like the feature being broken and it says so instead.
 
 ## Two products, one installer
 
@@ -752,6 +838,14 @@ as `<settings>-Controllers.ini`, keyed by VID/PID, and are validated against the
 saved report length before use. The wizard is reachable from Settings and from
 the notification-area menu — deliberately both, because the user who needs it is
 the one whose controller does not work yet.
+
+Its undo is reachable from all three: **Settings → Controller & Cursor → Delete
+Learned Profile**, the notification-area menu, and `Ctrl+Alt+Shift+D`. Three
+routes because a profile that learned an axis wrongly does not simply fail to
+help — it reads as a stick held over, so the pointer runs off the screen and the
+controller becomes the thing you cannot use to reach the fix. The keyboard chord
+is the one that works when the pointer has already gone. Deleting restores the
+built-in layout and reloads.
 
 The wizard speaks plainly — "Got it — the A button. Let go." rather than the
 byte and bit it matched. The byte, mask and neutral value still go to the log,

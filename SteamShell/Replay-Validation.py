@@ -179,6 +179,44 @@ def strip_code_noise(text):
     return "\n".join(strip_comments(line) for line in text.split("\n"))
 
 
+def read_shared_seam(ps_text):
+    """The $sharedSeamAllowed names and the count asserted beside them.
+
+    ONE parser for both readers below, and bounded by the NAME that follows the
+    list rather than by a closing parenthesis.
+
+    `@\\((.*?)\\)` stops at the first ")" in the block, which for as long as the
+    comments in that list happened to contain none read the whole thing. Adding
+    a comment that illustrates a callback seam --
+
+        OnEvent("Click", ExportDiagnosticBundle)
+
+    -- silently truncated the list to its first two entries, and every name
+    after the truncation was then reported as an unlisted seam leak. Eighteen
+    failures from a comment. $sharedSeamExpectedCount is the real terminator and
+    cannot appear inside the list, so it is what bounds the scan.
+
+    ANCHORED TO COLUMN ZERO, because the comment above the list quotes both
+    spellings verbatim -- "keep the literal `$sharedSeamAllowed = @(` and
+    `$sharedSeamExpectedCount = N` spellings" -- and an unanchored search finds
+    the COMMENT first. That match only ever looked right because the real list
+    happened to contain no ")" for the old pattern to stop at; the assignment is
+    the only one of the two at column zero, so that is what is matched.
+
+    Returns (names, expected) with names lowercased; expected is None when the
+    literal is absent.
+    """
+    block = re.search(
+        r"(?m)^\$sharedSeamAllowed = @\((.*?)^\$sharedSeamExpectedCount",
+        ps_text, re.S)
+    if not block:
+        return set(), None
+    body = re.sub(r"(?m)^\s*#.*$", "", block.group(1))
+    names = {n.lower() for n in re.findall(r'"([A-Za-z_]\w*)"', body)}
+    expected = re.search(r"(?m)^\$sharedSeamExpectedCount = (\d+)", ps_text)
+    return names, (int(expected.group(1)) if expected else None)
+
+
 def function_list(text):
     """Every top-level definition, in order, as (name, line, body).
 
@@ -457,7 +495,8 @@ def switch_case_labels(body):
 # Row ids whose behaviour is reached through a prefix rather than a case label.
 # Each is checked with SubStr in the resolver, so the literal id never appears
 # as a `case`.
-ROW_ID_FAMILIES = ("layout:", "taskWindow:", "gamescore:", "toggle:", "page:")
+ROW_ID_FAMILIES = ("layout:", "taskWindow:", "gamescore:", "toggle:", "page:",
+                   "currentapp:")
 
 
 def read_quickmenu_manifest():
@@ -2055,21 +2094,39 @@ def main():
     shared_defs = set(maps["SteamShell-Shared.ahk"])
     tree_defs = (set(maps["SteamShell.ahk"]) | set(maps["SteamShell-XFE.ahk"])
                  | set(maps["SteamShell-Helper.ahk"]))
+    # CALLS AND CALLBACKS, matching Assert-SharedParity.
+    #
+    # This counted `Name(` only, so the four seams Shared reaches as bare
+    # references -- ExportDiagnosticBundle and the three SettingsProduct*
+    # handlers passed to OnEvent -- were absent from the derived seam and
+    # therefore reported as STALE entries the moment the PowerShell list grew to
+    # admit them. Deriving one way here and enforcing another way there is the
+    # drift this file's header warns about; both sides read both forms now.
+    shared_code = strip_code_noise(sources["SteamShell-Shared.ahk"])
     shared_calls = set()
-    for line in strip_code_noise(sources["SteamShell-Shared.ahk"]).split("\n"):
-        for m in re.finditer(r"(?<![.\w])([A-Za-z_]\w*)\s*\(", line):
-            shared_calls.add(m.group(1).lower())
+    for m in re.finditer(r"(?<![.\w])([A-Za-z_]\w*)\s*\(", shared_code):
+        shared_calls.add(m.group(1).lower())
+    for m in re.finditer(r"(?<![.\w$])([A-Za-z_]\w*)(?![\w(])", shared_code):
+        shared_calls.add(m.group(1).lower())
     actual_seam = (shared_calls & tree_defs) - shared_defs - set(maps["SteamShell-Common.ahk"])
+    # A bare word that is ASSIGNED in the shared file is an ordinary local that
+    # happens to share a name with a tree function -- AutoHotkey identifiers are
+    # case-insensitive -- not a callback. Tested only against the handful of
+    # names that survive the intersection above; testing every identifier
+    # against a 440 KB source is minutes of regex for the same answer.
+    actual_seam = {
+        name for name in actual_seam
+        if not re.search(r"(?<![.\w])" + re.escape(name) + r"\s*(?::=|\+=|-=|\.=)",
+                         shared_code, re.I)}
     ps = (ROOT / "Validate-Common.ps1").read_text(encoding="utf-8", errors="replace")
-    block = re.search(r"\$sharedSeamAllowed = @\((.*?)\)", ps, re.S)
-    if block:
-        listed = {n.lower() for n in re.findall(r'"([A-Za-z_]\w*)"', block.group(1))}
+    listed, _expected = read_shared_seam(ps)
+    if listed:
         for extra in sorted(listed - actual_seam):
             fail(f"$sharedSeamAllowed in Validate-Common.ps1 lists '{extra}', which "
-                 "SteamShell-Shared.ahk no longer calls out to. The entry asserts it is "
-                 "defined in both trees; remove it.")
+                 "SteamShell-Shared.ahk no longer reaches out to. The entry asserts it "
+                 "is defined in both trees; remove it.")
         for missing in sorted(actual_seam - listed):
-            fail(f"SteamShell-Shared.ahk calls '{missing}' in a tree, and "
+            fail(f"SteamShell-Shared.ahk reaches '{missing}' in a tree, and "
                  "$sharedSeamAllowed does not list it. Widening the seam is meant to be "
                  "a decision somebody makes.")
 
@@ -2129,16 +2186,11 @@ def main():
     # those functions differ by design; making them declare it a second time here
     # is how the counts in this project keep going wrong.
     ps_gate = (ROOT / "Validate-Common.ps1").read_text(encoding="utf-8", errors="replace")
-    seam_block = re.search(r"\$sharedSeamAllowed = @\((.*?)\)\n", ps_gate, re.S)
-    seam_exempt = set()
-    if seam_block:
-        body = re.sub(r"#.*", "", seam_block.group(1))
-        seam_exempt = {n.lower() for n in re.findall(r'"([A-Za-z_]\w*)"', body)}
-        expected = re.search(r"\$sharedSeamExpectedCount = (\d+)", ps_gate)
-        if expected and len(seam_exempt) != int(expected.group(1)):
-            fail(f"The shared seam has {len(seam_exempt)} entries but "
-                 f"$sharedSeamExpectedCount says {expected.group(1)}. Update the "
-                 "expectation in the same commit that changes the list.")
+    seam_exempt, expected = read_shared_seam(ps_gate)
+    if seam_exempt and expected is not None and len(seam_exempt) != expected:
+        fail(f"The shared seam has {len(seam_exempt)} entries but "
+             f"$sharedSeamExpectedCount says {expected}. Update the "
+             "expectation in the same commit that changes the list.")
 
     flagged = []
     for name in sorted(set(a) & set(b)):

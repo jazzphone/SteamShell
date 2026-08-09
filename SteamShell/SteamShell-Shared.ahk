@@ -50,9 +50,15 @@
 ; look instead of guessing.
 ;
 ; SharedNotify was on that three-name list as something "each tree MUST define".
-; It is defined HERE, and neither tree defines it. The trees each have a
-; one-line alias -- ShowNotification in standalone, SetStatus in the companion --
-; which is why the mistake read as true for as long as it did.
+; It is defined HERE, and neither tree defines it. The trees USED to reach it
+; through a one-line alias each -- ShowNotification in standalone, SetStatus in
+; the companion -- which is why the mistake read as true for as long as it did.
+;
+; Both aliases are gone. ShowNotification is defined in this file and called by
+; both trees; nothing named SetStatus exists any more. This paragraph said
+; otherwise for long enough that a caller was written against SetStatus and did
+; not resolve -- the third time a sentence in one of these headers has described
+; a shape the code had already left.
 ;
 ; The two seam functions worth understanding rather than looking up:
 ;
@@ -2939,11 +2945,363 @@ LogGameCandidateTable(candidates, rejects, headerNote) {
 ; One row. Kept as the shell wrote it -- push onto a passed array rather than
 ; return a Map -- because 40-odd call sites already read that way and changing
 ; the shape to suit a second caller would be the tail wagging the dog.
+; ==============================================================================
+; RECENTLY USED APPLICATIONS
+; ==============================================================================
+; The applications the user has actually had in front, most recent first.
+;
+; WHY A HISTORY AND NOT A LIVE LIST. Every exe-list setting in both products is
+; edited from the Settings window, and by the time that window is open SETTINGS
+; IS THE FOREGROUND APPLICATION. "What is in front right now" is therefore always
+; the wrong answer to "which application did you mean" -- the app the user wants
+; to name stopped being current the moment they went looking for the setting.
+; The AlwaysFocus Manager's existing picker reads live and has exactly this
+; problem; it works only because that window is opened while the target is still
+; running, and it still cannot offer something closed five minutes ago.
+;
+; Sampled on its OWN timer rather than from either tree's foreground observer.
+; The companion has ObserveForeground and the shell has
+; ObserveForegroundForMouseParking, but the shell's runs inside WindowEngineTick,
+; which stops in desktop mode -- so the history would be silently empty in one
+; mode of one product. A history with a hole in it is worse than no history,
+; because nothing about it looks broken.
+;
+; In memory, deliberately not persisted. It survives as long as the process,
+; which for a shell is the whole login session, and that covers the case this
+; exists for. Writing it down would mean an INI that grows, a pruning rule, and a
+; record of every application the user has opened sitting inside a diagnostic
+; bundle they are asked to send to somebody.
+
+; How many entries the picker offers.
+RecentAppsMax() {
+    return 5
+}
+
+; One second. Fast enough that an application the user alt-tabbed through is
+; caught, slow enough to be free: the tick reads ONE window, not an inventory --
+; a foreground handle, its PID, class and title -- against the 500 ms sweep of
+; the whole desktop that the window engine already runs.
+;
+; A function rather than a global for the same reason RecentAppsMax is one:
+; neither tree has to declare it, so neither can declare it differently.
+RecentAppsIntervalMs() {
+    return 1000
+}
+
+; The store.
+;
+; A static here rather than a global, for the same reason SharedWindowInventoryGet
+; keeps its cache in one: this is shared-file state with no per-tree meaning, and
+; a global would have to be declared in both trees to satisfy the parity check.
+; Arrays are by reference, so the recorder mutates what this returns.
+RecentAppsAll() {
+    static list := []
+    return list
+}
+
+; Everything that is a window but not an APPLICATION the user chose to use.
+;
+; ApplicationFrameHost.exe is excluded, which excludes every windowed Store app
+; with it. That is deliberate and it is the same decision the shipped
+; automatic-mouse allowlist records: a UWP app's visible window belongs to the
+; frame host, so offering it here would put `applicationframehost.exe` into an
+; exe list -- one entry that silently matches Settings, Photos, Calculator, the
+; Store and everything else of that shape. A picker makes that one click instead
+; of a deliberate typo, so the entry it would produce is kept out of reach until
+; the hosted process behind the frame can be resolved properly.
+RecentAppsExcluded(exe, windowClass) {
+    static excludedExe := Map(
+        "", true,
+        ; The UWP frame host. See above.
+        "applicationframehost.exe", true,
+        ; Shell surfaces, not applications: Start, Search, the touch keyboard
+        ; and the lock screen are things Windows shows, not things a user ran.
+        "searchhost.exe", true,
+        "searchui.exe", true,
+        "startmenuexperiencehost.exe", true,
+        "shellexperiencehost.exe", true,
+        "textinputhost.exe", true,
+        "lockapp.exe", true)
+    static excludedClass := Map(
+        "progman", true, "workerw", true,
+        "shell_traywnd", true, "shell_secondarytraywnd", true,
+        "windowsdashboard", true)
+    return excludedExe.Has(exe) || excludedClass.Has(windowClass)
+}
+
+; Records one application, most recent first, deduped by executable.
+;
+; Deduped by EXE and not by window: the lists this feeds name executables, so a
+; browser with six windows is one entry. The title is refreshed on each sighting
+; so the row shows what the user last saw rather than the first thing that
+; application happened to be called.
+RecentAppsRecord(exe, title) {
+    if (exe = "")
+        return
+    list := RecentAppsAll()
+    index := 0
+    for position, item in list {
+        if (item["exe"] = exe) {
+            index := position
+            break
+        }
+    }
+    if index
+        list.RemoveAt(index)
+    list.InsertAt(1, Map("exe", exe, "title", title != "" ? title : exe))
+    while (list.Length > RecentAppsMax())
+        list.RemoveAt(list.Length)
+}
+
+; A copy, so a caller iterating the picker cannot reorder the history under the
+; timer that maintains it.
+RecentAppsGet() {
+    return RecentAppsAll().Clone()
+}
+
+RecentAppsTick() {
+    global ScriptPid
+    hwnd := 0
+    try hwnd := WinExist("A")
+    if !hwnd
+        return
+    exe := ""
+    windowClass := ""
+    title := ""
+    try {
+        ; Our own Settings window is the single most common foreground while
+        ; this list is being read. Recording it would push a real entry out of a
+        ; five-deep history every time somebody opened Settings.
+        if (WinGetPID("ahk_id " hwnd) = ScriptPid)
+            return
+        exe := StrLower(WinGetProcessName("ahk_id " hwnd))
+        windowClass := StrLower(WinGetClass("ahk_id " hwnd))
+        title := WinGetTitle("ahk_id " hwnd)
+    } catch {
+        return
+    }
+    if RecentAppsExcluded(exe, windowClass)
+        return
+    RecentAppsRecord(exe, title)
+}
+
+; Choose one recently used application, and hand its executable to the caller.
+;
+; CALLBACK, NOT A RETURN VALUE. AutoHotkey GUIs are not modal, so a picker that
+; returned a choice would have to spin waiting for its own window to close --
+; inside a Settings window that is itself driving timers. The caller supplies
+; what to do with the answer instead, which is also what lets the two products
+; share this at all: the shell adds a row to a ListView field, the companion
+; appends to a pipe-separated edit, and neither shape has to be known here.
+;
+; Each call owns its own window, held in a LOCAL that the two nested handlers
+; close over. Deliberately not a static or a global: a nested function assigning
+; to an enclosing function's static is the one piece of AutoHotkey scoping here
+; that could not be settled by reading, and the guard it would buy -- stopping a
+; second dialog if somebody clicks the button twice -- is worth less than being
+; sure the first one closes.
+ShowApplicationPicker(promptText, onChosen) {
+    recent := RecentAppsGet()
+
+    pickerGui := Gui("+AlwaysOnTop +ToolWindow", "Choose an application")
+    pickerGui.SetFont("s10", "Segoe UI")
+    pickerGui.AddText("xm ym w520", promptText)
+    ; The history is short by design, so the list is sized to it rather than
+    ; scrolling: RecentAppsMax rows, plus one so an empty list still has a row
+    ; to put its explanation in.
+    listView := pickerGui.AddListView(
+        "xm y+8 w520 r" (RecentAppsMax() + 1) " -Multi", ["Application", "Last window title"])
+    for _, item in recent
+        listView.Add("", item["exe"], item["title"])
+    if (recent.Length = 0) {
+        ; Not an error, and said as such. A freshly started shell has no history
+        ; yet, and "nothing here" with no reason reads as a broken dialog.
+        listView.Add("", "(nothing yet)",
+            "Applications appear here once you have used them.")
+    }
+    listView.ModifyCol(1, 160)
+    listView.ModifyCol(2, 340)
+    if (recent.Length > 0)
+        listView.Modify(1, "Select Focus")
+
+    ; Fat-arrow closures over two top-level helpers, which is how every other
+    ; GUI in these files wires an event.
+    ;
+    ; A NAMED NESTED FUNCTION would read better and cannot be used. Nested
+    ; functions are legitimate callbacks in AutoHotkey, but the shell validator's
+    ; named-callback rule resolves a bare handler name against top-level
+    ; definitions and the enclosing function's parameters, so a nested name reads
+    ; to it as a handler that resolves to nothing -- which is the exact bug that
+    ; rule exists to catch, and it caught this. An arrow is not a bare name, so
+    ; it is checked at the call inside it instead.
+    ;
+    ; That rule scans the source WITH ITS COMMENTS, so the handler-wiring syntax
+    ; is described here rather than quoted: writing it out named a callback that
+    ; does not exist and failed the build a second time.
+    hasEntries := recent.Length > 0
+    listView.OnEvent("DoubleClick",
+        (*) => ApplicationPickerChoose(pickerGui, listView, hasEntries, onChosen))
+    addButton := pickerGui.AddButton("xm y+10 w150 h30 Default", "Add")
+    addButton.OnEvent("Click",
+        (*) => ApplicationPickerChoose(pickerGui, listView, hasEntries, onChosen))
+    cancelButton := pickerGui.AddButton("x+10 yp w150 h30", "Cancel")
+    cancelButton.OnEvent("Click", (*) => ApplicationPickerClose(pickerGui))
+    pickerGui.OnEvent("Close", (*) => ApplicationPickerClose(pickerGui))
+    pickerGui.OnEvent("Escape", (*) => ApplicationPickerClose(pickerGui))
+    ; Shown before centring: both products' ProductCenterGui centre at whatever
+    ; size the window already is, and a window that has never been shown has none.
+    pickerGui.Show()
+    ProductCenterGui(pickerGui)
+}
+
+; Hands the selected executable to whoever opened the picker.
+;
+; The window is destroyed BEFORE the callback runs, so a callback that opens
+; something of its own is not fighting this dialog for the foreground.
+ApplicationPickerChoose(pickerGui, listView, hasEntries, onChosen) {
+    if !hasEntries
+        return
+    row := listView.GetNext()
+    if !row
+        return
+    exe := listView.GetText(row, 1)
+    try pickerGui.Destroy()
+    onChosen(exe)
+}
+
+ApplicationPickerClose(pickerGui) {
+    try pickerGui.Destroy()
+}
+
 HealthResult(results, status, checkName, detail) {
     results.Push(Map(
         "status", StrUpper(status),
         "name", checkName,
         "detail", detail))
+}
+
+; Records which backend answered, and says so in the log the first time each one
+; does.
+;
+; The poll runs every ~16 ms, so repeat changes are throttled to keep a flapping
+; backend from burying the button diagnostics.
+;
+; The FIRST time each backend becomes active is always logged, even inside the
+; throttle window. Suppressing it once cost a whole test cycle: the switch to
+; GameInput happened seconds after startup, was throttled away, and the log gave
+; no indication which backend produced the button readings that followed.
+;
+; Shared because "which backend is answering" is the same question in both
+; products, and the shell could not answer it at all: it selected a backend the
+; same way and then threw the answer away, so its log and its Health Check could
+; only report the SETTING. DIVERGENT_FUNCTIONS.txt names this function as one of
+; the four things ControllerReadState needs in both trees before it can be shared
+; outright; the other three are the GameInput backend itself, which stays the
+; companion's until somebody can put hardware behind it.
+SetActiveBackend(backend) {
+    global ActiveInputBackend
+    static lastLoggedBackend := ""
+    static lastLogTick := 0
+    static everLogged := Map()
+    if (ActiveInputBackend = backend)
+        return
+    ActiveInputBackend := backend
+    if (backend = lastLoggedBackend)
+        return
+    if (everLogged.Has(backend) && lastLogTick && A_TickCount - lastLogTick < 5000)
+        return
+    everLogged[backend] := true
+    lastLoggedBackend := backend
+    lastLogTick := A_TickCount
+    LogLine("Controller backend is now " backend ".")
+}
+
+; The four controller rows every product can answer, in one place.
+;
+; THE UNION OF WHAT THE TWO REPORTS HAD, not a copy of either. Each product knew
+; something the other did not, and neither gap was visible from inside one tree:
+;
+;   - the companion RECORDED which backend answered and reported it; the shell
+;     INFERRED it from "is RawInput registered and has it ever reported", which
+;     is a different question and answers "RawInput" for a pad XInput is actually
+;     reading. It now reports the recorded answer, through SetActiveBackend;
+;   - the shell reported the slot that ANSWERED alongside the one configured,
+;     which is the gap slot discovery exists to close; the companion printed the
+;     raw index and never mentioned the configured one;
+;   - the shell checked the mapping table for two actions bound to one input; the
+;     companion did not, though it has the same table and the same failure;
+;   - the companion had the backend and RawInput rows; the shell had neither.
+;
+; The slot is shown for XInput ONLY. ActiveControllerIndex is written by
+; XInputResolveController and by nothing else, so while RawInput is answering it
+; holds whatever XInput last left there -- the shell printed that stale slot
+; beside a RawInput reading, which is the one combination that would send someone
+; looking at the wrong device.
+;
+; Slots are reported 1-based, as the shell did. XInput numbers them 0-3
+; internally and every user-facing thing in Windows calls the first one
+; "controller 1"; the companion printed the raw index, so the same pad was "slot
+; 0" in one product and "slot 1" in the other.
+;
+; `detected` is passed in rather than probed here so this stays a formatter.
+; ControllerReadState is the one part that genuinely still differs per product --
+; the companion tries a GameInput backend the shell deliberately does not offer --
+; so each tree does its own detection and hands over the answer.
+;
+; GameInput has no row here for the same reason. The Backend setting offers it in
+; the companion only ("it reads all zeros outside Xbox FSE, so it is not an option
+; the shell could offer honestly"), and a row reporting a backend that cannot
+; exist would be noise in the shell's report. The companion appends its own.
+SharedControllerHealthRows(results, detected) {
+    global ControllerBackend, ActiveInputBackend, ActiveControllerIndex
+    global ControllerIndex, ControllerMap
+    global RawInputProbeActive, RawInputLastReportTick
+    if detected {
+        via := ActiveInputBackend = "rawinput"
+            ? "RawInput"
+            : (ActiveInputBackend = "gameinput" ? "GameInput" : "XInput")
+        slot := ""
+        if (ActiveInputBackend != "rawinput" && ActiveInputBackend != "gameinput"
+            && ActiveControllerIndex >= 0) {
+            slot := " on slot " (ActiveControllerIndex + 1)
+                . (ActiveControllerIndex != ControllerIndex
+                    ? " (configured: " (ControllerIndex + 1) ")" : "")
+        }
+        HealthResult(results, "PASS", "Controller",
+            via " controller is connected" slot ".")
+    } else {
+        HealthResult(results, "WARN", "Controller",
+            "No controller was detected on any backend.")
+    }
+    HealthResult(results, "INFO", "Input backend",
+        "Setting: " ControllerBackend ". Active: " ActiveInputBackend ".")
+    HealthResult(results,
+        !RawInputProbeActive ? "INFO" : (RawInputLastReportTick ? "PASS" : "INFO"),
+        "RawInput",
+        !RawInputProbeActive
+            ? "Not registered."
+            : (RawInputLastReportTick
+                ? "Registered and receiving HID reports."
+                : "Registered, no reports yet. Expected outside Xbox FSE."))
+
+    ; Two actions on one input is silent: the second binding simply never fires,
+    ; and the button looks broken rather than double-booked.
+    bindingOwners := Map()
+    duplicateBindings := []
+    for mappingKey, bindingValue in ControllerMap {
+        normalizedBinding := StrLower(Trim(bindingValue))
+        if (normalizedBinding = "" || normalizedBinding = "builtin:none")
+            continue
+        if bindingOwners.Has(normalizedBinding)
+            duplicateBindings.Push(bindingOwners[normalizedBinding] " + " mappingKey)
+        else
+            bindingOwners[normalizedBinding] := mappingKey
+    }
+    HealthResult(results, duplicateBindings.Length ? "WARN" : "PASS",
+        "Controller mappings",
+        duplicateBindings.Length
+            ? "Shared actions: " JoinWith(duplicateBindings, ", ")
+            : "No duplicate mapped actions were found.")
 }
 
 FormatHealthReport(results := 0) {
@@ -4929,10 +5287,26 @@ QuickMenuToggleTable() {
 ; Panel, and Explorer differs in HOW rather than whether -- which is the whole
 ; reason the action set stayed per-product until there was a table to hold it.
 ;
-; SendInput for a single key and SendChordSafe for anything with a modifier.
-; That distinction is deliberate and was already in both trees: a chord sent
-; without releasing the physical modifiers the user is still holding arrives as
-; a different chord.
+; SendChordSafe for anything Windows itself interprets; SendInput for a keystroke
+; the focused window interprets.
+;
+; The rule used to be "SendInput for a single key, SendChordSafe for anything with
+; a modifier", which put StartMenu on the wrong side of it. Win is a single key
+; and it is also a SYSTEM activation: with Shift or Ctrl still physically down it
+; is not the Start menu, and the key the user is holding does not have to be part
+; of the binding to be down when the binding fires. Enter and Esc are the other
+; case -- they go to whatever has focus, and Shift+Enter is what someone holding
+; Shift is asking for, so releasing modifiers there would DISCARD intent rather
+; than protect it.
+;
+; StartMenu was also the one action where this file and SteamShell-Helper.ahk
+; disagreed. The helper answers the same action for an elevated foreground and
+; had always used SendChordSafe, so the same button behaved differently depending
+; on whether the window in front happened to be elevated -- a distinction no user
+; can see or predict. Both paths now send it the same way.
+;
+; LeftClick and RightClick stay Click(): not keystrokes, no modifier state to
+; inherit.
 ;
 ; Returns true when the action was handled.
 ControllerBindingSharedAction(action) {
@@ -4946,7 +5320,7 @@ ControllerBindingSharedAction(action) {
         case "Esc":
             try SendInput("{Esc}")
         case "StartMenu":
-            try SendInput("{LWin}")
+            SendChordSafe("{LWin}")
         case "AltF4":
             SendChordSafe("!{F4}")
         case "WinG":
@@ -5253,7 +5627,11 @@ QuickMenuRowIsInert(index) {
         ; expressed that by having no case for it, which is indistinguishable
         ; from a case somebody deleted. The companion already said so out loud
         ; by giving it action "none".
-        "gameScoreEmpty", true)
+        "gameScoreEmpty", true,
+        ; Says why the current application cannot be added -- a Store app, or
+        ; nothing in front. Selecting it does nothing on purpose, and saying so
+        ; here is what tells that apart from a handler somebody deleted.
+        "currentAppBlocked", true)
     if (index < 1 || index > QuickMenuRows.Length)
         return false
     return inert.Has(QuickMenuRows[index]["id"])
@@ -5605,6 +5983,203 @@ QuickMenuGameDetectionValue() {
 ; Rows for the page: a back row, then one per candidate. Ids carry a colon, like
 ; the task and layout rows, because the list comes from whatever the last pass
 ; found rather than from a fixed set.
+; ==============================================================================
+; CURRENT APPLICATION
+; ==============================================================================
+; Add the application that was in front when the Quick Menu opened to one of the
+; executable lists, without typing its name.
+;
+; WHY THIS WORKS HERE AND NOT IN THE SETTINGS WINDOW. The Settings editor cannot
+; offer "the current application", because by the time it is open SETTINGS is the
+; current application -- which is why the picker over there offers a HISTORY
+; instead. The Quick Menu is the one surface that knows: both trees snapshot
+; QuickMenuPreviousHwnd in ShowQuickMenu, before the menu takes the foreground.
+; The two features are complements, not duplicates: this one names what you are
+; looking at, the picker names what you closed five minutes ago.
+;
+; Everything below is shared. Each tree contributes only the row SHAPE -- the
+; shell builds Map("id", ...), the companion builds MenuRow(...) -- exactly as
+; the Game Detection page above already does, and the ids, labels, values,
+; eligibility and the write are decided once, here.
+
+; Where an application can be added, and who offers each destination.
+;
+; A table with a product tag, the same shape and the same rule as
+; SettingsCategoryRows, so a destination one product does not have is DATA
+; rather than a second code path. SettingsRowAppliesTo does the filtering for
+; both.
+;
+; The two "protect from cleanup" rows are one destination under two spellings.
+; The shell keeps its protected list at LauncherCleanup\ExcludeExeList and the
+; companion at Assist\ProtectedProcesses; that is a real difference in where each
+; product has always stored it, and inventing a third location to make this table
+; shorter would break both products' existing settings files.
+QuickMenuAppTargets() {
+    static table := [
+        Map("product", "both", "section", "Controller", "key", "AutoMouseExeList",
+            "label", "Automatic Mouse"),
+        Map("product", "standalone", "section", "AlwaysFocus", "key", "ExeList",
+            "label", "Always In Focus"),
+        Map("product", "standalone", "section", "LauncherCleanup", "key", "ExcludeExeList",
+            "label", "Protect From Cleanup"),
+        Map("product", "xfe", "section", "Assist", "key", "ProtectedProcesses",
+            "label", "Protect From Cleanup"),
+        Map("product", "standalone", "section", "Controller",
+            "key", "DesktopAutoMouseExcludeExeList",
+            "label", "Exclude From Desktop Mouse")]
+    return table
+}
+
+QuickMenuAppTargetsFor(product) {
+    targets := []
+    for _, target in QuickMenuAppTargets() {
+        if SettingsRowAppliesTo(target, product)
+            targets.Push(target)
+    }
+    return targets
+}
+
+QuickMenuAppTargetIds(product) {
+    ids := []
+    for index, _ in QuickMenuAppTargetsFor(product)
+        ids.Push("currentapp:" index)
+    return ids
+}
+
+QuickMenuAppTargetFromId(id, product) {
+    targets := QuickMenuAppTargetsFor(product)
+    index := ToInt(SubStr(id, 12), 0)
+    if (index < 1 || index > targets.Length)
+        return 0
+    return targets[index]
+}
+
+; The executable that was in front when the menu opened.
+;
+; From the snapshot both trees already take, not from a live read: by the time a
+; row on this page is selected the Quick Menu itself has been the foreground for
+; several seconds.
+QuickMenuCurrentAppExe() {
+    global QuickMenuPreviousHwnd
+    if (!QuickMenuPreviousHwnd
+        || !DllCall("User32\IsWindow", "Ptr", QuickMenuPreviousHwnd, "Int"))
+        return ""
+    exe := ""
+    try exe := StrLower(WinGetProcessName("ahk_id " QuickMenuPreviousHwnd))
+    return exe
+}
+
+; Why this application cannot be added, or "" when it can.
+;
+; THE STORE-APP CASE IS THE REASON THIS FUNCTION EXISTS. A packaged UWP
+; application's visible window belongs to ApplicationFrameHost.exe, so the name
+; behind it is not the name of the application -- it is the name of a host shared
+; by Settings, Photos, Calculator, the Store and everything else of that shape.
+; Writing it into one of these lists would silently match all of them.
+;
+; The recent-application picker avoids this by filtering the host out of its
+; history. Here the user is pointing AT the window, so filtering would look like
+; the feature being broken; it says so instead. Both refusals are the same
+; decision, recorded in RecentAppsExcluded and here.
+QuickMenuCurrentAppBlockedReason() {
+    exe := QuickMenuCurrentAppExe()
+    if (exe = "")
+        return "No application was in front"
+    if (exe = "applicationframehost.exe")
+        return "Store app — cannot be added by name"
+    if !RegExMatch(exe, "i)^[a-z0-9][a-z0-9_. -]*\.exe$")
+        return "Unrecognised executable name"
+    return ""
+}
+
+; What the System page's row shows: the application, or why there is nothing to
+; offer. Selecting the row is pointless in the second case, and the row says so
+; rather than opening a page of destinations that would all refuse.
+QuickMenuCurrentAppValue() {
+    reason := QuickMenuCurrentAppBlockedReason()
+    return reason != "" ? reason : QuickMenuCurrentAppExe()
+}
+
+QuickMenuCurrentAppSelectable() {
+    return QuickMenuCurrentAppBlockedReason() = ""
+}
+
+; A destination row's label, with whether the application is already on it.
+;
+; Read live rather than cached, so a second visit to the page after adding shows
+; the result instead of inviting the same add again.
+QuickMenuAppTargetLabel(id, product) {
+    target := QuickMenuAppTargetFromId(id, product)
+    if !IsObject(target)
+        return ""
+    exe := QuickMenuCurrentAppExe()
+    if (exe != "" && SharedExeListContains(
+        ReadText(target["section"], target["key"], ""), exe))
+        return target["label"] " (already added)"
+    return target["label"]
+}
+
+; Whether a pipe-separated executable list already names an executable.
+;
+; Case-insensitive on both sides, because these lists are hand-edited and the
+; products lower-case them only when they build their lookup sets.
+SharedExeListContains(rawList, exe) {
+    exe := StrLower(Trim(exe))
+    if (exe = "")
+        return false
+    for _, entry in StrSplit(rawList, "|") {
+        if (StrLower(Trim(entry)) = exe)
+            return true
+    }
+    return false
+}
+
+; Appends an executable to a pipe-separated list setting, through the product's
+; own persistence.
+;
+; ProductApplyQuickMenuSetting is the seam every other Quick Menu write already
+; uses, so this inherits the shell's staged-copy write and the companion's direct
+; one without knowing which it got. Read-modify-write, because the seam takes a
+; whole value.
+SharedAppendExeToListSetting(section, key, exe) {
+    current := Trim(ReadText(section, key, ""))
+    if SharedExeListContains(current, exe)
+        return true
+    return ProductApplyQuickMenuSetting(
+        section, key, current = "" ? exe : current "|" exe)
+}
+
+; Adds the current application to the destination a row names.
+;
+; Shared, and reached from both trees' activate switches through the
+; "currentapp:" prefix, so neither tree spells the write, the duplicate check or
+; the notification.
+QuickMenuAddCurrentAppTo(id, product) {
+    reason := QuickMenuCurrentAppBlockedReason()
+    if (reason != "") {
+        SharedNotify(reason, "Warning")
+        return
+    }
+    target := QuickMenuAppTargetFromId(id, product)
+    if !IsObject(target) {
+        return
+    }
+    exe := QuickMenuCurrentAppExe()
+    if SharedExeListContains(
+        ReadText(target["section"], target["key"], ""), exe) {
+        SharedNotify(exe " is already in " target["label"])
+        return
+    }
+    if !SharedAppendExeToListSetting(target["section"], target["key"], exe) {
+        LogLine("Quick Menu: could not add " exe " to " target["section"] "\\"
+            . target["key"] ".", "Warning")
+        SharedNotify("Could not save " target["label"], "Warning")
+        return
+    }
+    LogLine("Quick Menu: added " exe " to " target["section"] "\\" target["key"] ".")
+    SharedNotify(exe " added to " target["label"])
+}
+
 QuickMenuGameScoreIds() {
     global LastGameCandidates
     ids := []

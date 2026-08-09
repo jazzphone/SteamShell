@@ -3219,6 +3219,41 @@ JoinWith(listObj, delimiter := ", ") {
     return out
 }
 
+; The out-of-the-box AutoMouseExeList, stated ONCE.
+;
+; This literal had twelve homes: two globals, two read defaults, a settings-row
+; default, a defaults Map, a schema spec, the shell's embedded default INI text
+; and two shipped sample INIs. That is the shape NEXT_STEPS.md records for the
+; version string, where five copies of an escaped spelling were missed on a bump
+; -- so the code paths all call this, and Assert-AutoMouseDefaults holds the
+; three text copies to it.
+;
+; What belongs here is a pointer-driven application a living-room user will
+; actually open from the couch, where reaching for View/Back before every click
+; is the friction the allowlist exists to remove.
+;
+; What does NOT belong here, and why, because each looks like an omission:
+;
+;   Windows Control Panel   already covered. Its window is CabinetWClass owned by
+;                           EXPLORER, not by control.exe -- control.exe launches
+;                           it and exits -- so explorer.exe below is what matches.
+;   SteamShell's own windows
+;                           never reach this test. AutoMouseModeActive skips a
+;                           foreground window whose PID is ours; the Quick Menu,
+;                           Settings and Control Panel carry their own controller
+;                           handling.
+;   Windows Settings        cannot be named by its own executable. ms-settings:
+;                           opens a UWP window owned by ApplicationFrameHost.exe,
+;                           so SystemSettings.exe would never match a foreground
+;                           lookup and would be a list entry that does nothing.
+;
+; explorer.exe additionally covers Start and Search through the shell-family
+; expansion in AutoMouseProcessMatches.
+DefaultAutoMouseExeList() {
+    return "explorer.exe|brave.exe|chrome.exe|msedge.exe|firefox.exe"
+        . "|notepad.exe|taskmgr.exe"
+}
+
 ; MB_SYSTEMMODAL. Despite the name, its actual effect here is to make the message
 ; box topmost, which is exactly what is needed and needs no timer.
 TopmostMsgBox(text, title := "", options := "") {
