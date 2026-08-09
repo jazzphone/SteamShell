@@ -1340,6 +1340,91 @@ function Assert-QuickMenuPageChangesRebuild {
     }
 }
 
+# The learner must not measure rest while the identifying button is still down.
+#
+# The wizard picks the device from the first report where a bit changed, and for
+# almost every pad that is the button going DOWN. Two things then have to be true
+# and neither is visible in a diff:
+#
+# 1. The resting baseline is the PRE-PRESS idle report, which the identification
+#    loop already keeps in order to measure idle noise. Copying the report that
+#    completed identification instead makes "that button held" the resting state:
+#    it reads as permanently pressed for the rest of the wizard, is saved into
+#    the profile's neutral, and the controller comes out of the wizard with a
+#    button stuck down. That is what shipped in 2.0.0 and what a user reported.
+#
+# 2. Nothing is measured until the control comes back up. Without the gate the
+#    rest window opens while the user is mid-press -- the prompt changes from
+#    "press a button" to "hands off" underneath their thumb -- and either the
+#    press lands in the baseline (stuck button) or the release lands in
+#    LearnRestNoise, where that bit is skipped by every later step, silently.
+#
+# The step captures have always had this rule; see LearnReleaseOffset, "a held
+# button cannot answer the next prompt". Identification is the one prompt whose
+# answer the user is still holding when the next prompt appears, and it was the
+# one place the rule was missing.
+#
+# Checked against SteamShell-Shared.ahk, because both products compile it and
+# neither can fix or break this on its own. KEPT IN STEP WITH
+# test_identifying_press_never_becomes_the_resting_state in
+# Test-ControllerProfiles.py, which models the same sequence report by report.
+function Assert-ControllerLearnerIdentifyRelease {
+    param(
+        [Parameter(Mandatory = $true)][string]$ProjectRoot,
+        [switch]$Quiet
+    )
+    $sharedText = Get-SourceText (Join-Path $ProjectRoot "SteamShell-Shared.ahk")
+    $report = Get-AhkFunctionBody -Source $sharedText -Name "ControllerLearnReport"
+    Assert-True ($report -ne "") (
+        "ControllerLearnReport could not be read, so nothing below it is checked.")
+
+    Assert-True ($report -match 'LearnBaseline\s*:=\s*ControllerLearnCopyReport\(\s*baseline\s*,') (
+        "The learner no longer takes its resting baseline from the pre-press " +
+        "idle report. Identification fires on the button going DOWN, so any " +
+        "other report saves that button as the resting state: it reads as held " +
+        "for the rest of the wizard and stays held in the saved profile.")
+    Assert-True ($report -notmatch 'LearnBaseline\s*:=\s*ControllerLearnCopyReport\(\s*data\s*,') (
+        "The learner copies the live report into LearnBaseline at " +
+        "identification. That report is the identifying PRESS, which is exactly " +
+        "the state that must not become rest.")
+    Assert-True ($report -match 'LearnIdentifyHoldOffset\s*:=\s*holdOffset') (
+        "ControllerLearnReport no longer records which control identified the " +
+        "device, so it cannot wait for that control to be released before " +
+        "measuring rest.")
+    Assert-True ($report -match '(?s)if\s*\(LearnIdentifyHoldOffset\s*>=\s*0\)') (
+        "ControllerLearnReport no longer holds off while the identifying " +
+        "control is down. Rest would be measured from reports in which it is " +
+        "still held.")
+
+    $released = Get-AhkFunctionBody -Source $sharedText `
+        -Name "ControllerLearnIdentifyReleased"
+    Assert-True ($released -ne "" -and
+        $released -match 'LearnRestSampling\s*:=\s*true' -and
+        $released -match 'ControllerLearnBeginSteps') (
+        "ControllerLearnIdentifyReleased is missing or no longer starts the " +
+        "rest phase. It is the single entry point to rest measurement; without " +
+        "it the wizard either never measures rest or measures it too early.")
+    $timeout = Get-AhkFunctionBody -Source $sharedText `
+        -Name "ControllerLearnIdentifyHoldTimeout"
+    Assert-True ($timeout -ne "" -and $timeout -match 'ControllerLearnIdentifyReleased') (
+        "The identify hold has no timeout. A pad whose release report is lost " +
+        "would leave the wizard waiting forever on a prompt already answered, " +
+        "with no way forward but Cancel.")
+
+    # The rest phase must have exactly one entry point. This is where it used to
+    # start -- on identification, which is the press.
+    $ui = Get-AhkFunctionBody -Source $sharedText -Name "ControllerLearnUpdateUi"
+    Assert-True ($ui -ne "" -and $ui -notmatch 'LearnRestSampling\s*:=\s*true') (
+        "ControllerLearnUpdateUi starts rest sampling again. It runs the moment " +
+        "the device is identified, which is the moment the button went down, so " +
+        "rest would once more be measured with it held.")
+    if (-not $Quiet) {
+        Write-Host ("Controller learner: rest is measured from the pre-press " +
+            "idle report, and only after the identifying control is released.")
+    }
+}
+
+
 # The recent-application history, and the picker that reads it.
 #
 # Four things, none of which fails to compile and none of which a user can tell

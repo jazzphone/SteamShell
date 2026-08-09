@@ -227,6 +227,10 @@ global LearnLength := 0
 global LearnPeak := 0
 global LearnProgressCtrl := unset
 global LearnPromptCtrl := unset
+; The control that chose the device, held until it is let go. Rest cannot be
+; measured while it is down, because "rest" would then include it.
+global LearnIdentifyHoldMask := 0
+global LearnIdentifyHoldOffset := -1
 global LearnReleaseMask := 0
 global LearnReleaseOffset := -1
 global LearnReleaseUntil := 0

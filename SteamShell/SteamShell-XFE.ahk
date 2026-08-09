@@ -2066,6 +2066,10 @@ global LearnAnalogValues := Map()
 global LearnReleaseOffset := -1
 global LearnReleaseMask := 0
 global LearnReleaseUntil := 0
+; The control that chose the device, held until it is let go. Rest cannot be
+; measured while it is down, because "rest" would then include it.
+global LearnIdentifyHoldOffset := -1
+global LearnIdentifyHoldMask := 0
 global LearnCaptureUntil := 0
 global LearnPeak := 0
 

@@ -8072,6 +8072,7 @@ CloseControllerLearner(*) {
     SetTimer(ControllerLearnNextStep, 0)
     SetTimer(ControllerLearnStartCapture, 0)
     SetTimer(ControllerLearnIdentificationReady, 0)
+    SetTimer(ControllerLearnIdentifyHoldTimeout, 0)
     if IsSet(LearnGui) {
         try LearnGui.Destroy()
         LearnGui := unset
@@ -8219,6 +8220,11 @@ ControllerLearnBeginSteps() {
         ; and the idle report captured before the identifying press is retained.
         ; Worth recording, because it also means a missed press produces no
         ; report to examine.
+        ;
+        ; This sentence used to be false. The baseline had been overwritten with
+        ; the report that identified the device -- the press -- so "the
+        ; pre-selection idle report" was exactly what it was NOT using. It is
+        ; now, which is what makes a change-only pad safe here.
         LogLine("Learn: no reports while at rest; this controller reports only "
             . "on change. Using the pre-selection idle report as the baseline.")
     }
@@ -8669,6 +8675,49 @@ ControllerLearnRejectAxis(step, reason) {
 
 
 
+; The identifying control came back up -- or ran out of patience. Either way the
+; hold is over and rest measurement can start.
+;
+; Both routes go through here so the rest phase has exactly one entry point. The
+; timeout is not a nicety: a pad that reports only on change and whose release
+; report is lost would otherwise leave the wizard waiting forever on a prompt
+; that has already been answered, with no clock on screen and no way forward but
+; Cancel.
+ControllerLearnIdentifyReleased(reason) {
+    global LearnActive, LearnIdentifyHoldOffset, LearnIdentifyHoldMask
+    global LearnRestSampling, LearnRestCount
+    if !LearnActive
+        return
+    if (LearnIdentifyHoldOffset < 0)
+        return
+    SetTimer(ControllerLearnIdentifyHoldTimeout, 0)
+    LogLine("Learn: identifying control " reason "; measuring rest.")
+    LearnIdentifyHoldOffset := -1
+    LearnIdentifyHoldMask := 0
+    LearnRestSampling := true
+    LearnRestCount := 0
+    ControllerLearnUpdateUi()
+    SetTimer(ControllerLearnBeginSteps, -1800)
+}
+
+
+; The identifying control never came back up. Proceed anyway, and say so.
+;
+; Measuring rest with it still held is the original defect, so this does not
+; pretend the reading is good: it warns, and the rest window that follows will
+; record the eventual release as noise exactly as before. That is a worse
+; outcome than waiting and a much better one than a wizard that cannot be
+; finished.
+ControllerLearnIdentifyHoldTimeout() {
+    global LearnActive, LearnIdentifyHoldOffset
+    if (!LearnActive || LearnIdentifyHoldOffset < 0)
+        return
+    LogLine("Learn: the identifying control was still held after 4 seconds. "
+        . "Measuring rest anyway; let go if the steps behave oddly.", "Warning")
+    ControllerLearnIdentifyReleased("timed out while held")
+}
+
+
 ; Watches for the accepted control to return to its resting state.
 ControllerLearnReleaseCheck(data, base, length) {
     global LearnBaseline, LearnReleaseOffset, LearnReleaseMask, LearnReleaseUntil
@@ -8698,6 +8747,7 @@ ControllerLearnReport(data, base, length, device) {
     global LearnStepIndex, LearnCaptureUntil, LearnPeak
     global LearnRestNoise, LearnRestSampling, LearnRestCount
     global LearnIdentifyDevices, LearnIdentifyReady
+    global LearnIdentifyHoldOffset, LearnIdentifyHoldMask
     global LearnReleaseOffset, LearnStepReports
     if !LearnActive
         return
@@ -8737,6 +8787,8 @@ ControllerLearnReport(data, base, length, device) {
             return
         }
         identified := false
+        holdOffset := -1
+        holdMask := 0
         Loop length {
             offset := A_Index - 1
             now := NumGet(data, base + offset, "UChar")
@@ -8744,6 +8796,8 @@ ControllerLearnReport(data, base, length, device) {
             changed := (now ^ was) & ~NumGet(noise, offset, "UChar") & 0xFF
             if changed {
                 identified := true
+                holdOffset := offset
+                holdMask := changed
                 break
             }
         }
@@ -8755,23 +8809,56 @@ ControllerLearnReport(data, base, length, device) {
         LearnDevice := device
         LearnDeviceKey := RawInputDeviceKey(device)
         LearnLength := length
-        ; Start the explicit rest phase from the report that completed device
-        ; identification, not the first report ever seen from that device.
+        ; THE IDLE REPORT, not the one that completed identification.
         ;
-        ; A change-only controller may first appear when A is pressed, then be
-        ; identified by the release report. Keeping the first report would make
-        ; "A held" the resting baseline: A would be learned on release, and B
-        ; would keep colliding with that false mapping forever.
-        LearnBaseline := ControllerLearnCopyReport(data, base, length)
+        ; Identification fires on the report where something CHANGED, and for
+        ; almost every pad that is the button going DOWN. Copying that report
+        ; made "the identifying button held" the resting state: it then differed
+        ; from rest in every later report, so it read as permanently pressed for
+        ; the rest of the wizard, was saved into the profile's neutral, and the
+        ; controller came out of the wizard with a button stuck down. On a pad
+        ; that does report at rest the release instead landed in LearnRestNoise,
+        ; which is quieter and just as wrong -- that bit is then skipped by every
+        ; later step, silently.
+        ;
+        ; `baseline` is the idle report this device was publishing before the
+        ; press. It stopped being updated the moment LearnIdentifyReady was set,
+        ; so it is exactly the pre-press state, and it was already being kept for
+        ; the noise measurement. It was there the whole time; it was simply
+        ; thrown away in favour of the report that happened to arrive last.
+        LearnBaseline := ControllerLearnCopyReport(baseline, 0, length)
         LearnRestNoise := Buffer(length, 0)
+        ; And nothing is measured until that control comes back up. The step
+        ; captures have always done this -- see LearnReleaseOffset, "a held
+        ; button cannot answer the next prompt" -- and identification is the one
+        ; place the same rule was never applied, even though it is the only
+        ; prompt whose answer the user is still holding when the next one
+        ; appears.
+        LearnIdentifyHoldOffset := holdOffset
+        LearnIdentifyHoldMask := holdMask
+        SetTimer(ControllerLearnIdentifyHoldTimeout, -4000)
         LogLine("Learn: capturing from device 0x" Format("{:X}", device)
             . " key=" (LearnDeviceKey != "" ? LearnDeviceKey : "unknown")
-            . " reportLength=" length ".")
+            . " reportLength=" length "; waiting for byte " holdOffset
+            . " bit 0x" Format("{:02X}", holdMask) " to be released.")
         ControllerLearnUpdateUi()
         return
     }
     if (device != LearnDevice || length != LearnLength)
         return
+    ; The identifying control has to come back up before anything is measured.
+    ; Until it does, every report is one where it is still held, and rest is the
+    ; one thing that must not be measured from those.
+    if (LearnIdentifyHoldOffset >= 0) {
+        if (LearnIdentifyHoldOffset < length) {
+            now := NumGet(data, base + LearnIdentifyHoldOffset, "UChar")
+            was := NumGet(LearnBaseline, LearnIdentifyHoldOffset, "UChar")
+            if ((now & LearnIdentifyHoldMask) != (was & LearnIdentifyHoldMask))
+                return
+        }
+        ControllerLearnIdentifyReleased("released")
+        return
+    }
     ; Rest sampling. The baseline is every detection's reference point, so it is
     ; taken while the user has explicitly let go, not from the report that
     ; happened to identify the device -- that one arrived with a button held.
@@ -9055,6 +9142,7 @@ ControllerLearnResolveAxis(step, allowRestNoisy := false) {
 
 ControllerLearnRestart() {
     global LearnDevice, LearnDeviceKey, LearnLength, LearnBaseline
+    global LearnIdentifyHoldOffset, LearnIdentifyHoldMask
     global LearnRestNoise, LearnRestSampling, LearnRestCount
     global LearnStepIndex, LearnResultButtons, LearnResultAxes
     global LearnHatValues, LearnCaptureUntil
@@ -9080,6 +9168,8 @@ ControllerLearnRestart() {
     LearnCaptureUntil := 0
     LearnIdentifyDevices := Map()
     LearnIdentifyReady := false
+    LearnIdentifyHoldOffset := -1
+    LearnIdentifyHoldMask := 0
     SetTimer(ControllerLearnTick, 0)
     SetTimer(ControllerLearnBeginSteps, 0)
     SetTimer(ControllerLearnNextStep, 0)
@@ -9473,7 +9563,7 @@ ControllerLearnTick() {
 ControllerLearnUpdateUi() {
     global LearnDevice, LearnStepIndex, LearnPromptCtrl, LearnDetailCtrl
     global LearnLength, LearnDeviceKey, LearnIdentifyReady
-    global LearnRestSampling, LearnRestCount
+    global LearnRestSampling, LearnRestCount, LearnIdentifyHoldOffset
     if !LearnDevice {
         if LearnIdentifyReady {
             try LearnPromptCtrl.Text := "Press any button on the controller you want to set up"
@@ -9486,14 +9576,23 @@ ControllerLearnUpdateUi() {
         }
         return
     }
+    ; Two states share LearnStepIndex = 0, and they used to be one. The rest
+    ; countdown started here, the moment the device was identified -- which is
+    ; the moment the identifying button was pressed, not released. The wizard
+    ; asked for hands off while the user was still mid-press, and measured rest
+    ; from it. Rest now starts from ControllerLearnIdentifyReleased, and this
+    ; only describes whichever of the two the wizard is actually in.
     if (LearnStepIndex = 0) {
+        if (LearnIdentifyHoldOffset >= 0) {
+            try LearnPromptCtrl.Text := "Let go of that button"
+            try LearnDetailCtrl.Text := "Got the controller. Release the button "
+                . "you just pressed and we will measure what resting looks like."
+            return
+        }
         try LearnPromptCtrl.Text := "Hands off — do not touch anything yet"
         try LearnDetailCtrl.Text := "Learning what resting looks like. Anything "
             . "you hold now will be ignored for the rest of the wizard, so let "
             . "go until the next prompt."
-        LearnRestSampling := true
-        LearnRestCount := 0
-        SetTimer(ControllerLearnBeginSteps, -1800)
     }
 }
 
@@ -9652,6 +9751,7 @@ ControllerProfileRestCheckBegin() {
 ShowControllerLearner(*) {
     global LearnGui, LearnActive, LearnDevice, LearnDeviceKey, LearnLength
     global LearnBaseline, LearnRestNoise, LearnRestSampling, LearnRestCount
+    global LearnIdentifyHoldOffset, LearnIdentifyHoldMask
     global LearnStepIndex, LearnResultButtons, LearnResultAxes, LearnHatValues
     global LearnPromptCtrl, LearnDetailCtrl, LearnProgressCtrl, LearnCaptureUntil
     global LearnLastAccepted, LearnLastFriendly
@@ -9706,6 +9806,8 @@ ShowControllerLearner(*) {
     LearnCaptureUntil := 0
     LearnIdentifyDevices := Map()
     LearnIdentifyReady := false
+    LearnIdentifyHoldOffset := -1
+    LearnIdentifyHoldMask := 0
     ; The pointer is needed for the buttons on this window.
     if MouseHidden {
         SystemCursor("Show")
