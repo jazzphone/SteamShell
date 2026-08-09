@@ -10582,18 +10582,27 @@ ControllerLogInputChange(buttons, lt, rt, pressed, released) {
 ; own settings path. That is the existing seam and the reason this works without
 ; knowing which product compiled it.
 ;
-; TWO COMMON KEYS ARE DELIBERATELY NOT HERE, because unifying them would change
+; ONE COMMON KEY IS DELIBERATELY NOT HERE, because unifying it would change
 ; behaviour rather than remove duplication:
 ;
-;   EnableElevatedFrameCapWrites   default true in the shell, false in the
-;                                  companion -- the shell already runs an
-;                                  elevated helper, the companion's is opt-in
 ;   EnableViewButtonActions        default false in the shell, true in the
 ;                                  companion
 ;
-; Both are DEFAULTS, and a default is a product's answer to "what should this do
+; It is a DEFAULT, and a default is a product's answer to "what should this do
 ; before anyone says otherwise". The two products answer differently for good
 ; reason, and an INI that sets the key explicitly is unaffected either way.
+;
+; EnableElevatedFrameCapWrites was the second of that pair and has joined the
+; list above. The reason recorded for keeping it apart was that the companion is
+; the unelevated product, so switching the helper on should be the user's
+; decision -- and it did not survive checking what the installer already does.
+; XFE's deployment writes the elevated helper payload to disk DORMANT and always
+; has, so the binary was never the line the flag was defending. What the flag
+; bought instead was a frame cap that silently did nothing whenever RTSS sits
+; under Program Files, which is where RTSS installs itself, behind a checkbox on
+; a page most people never open. The privilege boundary is untouched: elevated
+; INPUT is still not ported to the companion, and a payload on disk is not a
+; process until something needs a write only it can make.
 ;
 ; Three more used to be listed here -- ControllerPollIntervalMs,
 ; ControllerScrollIntervalMs and ControllerMouseFastMultiplier, same default in
@@ -10614,6 +10623,7 @@ LoadSharedSettings() {
     global GameLogIntervalMs, GameLogTopN, GameScoreMaxRows
     global QuickMenuChordHoldMs, RawInputStaleMs, RtssCustomFrameCap
     global RtssLastFrameCapFps, RtssPresetFrameCap
+    global RtssElevatedFrameCapWrites
     global RtssRestoreFrameLimitOnStartup, RtssUseDllIntegration
     global ViewHoldInGameMs, ViewHoldMs
     EnableViewTapAction := ReadBool("Steam", "EnableViewTapAction", true)
@@ -10661,5 +10671,13 @@ LoadSharedSettings() {
     RtssPresetFrameCap := ReadInt("RTSS", "PresetFrameCap", 158, 0, 1000)
     RtssCustomFrameCap := ReadInt("RTSS", "CustomFrameCap", 158, 10, 1000)
     RtssRestoreFrameLimitOnStartup := ReadBool("RTSS", "RestoreFrameLimitOnStartup", true)
+    ; Defaulted TRUE in both products now. The companion defaulted it false on
+    ; the grounds that it is the unelevated product and switching the helper on
+    ; should be a decision -- but its installer already writes the helper payload
+    ; to disk dormant, so the binary was never the line the flag was defending.
+    ; What the flag actually bought was a frame cap that silently does nothing
+    ; whenever RTSS sits under Program Files, which is where RTSS installs
+    ; itself, behind a checkbox on a page most people never open.
+    RtssElevatedFrameCapWrites := ReadBool("RTSS", "EnableElevatedFrameCapWrites", true)
     RtssLastFrameCapFps := ReadInt("RTSS", "LastFrameCapFps", 0, 0, 1000)
 }

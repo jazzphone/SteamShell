@@ -3751,7 +3751,6 @@ LauncherCleanupAudioPeakThreshold := ReadNumber("LauncherCleanup", "AudioPeakThr
     RtssFrameLimiterControlMode := StrLower(IniReadS("RTSS","FrameLimiterControlMode","Separate"))
     if (RtssFrameLimiterControlMode != "toggle" && RtssFrameLimiterControlMode != "separate")
         RtssFrameLimiterControlMode := "separate"
-    RtssElevatedFrameCapWrites := ReadBool("RTSS", "EnableElevatedFrameCapWrites", true)
     ; Reloading settings re-arms the frame cap.
     ;
     ; RtssFrameCapWriteBlocked latches on the first failed write so the row
@@ -16044,7 +16043,9 @@ XfeElevatedHelperDirectory() {
 ; payload and no administrator rights, so a user who later opts in from XFE's
 ; own Settings would otherwise be told to re-run an installer they have already
 ; run. A binary on disk is not an elevated process: nothing starts it until
-; [RTSS] EnableElevatedFrameCapWrites is turned on, and that is off by default.
+; [RTSS] EnableElevatedFrameCapWrites is turned on -- which now defaults to ON
+; in both products, so in practice the helper is started the first time a frame
+; cap needs a write RTSS's own location will not allow.
 DeploySteamShellXfe(targetDirectory, registerStartup := true, showResult := true) {
     global SteamShellRegKey, ScriptPid, IntentionalExitMode, SteamShellProduct
     global ShellRegKey

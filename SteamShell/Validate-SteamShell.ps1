@@ -3153,9 +3153,14 @@ Assert-True (
         'saved\["fps"\]\s*!=\s*fps' -and
     # The read-only latch clears when settings reload, or turning the elevated
     # write back on leaves the row dead until the next sign-in.
+    #
+    # The read itself moved to LoadSharedSettings when both products settled on
+    # the same default, so this no longer anchors on it -- LoadSettings calls
+    # that first and then clears the latch, and the clearing is the part this
+    # rule is about.
     $source -match
         '(?sm)^LoadSettings\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?' +
-        'ReadBool\("RTSS",\s*"EnableElevatedFrameCapWrites",\s*true\)' +
+        'LoadSharedSettings\(\)' +
         '(?:(?!\n\})[\s\S])*?RtssFrameCapWriteBlocked\s*:=\s*false' -and
     # Everything else first, Seq last: the helper acts on a sequence it has not
     # seen, so this ordering is what makes a torn read impossible.

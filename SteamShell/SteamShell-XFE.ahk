@@ -333,7 +333,7 @@ global RtssPendingFrameCap := 0
 ; OFF by default, and that is the point: choosing XFE means choosing a companion
 ; with nothing elevated in it, and turning this on is the user deciding
 ; otherwise. See StartElevatedRtssHelper for what it does and does not do.
-global RtssElevatedFrameCapWrites := false
+global RtssElevatedFrameCapWrites := true
 global ElevatedHelperPath := ""
 global ElevatedHelperPid := 0
 global ElevatedHelperAvailable := false
@@ -671,7 +671,7 @@ DefaultSettings() {
             "PresetFrameCap", 158,
             "CustomFrameCap", 158,
             "RestoreFrameLimitOnStartup", "true",
-            "EnableElevatedFrameCapWrites", "false",
+            "EnableElevatedFrameCapWrites", "true",
             "LastFrameCapMode", "",
             "LastFrameCapFps", 0,
             "CustomFrameCapShortcut", "^+f",
@@ -1125,11 +1125,23 @@ LoadSettings() {
     RtssOverlayOnShortcut := ReadText("RTSS", "OverlayOnShortcut", "^+1")
     RtssOverlayOffShortcut := ReadText("RTSS", "OverlayOffShortcut", "^+2")
     RtssFrameLimiterControlMode := StrLower(ReadText("RTSS", "FrameLimiterControlMode", "separate"))
-    ; DEFAULT FALSE, and that default is the feature. XFE is chosen because
-    ; nothing about it is elevated; this is the user deciding otherwise for the
-    ; one thing that cannot work any other way. See StartElevatedRtssHelper.
-    RtssElevatedFrameCapWrites := ReadBool(
-        "RTSS", "EnableElevatedFrameCapWrites", false)
+    ; EnableElevatedFrameCapWrites is read by LoadSharedSettings now, on the
+    ; shell's default of TRUE. It used to default false here, and the comment
+    ; that stood in this place argued the default WAS the feature -- that the
+    ; companion is chosen because nothing about it is elevated, so switching the
+    ; helper on should be the user deciding otherwise.
+    ;
+    ; The argument does not survive what the installer already does. XFE's
+    ; deployment writes the elevated helper payload to disk DORMANT and always
+    ; has, precisely so a user opting in later is not sent back to an installer
+    ; they have already run. So the binary was never the line; the flag was. And
+    ; a flag that is off by default, buried on the RTSS page, and needed for the
+    ; one thing that cannot work any other way is a feature most people will
+    ; never find -- they get a frame cap that silently does nothing whenever RTSS
+    ; sits under Program Files, which is where RTSS installs itself.
+    ;
+    ; A binary on disk is still not an elevated process. Nothing starts it until
+    ; something needs a write only it can make.
     ; Reloading settings re-arms the frame cap.
     ;
     ; RtssFrameCapWriteBlocked latches on the first failed write so the row

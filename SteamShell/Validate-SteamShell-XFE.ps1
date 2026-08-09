@@ -1839,16 +1839,28 @@ Assert-True (
 # Every assertion in this section was mutation-tested by breaking the behaviour
 # it names and confirming the build fails.
 
-# Default OFF, in all three places that decide the default: the embedded
-# defaults, the reader, and the shipped sample. A user chooses XFE because
-# nothing about it is elevated; the opt-in is the feature.
+# Default ON, in all three places that decide the default: the embedded
+# defaults, the reader, and the shipped sample.
+#
+# This assertion used to pin the opposite, and said "a user chooses XFE because
+# nothing about it is elevated; the opt-in is the feature." What retired that
+# argument is what the installer was already doing: XFE's deployment writes the
+# elevated helper payload to disk DORMANT, so a user opting in later is not sent
+# back to an installer they have already run. The binary was never the line the
+# flag defended.
+#
+# What the flag actually bought, off by default and on the RTSS page, was a
+# frame cap that silently does nothing whenever RTSS sits under Program Files --
+# which is where RTSS installs itself. The reader now lives in
+# LoadSharedSettings, on one default for both products, which is why only two of
+# the three places are checked here.
+#
+# The privilege boundary itself is unchanged and is pinned below: elevated INPUT
+# is still not ported, and the --product argument assertion is what holds that.
 Assert-True (
-    $source -match '"EnableElevatedFrameCapWrites",\s*"false"' -and
-    $source -match
-        'RtssElevatedFrameCapWrites\s*:=\s*ReadBool\(\s*\r?\n?\s*' +
-        '"RTSS",\s*"EnableElevatedFrameCapWrites",\s*false\)' -and
-    $sample -match '(?m)^EnableElevatedFrameCapWrites=false$') (
-    "The elevated RTSS helper is no longer opt-in and off by default.")
+    $source -match '"EnableElevatedFrameCapWrites",\s*"true"' -and
+    $sample -match '(?m)^EnableElevatedFrameCapWrites=true') (
+    "The elevated RTSS helper is no longer on by default.")
 
 # Nothing is elevated until it has been proved administrator-protected.
 #
