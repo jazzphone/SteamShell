@@ -88,59 +88,46 @@ Everything below was written or changed statically and has not been run.
   roughly double, the ×32 migration factor is wrong for this hardware and 62.5 is
   correct -- a one-line change in both migrations.
 
-### J. Nine cross-name pairs, all read, all with a shape
+### J. Cross-name consolidation — one left, and it needs hardware
 
-Every one of the seventeen candidates has now been read in full. The reasons in
-`CROSS_NAME_DUPLICATES.txt` carry the detail; this is the order to work them and
-the three defects that fell out.
+Batches A to D landed. Seventeen candidates became ten, nine QUEUED entries
+became one, and four unported defects were fixed on the way:
 
-**Three unported defects, worth doing regardless of the sharing.**
+1. `AssistProcessCpuSample` marked a sample `known` on elapsed time alone, so a
+   negative CPU delta reached the companion's game detector as a known sample
+   carrying the previous usage figure. **Fixed** — the shared sampler requires a
+   non-negative delta, which is what the shell already did.
+2. `AssistPruneCpuSamples` dropped a sample the moment its PID left the filtered
+   inventory. **Fixed** — the shared prune carries the shell's 30-second grace.
+3. The shell logged a failed Settings layout audit at Info. **Fixed** — Warning
+   in both.
+4. `RunStartupCommandLine` never checked its target existed. **Fixed** — the
+   shared prepare step does, for both.
 
-1. `AssistProcessCpuSample` marks a sample `known` when only the elapsed time is
-   positive. `GetProcessCpuSample` also requires a non-negative CPU delta. A
-   negative delta -- PID reuse, a counter reset -- is therefore reported to the
-   companion's game detector as a known sample carrying the *previous* usage
-   figure. The shell had this and it was fixed this pass.
-2. `SettingsEditorReportLayoutAudit` logs a failed layout audit at Info. The
-   companion logs the same failure as a Warning. The shell is the product where
-   the Settings window can be the only interface on screen.
-3. `RunStartupCommandLine` never checks the target exists. `LaunchStartupProgram`
-   normalises the path and rejects a missing one with "Startup program not
-   found". A stale entry in the shell reaches the launcher and fails further in.
-4. `AssistPruneCpuSamples` drops a CPU sample the moment its PID leaves the
-   inventory. `WindowEngineCleanupCpuSamples` keeps it for 30 seconds. The assist
-   inventory is the FILTERED list, so a game that minimises or is briefly cloaked
-   drops out for one pass and loses its baseline -- and returns as `known=false`
-   with a usage of zero, to the detector whose question is whether a game is
-   running. Compounds defect 1. Neither check can see this pair: no DllCall and
-   no string literal means no anchors, and the names share no word.
+**What is left of the cross-name work:** `XfeBestGameWindow` /
+`WindowEngineEvaluateGame`. The verdict layer and now the CPU sampler are both
+shared, so what remains duplicated is the candidate loop between them. The
+shell's cooldown, Steam-foreground gate and reject logging stay its own. It is
+the game-detection path on a program that replaces the Windows shell, so it
+wants a machine with a controller — same gate as item G.
 
-**The sharing, in dependency order.**
+**Four contracts are now checked** that were held by nothing:
 
-| # | Pair | Shape | Risk |
-|---|---|---|---|
-| 1 | `SettingsMouseWheel` / `SettingsEditorMouseWheel` | Thin per-tree handler resolving its own guard and scroll callback; shared body. | Low — pure |
-| 2 | `GetDisplaySummary` / `GetCurrentDisplayModeText` | Shared formatter; the shell's revert countdown stays with the caller. | Low — pure |
-| 3 | `MappingBuiltinValue` / `ChoiceToBinding` **+ `ControllerBindingPretty`** | One label vocabulary currently in FOUR hand-kept copies -- forward and inverse, twice. One `Map(action -> label)` per product, a shared resolver each way, the reverse derived by inverting. | Low, high value |
-| 4 | `SettingsReportLayoutAudit` / `SettingsEditorReportLayoutAudit` | Shared body; where the warning is shown is the one per-tree line. Take `SettingsAuditLayout` / `SettingsEditorAuditLayout` with it. | Low |
-| 5 | `LaunchStartupProgram` / `RunStartupCommandLine` | Shared prepare step (split, validate, already-running), with defect 3 fixed inside it. The launch stays per-tree: the shell must not hand its token to a child. | Low |
-| 6 | `RunStartupPrograms` / `StartUserStartupProgramsNow` | Shared launch-with-stagger taking a list, a stagger and a launcher. Makes the missing re-entry guard visible. | Low |
-| 7 | `AssistProcessCpuSample` / `GetProcessCpuSample` | `SharedProcessCpuSample(pid, store, minIntervalMs)` in Common -- the store is a parameter, so no global crosses. Fixes defect 1. | Medium — feeds game detection |
-| 8 | `StartElevatedRtssHelper` / `StartElevatedInputHelper` | **Protocol only.** The lifecycles are genuinely two. The command line is not: five flags, one helper binary, four hand-written call sites, no definition and no check. | Medium |
-| 9 | `XfeBestGameWindow` / `WindowEngineEvaluateGame` | The candidate loop, after 7 lands. The shell's cooldown, Steam gating and reject logging stay its own. | High — needs hardware |
+- the binding table must be an ordered array with unique actions and labels, and
+  every action must reach an implementation;
+- the two score-weight tables must offer the same keys, because the shared
+  scorers index them by name and a missing key scores as empty on one product
+  only;
+- the helper's five command-line flags must be exactly what
+  `SteamShell-Helper.ahk` parses, in both directions, and neither tree may spell
+  one itself;
+- and a Settings row must still reach a consumer, from the earlier pass.
 
-**Two that stay separate but want a check rather than a merge.**
-
-- `XfeGameScoreWeights` / `WindowEngineScoreWeights`: eleven weight KEYS that
-  shared scorers in `SteamShell-Common.ahk` index by name. The values are two
-  settings namespaces and must differ; the keys are a contract and nothing
-  asserts they match. A key renamed on one side breaks that product's scorer
-  silently.
-- `QuickMenuGetRows` / `QuickMenuGetDefinitions`: 84 shared row labels. The rows
-  themselves genuinely differ, but the settings surface has a shared spec that
-  tags each row `both` / `standalone` / `xfe` and the Quick Menu has no
-  equivalent -- so the same user-facing strings are typed twice. That is a bigger
-  idea than a merge and belongs on its own.
+**Still open and deliberately not merged:** `QuickMenuGetRows` /
+`QuickMenuGetDefinitions` share 85 row labels. The rows genuinely differ, but the
+settings surface has a shared spec tagging each row `both` / `standalone` / `xfe`
+and the Quick Menu has none, so the same user-facing strings are typed twice.
+That is a bigger idea than a merge.
 
 ### D, revisited: the settings-row check does not catch what it was proposed for
 

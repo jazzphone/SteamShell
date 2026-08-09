@@ -2869,13 +2869,16 @@ Assert-True (
 
 # Standalone names its product explicitly on both launch routes, so the task XML
 # on disk records which product registered it.
+# The flags themselves are built in one place now, so what is asserted here is
+# the PRODUCT each route names -- which is the part that is standalone's and
+# cannot be delegated.
 Assert-True (
     $source -match
         '(?sm)^RegisterElevatedHelperTask\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?' +
-        'taskArguments := "--product=standalone"' -and
+        'SharedElevatedHelperArguments\(\s*\r?\n?\s*"standalone"' -and
     $source -match
         '(?sm)^StartElevatedInputHelper\(\)\s*\{(?:(?!\n\})[\s\S])*?' +
-        'helperArguments := "--product=standalone"') (
+        'SharedElevatedHelperArguments\(\s*\r?\n?\s*"standalone"') (
     "Standalone no longer identifies its product when launching the helper.")
 
 # ==============================================================================
@@ -3925,6 +3928,7 @@ Assert-SettingsRowsReachConsumers -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-CrossNameAnchors -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-BindingLabelTables -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-GameScoreWeightKeys -ProjectRoot $projectRoot -Quiet:$Quiet
+Assert-ElevatedHelperProtocol -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-NoAmbiguousDeindentedBlocks -ProjectRoot $projectRoot -File "SteamShell.ahk" -Quiet:$Quiet
 Assert-NoAmbiguousDeindentedBlocks -ProjectRoot $projectRoot -File "SteamShell-Shared.ahk" -Quiet:$Quiet
 Assert-NoAmbiguousDeindentedBlocks -ProjectRoot $projectRoot -File "SteamShell-Common.ahk" -Quiet:$Quiet
@@ -4135,9 +4139,12 @@ Assert-True (
 # SysListView32 -- so hovering the category list and scrolling moved the settings
 # page instead of the list. The companion had the exclusion and the difference
 # was recorded as deliberate, which is how it survived.
+#
+# One handler for both products now, so this protects both. Against $source
+# rather than $rawSource, because the body lives in SteamShell-Common.ahk.
 Assert-True (
-    $rawSource -match
-        '(?sm)^SettingsEditorMouseWheel\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?' +
+    $source -match
+        '(?sm)^SettingsWheelNotch\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?' +
         'controlClass = "ListBox" \|\| controlClass = "SysListView32"') (
     "The Settings wheel handler no longer excludes ListBox, so scrolling over " +
     "the category list moves the page instead of the list.")

@@ -1754,7 +1754,7 @@ Assert-True (
     $source -match
         '(?sm)^StartElevatedRtssHelper\(\)\s*\{(?:(?!\n\})[\s\S])*?' +
         'commandLine := "\*RunAs "(?:(?!\n\})[\s\S])*?' +
-        '\. " --product=xfe"') (
+        'SharedElevatedHelperArguments\("xfe"') (
     "The XFE helper is no longer launched in RTSS-only mode.")
 
 # XFE never deploys, extracts, or hardens the helper. It has no embedded payload
@@ -2336,6 +2336,7 @@ Assert-SettingsRowsReachConsumers -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-CrossNameAnchors -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-BindingLabelTables -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-GameScoreWeightKeys -ProjectRoot $projectRoot -Quiet:$Quiet
+Assert-ElevatedHelperProtocol -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-NoAmbiguousDeindentedBlocks -ProjectRoot $projectRoot -File "SteamShell-XFE.ahk" -Quiet:$Quiet
 Assert-NoAmbiguousDeindentedBlocks -ProjectRoot $projectRoot -File "SteamShell-Shared.ahk" -Quiet:$Quiet
 Assert-NoAmbiguousDeindentedBlocks -ProjectRoot $projectRoot -File "SteamShell-Common.ahk" -Quiet:$Quiet

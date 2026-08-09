@@ -286,6 +286,43 @@ CalculateProcessCpuPercent(cpuDelta100ns, elapsedMs) {
         (cpuDelta100ns / (elapsedMs * 10000.0)) * 100.0, 0.0, 10000.0)
 }
 
+; The command line SteamShell-Helper.exe is started with.
+;
+; NOT A DUPLICATE PAIR -- A WIRE PROTOCOL, and that is why it is here rather than
+; in either tree. One helper binary serves both products and parses exactly five
+; flags in its ReadArgument calls. Those five were written out by hand in FOUR
+; places: each product registers a scheduled task with one shape and requests
+; elevation directly with another. Nothing defined them, and nothing compared
+; them against the helper.
+;
+; The failure that invites is quiet in the worst way. Rename a flag in the helper
+; and three call sites still build the old spelling; the helper starts, reads its
+; default for the argument it did not recognise, and runs. For --product that
+; default is "standalone", so an XFE helper would silently become a shell helper
+; with elevated input and geometry enabled. Nothing throws, and the process is
+; there in Task Manager looking correct.
+;
+; Empty or zero values are OMITTED rather than passed blank, because the helper
+; distinguishes an absent argument (use the default) from an empty one.
+;
+; --product is always named even though the helper defaults to standalone. The
+; helper treats any unrecognised value as standalone on purpose -- so a
+; standalone user never silently gets the narrower XFE helper -- and naming it
+; means a registered task's XML records which product registered it.
+SharedElevatedHelperArguments(product, parentPid := 0, mainPath := "",
+        settingsPath := "", logPath := "") {
+    arguments := "--product=" product
+    if parentPid
+        arguments .= " --parent-pid=" parentPid
+    if (mainPath != "")
+        arguments .= " --main-path=" QuoteWindowsCommandLineArg(mainPath)
+    if (settingsPath != "")
+        arguments .= " --settings=" QuoteWindowsCommandLineArg(settingsPath)
+    if (logPath != "")
+        arguments .= " --log=" QuoteWindowsCommandLineArg(logPath)
+    return arguments
+}
+
 ; Rolling CPU usage for one process, as a percentage of one core-equivalent.
 ;
 ; WRITTEN TWICE AND DRIFTED APART, which is the reason it is here rather than the
@@ -625,10 +662,15 @@ SharedDisplayModeText() {
 ; delta (0, handled) -- and a helper that returned 0 for both kinds of "no
 ; scroll" would silently start swallowing wheel messages meant for a ListBox.
 ;
-; A list box owns its own wheel: scrolling the page out from under the
-; startup-program list while the user is picking a row is not helpful. That
-; sentence is the companion's; the shell had the same two class names and no
-; explanation of them.
+; A list box owns its own wheel: scrolling the page out from under the list
+; while the user is picking a row is not helpful. The companion means its
+; startup-program list, the shell its category list.
+;
+; ListBox was once missing from the shell's copy and present in the companion's,
+; and that difference was written down as deliberate -- "XFE also excludes the
+; ListBox class" -- when the shell has a category ListBox of its own and
+; scrolling over it moved the settings page instead. One copy cannot drift from
+; the other now, which is most of the reason this is here.
 SettingsWheelNotch(wParam, hwnd, rootHwnd, &notch) {
     notch := 0
     if (DllCall("GetAncestor", "Ptr", hwnd, "UInt", 2, "Ptr") != rootHwnd)

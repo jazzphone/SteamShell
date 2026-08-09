@@ -918,6 +918,84 @@ function Assert-QuickMenuRows {
     }
 }
 
+# The flags the trees build must be exactly the ones the helper parses.
+#
+# KEPT IN STEP WITH check_elevated_helper_protocol in Replay-Validation.py.
+#
+# SteamShell-Helper.exe is one binary serving both products, and its command line
+# is a contract between three programs. It used to be written out by hand in four
+# places, with nothing defining it and nothing comparing it against the helper.
+#
+# The failure that invites is quiet in the worst way: rename a flag in the helper
+# and the callers still build the old spelling, so the helper starts, falls back
+# to its default for the argument it did not recognise, and runs. For --product
+# that default is "standalone", so an XFE helper silently becomes a shell helper
+# with elevated input and geometry enabled.
+function Assert-ElevatedHelperProtocol {
+    param(
+        [Parameter(Mandatory = $true)][string]$ProjectRoot,
+        [switch]$Quiet
+    )
+    $builder = Get-AhkFunctionBody `
+        -Source (Get-SourceText (Join-Path $ProjectRoot "SteamShell-Common.ahk")) `
+        -Name "SharedElevatedHelperArguments"
+    Assert-True ($builder -ne "") (
+        "SteamShell-Common.ahk defines no SharedElevatedHelperArguments(); the " +
+        "helper command line would have no single definition.")
+    if ($builder -eq "") { return }
+
+    # `" --parent-pid="` -- the separator lives inside the literal.
+    $built = New-Object System.Collections.Generic.HashSet[string]
+    foreach ($m in [regex]::Matches($builder, '"\s*--([a-z-]+)=')) {
+        [void]$built.Add($m.Groups[1].Value)
+    }
+    $helperText = Get-SourceText (Join-Path $ProjectRoot "SteamShell-Helper.ahk")
+    $parsed = New-Object System.Collections.Generic.HashSet[string]
+    foreach ($m in [regex]::Matches($helperText, 'ReadArgument\(\s*"([a-z-]+)"')) {
+        [void]$parsed.Add($m.Groups[1].Value)
+    }
+    Assert-True ($parsed.Count -ge 4) (
+        "Only $($parsed.Count) ReadArgument calls were read from " +
+        "SteamShell-Helper.ahk; the scan is not seeing them.")
+    if ($parsed.Count -lt 4) { return }
+
+    foreach ($flag in @($built | Where-Object { -not $parsed.Contains($_) } | Sort-Object)) {
+        Assert-True $false (
+            "SharedElevatedHelperArguments builds --$flag= and " +
+            "SteamShell-Helper.ahk never reads it. The helper would ignore it " +
+            "and start anyway.")
+    }
+    foreach ($flag in @($parsed | Where-Object { -not $built.Contains($_) } | Sort-Object)) {
+        Assert-True $false (
+            "SteamShell-Helper.ahk reads --$flag= and " +
+            "SharedElevatedHelperArguments never builds it. The helper falls " +
+            "back to its default, which for --product is the WRONG product.")
+    }
+
+    # Nobody may go around the builder. Comments go, string bodies STAY: the
+    # flags being looked for ARE string literals, so blanking them would make
+    # this pass on the very thing it exists to catch.
+    foreach ($tree in @("SteamShell.ahk", "SteamShell-XFE.ahk")) {
+        $lines = @()
+        foreach ($line in (Get-SourceLines (Join-Path $ProjectRoot $tree))) {
+            $lines += ($line -replace '(?<!`);.*$', '')
+        }
+        $code = $lines -join "`n"
+        foreach ($m in [regex]::Matches($code, '--([a-z-]+)=')) {
+            $flag = $m.Groups[1].Value
+            if (-not $parsed.Contains($flag)) { continue }
+            Assert-True $false (
+                "$tree spells --$flag= itself instead of calling " +
+                "SharedElevatedHelperArguments. Four hand-written copies of this " +
+                "command line is what that function exists to end.")
+        }
+    }
+    if (-not $Quiet) {
+        Write-Host ("Elevated helper protocol: $($built.Count) flags, built in one " +
+            "place and all read by the helper.")
+    }
+}
+
 # The two products' score-weight tables must offer the same KEYS.
 #
 # KEPT IN STEP WITH check_game_score_weight_keys in Replay-Validation.py.

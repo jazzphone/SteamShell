@@ -4029,7 +4029,8 @@ EnsureXfeElevatedHelperTask(helperPath, &failureReason) {
     SplitPath(helperPath, , &helperDirectory)
     account := LogonTaskAccountForXml()
     xml := ElevatedHelperTaskXml(account, helperPath,
-        "--product=xfe --main-path=" '"' A_ScriptFullPath '"', helperDirectory)
+        SharedElevatedHelperArguments("xfe", 0, A_ScriptFullPath),
+        helperDirectory)
     xmlPath := A_Temp "\SteamShell-XFE-helper-task.xml"
     try FileDelete(xmlPath)
     try FileAppend(xml, xmlPath, "UTF-16")
@@ -4131,10 +4132,7 @@ StartElevatedRtssHelper() {
             . "); elevation will prompt.", "Warning")
     }
     commandLine := "*RunAs " QuoteWindowsCommandLineArg(ElevatedHelperPath)
-        . " --product=xfe"
-        . " --parent-pid=" ScriptPid
-        . " --settings=" QuoteWindowsCommandLineArg(IniPath)
-        . " --log=" QuoteWindowsCommandLineArg(helperLog)
+        . " " SharedElevatedHelperArguments("xfe", ScriptPid, "", IniPath, helperLog)
     try {
         Run(commandLine, A_ScriptDir, , &ElevatedHelperPid)
         ElevatedHelperAvailable := WaitForVerifiedElevatedHelper(

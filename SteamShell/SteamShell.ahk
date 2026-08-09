@@ -2128,10 +2128,8 @@ RegisterElevatedHelperTask(helperPath, mainPath, settingsFile, helperLog, &failu
     ; helper treats any unrecognised value as standalone precisely so a
     ; standalone user never silently gets the narrower XFE helper, and naming it
     ; here means the task XML records which product registered the task.
-    taskArguments := "--product=standalone"
-        . " --main-path=" QuoteWindowsCommandLineArg(mainPath)
-        . " --settings=" QuoteWindowsCommandLineArg(settingsFile)
-        . " --log=" QuoteWindowsCommandLineArg(helperLog)
+    taskArguments := SharedElevatedHelperArguments(
+        "standalone", 0, mainPath, settingsFile, helperLog)
     SplitPath(helperPath, , &helperDirectory)
     ; Built by SteamShell-Common.ahk; the companion registers the same shape of
     ; task for its own helper and the two used to be written out separately.
@@ -2373,10 +2371,8 @@ StartElevatedInputHelper() {
     ; reparse-point redirection onto a file it should never have touched.
     SplitPath(ElevatedHelperPath, , &helperDirectory)
     helperLog := helperDirectory "\SteamShell-Helper.log"
-    helperArguments := "--product=standalone"
-        . " --parent-pid=" ScriptPid
-        . " --settings=" QuoteWindowsCommandLineArg(SettingsPath)
-        . " --log=" QuoteWindowsCommandLineArg(helperLog)
+    helperArguments := SharedElevatedHelperArguments(
+        "standalone", ScriptPid, "", SettingsPath, helperLog)
     commandLine := "*RunAs " QuoteWindowsCommandLineArg(ElevatedHelperPath)
         . " " helperArguments
     ; The gate is the security property, not the installation mode.
@@ -10536,25 +10532,10 @@ SettingsEditorMouseWheel(wParam, lParam, msg, hwnd) {
     global SettingsGui
     if !IsSet(SettingsGui)
         return
-    rootHwnd := DllCall("GetAncestor", "Ptr", hwnd, "UInt", 2, "Ptr")
-    if (rootHwnd != SettingsGui.Hwnd)
+    if !SettingsWheelNotch(wParam, hwnd, SettingsGui.Hwnd, &notch)
         return
-    ; A list box owns its own wheel: scrolling the page out from under the
-    ; category list while the user is picking a row is not helpful.
-    ;
-    ; ListBox was missing here and present in the companion, and that difference
-    ; was recorded as a deliberate one -- "XFE also excludes the ListBox class" --
-    ; when this window has a category ListBox of its own. Hovering it and
-    ; scrolling moved the settings page instead of the list.
-    controlClass := ""
-    try controlClass := WinGetClass("ahk_id " hwnd)
-    if (controlClass = "ListBox" || controlClass = "SysListView32")
-        return
-    delta := (wParam >> 16) & 0xFFFF
-    if (delta & 0x8000)
-        delta -= 0x10000
-    if (delta != 0)
-        SettingsEditorScroll(delta > 0 ? -1 : 1)
+    if notch
+        SettingsEditorScroll(notch)
     return 0
 }
 

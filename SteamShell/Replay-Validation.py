@@ -1362,6 +1362,67 @@ def check_ambiguous_deindented_blocks(sources):
                  "brace the block.")
 
 
+def check_elevated_helper_protocol(sources):
+    """The flags the trees build must be exactly the ones the helper parses.
+
+    KEPT IN STEP WITH Assert-ElevatedHelperProtocol in Validate-Common.ps1.
+
+    SteamShell-Helper.exe is one binary serving both products, and its command
+    line is a contract between three programs. It used to be written out by hand
+    in four places -- each product registers a scheduled task with one shape and
+    requests elevation directly with another -- with nothing defining it and
+    nothing comparing it against the helper.
+
+    The failure that invites is quiet in the worst way. Rename a flag in the
+    helper and the callers still build the old spelling; the helper starts, falls
+    back to its default for the argument it did not recognise, and runs. For
+    --product that default is "standalone", so an XFE helper would silently
+    become a shell helper with elevated input and geometry enabled -- present in
+    Task Manager, looking correct, doing something nobody asked for.
+
+    Both directions are checked. A flag built and not parsed is ignored; a flag
+    parsed and never built is either dead or a caller that forgot it.
+    """
+    builder = function_body(sources["SteamShell-Common.ahk"],
+                            "SharedElevatedHelperArguments")
+    if not builder:
+        fail("SteamShell-Common.ahk defines no SharedElevatedHelperArguments(); "
+             "the helper command line would have no single definition.")
+        return
+    # `" --parent-pid="` -- the separator lives inside the literal.
+    built = set(re.findall(r'"\s*--([a-z-]+)=', builder))
+    parsed = set(re.findall(r'ReadArgument\(\s*"([a-z-]+)"',
+                            sources["SteamShell-Helper.ahk"]))
+    if len(parsed) < 4:
+        fail(f"Only {len(parsed)} ReadArgument calls were read from "
+             "SteamShell-Helper.ahk; the scan is not seeing them.")
+        return
+    for flag in sorted(built - parsed):
+        fail(f"SharedElevatedHelperArguments builds --{flag}= and "
+             "SteamShell-Helper.ahk never reads it. The helper would ignore it "
+             "and start anyway.")
+    for flag in sorted(parsed - built):
+        fail(f"SteamShell-Helper.ahk reads --{flag}= and "
+             "SharedElevatedHelperArguments never builds it. The helper falls "
+             "back to its default, which for --product is the WRONG product.")
+
+    # And nobody may go around the builder.
+    #
+    # Comments go, string bodies STAY -- and not strip_comments(), which blanks
+    # both. The flags being looked for ARE string literals, so blanking them
+    # makes this pass on the very thing it exists to catch. Found by the mutation
+    # test below, which is the second time in this file that helper has been the
+    # wrong one to reach for.
+    for name in ("SteamShell.ahk", "SteamShell-XFE.ahk"):
+        code = "\n".join(re.sub(r"(?<!`);.*$", "", l)
+                         for l in sources[name].split("\n"))
+        for flag in sorted(set(re.findall(r"--([a-z-]+)=", code))):
+            if flag in parsed:
+                fail(f"{name} spells --{flag}= itself instead of calling "
+                     "SharedElevatedHelperArguments. Four hand-written copies of "
+                     "this command line is what that function exists to end.")
+
+
 def check_game_score_weight_keys(sources):
     """The two products' score-weight tables must offer the same KEYS.
 
@@ -1683,6 +1744,7 @@ def main():
     check_powershell_variable_shapes()
     check_binding_label_tables(sources)
     check_game_score_weight_keys(sources)
+    check_elevated_helper_protocol(sources)
     check_learner_guard(sources)
     check_rtss_limiter_restore(sources)
     check_source_encoding()

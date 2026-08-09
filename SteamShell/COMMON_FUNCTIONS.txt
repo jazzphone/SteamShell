@@ -108,6 +108,7 @@ SharedBindingActionFor
 SharedBindingLabelFor
 SharedBindingLabelList
 SharedDisplayModeText
+SharedElevatedHelperArguments
 SharedLaunchWithStagger
 SharedPrepareStartupProgram
 SharedProcessCpuSample
