@@ -34,16 +34,15 @@
 #                                               written as subscript assignments
 #                                               and one as a Map() literal
 #
-# It is shared now, but it was not found BY this check, and it could not have
-# been. The check compares call sequences, and neither body calls anything worth
-# comparing -- one is 22 assignments, the other is a single Map(). A pure-DATA
-# function has no call sequence, so it is invisible here for the same reason it
-# is invisible to the name-keyed gate: nothing about it is a call, and the names
-# do not match.
+# It is shared now, but it was not found by the check of the day, and it could
+# not have been. That check compared call sequences, and neither body calls
+# anything worth comparing -- one is 22 assignments, the other is a single Map().
+# A pure-DATA function has no call sequence.
 #
-# The gap is recorded rather than closed. Comparing data tables structurally is a
-# different check from comparing call sequences, and writing a weak version of it
-# would be worse than knowing this one does not cover them.
+# THE GAP IS CLOSED, and closing it is what eventually replaced the check. The
+# anchor check described below finds pure-data pairs the same way it finds any
+# other: XfeGameScoreWeights and WindowEngineScoreWeights share eleven weight
+# key names, and neither calls a thing.
 #
 # THE NINTH, AND THE LARGEST
 # --------------------------
@@ -78,11 +77,59 @@
 #   xfeName=standaloneName: the reason they must stay separate
 #
 # An entry with no reason fails the build, as in the other two manifests. An
-# entry does NOT have to have come from the detector: the two below score under
-# both thresholds and were written by hand, because the value of recording a pair
-# is highest exactly where no check can find it. The list is an allowlist, so a
-# hand-written entry costs nothing and answers the next person who greps one of
-# these two names and finds no twin.
+# entry does NOT have to have come from the check: several here were written by
+# hand, because the value of recording a pair is highest exactly where no check
+# can find it. The list is an allowlist, so a hand-written entry costs nothing and
+# answers the next person who greps one of these two names and finds no twin.
+#
+# A reason beginning QUEUED means the pair was surfaced, judged worth merging or
+# not yet judged at all, and is DEBT rather than a decision. Those are counted and
+# printed on every run, so this file cannot quietly become the place work goes to
+# be forgotten. Turning a QUEUED entry into a real reason, or into a merge, is the
+# way one leaves.
+#
+# HOW THE PAIRS ARE FOUND NOW
+# ---------------------------
+# By anchors, not by similarity. An anchor is something in a body that MEANS
+# something here -- a Win32 export the function calls, a string it puts on screen
+# or writes to the log. Two functions sharing several anchors that almost nothing
+# else uses are doing one job, whatever they are named and however far their
+# bodies have drifted apart.
+#
+# The check this replaced scored call-sequence and body-token similarity above two
+# hand-set thresholds, and its record is written above: it found none of the nine.
+# The seven predate it, the eighth is recorded as invisible to it, and the ninth
+# was found by grepping for a Quick Menu page constant. Thresholds with no
+# principled value get tuned to whatever is already known, and Validate-Common.ps1
+# already argues the deeper point -- similarity falls as a duplicate drifts, so
+# the metric is worst exactly where the problem is worst.
+#
+# The output is EVIDENCE. "Both contain 'that window is no longer available'" is
+# judgeable in seconds; "0.80" is not. The anchor check found the Task Switcher
+# pair cold, on two of its own user-facing strings.
+#
+# Its own failure mode is the opposite of the old one, and there is a worked
+# example below: shared vocabulary is not shared purpose. AssistProcessCpuSample
+# and GetProcessWriteTransferBytes both open a process handle and close it and do
+# entirely different things with it. That pair is recorded as NOT a pair, because
+# an unexplained line in a report is how a reader learns to skim it.
 
 ActivateSwitchableWindow=SelectTaskSwitcherWindow: one-shot activation against a focus lock. The companion activates and stops -- if Xbox FSE puts something else in front afterwards, that is its call, and pinning a window would be this product fighting the thing it is a companion to. The shell IS the shell, so its version takes a lockFocus argument, records PinnedForegroundHwnd/Title/Exe for the focus engine to re-assert, releases any previous pin on a normal switch, and hands the cursor over through HandleCursorAfterManagedFocus. ActivateWindowRobust versus a bare WinActivate is the same divergence: the shell has to win against a fullscreen game's foreground lock.
 CloseSwitchableWindow=RequestCloseTaskSwitcherWindow: the shell splits the request from the kill. RequestCloseTaskSwitcherWindow asks politely and ForceCloseTaskSwitcherWindow is a separate confirmed action; the companion carries both in one function behind a `force` parameter and its own inline QuickMenuConfirmAction check. Merging them means choosing one confirmation model for two Quick Menus that present the confirmation differently.
+quickmenugetrows=quickmenugetdefinitions: each product's Quick Menu row table, sharing 84 row labels because they present the same features -- which is the vocabulary agreeing, not a routine written twice. The rows themselves differ in membership, order and page; QUICKMENU_ROWS.txt is the record that enumerates them, and Assert-QuickMenuRows is the check that every one reaches behaviour.
+xfegamescoreweights=windowenginescoreweights: the same eleven weight KEYS filled from each product's own settings globals -- Assist* here, bare names there. The keys must agree, because shared scorers in SteamShell-Common.ahk index them; the values must not, because they are two settings namespaces. Sharing the Map construction would mean passing eleven values in to rebuild a Map the caller already has, which is longer than the duplication and no safer. Worth knowing this pair exists: a key renamed on one side breaks the shared scorer silently on that product only.
+mappingbuiltinvalue=choicetobinding: QUEUED: eleven shared Builtin:* action names. Surfaced by the anchor report and not yet examined. Both map a user-facing choice to a Builtin: binding value, and ControllerBindingPretty -- the reverse direction -- is already recorded below as one resolver with per-product labels.
+startelevatedrtsshelper=startelevatedinputhelper: QUEUED: twelve shared command-line flags (--log=, --parent-pid=, --settings= and nine more). Surfaced by the anchor report and not yet examined. Both spawn an elevated helper and hand it the same argument vocabulary; the helper binaries and their jobs differ, the launch and hand-off may not.
+xfebestgamewindow=windowengineevaluategame: QUEUED: three shared candidate-map keys (accepted, cpuknown, nearfs). Surfaced by the anchor report and not yet examined. Both score windows to pick the running game; the shared verdict helpers in SteamShell-Common.ahk were extracted from these two, so what is left is the part nobody has compared since.
+assistprocesscpusample=getprocesscpusample: QUEUED: both DllCall OpenProcess and GetProcessTimes, which is one job. This is the same rolling-CPU sampler twice: the differences are the store global, the Map key spellings, an optional sample rate limit the shell has and the companion does not, and the companion inlining CalculateProcessCpuPercent. THEY HAVE ALSO DRIFTED -- the shell sets "known" only when elapsed > 0 AND the CPU delta is non-negative, the companion on elapsed alone, so the companion can report a negative-delta sample as known and carry a stale usage figure. Sharing it takes a store and a minimum interval as parameters.
+assistprocesscpusample=getprocesswritetransferbytes: NOT a pair, and recorded so the report stops offering it. Both open a process handle and close it, which is the whole of the resemblance: one samples CPU time through GetProcessTimes, the other reads write-transfer counters through GetProcessIoCounters. This is the anchor report's characteristic false positive -- shared vocabulary is not shared purpose -- and leaving it unrecorded would train the reader to skim the list.
+settingsmousewheel=settingseditormousewheel: QUEUED: the same wheel handler twice. Identical but for a SettingsVisible guard the companion adds and the name of the scroll function each calls. Report-StructuralDrift's header in Validate-Common.ps1 calls this pair "deliberately separate"; read side by side they are one routine, and that claim predates this check being able to see them.
+settingsapplycategorylayout=settingseditorapplycategorylayout: QUEUED: the same layout pass twice, differing in a local named ctrl against control and in where contentTop and contentBottom come from -- globals in the shell, SettingsLayout() in the companion. Below this check's coverage bar but flagged by the same-name gate's cross-name sweep at 0.77/0.85; recorded here so it is not rediscovered a third time.
+settingsreportlayoutaudit=settingseditorreportlayoutaudit: QUEUED: three shared log strings including "Settings layout audit passed for all categories.", which both products print verbatim. Surfaced by the anchor report and not yet examined.
+quickmenuhint=quickmenuhinttext: the Quick Menu footer hint, per product and correctly so. Four page hints are word-for-word identical because those pages behave identically, but the TASKS hint is not -- the shell offers Y to switch-and-lock and hold-X to force close, which the companion has no equivalent for -- and the shell's version returns a transient status message in place of the hint when one is fresh, which the companion renders elsewhere. What is shared is the text of four strings, not a routine.
+getdisplaysummary=getcurrentdisplaymodetext: QUEUED: the same three lines of display formatting -- resolution, refresh rate, scale percentage -- with the shell appending a KEEP? countdown while a mode change is pending revert. A shared formatter with the countdown as the caller's business is the obvious shape; small enough that nobody has bothered.
+recordshortcutsetmodifier=recordshortcutchord_trysetmod: part of the six-handler shortcut-capture family recorded under RecordShortcutChord in DIVERGENT_FUNCTIONS.txt, which measured the six and found they differ in substance rather than in name -- body similarity from 0.94 down to 0.48, and the shell's Accept snapping a default modifier map the companion's does not have. The shared modifier key names are what this pair has in common.
+recordshortcutupdatepreview=recordshortcutchord_updatepreview: the same family as the entry above, and the same reason. Two shared strings, "(none)" and "Shift+", are the preview vocabulary rather than the routine.
+runstartupprograms=startuserstartupprogramsnow: QUEUED: two shared log strings around launching the user's startup programs. Surfaced by the anchor report and not yet examined.
+launchstartupprogram=runstartupcommandline: QUEUED: two shared log strings, both about a startup entry that could not be parsed or was already running. Surfaced by the anchor report and not yet examined; likely the same pass as the entry above.
+getswitchablewindowssummary=getpinnedforegroundsummary: the Quick Menu tasks-row value in each product, sharing the phrase that pluralises a window count. The shell's also reports the pinned-foreground lock, which the companion has no concept of because Xbox FSE owns presentation; both now read the same SharedTaskSwitcherWindows list. What is left is a count formatted two ways around one product-specific state.

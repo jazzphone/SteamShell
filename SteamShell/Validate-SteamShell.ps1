@@ -3922,6 +3922,7 @@ Assert-True (
 Assert-SharedParity -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-QuickMenuRows -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-SettingsRowsReachConsumers -ProjectRoot $projectRoot -Quiet:$Quiet
+Assert-CrossNameAnchors -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-NoAmbiguousDeindentedBlocks -ProjectRoot $projectRoot -File "SteamShell.ahk" -Quiet:$Quiet
 Assert-NoAmbiguousDeindentedBlocks -ProjectRoot $projectRoot -File "SteamShell-Shared.ahk" -Quiet:$Quiet
 Assert-NoAmbiguousDeindentedBlocks -ProjectRoot $projectRoot -File "SteamShell-Common.ahk" -Quiet:$Quiet

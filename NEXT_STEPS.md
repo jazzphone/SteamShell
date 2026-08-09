@@ -88,6 +88,32 @@ Everything below was written or changed statically and has not been run.
   roughly double, the ×32 migration factor is wrong for this hardware and 62.5 is
   correct -- a one-line change in both migrations.
 
+### J. Nine cross-name pairs, surfaced and awaiting a decision
+
+`CROSS_NAME_DUPLICATES.txt` now carries nine entries whose reason begins
+**QUEUED**, which means the pair was found and not yet judged. The count is
+printed on every run so the allowlist cannot become where work goes to be
+forgotten. Turning one into a real reason, or into a merge, is how it leaves.
+
+Ranked by what the evidence suggests, not by size:
+
+| Pair | Evidence | Read so far |
+|---|---|---|
+| `AssistProcessCpuSample` / `GetProcessCpuSample` | both `OpenProcess` + `GetProcessTimes` | One sampler twice, **and drifted**: the shell sets `known` only when the CPU delta is non-negative, the companion on elapsed time alone, so it can report a negative-delta sample as known with a stale usage figure. Same shape as the bug fixed in the shell this pass. Sharing takes a store and a minimum interval as parameters. |
+| `SettingsMouseWheel` / `SettingsEditorMouseWheel` | `GetAncestor`, `ListBox` | One routine. Differs by a `SettingsVisible` guard and the scroll callee's name. `Report-StructuralDrift`'s header still calls this pair "deliberately separate". |
+| `SettingsApplyCategoryLayout` / `SettingsEditorApplyCategoryLayout` | 0.77/0.85 on the old metric | One routine. A local named `ctrl` against `control`, and where `contentTop`/`contentBottom` come from. |
+| `MappingBuiltinValue` / `ChoiceToBinding` | eleven `Builtin:*` names | Not examined. The reverse direction (`ControllerBindingPretty`) is already recorded as one resolver with per-product labels. |
+| `StartElevatedRtssHelper` / `StartElevatedInputHelper` | twelve shared CLI flags | Not examined. Different helper binaries; the launch and hand-off may still be one routine. |
+| `XfeBestGameWindow` / `WindowEngineEvaluateGame` | `accepted`, `cpuknown`, `nearfs` | Not examined. The shared verdict helpers were extracted from these two; what is left is what nobody compared afterwards. |
+| `SettingsReportLayoutAudit` / `SettingsEditorReportLayoutAudit` | three shared log strings | Not examined. |
+| `RunStartupPrograms` / `StartUserStartupProgramsNow` | two shared log strings | Not examined. |
+| `LaunchStartupProgram` / `RunStartupCommandLine` | two shared log strings | Not examined. Probably the same pass as the row above. |
+
+Also worth doing while in there: `ControllerBindingPretty` is a same-name pair at
+1.00 whose entry says the labels are "kept as a per-product label map behind one
+shared resolver". The labels are per-product, correctly; there is no shared
+resolver, and about fifteen lines of structure around them is duplicated.
+
 ### D, revisited: the settings-row check does not catch what it was proposed for
 
 `Assert-SettingsRowsReachConsumers` exists and is mutation-tested. It proves a

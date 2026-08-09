@@ -57,6 +57,7 @@ KEEPING THE TWO HARNESSES HONEST
   the per-function scores so the two can be diffed after any change to either.
 """
 
+import collections
 import re
 import sys
 from pathlib import Path
@@ -719,21 +720,90 @@ def _body_tokens(body):
     return [tok for tok in re.findall(r"[A-Za-z_]\w*|[^\s\w]", text) if tok]
 
 
-def check_cross_name_duplicates(sources):
+# Anchors: the things in a function body that MEAN something to this project --
+# a Win32 export it calls, a string it puts on screen or in the log.
+#
+# Deliberately not a similarity metric. See check_cross_name_anchors.
+CROSS_NAME_UBIQUITOUS_APIS = frozenset({
+    "closehandle", "getlasterror", "getforegroundwindow", "iswindow", "getwindow",
+})
+# How many tree-only functions an anchor may appear in before it stops carrying
+# information. Separate budgets because the two kinds have different densities:
+# a Win32 export is rare and meaningful, a short string much less so.
+CROSS_NAME_ANCHOR_BUDGET = {"api": 4, "str": 3}
+# The shared anchors must also be this fraction of the LARGER function's anchor
+# set. Without it, a table that names every settings key pairs with every small
+# function that happens to name two of them -- XFE's DefaultSettings matched six
+# unrelated shell functions that way. This is the only ratio in the check, and it
+# is about how much of a function the evidence covers, not how alike two bodies
+# are.
+CROSS_NAME_ANCHOR_COVERAGE = 0.20
+
+
+def _function_anchors(body):
+    lines = [re.sub(r"(?<!`);.*$", "", l)
+             for l in (body if isinstance(body, list) else body.split("\n"))]
+    found = set()
+    # Whole-body, because a DllCall's target routinely sits on the line after the
+    # opening paren in these sources. A per-line scan misses those, and it missed
+    # the one pair in this tree that a Win32 export identifies outright.
+    for match in re.finditer(r'DllCall\(\s*"((?:[^"`]|`.)*)"', "\n".join(lines)):
+        target = match.group(1).split("\\")[-1].lower()
+        if target and target not in CROSS_NAME_UBIQUITOUS_APIS and not target.isdigit():
+            found.add("api:" + target)
+    # Strings per line, because an AutoHotkey literal cannot span one. Scanning
+    # the joined body pairs the closing quote of one string with the opening
+    # quote of the next and turns the CODE BETWEEN THEM into an anchor -- which
+    # the first draft of this did, and it produced convincing nonsense.
+    for line in lines:
+        for match in re.finditer(r'"((?:[^"`\n]|`.)*)"', line):
+            text = match.group(1)
+            if len(text) >= 6 and re.search(r"[A-Za-z]", text):
+                found.add("str:" + text.lower())
+    return found
+
+
+def check_cross_name_anchors(sources):
     """The same routine in both trees under two DIFFERENT names.
 
-    The blind spot this project was built without. Both the fingerprint gate and
-    DIVERGENT_FUNCTIONS.txt compare functions BY NAME, so a rename hides a
-    duplicate from every check there is -- SetStatus and ShowNotification were
-    three identical lines apiece and appeared on no list anywhere, and an entire
-    settings-UI subsystem was duplicated behind a Settings*/SettingsEditor*
-    prefix split.
+    KEPT IN STEP WITH Assert-CrossNameAnchors in Validate-Common.ps1.
 
-    Two measurements, because one is not enough. Call-sequence similarity alone
-    scores every one-call function against every other one-call function at
-    1.00, which produced pairings like NormalizePath against ToBool. The token
-    stream of the body is what separates them: real pairs scored 0.75 and up,
-    coincidences 0.68 and down, with nothing in between across the whole tree.
+    THIS REPLACES A CHECK THAT NEVER FOUND ANYTHING. The previous version scored
+    call-sequence and body-token similarity between every tree-only pair and
+    failed above two hand-set thresholds. Its record, from the file it feeds:
+    the seven original pairs existed BEFORE it was written and it was fitted to
+    them; the eighth is recorded there as "not found BY this check, and it could
+    not have been"; the ninth -- the whole Task Switcher -- was found by grepping
+    for a Quick Menu page constant; and four more surfaced only when someone who
+    already knew the answer lowered its thresholds. It also lived in Python
+    alone, so it never ran on Windows at all.
+
+    That is not bad luck. Validate-Common.ps1's own header argues the point
+    against the same-name gate: a low score is not evidence of intent, and two
+    copies of one routine drift apart in structure as well as text, so the metric
+    loses confidence exactly as the problem gets worse. A duplicate that has
+    drifted is the only kind worth finding and the kind similarity is worst at --
+    and thresholds with no principled value get tuned to whatever is already
+    known.
+
+    SO THIS ASKS A DIFFERENT QUESTION. Not "how alike are these two bodies" but
+    "do these two functions share something that means something": a Win32 export
+    they both call, a message they both put on screen, a log line they both
+    write, an action name they both spell. Two functions that both DllCall
+    GetProcessTimes and OpenProcess are doing one job, whatever they are called
+    and however far their bodies have drifted.
+
+    What it reports is EVIDENCE, not a number. "Both contain 'that window is no
+    longer available'" can be judged in seconds; "0.80" cannot. It found the Task
+    Switcher pair cold, on two of its own user-facing strings, and it finds the
+    two duplicated DATA tables that the call-fingerprint approach is documented
+    as structurally unable to see -- a pure-data function has no call sequence.
+
+    ITS OWN LIMIT, stated because it is not the same as the old one: shared
+    vocabulary is not proof of a duplicate. Two functions can both open a process
+    handle and do unrelated things with it, and one such pair is recorded in
+    CROSS_NAME_DUPLICATES.txt for exactly that reason. This produces candidates
+    for a person to judge, and the allowlist is where the judgement goes.
     """
     accepted = {}
     path = ROOT / "CROSS_NAME_DUPLICATES.txt"
@@ -747,36 +817,51 @@ def check_cross_name_duplicates(sources):
 
     a = function_map(sources["SteamShell.ahk"])
     b = function_map(sources["SteamShell-XFE.ahk"])
-    fa = {n: fingerprint(a[n][1]) for n in a if n not in b}
-    fb = {n: fingerprint(b[n][1]) for n in b if n not in a}
-    fa = {n: f for n, f in fa.items() if f}
-    fb = {n: f for n, f in fb.items() if f}
-    ta = {n: _body_tokens(a[n][1]) for n in fa}
-    tb = {n: _body_tokens(b[n][1]) for n in fb}
-    for x in sorted(fb):
-        best = None
-        for s in fa:
-            call_score = similarity(fb[x], fa[s])
-            if call_score < 0.85:
+    shell = {n: _function_anchors(a[n][1]) for n in a if n not in b}
+    companion = {n: _function_anchors(b[n][1]) for n in b if n not in a}
+
+    seen = collections.Counter()
+    for group in (shell, companion):
+        for anchors in group.values():
+            for anchor in anchors:
+                seen[anchor] += 1
+
+    def distinctive(anchors):
+        return {x for x in anchors
+                if seen[x] <= CROSS_NAME_ANCHOR_BUDGET[x[:3]]}
+
+    shell = {n: distinctive(s) for n, s in shell.items()}
+    companion = {n: distinctive(s) for n, s in companion.items()}
+
+    queued = []
+    for x in sorted(companion):
+        for s in sorted(shell):
+            shared = companion[x] & shell[s]
+            if len(shared) < 2:
                 continue
-            body_score = similarity(tb[x], ta[s])
-            if body_score < 0.72:
+            if len(shared) < CROSS_NAME_ANCHOR_COVERAGE * max(
+                    len(shell[s]), len(companion[x])):
                 continue
-            if best is None or (call_score, body_score) > (best[0], best[1]):
-                best = (call_score, body_score, s)
-        if not best:
-            continue
-        key = f"{x}={best[2]}"
-        if key in accepted:
-            if not accepted[key]:
-                fail(f"CROSS_NAME_DUPLICATES.txt lists '{key}' with no reason. "
-                     "The reason is the entire value of that file.")
-            continue
-        fail(f"SteamShell-XFE.ahk's '{x}' and SteamShell.ahk's '{best[2]}' are "
-             f"the same routine under two names (calls {best[0]:.2f}, body "
-             f"{best[1]:.2f}). Give them one name and share it, or record the "
-             f"pair in CROSS_NAME_DUPLICATES.txt as '{key}: why' with the reason "
-             "they must stay separate.")
+            key = f"{x}={s}"
+            if key in accepted:
+                if not accepted[key]:
+                    fail(f"CROSS_NAME_DUPLICATES.txt lists '{key}' with no reason. "
+                         "The reason is the entire value of that file.")
+                elif accepted[key].upper().startswith("QUEUED"):
+                    queued.append(key)
+                continue
+            evidence = "; ".join(sorted(shared)[:4])
+            fail(f"SteamShell-XFE.ahk's '{x}' and SteamShell.ahk's '{s}' share "
+                 f"{len(shared)} distinctive anchors and may be one routine under "
+                 f"two names ({evidence}). Give them one name and share it, or "
+                 f"record the pair in CROSS_NAME_DUPLICATES.txt as '{key}: why' "
+                 "with the reason they stay separate.")
+
+    # QUEUED entries are debt, not decisions, and are counted so the allowlist
+    # cannot quietly become the place work goes to be forgotten.
+    if queued:
+        print(f"  cross-name candidates: {len(queued)} recorded as QUEUED in "
+              "CROSS_NAME_DUPLICATES.txt, awaiting a decision")
 
 
 def check_schema_versions():
@@ -1495,7 +1580,7 @@ def main():
     check_ambiguous_deindented_blocks(sources)
     check_quickmenu_rows(sources)
     check_schema_versions()
-    check_cross_name_duplicates(sources)
+    check_cross_name_anchors(sources)
 
     # ---- duplicate definitions -------------------------------------------
     # A duplicate silently wins over the earlier one.

@@ -918,6 +918,157 @@ function Assert-QuickMenuRows {
     }
 }
 
+# The same routine in both trees under two DIFFERENT names.
+#
+# KEPT IN STEP WITH check_cross_name_anchors in Replay-Validation.py. See its
+# docstring for the argument; the short version is that the check this replaces
+# scored similarity above two hand-tuned thresholds and, across nine pairs
+# eventually found, found none of them -- and lived in Python alone, so it never
+# ran here at all.
+#
+# An ANCHOR is something in a body that means something to this project: a Win32
+# export it calls, a string it puts on screen or writes to the log. Two functions
+# sharing several anchors almost nothing else uses are doing one job, whatever
+# they are called and however far their bodies have drifted. What comes out is
+# evidence rather than a score, and the allowlist is where judgement goes.
+function Assert-CrossNameAnchors {
+    param(
+        [Parameter(Mandatory = $true)][string]$ProjectRoot,
+        [switch]$Quiet
+    )
+    # Ubiquitous exports carry no information about what a function is for.
+    $ubiquitous = @("closehandle", "getlasterror", "getforegroundwindow",
+        "iswindow", "getwindow")
+    # How many tree-only functions an anchor may appear in before it stops
+    # meaning anything. Two budgets, because a Win32 export is rarer than a short
+    # string and worth more when shared.
+    $budget = @{ "api" = 4; "str" = 3 }
+    # The shared anchors must also cover this much of the LARGER function. Without
+    # it, a table naming every settings key pairs with every small function that
+    # names two of them -- the companion's DefaultSettings matched six unrelated
+    # shell functions that way. The only ratio here, and it measures how much of a
+    # function the evidence covers, not how alike two bodies are.
+    $coverage = 0.20
+
+    $standalone = Get-AhkFunctionBodies -Path (Join-Path $ProjectRoot "SteamShell.ahk")
+    $companion = Get-AhkFunctionBodies -Path (Join-Path $ProjectRoot "SteamShell-XFE.ahk")
+
+    function Get-FunctionAnchors {
+        param([string]$Body)
+        $found = @{}
+        $lines = @()
+        foreach ($line in ($Body -split "`n")) {
+            $lines += ($line -replace '(?<!`);.*$', '')
+        }
+        # Whole-body for DllCall: the target routinely sits on the line after the
+        # opening paren in these sources, and a per-line scan misses those. It
+        # missed the one pair here that a Win32 export identifies outright.
+        $joined = $lines -join "`n"
+        foreach ($m in [regex]::Matches($joined, 'DllCall\(\s*"((?:[^"`]|`.)*)"')) {
+            $target = ($m.Groups[1].Value -split '\\')[-1].ToLowerInvariant()
+            if ($target -and $ubiquitous -notcontains $target -and
+                $target -notmatch '^\d+$') {
+                $found["api:$target"] = $true
+            }
+        }
+        # Strings per line, because an AutoHotkey literal cannot span one.
+        # Scanning the joined body pairs one string's closing quote with the
+        # next one's opening quote and turns the CODE BETWEEN THEM into an
+        # anchor -- which the first draft did, convincingly.
+        foreach ($line in $lines) {
+            foreach ($m in [regex]::Matches($line, '"((?:[^"`\n]|`.)*)"')) {
+                $text = $m.Groups[1].Value
+                if ($text.Length -ge 6 -and $text -match '[A-Za-z]') {
+                    $found["str:" + $text.ToLowerInvariant()] = $true
+                }
+            }
+        }
+        return $found
+    }
+
+    $shellAnchors = @{}
+    foreach ($name in $standalone.Keys) {
+        if ($companion.ContainsKey($name)) { continue }
+        $shellAnchors[$name] = Get-FunctionAnchors -Body $standalone[$name]
+    }
+    $xfeAnchors = @{}
+    foreach ($name in $companion.Keys) {
+        if ($standalone.ContainsKey($name)) { continue }
+        $xfeAnchors[$name] = Get-FunctionAnchors -Body $companion[$name]
+    }
+
+    $seen = @{}
+    foreach ($table in @($shellAnchors, $xfeAnchors)) {
+        foreach ($set in $table.Values) {
+            foreach ($anchor in $set.Keys) {
+                $seen[$anchor] = 1 + $(if ($seen.ContainsKey($anchor)) { $seen[$anchor] } else { 0 })
+            }
+        }
+    }
+    function Select-Distinctive {
+        param($Set)
+        $out = @{}
+        foreach ($anchor in $Set.Keys) {
+            if ($seen[$anchor] -le $budget[$anchor.Substring(0, 3)]) { $out[$anchor] = $true }
+        }
+        return $out
+    }
+    foreach ($name in @($shellAnchors.Keys)) {
+        $shellAnchors[$name] = Select-Distinctive -Set $shellAnchors[$name]
+    }
+    foreach ($name in @($xfeAnchors.Keys)) {
+        $xfeAnchors[$name] = Select-Distinctive -Set $xfeAnchors[$name]
+    }
+
+    $accepted = @{}
+    $manifest = Join-Path $ProjectRoot "CROSS_NAME_DUPLICATES.txt"
+    if (Test-Path -LiteralPath $manifest) {
+        foreach ($line in (Get-SourceLines $manifest)) {
+            $trimmed = $line.Trim()
+            if ($trimmed -eq "" -or $trimmed.StartsWith("#")) { continue }
+            $split = $trimmed.IndexOf(":")
+            if ($split -lt 0) { continue }
+            $accepted[$trimmed.Substring(0, $split).Trim().ToLowerInvariant()] =
+                $trimmed.Substring($split + 1).Trim()
+        }
+    }
+
+    $failures = @()
+    $queued = 0
+    foreach ($x in ($xfeAnchors.Keys | Sort-Object)) {
+        foreach ($s in ($shellAnchors.Keys | Sort-Object)) {
+            $shared = @($xfeAnchors[$x].Keys | Where-Object { $shellAnchors[$s].ContainsKey($_) })
+            if ($shared.Count -lt 2) { continue }
+            $larger = [Math]::Max($shellAnchors[$s].Count, $xfeAnchors[$x].Count)
+            if ($shared.Count -lt $coverage * $larger) { continue }
+            $key = ("$x=$s").ToLowerInvariant()
+            if ($accepted.ContainsKey($key)) {
+                if ($accepted[$key] -eq "") {
+                    $failures += "CROSS_NAME_DUPLICATES.txt lists '$key' with no reason"
+                } elseif ($accepted[$key].ToUpperInvariant().StartsWith("QUEUED")) {
+                    $queued++
+                }
+                continue
+            }
+            $evidence = (($shared | Sort-Object | Select-Object -First 4) -join "; ")
+            $failures +=
+                ("SteamShell-XFE.ahk's '$x' and SteamShell.ahk's '$s' share " +
+                 "$($shared.Count) distinctive anchors and may be one routine " +
+                 "under two names ($evidence). Give them one name and share it, " +
+                 "or record the pair in CROSS_NAME_DUPLICATES.txt as '${key}: why'")
+        }
+    }
+    Assert-True ($failures.Count -eq 0) (
+        "Cross-name duplicate candidates: " + ($failures -join "; ") + ".")
+
+    if (-not $Quiet) {
+        # QUEUED entries are debt, not decisions, and are counted so the
+        # allowlist cannot quietly become where work goes to be forgotten.
+        Write-Host ("Cross-name anchors: no unrecorded candidates; $queued pair(s) " +
+            "recorded as QUEUED and awaiting a decision.")
+    }
+}
+
 # A braceless control statement whose body is not indented under it.
 #
 # AutoHotkey does not care about indentation, so this is legal and means exactly
