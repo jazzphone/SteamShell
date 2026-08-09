@@ -10230,6 +10230,178 @@ SettingsAddNote(guiObj, category, text, &y, height := 34) {
 }
 
 
+; ==============================================================================
+; Controller test and calibration
+; ==============================================================================
+; A diagnostic window over the controller stack both products already share --
+; the same decoder, the same poll frame, the same settings on the same clamps.
+; It was standalone's alone for no reason anyone had written down, which is what
+; being absent from DIVERGENT_FUNCTIONS.txt means: that file records functions
+; defined in BOTH trees, so a surface only one tree has never comes up for a
+; decision at all.
+;
+; Nothing here is product-shaped. The last thing that looked it -- writing the
+; calibrated deadzone back -- turned out to be a call path that went around
+; ProductApplyQuickMenuSetting rather than through it, and now goes through it.
+; The window and the button are per product only in the sense every window is:
+; ProductCenterGui places it and ProductIdentity titles it.
+
+ControllerTestActive() {
+    global ControllerTestGui
+    if !IsSet(ControllerTestGui)
+        return false
+    try return IsGuiVisible(ControllerTestGui)
+    return false
+}
+
+ControllerButtonNames(buttons) {
+    names := []
+    definitions := [
+        ["D-pad Up", 0x0001], ["D-pad Down", 0x0002],
+        ["D-pad Left", 0x0004], ["D-pad Right", 0x0008],
+        ["Start", 0x0010], ["View / Back", 0x0020],
+        ["L3", 0x0040], ["R3", 0x0080],
+        ["LB", 0x0100], ["RB", 0x0200], ["Xbox", 0x0400],
+        ["A", 0x1000], ["B", 0x2000], ["X", 0x4000], ["Y", 0x8000]
+    ]
+    for _, definition in definitions {
+        if (buttons & definition[2])
+            names.Push(definition[1])
+    }
+    return names.Length ? JoinWith(names, "  •  ") : "None"
+}
+
+; Called with the DECODED sample and, deliberately, BEFORE the deadzone is
+; applied -- the axis readout says "Raw stick axes" and has to mean it. A
+; deadzoned sample would report perfect centring on a stick that drifts, which is
+; the one thing this window exists to measure.
+UpdateControllerTest(buttons, lt, rt, lx, ly, rx, ry) {
+    global ControllerTestGui, ControllerCalibrationUntil
+    global ControllerCalibrationMax, ControllerSuggestedDeadzone
+    if !ControllerTestActive()
+        return
+
+    try {
+        ControllerTestGui["ControllerButtons"].Text := ControllerButtonNames(buttons)
+        ControllerTestGui["ControllerTriggers"].Text :=
+            "LT " lt " / 255        RT " rt " / 255"
+        ControllerTestGui["ControllerAxes"].Text :=
+            "Left stick     X " lx "     Y " ly
+            . "`r`nRight stick   X " rx "     Y " ry
+    }
+
+    if (ControllerCalibrationUntil > 0) {
+        ControllerCalibrationMax := Max(
+            ControllerCalibrationMax, Abs(lx), Abs(ly), Abs(rx), Abs(ry))
+        remainingMs := ControllerCalibrationUntil - A_TickCount
+        if (remainingMs > 0) {
+            try ControllerTestGui["ControllerCalibration"].Text :=
+                "Sampling centered sticks… " Ceil(remainingMs / 1000) " sec"
+        } else {
+            ControllerCalibrationUntil := 0
+            ControllerSuggestedDeadzone := ClampInt(
+                ControllerCalibrationMax + 1500, 1000, 16000)
+            try ControllerTestGui["ControllerCalibration"].Text :=
+                "Maximum centered drift: " ControllerCalibrationMax
+                . "     Suggested deadzone: " ControllerSuggestedDeadzone
+        }
+    }
+}
+
+StartControllerCenterSample(*) {
+    global ControllerCalibrationUntil, ControllerCalibrationMax
+    global ControllerSuggestedDeadzone
+    ControllerCalibrationMax := 0
+    ControllerSuggestedDeadzone := 0
+    ControllerCalibrationUntil := A_TickCount + 3000
+}
+
+; THROUGH ProductApplyQuickMenuSetting, which is the seam every other write of a
+; setting already uses. This wrote the INI itself and then reached into the
+; shell's Settings field registry by hand, which is what made a calibration look
+; like it belonged to one product -- and it was the worse of the two paths: no
+; check that the Settings window was still visible before assigning to one of its
+; controls, a raw .Value where the seam repopulates by field type, and no
+; SyncControlPanel, so the shell's Control Panel kept showing the old deadzone.
+;
+; LoadSettings inside the seam re-reads ControllerDeadzone, so nothing assigns it
+; here, and the value reported back is the one that survived the clamp rather
+; than the one that was suggested.
+ApplyControllerSuggestedDeadzone(*) {
+    global ControllerSuggestedDeadzone, ControllerDeadzone, ControllerTestGui
+    if (ControllerSuggestedDeadzone <= 0) {
+        try ControllerTestGui["ControllerCalibration"].Text :=
+            "Run the three-second center sample before applying a recommendation."
+        return
+    }
+    if !ProductApplyQuickMenuSetting(
+        "Controller", "ControllerDeadzone", ControllerSuggestedDeadzone) {
+        try ControllerTestGui["ControllerCalibration"].Text :=
+            "The recommended deadzone could not be saved."
+        return
+    }
+    try ControllerTestGui["ControllerCalibration"].Text :=
+        "Deadzone " ControllerDeadzone " saved and applied."
+}
+
+HideControllerTest(*) {
+    global ControllerTestGui
+    if IsSet(ControllerTestGui)
+        try ControllerTestGui.Hide()
+    ; Hands the poll timer back to whatever the settings say it should be. In the
+    ; companion that includes cancelling it again if the companion is disabled,
+    ; which is the state ShowControllerTest below deliberately overrides.
+    ApplyRuntimeTimers()
+}
+
+ShowControllerTest(*) {
+    global ControllerTestGui, ControllerDeadzone, ControllerPollIntervalMs
+    if !IsSet(ControllerTestGui) {
+        ControllerTestGui := Gui("+AlwaysOnTop +ToolWindow -Resize",
+            ProductIdentity()["title"] " Controller Test")
+        ControllerTestGui.SetFont("s10", "Segoe UI")
+        title := ControllerTestGui.AddText("xm ym w620 h30", "Controller Test and Calibration")
+        title.SetFont("s17 Bold", "Segoe UI")
+        ControllerTestGui.AddText(
+            "xm y+2 w620 h38 +Wrap",
+            "Inputs are captured by this window and are not sent through "
+            . ProductIdentity()["title"] " mappings while the test is open.")
+        ControllerTestGui.AddGroupBox("xm y+8 w620 h72", "Pressed buttons")
+        ControllerTestGui.AddText(
+            "xp+14 yp+27 w590 h30 vControllerButtons +Wrap", "Waiting for controller input…")
+        ControllerTestGui.AddGroupBox("xm y+10 w620 h66", "Triggers")
+        ControllerTestGui.AddText(
+            "xp+14 yp+27 w590 h24 vControllerTriggers", "LT 0 / 255        RT 0 / 255")
+        ControllerTestGui.AddGroupBox("xm y+10 w620 h92", "Raw stick axes")
+        ControllerTestGui.AddText(
+            "xp+14 yp+26 w590 h52 vControllerAxes",
+            "Left stick     X 0     Y 0`r`nRight stick   X 0     Y 0")
+        ControllerTestGui.AddText(
+            "xm y+10 w620 h42 +Wrap",
+            "Leave both sticks untouched, then sample their centered drift. Current deadzone: " ControllerDeadzone)
+        ControllerTestGui.AddText(
+            "xm y+2 w620 h28 vControllerCalibration", "No center sample has been recorded.")
+        sampleButton := ControllerTestGui.AddButton("xm y+8 w205 h32", "Sample Center for 3 Seconds")
+        sampleButton.OnEvent("Click", StartControllerCenterSample)
+        applyButton := ControllerTestGui.AddButton("x+8 yp w205 h32", "Apply Suggested Deadzone")
+        applyButton.OnEvent("Click", ApplyControllerSuggestedDeadzone)
+        closeButton := ControllerTestGui.AddButton("x+8 yp w120 h32", "Close")
+        closeButton.OnEvent("Click", HideControllerTest)
+        ControllerTestGui.OnEvent("Close", HideControllerTest)
+        ControllerTestGui.OnEvent("Escape", HideControllerTest)
+    }
+    ControllerTestGui.Show()
+    ProductCenterGui(ControllerTestGui)
+    ; Arms the poll unconditionally, which is what makes the window work in the
+    ; companion when the companion is DISABLED -- the state its poll timer is
+    ; normally cancelled in, and the state somebody testing a pad is most likely
+    ; to be in. The poll's own test branch runs ahead of its disabled stand-down
+    ; for the same reason, and on the same precedent as RecentAppsTick: being
+    ; switched off stops the companion ACTING, and this only observes.
+    SetTimer(PollController, ControllerPollIntervalMs)
+}
+
+
 ; Does this process own the given window?
 ;
 ; SHARED because ScriptPid is declared in both trees, which is the whole rule for

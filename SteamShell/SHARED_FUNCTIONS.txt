@@ -105,6 +105,7 @@ AddInstallationRecordHealthRow
 AdjustRtssCustomFrameCap
 ApplicationPickerChoose
 ApplicationPickerClose
+ApplyControllerSuggestedDeadzone
 ApplyDisplaySelection
 ApplyElevatedRtssFrameLimit
 ApplyElevatedRtssProfileFrameLimit
@@ -122,6 +123,7 @@ CloseControllerLearner
 CommitRtssPendingFrameCap
 ConfirmPrimaryDisplayMode
 ControllerBindingSharedAction
+ControllerButtonNames
 ControllerDiagnosticTick
 ControllerLearnAccept
 ControllerLearnAxisStats
@@ -164,6 +166,7 @@ ControllerProfilePath
 ControllerProfileRestCheck
 ControllerProfileRestCheckBegin
 ControllerSettingsSurfaceActive
+ControllerTestActive
 ControllerTrackViewButton
 CopyHealthReport
 CycleDefaultAudioOutput
@@ -210,6 +213,7 @@ GetRtssMenuStatus
 GuiLiteralText
 HasLongBinding
 HealthResult
+HideControllerTest
 InitDefaultControllerMappings
 InitializeTrayMenu
 InitXInput
@@ -373,11 +377,13 @@ SharedWindowInventoryGet
 ShouldLogRateLimited
 ShowApplicationPicker
 ShowControllerLearner
+ShowControllerTest
 ShowNotification
 ShowHealthCheck
 ShowQuickMenuLayoutManager
 ShutdownGdiPlus
 ShutdownRtssHooksApi
+StartControllerCenterSample
 SteamShellInstallationVerdict
 SteamShellSetupRecord
 SteamShellSetupRecordDrift
@@ -390,6 +396,7 @@ ToggleRtssFrameLimiter
 ToggleRtssOverlay
 TrayOpenQuickMenu
 TryInvokeTouchKeyboard
+UpdateControllerTest
 VerifyElevatedHelperProcess
 ViewButtonReleased
 WaitForElevatedRtssRequest

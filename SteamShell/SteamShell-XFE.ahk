@@ -134,6 +134,13 @@ global ControllerMouseFastMultiplier := 2.5
 global ControllerScrollIntervalMs := 80
 global ControllerScrollStep := 1
 global ControllerChordHoldMs := 500
+; Controller test and calibration. The window and everything it does live in
+; SteamShell-Shared.ahk; these four are declared here because a shared function
+; may name a global only when BOTH trees declare it.
+global ControllerTestGui := unset
+global ControllerCalibrationUntil := 0
+global ControllerCalibrationMax := 0
+global ControllerSuggestedDeadzone := 0
 ; Steam shortcuts. These are sent to whatever owns the foreground, so they must
 ; match the bindings configured inside Steam itself.
 global SteamMenuShortcut := "^1"
@@ -5130,6 +5137,9 @@ ShowSettings(*) {
         ["Controller Mappings...", ShowMappingEditor],
         ["Learn Controller...", ShowControllerLearner],
         ["Delete Learned Profile", DeleteControllerProfileForActiveDevice]], &y)
+    ; The window is shared with the shell, which had it first and had it alone.
+    SettingsAddButtonRow(settings, category, [
+        ["Test / Calibrate Controller...", ShowControllerTest]], &y)
 
     ; Steam — no standalone counterpart. Standalone keeps its three Steam
     ; shortcuts in General; here they belong to a page that also owns the View
@@ -6546,7 +6556,7 @@ PollController() {
     global SettingsVisible, SettingsDialogActive, LearnActive
     global CompanionDisabled, ControllerNeedsFreshBaseline
     global EnableControllerDiagnostics
-    global ControllerPollIntervalMs
+    global ControllerPollIntervalMs, ControllerTestGui
 
     static state := Buffer(16, 0)
     static previousButtons := 0
@@ -6559,6 +6569,11 @@ PollController() {
     static viewUsedAsModifier := false
     static quickChordSince := 0
     static quickChordFired := false
+    ; Up here with the rest rather than beside the chord that uses them. They are
+    ; cleared by the stand-downs above that point, and a static declared halfway
+    ; down a function reads as though it were scoped to that half.
+    static settingsChordSince := 0
+    static settingsChordFired := false
     static lastScroll := 0
     static downTick := Map()
     static longFired := Map()
@@ -6581,6 +6596,52 @@ PollController() {
     inPoll := true
     try {
         ControllerPrimeHoldTables(downTick, longFired, buttonDefinitions)
+
+        ; The controller test owns all input while it is visible, so calibrating
+        ; a pad cannot fire mapped actions, open overlays or navigate whatever is
+        ; behind the window.
+        ;
+        ; AHEAD OF THE DISABLED STAND-DOWN, on the precedent ApplyRuntimeTimers
+        ; already sets for RecentAppsTick: being switched off stops the companion
+        ; ACTING, and this only observes. Settings is reachable from the tray
+        ; while disabled, so the button is reachable too, and a diagnostic that
+        ; silently showed nothing in the state you are most likely to be testing
+        ; a pad in would be worse than not having it. ShowControllerTest arms the
+        ; poll timer unconditionally for the same reason, and HideControllerTest
+        ; hands it back to ApplyRuntimeTimers, which cancels it again if the
+        ; companion is still disabled.
+        ;
+        ; It reads and decodes its own sample rather than falling through to the
+        ; loop's: the readout says RAW stick axes, and everything below applies
+        ; the deadzone before anything could display it. A deadzoned sample
+        ; reports perfect centring on a stick that drifts, which is the single
+        ; measurement this window exists to take.
+        if ControllerTestActive() {
+            ; The loop's own static buffer. ControllerReadState fills a buffer
+            ; the CALLER owns -- it does not allocate one -- so an unset local
+            ; here would have been a fresh bug rather than a port.
+            if ControllerReadState(&state) {
+                ControllerDecodeState(state, &testButtons, &testLt, &testRt,
+                    &testLx, &testLy, &testRx, &testRy)
+                UpdateControllerTest(testButtons, testLt, testRt,
+                    testLx, testLy, testRx, testRy)
+                previousButtons := testButtons
+            } else {
+                try ControllerTestGui["ControllerButtons"].Text :=
+                    "No controller detected on any XInput slot."
+                previousButtons := 0
+            }
+            quickChordSince := 0
+            quickChordFired := false
+            settingsChordSince := 0
+            settingsChordFired := false
+            settingsLtDown := false
+            settingsRtDown := false
+            ResetControllerHoldState(
+                &previousViewDown, downTick, longFired, triggerDown,
+                buttonDefinitions, &viewWasDown)
+            return
+        }
 
         if CompanionDisabled {
             ; The same stand-down the shell performs, through the same routine.
@@ -6702,8 +6763,6 @@ PollController() {
         ; combination still satisfies this one, since the triggers are ignored
         ; rather than forbidden. The hold requirement compensates for the looser
         ; chord so it cannot fire accidentally during play.
-        static settingsChordSince := 0
-        static settingsChordFired := false
         settingsComboDown := (buttons & 0x0100) && (buttons & 0x0200)
             && (buttons & 0x0040) && (buttons & 0x0080)
         if ControllerChordFired(settingsComboDown, QuickMenuChordHoldMs, now,

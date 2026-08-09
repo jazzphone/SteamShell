@@ -442,6 +442,24 @@ $sharedSeamAllowed = @(
     # companion's half of the tick reports GameInput and a second backend name,
     # neither of which the shell has; a seam is the honest way to say so.
     "ProductControllerDiagnosticProbe",
+    # Widened for the controller test and calibration window, which moved to
+    # SteamShell-Shared.ahk when it turned out to be standalone-only for no
+    # recorded reason rather than for a product one.
+    #
+    # Neither of these is a Product* name, and both are genuinely per-tree: the
+    # two poll heads differ in which flags stand them down, which is the last
+    # honest divergence in PollController, and ApplyRuntimeTimers arms a
+    # different set of timers in each product. The window needs exactly two
+    # things from its host -- "start polling the pad" and "put the timers back
+    # the way the settings say" -- and asking through the pair each tree already
+    # defines beats inventing a Product* wrapper over each that would do nothing
+    # but forward.
+    #
+    # ShowControllerTest arms PollController unconditionally, which is what makes
+    # the window work in the companion while the companion is DISABLED and its
+    # poll timer cancelled. HideControllerTest hands that back to
+    # ApplyRuntimeTimers, which cancels it again if it should be.
+    "ApplyRuntimeTimers", "PollController",
     # Only SettingsRegisterBuiltField is CALLED from the shared file. The
     # browse, record and mark-dirty seams are passed as CALLBACKS --
     # OnEvent("Click", SettingsProductBrowsePath.Bind(...)) -- and they are on
@@ -477,7 +495,7 @@ $sharedSeamAllowed = @(
 # Restated here, next to the list, and asserted in Assert-SharedParity: changing
 # one without the other fails the build. Update the expectation in the same
 # commit that changes the list, and say in the message why the seam moved.
-$sharedSeamExpectedCount = 40
+$sharedSeamExpectedCount = 42
 
 # Reports same-named functions in both trees whose difference is only naming and
 # formatting -- the drift that a raw similarity score hides.

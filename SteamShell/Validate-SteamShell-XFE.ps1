@@ -2346,8 +2346,13 @@ Assert-True (
 # The RTSS page is one flowing list, like standalone's. Its two side-by-side
 # group boxes are what forced the whole page into hand-placed columns: a group
 # box needs its height before the rows inside it exist, so it cannot flow.
+# The exemption is the controller test window, which is not a flowing page: it
+# is a fixed-size ToolWindow in SteamShell-Shared.ahk laid out with relative
+# offsets, where a group box costs nothing. The ban is still global otherwise --
+# scoping it to ShowSettings' own body would have stopped covering the shared
+# row builders it calls, and those are where a group box would do the damage.
 Assert-True (
-    $source -notmatch 'AddGroupBox\(') (
+    $source -notmatch '(?<!ControllerTestGui\.)AddGroupBox\(') (
     "A Settings group box has returned; group boxes cannot flow and force hand placement.")
 Assert-True (
     # Section breaks come from the shared page table now, as companion-only
