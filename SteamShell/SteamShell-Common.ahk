@@ -3223,10 +3223,10 @@ JoinWith(listObj, delimiter := ", ") {
 ;
 ; This literal had twelve homes: two globals, two read defaults, a settings-row
 ; default, a defaults Map, a schema spec, the shell's embedded default INI text
-; and two shipped sample INIs. That is the shape NEXT_STEPS.md records for the
-; version string, where five copies of an escaped spelling were missed on a bump
-; -- so the code paths all call this, and Assert-AutoMouseDefaults holds the
-; three text copies to it.
+; and two shipped sample INIs. That is the shape the version string was in when
+; the 2.0.0 bump missed five of its copies, because one spelling was escaped and
+; the grep only found the other -- so the code paths all call this, and
+; Assert-AutoMouseDefaults holds the three text copies to it.
 ;
 ; What belongs here is a pointer-driven application a living-room user will
 ; actually open from the couch, where reaching for View/Back before every click

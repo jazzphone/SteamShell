@@ -1340,9 +1340,9 @@ function Assert-RecentApplicationPicker {
 # text and the two shipped sample INIs are literal text a user reads and edits.
 # Those are held to the function here.
 #
-# This is the version-string trap in another key. NEXT_STEPS.md records five
-# literals missed on the 2.0.0 bump because one spelling was escaped and the grep
-# only found the other; a default duplicated across two products, a text blob and
+# This is the version-string trap in another key. The 2.0.0 bump missed five of
+# that literal's copies because one spelling was escaped and the grep only found
+# the other; a default duplicated across two products, a text blob and
 # two samples drifts exactly the same way, and the failure is quiet -- a user
 # whose INI came from the sample gets a different allowlist from a user who let
 # the shell write its own.
