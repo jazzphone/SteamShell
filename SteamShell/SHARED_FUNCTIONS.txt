@@ -311,6 +311,7 @@ RefreshHealthCheck
 RegisterQuickMenuKeys
 RegisterTaskbarCreatedListener
 RequestElevatedRtssFrameLimit
+ResetControllerHoldState
 ResolveRtssExecutablePath
 RestoreRtssFrameLimitTick
 RevealWindow

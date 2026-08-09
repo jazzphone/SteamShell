@@ -3305,7 +3305,6 @@ _TryParseBool(x) {
 }
 
 
-
 ParseExeListPipe(raw) {
     list := []
 
@@ -6916,36 +6915,6 @@ IsSteamRunning() {
     return cachedResult
 }
 
-; Discard every press/hold tracker, so a button held across an interruption
-; cannot complete a Short or Long the user never finished.
-;
-; This existed as SEVEN hand-copied blocks inside PollController -- the same four
-; statements written four slightly different ways, at every early return. XFE has
-; had one function for this since it was written; standalone never got one, and a
-; reset that has to be remembered seven times is a reset that will eventually be
-; forgotten once. That matters more than tidiness: the hold-to-drag work adds
-; "release any synthetic mouse button" to exactly this set, and a missed site
-; there leaves a button held down in the Windows shell with no keyboard.
-;
-; previousViewDown is by reference because it is a plain Boolean; the Maps and
-; the definition array are objects and already carry through. XFE sets its own
-; copy separately at each call site, which is the same duplication one variable
-; smaller -- aligning the two signatures is what lets this move into the shared
-; input file rather than being written a third time for the helper.
-ResetControllerHoldState(
-        &previousViewDown, downTick, longFired, triggerDown, buttonDefinitions,
-        &viewWasDown) {
-    previousViewDown := false
-    ; The View button's own press is a hold tracker too, so it is discarded here
-    ; with the rest rather than at each call site. Left standing, a View held
-    ; when the poll stood down -- the learner opening, the controller
-    ; disconnecting, mouse mode being switched off -- is still "down" when the
-    ; poll resumes, and the release after it reports a hold of however long the
-    ; interruption lasted. That fires the hold action, which throws the Steam
-    ; overlay up over whatever the user was doing.
-    viewWasDown := false
-    ResetControllerEdgeState(downTick, longFired, triggerDown, buttonDefinitions)
-}
 
 PollController() {
     global LearnActive
@@ -10215,7 +10184,6 @@ SettingsEditorAddMappedChoice(category, section, key, label, choices, values, &y
     y += 34
     return ctrl
 }
-
 
 
 SettingsEditorSetFieldEnabled(section, key, enabled) {

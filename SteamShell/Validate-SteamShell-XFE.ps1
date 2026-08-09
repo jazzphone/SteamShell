@@ -462,7 +462,10 @@ Assert-True (
     $source -match 'ApplyControllerMouseScroll\(ly, ControllerScrollStep\)' -and
     $source -match 'ApplyControllerMouseScroll\(ly, 1\)' -and
     $source -match 'ResetControllerEdgeState\(' -and
-    $source -notmatch '(?m)^ResetControllerHoldState\(') (
+    # rawSource: the rule is that the COMPANION does not define its own copy.
+    # It is in SteamShell-Shared.ahk now, which the effective source inlines,
+    # so reading $source here would forbid the shared definition itself.
+    $rawSource -notmatch '(?m)^ResetControllerHoldState\(') (
     "XFE must take controller-mouse movement, scroll and the hold reset from SteamShell-Common.ahk.")
 # Hold-to-drag. Left click ONLY, and decided in the poll loop, never inside a
 # binding executor.

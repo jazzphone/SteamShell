@@ -6637,13 +6637,16 @@ PollController() {
         ControllerPrimeHoldTables(downTick, longFired, buttonDefinitions)
 
         if CompanionDisabled {
-            ResetControllerEdgeState(downTick, longFired, triggerDown,
-                buttonDefinitions)
+            ; The same stand-down the shell performs, through the same routine.
+            ; viewPressTick and viewUsedAsModifier are no longer cleared here
+            ; and did not need to be: ControllerTrackViewButton writes both on
+            ; the rising edge of View and reads pressTick only while wasDown is
+            ; true, which nothing but that edge sets. Clearing wasDown, which
+            ; this does, is what makes them unreachable.
+            ResetControllerHoldState(
+                &previousViewDown, downTick, longFired, triggerDown,
+                buttonDefinitions, &viewWasDown)
             previousButtons := 0
-            previousViewDown := false
-            viewWasDown := false
-            viewPressTick := 0
-            viewUsedAsModifier := false
             quickChordSince := 0
             quickChordFired := false
             settingsLtDown := false
