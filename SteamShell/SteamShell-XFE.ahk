@@ -4683,12 +4683,19 @@ QuickMenuEnsureContentFits() {
     }
     if (statusHeight <= 0 || clientHeight <= 0 || winHeight <= 0)
         return
-    ; The bottom margin is derived from the status line's own scaled height, so it
-    ; stays proportional without reintroducing a DPI calculation.
-    needed := statusY + statusHeight + Round(statusHeight * 0.45)
-    if (needed <= clientHeight)
-        return
+    ; The bottom margin is derived from the status line's own MEASURED height and
+    ; the layout's own two constants, so it stays proportional without
+    ; reintroducing a DPI calculation and without a second constant that can
+    ; disagree with the layout. See QuickMenuMeasuredBottomMargin.
+    needed := statusY + statusHeight + QuickMenuMeasuredBottomMargin(statusHeight)
     grow := needed - clientHeight
+    ; A single pixel of shortfall is the two roundings disagreeing, not a clipped
+    ; row. AutoHotkey scales each control coordinate independently, so the layout
+    ; and this reconstruction can land a pixel apart at some scales however the
+    ; margin is derived -- and growing the window by one pixel to fix a one-pixel
+    ; miscount is the loop this used to be stuck in.
+    if (grow <= 1)
+        return
     monitorIndex := ClampInt(QuickMenuMonitorIndex, 1, MonitorGetCount())
     MonitorGetWorkArea(monitorIndex, &left, &top, &right, &bottom)
     ; Never grow past the screen. If the content genuinely does not fit, a window

@@ -242,6 +242,40 @@ QuickMenuBottomMargin() {
     return 16
 }
 
+; The same margin, in whatever units the caller MEASURED the status control in.
+;
+; QuickMenuEnsureContentFits compares a measured client height against a
+; requirement it has to reconstruct, because the layout is authored in logical
+; units and AutoHotkey scales the controls on the way to the screen. Both trees
+; reconstructed it by rounding 0.45 of the measured status height, and 0.45 is
+; 16/36 -- this margin over that height -- rounded up and frozen as a literal.
+;
+; The expression is deliberately not written out here. Both validators assert it
+; is absent from the effective source, and that source includes comments: naming
+; it would satisfy the check it is meant to fail, which is the trap the shared
+; file's own header records happening the other way round.
+;
+; THAT ONE DIGIT LOGGED A WARNING ON EVERY QUICK MENU OPEN. At 300% scale the
+; layout leaves 16 * 3 = 48 physical pixels, and the check demands
+; Round(108 * 0.45) = Round(48.6) = 49. One pixel short, deterministically, so
+; the menu grew by a pixel and re-centred every time it was drawn and wrote a
+; Warning line saying so. Ten of them in two minutes of ordinary use, on the
+; product where the log is the only way to see that a row was clipped -- which
+; is the failure the warning was added to make visible, drowned by itself.
+;
+; It only shows at scales where 0.45 and 16/36 round apart, which is why it
+; survived: at 100% both give 16.
+;
+; Derived from the two layout functions now, so the check cannot disagree with
+; the layout it is checking. The ratio is applied to the MEASURED height, so it
+; carries whatever scaling was applied without this having to know what that was.
+QuickMenuMeasuredBottomMargin(measuredStatusHeight) {
+    if (QuickMenuStatusHeight() <= 0)
+        return QuickMenuBottomMargin()
+    return Round(
+        measuredStatusHeight * QuickMenuBottomMargin() / QuickMenuStatusHeight())
+}
+
 ; GDI+ has no blur. The glow is concentric strokes stepping outward with
 ; falling alpha, which is cheap, needs no second surface, and at these radii is
 ; visually indistinguishable from a real one.

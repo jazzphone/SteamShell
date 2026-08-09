@@ -5777,8 +5777,16 @@ QuickMenuEnsureContentFits() {
     if (statusHeight <= 0 || clientHeight <= 0 || winWidth <= 0 || winHeight <= 0)
         return
 
-    neededClientHeight := statusY + statusHeight + Round(statusHeight * 0.45)
+    neededClientHeight := statusY + statusHeight
+        + QuickMenuMeasuredBottomMargin(statusHeight)
     grow := Max(0, neededClientHeight - clientHeight)
+    ; A single pixel of shortfall is the two roundings disagreeing, not a clipped
+    ; row. AutoHotkey scales each control coordinate independently, so the layout
+    ; and this reconstruction can land a pixel apart at some scales however the
+    ; margin is derived -- and growing the window by one pixel to fix a one-pixel
+    ; miscount is the loop this used to be stuck in.
+    if (grow <= 1)
+        grow := 0
     GetTargetMonitorWorkArea(
         QuickMenuPreviousHwnd, &workLeft, &workTop, &workRight, &workBottom)
     maxHeight := workBottom - workTop

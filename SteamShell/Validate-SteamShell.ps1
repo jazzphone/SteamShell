@@ -3927,6 +3927,24 @@ Assert-NoAmbiguousDeindentedBlocks -ProjectRoot $projectRoot -File "SteamShell-S
 Assert-NoAmbiguousDeindentedBlocks -ProjectRoot $projectRoot -File "SteamShell-Common.ahk" -Quiet:$Quiet
 # Reports only. See Report-StructuralDrift in Validate-Common.ps1 for why a
 # high structural score is evidence rather than a verdict.
+# The fit check must ask the LAYOUT for its bottom margin, not restate it.
+#
+# Both trees carried `Round(statusHeight * 0.45)` -- 16/36 rounded up and frozen
+# as a constant. At 300% scale the layout leaves 48 physical pixels and that
+# expression demands 49, so the Quick Menu grew a pixel, re-centred and logged a
+# Warning on EVERY open. Ten in two minutes of ordinary use, drowning the signal
+# the warning exists to carry.
+#
+# The guarantee is that the requirement is derived from the two functions that
+# define the layout, so it cannot disagree with what the layout actually does.
+Assert-True (
+    $source -match
+        '(?s)QuickMenuEnsureContentFits\([^)]*\)\s*\{.*?' +
+        'QuickMenuMeasuredBottomMargin\(statusHeight\)' -and
+    $source -notmatch 'statusHeight \* 0\.45') (
+    "The Quick Menu fit check restates the layout's bottom margin instead of " +
+    "deriving it, which logs a spurious grow-and-recentre at some DPI scales.")
+
 Report-StructuralDrift -ProjectRoot $projectRoot -Quiet:$Quiet | Out-Null
 
 if (-not $Quiet) {

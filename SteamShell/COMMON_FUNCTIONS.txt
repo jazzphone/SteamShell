@@ -81,6 +81,7 @@ QuickMenuFillRounded
 QuickMenuGlowPadding
 QuickMenuIdSet
 QuickMenuMakeFont
+QuickMenuMeasuredBottomMargin
 QuickMenuRowHeight
 QuickMenuRowInset
 QuickMenuRowTop
