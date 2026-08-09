@@ -107,6 +107,13 @@ the three defects that fell out.
 3. `RunStartupCommandLine` never checks the target exists. `LaunchStartupProgram`
    normalises the path and rejects a missing one with "Startup program not
    found". A stale entry in the shell reaches the launcher and fails further in.
+4. `AssistPruneCpuSamples` drops a CPU sample the moment its PID leaves the
+   inventory. `WindowEngineCleanupCpuSamples` keeps it for 30 seconds. The assist
+   inventory is the FILTERED list, so a game that minimises or is briefly cloaked
+   drops out for one pass and loses its baseline -- and returns as `known=false`
+   with a usage of zero, to the detector whose question is whether a game is
+   running. Compounds defect 1. Neither check can see this pair: no DllCall and
+   no string literal means no anchors, and the names share no word.
 
 **The sharing, in dependency order.**
 
