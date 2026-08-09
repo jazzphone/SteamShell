@@ -110,6 +110,7 @@ ApplyElevatedRtssFrameLimit
 ApplyElevatedRtssProfileFrameLimit
 ApplyRtssGlobalState
 ApplyTrayIconImage
+ArmRtssFrameLimitHold
 AutoMouseProcessMatches
 BuildProductTrayMenu
 CachedInstallationVerdict
@@ -324,6 +325,7 @@ RtssFrameCapBlockedReason
 RtssFrameCapModeForFps
 RtssFrameCapValueText
 RtssFrameCapWritable
+RtssFrameLimitHoldTick
 RtssGlobalFrameLimit
 RtssGlobalFrameLimitRead
 RtssProfileTargetExe

@@ -437,6 +437,10 @@ global RtssHooksLastFailure := ""
 ; The last RTSS flag word seen, so a CHANGE can be logged without logging every
 ; read. -1 is "nothing seen yet"; 0 is a real flag word.
 global RtssLastFlagsSeen := -1
+; The window after a startup restore during which the limiter flag is held
+; against RTSS re-asserting its own saved state. See RtssFrameLimitHoldTick.
+global RtssFrameLimitHoldUntil := 0
+global RtssFrameLimitHoldRetries := 0
 ; Quick Menu frame-cap presets, in cycle order. "Off" and "Custom" are derived
 ; states rather than list entries; see GetRtssFrameCapState.
 global RtssFrameCapPresets := [30, 40, 60, 90, 120]

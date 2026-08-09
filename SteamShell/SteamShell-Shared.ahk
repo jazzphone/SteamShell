@@ -774,6 +774,78 @@ PersistRtssFrameCapStateNow() {
     return PersistRtssFrameCapSelection(state["mode"], fps)
 }
 
+; Opens the hold window. Thirty seconds, which is comfortably longer than RTSS
+; takes to finish starting and comfortably shorter than a user settling in.
+ArmRtssFrameLimitHold() {
+    global RtssFrameLimitHoldUntil, RtssFrameLimitHoldRetries
+    RtssFrameLimitHoldUntil := A_TickCount + 30000
+    RtssFrameLimitHoldRetries := 0
+    SetTimer(RtssFrameLimitHoldTick, 3000)
+}
+
+
+; Holds the limiter on for a short window after the startup restore.
+;
+; THE RESTORE WAS BEING UNDONE, NOT FAILING. ApplyRtssGlobalState confirms its
+; own write by re-reading the flag word immediately, and it confirmed -- the log
+; said "Restored the last Frame Limit selection: CONFIGURED at 158 FPS". By the
+; time the user opened the Quick Menu, bit 0x4 was set again and the machine was
+; running uncapped. The row was right; the write had not stuck.
+;
+; The restore fires as soon as RTSS answers, and answering is not the same as
+; having finished starting. RTSS applies its own saved runtime state during
+; initialisation, and anything written into the flag word before that point is
+; overwritten by it. An immediate read-back cannot see this: it happens while
+; the value is still ours.
+;
+; So the write is verified again after RTSS has settled, and re-applied if it
+; reverted. Bounded on both axes -- a short window and a small number of
+; attempts -- because the one thing this must never become is a loop that fights
+; the user. Turning the limiter off in RTSS's own UI during the first half
+; minute after boot is rare; a program that silently turns it back on forever
+; would be much worse than the fault being fixed.
+;
+; A change made through SteamShell stops it immediately and needs no check here:
+; the Quick Menu's own writes go through PersistRtssFrameCapStateNow, which
+; records mode "off" and fails the guard below on the next tick.
+RtssFrameLimitHoldTick(*) {
+    global RtssLastFrameCapMode, RtssLastFrameCapFps
+    global RtssFrameLimitHoldUntil, RtssFrameLimitHoldRetries
+    static MAX_RETRIES := 3
+    ; "off" is the one selection this must not defend. Re-applying it would mean
+    ; writing the disabled bit back over a user who has just turned the limiter
+    ; on in RTSS.
+    if (RtssLastFrameCapMode = "" || RtssLastFrameCapMode = "off"
+        || A_TickCount > RtssFrameLimitHoldUntil
+        || RtssFrameLimitHoldRetries >= MAX_RETRIES) {
+        SetTimer(RtssFrameLimitHoldTick, 0)
+        return
+    }
+    state := GetRtssGlobalState()
+    if !IsObject(state)
+        return
+    if state["limiter"]
+        return
+    ; The number is checked too. If RTSS came back with a different cap entirely
+    ; then this is not our write being reverted, it is a different state, and
+    ; re-enabling the limiter would cap at a number the user never chose.
+    fps := 0
+    if !RtssGlobalFrameLimitRead(&fps)
+        return
+    if (fps != RtssLastFrameCapFps) {
+        SetTimer(RtssFrameLimitHoldTick, 0)
+        LogLine("RTSS holds " fps " FPS rather than the restored "
+            . RtssLastFrameCapFps "; leaving the limiter alone.", "Warning")
+        return
+    }
+    RtssFrameLimitHoldRetries += 1
+    LogLine("The RTSS limiter was disabled again after the startup restore"
+        . " (attempt " RtssFrameLimitHoldRetries " of " MAX_RETRIES
+        . "); re-enabling it at " fps " FPS.", "Warning")
+    ApplyRtssGlobalState("limiter", true)
+}
+
+
 ; Reapplies the recorded selection once RTSS is available.
 ;
 ; Never starts RTSS. SteamShell restoring a frame cap is not a reason to launch
@@ -898,6 +970,10 @@ RestoreRtssFrameLimitTick(*) {
     LogLine(
         "Restored the last Frame Limit selection: " StrUpper(RtssLastFrameCapMode)
         . " at " RtssLastFrameCapFps " FPS.")
+    ; And watch that it stays restored. RTSS applies its own saved runtime state
+    ; while it finishes starting, which can overwrite the flag this just set --
+    ; after the read-back that confirmed it.
+    ArmRtssFrameLimitHold()
 }
 
 ; ==============================================================================

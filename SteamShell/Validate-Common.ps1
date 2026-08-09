@@ -1340,6 +1340,56 @@ function Assert-QuickMenuPageChangesRebuild {
     }
 }
 
+# The startup limiter hold must stay bounded, and must never defend "off".
+#
+# RTSS applies its own saved runtime state while it finishes starting, which
+# overwrites the limiter flag the startup restore had already set AND already
+# verified -- the read-back happens while the value is still ours. So the restore
+# re-checks after RTSS settles and re-applies if it reverted.
+#
+# That is a program writing a setting the user did not just ask it to write, and
+# the only thing keeping it honest is that it stops. Two bounds and one
+# exclusion, all three of which a tidy could remove without any test noticing:
+#
+#   - a deadline, so it cannot run for the session
+#   - a retry cap, so it cannot fight in a loop inside the deadline
+#   - never for mode "off", because re-applying THAT means writing the disabled
+#     bit over a user who has just turned the limiter on in RTSS's own UI
+function Assert-RtssFrameLimitHoldIsBounded {
+    param(
+        [Parameter(Mandatory = $true)][string]$ProjectRoot,
+        [switch]$Quiet
+    )
+    $sharedText = Get-SourceText (Join-Path $ProjectRoot "SteamShell-Shared.ahk")
+    $hold = Get-AhkFunctionBody -Source $sharedText -Name "RtssFrameLimitHoldTick"
+    Assert-True ($hold -ne "") (
+        "RtssFrameLimitHoldTick is gone. Without it the startup restore is " +
+        "confirmed by a read-back that happens before RTSS has finished " +
+        "applying its own state, so a reverted limiter is never noticed.")
+    Assert-True ($hold -match 'RtssLastFrameCapMode\s*=\s*"off"') (
+        "The RTSS limiter hold no longer excludes the 'off' selection. It " +
+        "would write the disabled bit back over a user who has just turned the " +
+        "limiter on in RTSS itself.")
+    Assert-True ($hold -match 'A_TickCount\s*>\s*RtssFrameLimitHoldUntil') (
+        "The RTSS limiter hold has no deadline and would run for the session.")
+    Assert-True ($hold -match 'RtssFrameLimitHoldRetries\s*>=\s*MAX_RETRIES') (
+        "The RTSS limiter hold has no retry cap. Inside its deadline it could " +
+        "re-enable the limiter every tick against a user turning it off.")
+    Assert-True ($hold -match 'fps\s*!=\s*RtssLastFrameCapFps') (
+        "The RTSS limiter hold no longer checks the cap it is defending. If " +
+        "RTSS came back holding a different number this would enable the " +
+        "limiter at an FPS the user never chose.")
+    $arm = Get-AhkFunctionBody -Source $sharedText -Name "ArmRtssFrameLimitHold"
+    Assert-True ($arm -ne "" -and $arm -match 'RtssFrameLimitHoldRetries\s*:=\s*0') (
+        "ArmRtssFrameLimitHold is missing or does not reset the retry count, " +
+        "so a later restore in the same session would start already exhausted.")
+    if (-not $Quiet) {
+        Write-Host ("RTSS limiter hold: bounded by deadline and retries, and " +
+            "never applied to an 'off' selection.")
+    }
+}
+
+
 # "Could not read the cap" must never render as "the limiter is off".
 #
 # GetRtssFrameLimit returns 0 for six different reasons and only one of them is
