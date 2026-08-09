@@ -10276,3 +10276,38 @@ ResetControllerHoldState(
     ResetControllerEdgeState(downTick, longFired, triggerDown, buttonDefinitions)
 }
 
+
+; One line per button edge and per trigger crossing, while DiagnosticLogging is
+; on. The right granularity for diagnosing a pad, and far too much for an
+; ordinary session -- which is why it is behind the flag that already exists for
+; exactly this, and why the timer-driven ControllerDiagnosticTick is gated the
+; same way.
+;
+; SHARED, and it was not. Both products ship the DiagnosticLogging row and both
+; read it into EnableControllerDiagnostics; only the companion logged anything
+; per report. So the same setting promised different things in the two products,
+; and the half that was missing is the half that matters when a controller is
+; unreadable -- which on the shell means a machine nobody can drive. Same shape
+; as the XInput-slot row that shipped in both and had a tick behind it in one.
+;
+; The trigger edges are STATIC HERE rather than passed in. Each product compiles
+; its own copy of this file into its own process, so a static in it is per
+; program, which is exactly the lifetime the two per-tree pairs had -- and it
+; removes them from both poll loops instead of moving them.
+ControllerLogInputChange(buttons, lt, rt, pressed, released) {
+    global EnableControllerDiagnostics, ActiveInputBackend, ActiveControllerIndex
+    static ltDown := false
+    static rtDown := false
+    currentLt := lt > 30
+    currentRt := rt > 30
+    if (EnableControllerDiagnostics
+        && (pressed || released || currentLt != ltDown || currentRt != rtDown)) {
+        LogLine(
+            "Controller input [" ActiveInputBackend "]"
+            . (ActiveInputBackend = "xinput" ? " slot " ActiveControllerIndex : "")
+            . ": buttons=0x" Format("{:04X}", buttons)
+            . ", LT=" lt ", RT=" rt ".")
+    }
+    ltDown := currentLt
+    rtDown := currentRt
+}

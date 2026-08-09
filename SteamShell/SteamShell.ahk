@@ -7124,6 +7124,13 @@ PollController() {
 
     ControllerButtonEdges(buttons, &previousButtons, &pressed, &released)
 
+    ; One line per button edge and per trigger crossing, while DiagnosticLogging
+    ; is on. This product read that setting and logged nothing per report, so
+    ; the same row promised less here than in the companion -- and the half that
+    ; was missing is the half that matters when a controller is unreadable,
+    ; which on the Windows shell means a machine nobody can drive.
+    ControllerLogInputChange(buttons, lt, rt, pressed, released)
+
     ; Full Settings reserves the analog triggers for category changes. Track
     ; their edges here—even while View/Back is held—so releasing Back cannot
     ; create a stale category change. Ignore both together because both triggers

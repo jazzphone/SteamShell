@@ -157,6 +157,7 @@ ControllerLearnSteps
 ControllerLearnTick
 ControllerLearnUpdateUi
 ControllerLearnValidateDpad
+ControllerLogInputChange
 ControllerPollFrame
 ControllerResumeGapCheck
 ControllerProfilePath

@@ -6617,8 +6617,6 @@ PollController() {
     static triggerDown := Map("LT", false, "RT", false)
     static settingsLtDown := false
     static settingsRtDown := false
-    static diagnosticLtDown := false
-    static diagnosticRtDown := false
     static inPoll := false
     static wasDisabled := false
     static buttonDefinitions := [
@@ -6651,8 +6649,6 @@ PollController() {
             quickChordFired := false
             settingsLtDown := false
             settingsRtDown := false
-            diagnosticLtDown := false
-            diagnosticRtDown := false
             wasDisabled := true
             return
         }
@@ -6734,26 +6730,11 @@ PollController() {
         now := A_TickCount
         ControllerDecodeState(state, &buttons, &lt, &rt, &lx, &ly, &rx, &ry)
         ControllerButtonEdges(buttons, &previousButtons, &pressed, &released)
-        currentDiagnosticLtDown := lt > 30
-        currentDiagnosticRtDown := rt > 30
-        ; One line per button edge and per trigger crossing. That is the right
-        ; granularity for diagnosing a pad, and far too much for an ordinary
-        ; session, so it belongs behind the diagnostic flag that already exists
-        ; for exactly this -- the timer-driven ControllerDiagnosticTick is gated
-        ; the same way. Left ungated it was the single largest writer to a log
-        ; that, until now, never rotated.
-        if (EnableControllerDiagnostics
-            && (pressed || released
-                || currentDiagnosticLtDown != diagnosticLtDown
-                || currentDiagnosticRtDown != diagnosticRtDown)) {
-            LogLine(
-                "Controller input [" ActiveInputBackend "]"
-                . (ActiveInputBackend = "xinput" ? " slot " ActiveControllerIndex : "")
-                . ": buttons=0x" Format("{:04X}", buttons)
-                . ", LT=" lt ", RT=" rt ".")
-        }
-        diagnosticLtDown := currentDiagnosticLtDown
-        diagnosticRtDown := currentDiagnosticRtDown
+        ; Shared with the shell, which read the same DiagnosticLogging setting
+        ; and logged nothing per report. Its trigger-edge statics live in the
+        ; shared function now, so the two that were here are gone rather than
+        ; moved.
+        ControllerLogInputChange(buttons, lt, rt, pressed, released)
 
         ControllerApplyStickDeadzone(&lx, &ly, &rx, &ry, ControllerDeadzone)
 
