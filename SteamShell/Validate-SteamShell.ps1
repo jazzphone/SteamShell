@@ -1904,7 +1904,7 @@ Assert-True (
         'FileSelect\((?:(?!\n\})[\s\S])*?finally(?:(?!\n\})[\s\S])*?' +
         'SettingsDialogActive\s*:=\s*false' -and
     $source -match
-        '(?s)if\s*\(SettingsDialogActive\s*\|\|\s*settingsPrimaryActive\).*?' +
+        '(?s)if\s*\(SettingsDialogActive\s*\|\|\s*settingsMainActive\).*?' +
         'SettingsEditorHandleController.*?else\s*' +
         'SettingsEditorHandlePointer' -and
     $source -match

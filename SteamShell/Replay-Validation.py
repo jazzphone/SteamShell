@@ -1483,6 +1483,52 @@ def _has_inline_body(keyword, rest):
     return False
 
 
+def check_local_shadows_call(sources):
+    """A local that shadows something callable, per FUNCTION rather than per file.
+
+    KEPT IN STEP WITH the shadow scan in Assert-AhkFileSanity in
+    Validate-Common.ps1.
+
+    A name cannot be both assigned as a local and called as "name(" in the same
+    body. In AutoHotkey the assignment makes it a local, so the call resolves to
+    that local instead of the function or class it looks like, and throws.
+
+    THE MAC HAD NO COPY OF THIS UNTIL A WINDOWS RUN CAUGHT WHAT IT WAS FOR.
+    Moving the shell's SettingsEditorPrimaryActive into SteamShell-Shared.ahk as
+    SettingsPrimaryActive collided with a local already called
+    settingsPrimaryActive in PollController -- AutoHotkey identifiers are
+    case-insensitive, so those are one name -- and the poll would have thrown on
+    its first tick. Every local check here passed, because this check lived only
+    in the PowerShell half. That is the failure mode the two harnesses exist to
+    avoid, so it is ported rather than left as a Windows-only rule.
+
+    Scoped per function deliberately. It costs no list of builtin names to keep
+    current -- `send := SubStr(v, 6)` shadows Send() harmlessly when nothing in
+    that function calls it, and a name list would have failed the build on it.
+    The signal is the collision, not the name.
+    """
+    for name, text in sources.items():
+        for function, line, body in function_list(text):
+            code = "\n".join(strip_comments(l) for l in body)
+            assigned = {}
+            for match in re.finditer(
+                    r"(?m)^\s*([A-Za-z_][A-Za-z0-9_]*)\s*:=", code):
+                assigned[match.group(1).lower()] = match.group(1)
+            reported = set()
+            for match in re.finditer(
+                    r"(?<![.\w])([A-Za-z_][A-Za-z0-9_]*)\s*\(", code):
+                called = match.group(1).lower()
+                # Recursion is a name calling itself, not a local shadowing it.
+                if called == function.lower() or called in reported:
+                    continue
+                if called in assigned:
+                    reported.add(called)
+                    fail(f"{name}: {function}() at line {line}: local "
+                         f"'{assigned[called]}' shadows the call "
+                         f"'{assigned[called]}(' -- AutoHotkey resolves the call "
+                         "to the local and throws at run time.")
+
+
 def check_ambiguous_deindented_blocks(sources):
     """A braceless control statement whose body is not indented under it.
 
@@ -2043,6 +2089,7 @@ def main():
     check_settings_row_keys(sources)
     check_settings_rows_reach_consumers(sources)
     check_ambiguous_deindented_blocks(sources)
+    check_local_shadows_call(sources)
     check_quickmenu_rows(sources)
     check_schema_versions()
     check_cross_name_anchors(sources)

@@ -6849,7 +6849,7 @@ PollController() {
         return
     }
     settingsControllerActive := ControllerSettingsSurfaceActive()
-    settingsPrimaryActive := SettingsPrimaryActive()
+    settingsMainActive := SettingsPrimaryActive()
     isControllerTestActive := ControllerTestActive()
     if (!EnableControllerMouseMode && !EnableQuickMenu
         && !settingsControllerActive && !isControllerTestActive)
@@ -6991,7 +6991,7 @@ PollController() {
     currentLtDown := lt > 30
     currentRtDown := rt > 30
     settingsCategoryDirection := 0
-    if (settingsPrimaryActive
+    if (settingsMainActive
         && !SettingsDialogActive
         && !(buttons & 0x0020)
         && !(currentLtDown && currentRtDown)) {
@@ -7067,7 +7067,7 @@ PollController() {
             ResetControllerHoldState(
                 &previousViewDown, downTick, longFired, triggerDown, buttonDefinitions,
                 &viewWasDown)
-            if (SettingsDialogActive || settingsPrimaryActive)
+            if (SettingsDialogActive || settingsMainActive)
                 SettingsEditorHandleController(
                     pressed, lx, ly, rx, ry, settingsCategoryDirection)
             else
