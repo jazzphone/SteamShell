@@ -4703,30 +4703,35 @@ StartControllerCenterSample(*) {
     ControllerCalibrationUntil := A_TickCount + 3000
 }
 
+; THROUGH ProductApplyQuickMenuSetting, which is the seam every other write of a
+; setting already uses. This wrote the INI itself and then reached into the
+; Settings editor's field registry by hand, which is how a calibration ended up
+; coupled to one product's Settings implementation -- and it was the worse of the
+; two paths in three ways:
+;
+;   - it assigned field["ctrl"].Value with no check that the window is still
+;     visible, where SettingsEditorSyncFieldControl checks first;
+;   - it assigned .Value raw, where SettingsEditorPopulateField repopulates by
+;     field type;
+;   - it skipped SyncControlPanel, so the Control Panel went on showing the old
+;     deadzone until something else refreshed it.
+;
+; The seam does all of that, per product, and LoadSettings inside it is what
+; re-reads ControllerDeadzone -- so there is no assignment to it here any more.
+; The value reported back is the one that survived the clamp, not the one that
+; was suggested.
 ApplyControllerSuggestedDeadzone(*) {
-    global ControllerSuggestedDeadzone, ControllerDeadzone
-    global ControllerTestGui, SettingsEditorUpdating
+    global ControllerSuggestedDeadzone, ControllerDeadzone, ControllerTestGui
     if (ControllerSuggestedDeadzone <= 0) {
         try ControllerTestGui["ControllerCalibration"].Text :=
             "Run the three-second center sample before applying a recommendation."
         return
     }
-    if !CommitIniChanges([
-        Map(
-            "section", "Controller",
-            "key", "ControllerDeadzone",
-            "value", ControllerSuggestedDeadzone)
-    ]) {
+    if !ProductApplyQuickMenuSetting(
+        "Controller", "ControllerDeadzone", ControllerSuggestedDeadzone) {
         try ControllerTestGui["ControllerCalibration"].Text :=
-            "SteamShell could not save the recommended deadzone."
+            "The recommended deadzone could not be saved."
         return
-    }
-    ControllerDeadzone := ControllerSuggestedDeadzone
-    field := SettingsEditorFindField("Controller", "ControllerDeadzone")
-    if IsObject(field) {
-        SettingsEditorUpdating := true
-        field["ctrl"].Value := ControllerDeadzone
-        SettingsEditorUpdating := false
     }
     try ControllerTestGui["ControllerCalibration"].Text :=
         "Deadzone " ControllerDeadzone " saved and applied."
