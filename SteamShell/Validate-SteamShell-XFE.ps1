@@ -1055,6 +1055,43 @@ Assert-True (
     # than on end-of-line.
     $source -match '(?s)PollController\(\)\s*\{(?:(?!\n\})[\s\S])*?if LearnActive\s*\{.*?ResetControllerHoldState\((?:(?!\)\s)[\s\S])*?\)\s*\r?\n\s*return.*?if !ControllerReadState') (
     "PollController must ignore controller input entirely while the learning wizard is open.")
+# The settle gate, and the three properties that make it one rather than a
+# fourth fixed delay. Each is something a tidy would remove without any test
+# noticing, and each removal turns it back into the guess it replaced.
+#
+# Checked once, here, because the learner is defined once in
+# SteamShell-Shared.ahk and both products compile the same bytes.
+Assert-True (
+    # 1. It gates the capture window. A prompt that appears while the sticks are
+    #    still moving is the invitation to answer it too early, so the wait has
+    #    to come before the prompt changes, not after.
+    $source -match
+        '(?sm)^ControllerLearnStartCapture\(\)\s*\{(?:(?!\n\})[\s\S])*?' +
+        'if ControllerLearnAwaitQuiet\(\)(?:(?!\n\})[\s\S])*?LearnCaptureUntil' -and
+    # 2. Quiet is WALL TIME since the last change, not a count of quiet reports.
+    #    Many pads report only on change, so "no report at all" is the quietest
+    #    a pad can be and counting arrivals would never advance for them.
+    $source -match
+        '(?sm)^ControllerLearnSettleTick\(\)\s*\{(?:(?!\n\})[\s\S])*?' +
+        'A_TickCount\s*-\s*LearnLastMotionTick\s*<\s*LEARN_QUIET_MS' -and
+    # 3. Bounded, and it says so when the bound is what released it. Without the
+    #    deadline a pad with a live motion sensor never starts a step.
+    $source -match
+        '(?sm)^ControllerLearnAwaitQuiet\(\)\s*\{(?:(?!\n\})[\s\S])*?' +
+        'LearnSettleDeadline := A_TickCount \+ LEARN_SETTLE_LIMIT_MS' -and
+    $source -match
+        '(?sm)^ControllerLearnSettleTick\(\)\s*\{(?:(?!\n\})[\s\S])*?' +
+        'timedOut := A_TickCount >= LearnSettleDeadline' -and
+    # 4. Bytes already noisy at rest are skipped while measuring quiet. A motion
+    #    sensor never stops, and waiting for one to go still waits forever --
+    #    which is the same reason LearnRestNoise exists at all.
+    $source -match
+        '(?sm)^ControllerLearnReport\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?' +
+        'LearnRestNoise, offset, "UChar"\)\)(?:(?!\n\})[\s\S])*?' +
+        'LearnLastMotionTick := A_TickCount') (
+    "The learner's settle gate must wait on measured quiet, skip resting noise, " +
+    "and be bounded; without all three it is a fixed delay again.")
+
 # With the controller inert, Skip is unreachable from the couch, so a digital step
 # that never sees its control has to advance by itself.
 Assert-True (

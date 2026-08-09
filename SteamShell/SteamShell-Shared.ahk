@@ -7805,12 +7805,16 @@ ControllerLearnConsumesReport(data, base, length, device) {
 
 CloseControllerLearner(*) {
     global LearnActive, LearnGui, SettingsDialogActive
+    global LearnSettleDeadline, LearnSettleDone
     LearnActive := false
     SettingsDialogActive := false
     SetTimer(ControllerLearnTick, 0)
     SetTimer(ControllerLearnBeginSteps, 0)
     SetTimer(ControllerLearnNextStep, 0)
     SetTimer(ControllerLearnStartCapture, 0)
+    SetTimer(ControllerLearnSettleTick, 0)
+    LearnSettleDeadline := 0
+    LearnSettleDone := false
     SetTimer(ControllerLearnIdentificationReady, 0)
     SetTimer(ControllerLearnIdentifyHoldTimeout, 0)
     if IsSet(LearnGui) {
@@ -8482,8 +8486,38 @@ ControllerLearnReport(data, base, length, device) {
     global LearnIdentifyDevices, LearnIdentifyReady
     global LearnIdentifyHoldOffset, LearnIdentifyHoldMask
     global LearnReleaseOffset, LearnStepReports
+    global LearnSettleDeadline, LearnLastMotionTick, LearnSettlePrev
     if !LearnActive
         return
+    ; The settle gate's clock. While ControllerLearnAwaitQuiet is waiting, every
+    ; report is compared with the PREVIOUS one and any difference restarts the
+    ; clock; bytes that were already noisy at rest are skipped, because a motion
+    ; sensor never stops and waiting for one to go still waits forever.
+    ;
+    ; The report is not fed to the step machine while this is running. That is
+    ; the point: a press made before the prompt settles is discarded rather than
+    ; captured as the answer to a step that had not started asking.
+    if (LearnSettleDeadline && LearnDevice) {
+        if (!LearnSettlePrev || LearnSettlePrev.Size != length) {
+            LearnSettlePrev := ControllerLearnCopyReport(data, base, length)
+            LearnLastMotionTick := A_TickCount
+            return
+        }
+        Loop length {
+            offset := A_Index - 1
+            if (IsObject(LearnRestNoise)
+                && offset < LearnRestNoise.Size
+                && NumGet(LearnRestNoise, offset, "UChar"))
+                continue
+            if (NumGet(data, base + offset, "UChar")
+                != NumGet(LearnSettlePrev, offset, "UChar")) {
+                LearnLastMotionTick := A_TickCount
+                break
+            }
+        }
+        LearnSettlePrev := ControllerLearnCopyReport(data, base, length)
+        return
+    }
     ; Select the controller that the user actually operates. RawInput gamepads
     ; often publish idle reports continuously, so locking to the first hDevice
     ; seen makes the prompt meaningless when more than one pad is connected.
@@ -8881,6 +8915,7 @@ ControllerLearnRestart() {
     global LearnLastAccepted, LearnLastFriendly
     global LearnIdentifyDevices, LearnIdentifyReady
     global LearnAnalogBytes, LearnAnalogValues, LearnDpadRetries
+    global LearnSettleDeadline, LearnSettleDone
     LearnAnalogBytes := Map()
     LearnAnalogValues := Map()
     LearnDpadRetries := 0
@@ -8909,6 +8944,9 @@ ControllerLearnRestart() {
     ; so leaving it pending meant the old step restarting on top of the fresh
     ; session -- or firing at LearnStepIndex 0 and throwing.
     SetTimer(ControllerLearnStartCapture, 0)
+    SetTimer(ControllerLearnSettleTick, 0)
+    LearnSettleDeadline := 0
+    LearnSettleDone := false
     SetTimer(ControllerLearnIdentificationReady, -1200)
     ControllerLearnUpdateUi()
 }
@@ -9045,6 +9083,75 @@ ControllerLearnSkip() {
 }
 
 
+; Wait for the pad to actually stop before opening a capture window.
+;
+; EVERY OTHER PAUSE IN THIS WIZARD IS A FIXED DELAY, and they are wildly uneven:
+; 1800ms after the identifying control is released, 700 after an axis completes,
+; 600 after the analogue scan, 150 between digital steps. Not one of them asks
+; whether the controller has stopped moving -- each is a guess about how fast a
+; person lets go, and the 600 after the analogue scan is the tightest guess in
+; front of the one step where both thumbs are demonstrably still moving and a
+; sprung stick is still returning to centre. Reported from hardware: press A too
+; soon after that step and the run is spoiled; pause first and it completes.
+;
+; A settled pad is a fact this code can read, so it reads it instead of guessing.
+;
+; Quiet is measured against the PREVIOUS REPORT rather than the baseline, and
+; bytes already known to be noisy at rest are ignored -- LearnRestNoise exists
+; because a motion sensor never stops streaming, and waiting for one of those to
+; go still would wait forever.
+;
+; The clock is wall time since the last CHANGE, not a count of quiet reports.
+; Many pads report only on change, so "no report at all" is the quietest a pad
+; can be and counting arrivals would never advance for them.
+;
+; Bounded, like every other wait here: after LEARN_SETTLE_LIMIT_MS it proceeds
+; anyway and says so in the log, because a wizard that cannot be finished is
+; worse than one that captures a slightly noisy step.
+ControllerLearnAwaitQuiet() {
+    global LearnSettleDeadline, LearnLastMotionTick, LearnSettleDone
+    global LearnSettlePrev, LearnSettleNoisy, LearnDetailCtrl, LearnLength
+    static LEARN_SETTLE_LIMIT_MS := 2500
+    if LearnSettleDone {
+        LearnSettleDone := false
+        if LearnSettleNoisy {
+            LearnSettleNoisy := false
+            LogLine("Learn: the controller never went quiet; capturing anyway. "
+                . "If this step misreads, let go of everything and retry it.",
+                "Warning")
+        }
+        return false
+    }
+    LearnSettlePrev := 0
+    LearnLastMotionTick := A_TickCount
+    LearnSettleDeadline := A_TickCount + LEARN_SETTLE_LIMIT_MS
+    try LearnDetailCtrl.Text := "Let go of everything — waiting for the "
+        . "controller to settle…"
+    SetTimer(ControllerLearnSettleTick, 60)
+    return true
+}
+
+
+; Polls the quiet clock ControllerLearnReport keeps, and opens the capture window
+; when it has run long enough -- or when the bound is reached.
+ControllerLearnSettleTick() {
+    global LearnActive, LearnLastMotionTick, LearnSettleDeadline
+    global LearnSettleDone, LearnSettleNoisy
+    static LEARN_QUIET_MS := 450
+    if !LearnActive {
+        SetTimer(ControllerLearnSettleTick, 0)
+        return
+    }
+    timedOut := A_TickCount >= LearnSettleDeadline
+    if (A_TickCount - LearnLastMotionTick < LEARN_QUIET_MS && !timedOut)
+        return
+    SetTimer(ControllerLearnSettleTick, 0)
+    LearnSettleNoisy := timedOut
+    LearnSettleDone := true
+    ControllerLearnStartCapture()
+}
+
+
 ControllerLearnStartCapture() {
     global LearnCaptureUntil, LearnPeak, LearnPromptCtrl, LearnProgressCtrl
     global LearnStepIndex, LearnDetailCtrl, LearnLength
@@ -9068,6 +9175,11 @@ ControllerLearnStartCapture() {
         ControllerLearnFinish()
         return
     }
+    ; Before anything is armed, and before the prompt changes: a prompt that
+    ; appears while the sticks are still moving is the invitation to answer it
+    ; too early. ControllerLearnSettleTick re-enters here when the pad is quiet.
+    if ControllerLearnAwaitQuiet()
+        return
     step := steps[LearnStepIndex]
     LearnPeak := 0
     ; Per step, not per wizard: a refusal that cannot be retried belongs to the

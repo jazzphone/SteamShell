@@ -2050,6 +2050,15 @@ global LearnReleaseUntil := 0
 global LearnIdentifyHoldOffset := -1
 global LearnIdentifyHoldMask := 0
 global LearnCaptureUntil := 0
+; The settle gate. Every pause in this wizard used to be a fixed delay -- 1800ms
+; after the identifying control is released, 600 after the analogue scan, 150
+; between digital steps -- and none of them looked at whether the pad had
+; actually stopped. See ControllerLearnAwaitQuiet.
+global LearnSettleDeadline := 0
+global LearnLastMotionTick := 0
+global LearnSettlePrev := 0
+global LearnSettleDone := false
+global LearnSettleNoisy := false
 global LearnPeak := 0
 
 

@@ -126,6 +126,7 @@ ControllerBindingSharedAction
 ControllerButtonNames
 ControllerDiagnosticTick
 ControllerLearnAccept
+ControllerLearnAwaitQuiet
 ControllerLearnAxisStats
 ControllerLearnBeginSteps
 ControllerLearnBufferAxisRaw
@@ -153,6 +154,7 @@ ControllerLearnReportAxisActive
 ControllerLearnResolveAxis
 ControllerLearnRestart
 ControllerLearnSave
+ControllerLearnSettleTick
 ControllerLearnSkip
 ControllerLearnStartCapture
 ControllerLearnSteps
