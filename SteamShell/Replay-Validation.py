@@ -1483,6 +1483,48 @@ def _has_inline_body(keyword, rest):
     return False
 
 
+def check_required_functions(sources):
+    """Every name in a validator's $requiredFunctions must still be defined.
+
+    KEPT IN STEP WITH the $requiredFunctions loops in Validate-SteamShell.ps1
+    and Validate-SteamShell-XFE.ps1.
+
+    THE REPLAY COULD NOT SEE THESE. It works by re-evaluating the `-match`
+    assertions it can parse out of the two validators, and a required-function
+    list is neither -- it is a PowerShell array walked by a foreach. So a
+    renamed function passed every check on the development machine and failed on
+    Windows, which is the second time this session a Windows-only class has been
+    the thing that caught a rename: ShowMappingEditor became
+    ShowControllerMappingWindow when the two mapping editors merged, and the
+    list still named the old one.
+
+    Cheap to check here, and the whole point of two harnesses is that the slow
+    one should not be the only one that knows.
+    """
+    trees = {
+        "Validate-SteamShell.ps1": "SteamShell.ahk",
+        "Validate-SteamShell-XFE.ps1": "SteamShell-XFE.ahk",
+    }
+    for validator, tree in trees.items():
+        text = read_source(validator)
+        match = re.search(r"\$requiredFunctions\s*=\s*@\((.*?)\n\)", text, re.S)
+        if not match:
+            fail(f"{validator} has no $requiredFunctions list; the check that "
+                 "every named entry point still exists has gone with it.")
+            continue
+        # The effective source: the tree plus everything it #Includes, because a
+        # required function may legitimately have moved into a shared file.
+        effective = "\n".join((sources[tree], sources["SteamShell-Common.ahk"],
+                               sources["SteamShell-Shared.ahk"]))
+        defined = set(name.lower() for name, _, _ in function_list(effective))
+        for name in re.findall(r'"(\w+)"', match.group(1)):
+            if name.lower() not in defined:
+                fail(f"{validator} requires {name}(), which nothing {tree} "
+                     "compiles defines any more. Rename the entry in the list in "
+                     "the same commit that renames the function, or drop it if "
+                     "the entry point is genuinely gone.")
+
+
 def check_product_surfaces(sources):
     """Every window a TREE builds must be named in PRODUCT_SURFACES.txt.
 
@@ -2165,6 +2207,7 @@ def main():
     check_ambiguous_deindented_blocks(sources)
     check_local_shadows_call(sources)
     check_product_surfaces(sources)
+    check_required_functions(sources)
     check_quickmenu_rows(sources)
     check_schema_versions()
     check_cross_name_anchors(sources)

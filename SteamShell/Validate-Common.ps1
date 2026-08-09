@@ -3143,8 +3143,12 @@ function Assert-SharedParity {
             "would wait out its timeout on every frame cap write.")
     }
 
-    # The same requirement for automatic mouse mode, which crosses from
-    # SteamShell.ahk rather than from the shared file.
+    # The same requirement for automatic mouse mode.
+    #
+    # It used to cross from SteamShell.ahk, and this check named that file. The
+    # publisher moved to SteamShell-Shared.ahk when elevated input became shared
+    # -- the companion needed the same channel -- so the pairing is now the same
+    # one the RTSS channels above use, shared file against helper.
     #
     # This one is worth stating as a rule because of what it replaced. Both
     # processes used to decide independently whether the controller was a mouse,
@@ -3153,9 +3157,8 @@ function Assert-SharedParity {
     # read, that divergence comes back silently -- automatic mouse mode simply
     # stops engaging over elevated windows, which looks like a controller
     # problem and not like a name.
-    $standaloneText = Get-SourceText $standalonePath
     foreach ($end in @(
-        @{ File = "SteamShell.ahk"; Text = $standaloneText; Role = "publishes" },
+        @{ File = "SteamShell-Shared.ahk"; Text = $sharedText; Role = "publishes" },
         @{ File = "SteamShell-Helper.ahk"; Text = $helperText; Role = "reads" })) {
         Assert-True ($end.Text -match [regex]::Escape('Local\SteamShellAutoMouse-')) (
             "$($end.File) no longer names the automatic-mouse event " +

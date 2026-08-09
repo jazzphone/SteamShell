@@ -65,7 +65,7 @@ $requiredFunctions = @(
     "QuickMenuRender",
     "ShowSettings",
     "SettingsShowCategory",
-    "ShowMappingEditor",
+    "ShowControllerMappingWindow",
     "OpenTouchKeyboard",
     "ParkCursor",
     "ObserveForeground",
