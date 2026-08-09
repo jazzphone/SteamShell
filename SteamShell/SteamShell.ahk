@@ -7298,44 +7298,44 @@ PollController() {
         return
     }
 
-; Automatic mouse mode is expressed as a virtual View/Back hold, so every branch
-; below is reached identically whether the user is holding the button or the
-; foreground application is on their list.
-;
-; Deliberately evaluated AFTER the Quick Menu and Settings chords above, which
-; test the real button state. That is what keeps a misconfigured list
-; recoverable: name a game by mistake and the controller becomes a mouse inside
-; it, but L3+R3 still opens the Quick Menu and the Settings chord still opens
-; Settings, so the list can be corrected without a keyboard.
-autoMouse := AutoMouseModeActive()
-if (autoMouse && MouseHidden) {
-    ; Moving a pointer that cannot be seen is not a usable mode.
-    SystemCursor("Show")
-    MouseHidden := false
-}
-; The PHYSICAL button and the mapping gate are two different things, and they are
-; named separately now: viewPhysical above drives the tap/hold action, this drives
-; the mappings. Reading one variable for both would make automatic mouse mode --
-; which is a permanent virtual hold -- look like a button the user is holding
-; down, and every release of it like a tap.
-viewDown := viewPhysical || autoMouse
-if (!viewDown) {
-    ; Reset press tracking so Short/Long doesn't misfire when View/Back is not held.
-    ResetControllerHoldState(
-        &previousViewDown, downTick, longFired, triggerDown, buttonDefinitions,
-        &viewWasDown)
-    return
-}
+        ; Automatic mouse mode is expressed as a virtual View/Back hold, so every branch
+        ; below is reached identically whether the user is holding the button or the
+        ; foreground application is on their list.
+        ;
+        ; Deliberately evaluated AFTER the Quick Menu and Settings chords above, which
+        ; test the real button state. That is what keeps a misconfigured list
+        ; recoverable: name a game by mistake and the controller becomes a mouse inside
+        ; it, but L3+R3 still opens the Quick Menu and the Settings chord still opens
+        ; Settings, so the list can be corrected without a keyboard.
+        autoMouse := AutoMouseModeActive()
+        if (autoMouse && MouseHidden) {
+            ; Moving a pointer that cannot be seen is not a usable mode.
+            SystemCursor("Show")
+            MouseHidden := false
+        }
+        ; The PHYSICAL button and the mapping gate are two different things, and they are
+        ; named separately now: viewPhysical above drives the tap/hold action, this drives
+        ; the mappings. Reading one variable for both would make automatic mouse mode --
+        ; which is a permanent virtual hold -- look like a button the user is holding
+        ; down, and every release of it like a tap.
+        viewDown := viewPhysical || autoMouse
+        if (!viewDown) {
+            ; Reset press tracking so Short/Long doesn't misfire when View/Back is not held.
+            ResetControllerHoldState(
+                &previousViewDown, downTick, longFired, triggerDown, buttonDefinitions,
+                &viewWasDown)
+            return
+        }
 
-    ; Everything from here is ControllerPollFrame in SteamShell-Shared.ahk: adopt
-    ; held buttons, cursor, wheel, Short/Long for buttons and triggers, D-pad,
-    ; Guide. It was the same routine in both products; the heads above it are
-    ; not, and stay here.
-    ControllerPollFrame(buttons, pressed, released, lt, rt, rx, ry, ly, now,
-        buttonDefinitions, downTick, longFired, triggerDown,
-        &previousViewDown, &lastScroll)
+        ; Everything from here is ControllerPollFrame in SteamShell-Shared.ahk: adopt
+        ; held buttons, cursor, wheel, Short/Long for buttons and triggers, D-pad,
+        ; Guide. It was the same routine in both products; the heads above it are
+        ; not, and stay here.
+        ControllerPollFrame(buttons, pressed, released, lt, rt, rx, ry, ly, now,
+            buttonDefinitions, downTick, longFired, triggerDown,
+            &previousViewDown, &lastScroll)
     } finally {
-    inPoll := false
+        inPoll := false
     }
 }
 
@@ -17216,23 +17216,23 @@ CheckLauncherCleanup() {
             }
         }
 
-LC_LastCleanupTick := A_TickCount
+        LC_LastCleanupTick := A_TickCount
         LC_LastDecisionStamp := NowStamp()
-LC_LastDecisionText := "Cleanup: removed L=" launcherRemovedTotal ", H=" helperRemovedTotal
-try {
-    det := ""
-    if (launcherDetails.Length) {
-        det := "L: " JoinDetails(launcherDetails, 3)
-    }
-    if (helperDetails.Length) {
-        if (det != "")
-            det .= "; "
-        det .= "H: " JoinDetails(helperDetails, 3)
-    }
-    if (det != "")
-        LC_LastDecisionText .= " [" det "]"
-} catch {
-}
+        LC_LastDecisionText := "Cleanup: removed L=" launcherRemovedTotal ", H=" helperRemovedTotal
+        try {
+            det := ""
+            if (launcherDetails.Length) {
+                det := "L: " JoinDetails(launcherDetails, 3)
+            }
+            if (helperDetails.Length) {
+                if (det != "")
+                    det .= "; "
+                det .= "H: " JoinDetails(helperDetails, 3)
+            }
+            if (det != "")
+                LC_LastDecisionText .= " [" det "]"
+        } catch {
+        }
 
         ; Refresh detection text after cleanup so the panel shows what remains.
         lProc2 := 0, lExe2 := 0, bProc2 := 0, bExe2 := 0

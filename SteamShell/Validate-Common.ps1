@@ -1340,6 +1340,72 @@ function Assert-QuickMenuPageChangesRebuild {
     }
 }
 
+# No function may be truncated by a closing brace at column zero.
+#
+# Assertions all over this project bound themselves to a function with
+# `(?ms)^Name\(\)\s*\{.*?^\}\s*$`, and that pattern ends at the FIRST `}` in
+# column zero. A `}` written at column zero inside a function therefore ends the
+# match early, and every check anchored to that function silently reads a prefix
+# of it and reports on the rest by not looking.
+#
+# This was not hypothetical. PollController in SteamShell.ahk had forty lines
+# written at column zero, so every range-bounded read of the shell's input loop
+# saw about nine tenths of it. A rename driven by that extraction stopped at the
+# truncation point and left two by-ref arguments pointing at statics that had
+# just been renamed -- an uninitialised reference in the input path of a Windows
+# shell replacement, invisible to every structural check because the structure
+# is exactly what was being hidden.
+#
+# Assert-NoAmbiguousDeindentedBlocks does not cover this. It asks whether a
+# BRACELESS body is ambiguous; these blocks all had braces, and were unambiguous
+# to a reader and to AutoHotkey. Only the regexes were fooled.
+function Assert-NoTruncatingBraces {
+    param(
+        [Parameter(Mandatory = $true)][string]$ProjectRoot,
+        [switch]$Quiet
+    )
+    $checked = 0
+    foreach ($file in @("SteamShell.ahk", "SteamShell-XFE.ahk",
+                        "SteamShell-Shared.ahk", "SteamShell-Common.ahk",
+                        "SteamShell-Helper.ahk")) {
+        $path = Join-Path $ProjectRoot $file
+        if (-not (Test-Path -LiteralPath $path)) { continue }
+        $lines = @(Get-SourceLines $path)
+        for ($i = 0; $i -lt $lines.Count; $i++) {
+            if ($lines[$i] -notmatch '^[A-Za-z_]\w*\([^)]*\)\s*\{') { continue }
+            $checked++
+            $depth = 0
+            for ($j = $i; $j -lt $lines.Count; $j++) {
+                # Strings before comments: a `;` inside a literal is not a
+                # comment, and a brace inside one is not a brace.
+                $code = $lines[$j] -replace '"(?:[^"]|"")*"', '""'
+                $code = $code -replace '(?<!`);.*$', ''
+                $depth += ([regex]::Matches($code, '\{')).Count
+                $depth -= ([regex]::Matches($code, '\}')).Count
+                if ($j -gt $i -and $depth -eq 0) { break }
+                if ($j -gt $i -and $lines[$j] -match '^\}') {
+                    Assert-True $false (
+                        "${file}:$($j + 1) closes a block at column zero inside " +
+                        "a function that is still open. Every assertion bounded " +
+                        "with '^Name(...) {.*?^}' stops here instead of at the " +
+                        "end of the function, so the rest of it is checked by " +
+                        "nobody. Indent it to its real depth.")
+                }
+            }
+            $i = $j
+        }
+    }
+    Assert-True ($checked -ge 900) (
+        "Only $checked function bodies were scanned for truncating braces, and " +
+        "there are over nine hundred. The scan is not finding them, which makes " +
+        "this check vacuous.")
+    if (-not $Quiet) {
+        Write-Host ("Function extents: $checked bodies, none truncated by a " +
+            "brace at column zero.")
+    }
+}
+
+
 # Every input backend must reach the elevated helper, not just XInput.
 #
 # The helper drives the pointer while a High-integrity window owns the
