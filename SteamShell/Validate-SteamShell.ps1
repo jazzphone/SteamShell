@@ -1930,7 +1930,7 @@ Assert-True (
     "Legacy game-window detection is missing ownership or activation safeguards.")
 Assert-True (
     $source -match
-        '(?s)SharedTaskSwitcherWindows\(\)\s*\{.*?' +
+        '(?s)SharedTaskSwitcherWindows\([^)]*\)\s*\{.*?' +
         'WindowEngineIsLegacyApplicationSurface\(item,\s*true\).*?' +
         'item\["minMax"\]\s*=\s*-1.*?' +
         'legacy fullscreen window') (
@@ -1942,7 +1942,7 @@ Assert-True (
 # was ever reached.
 Assert-True (
     $source -match
-        '(?s)SharedTaskSwitcherWindows\(\)\s*\{.*?' +
+        '(?s)SharedTaskSwitcherWindows\([^)]*\)\s*\{.*?' +
         'steam\s*:=\s*item\["steam"\].*?' +
         'item\["cloaked"\]\s*&&\s*!steam.*?' +
         'item\["title"\]\s*=\s*""\s*&&\s*!steam.*?' +

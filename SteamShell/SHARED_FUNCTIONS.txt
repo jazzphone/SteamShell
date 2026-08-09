@@ -337,6 +337,7 @@ SettingsUpdateScrollBar
 SharedNotify
 SharedTaskSwitcherWindows
 SharedWindowInventoryBuild
+SharedWindowInventoryGet
 ShouldLogRateLimited
 ShowControllerLearner
 ShowNotification

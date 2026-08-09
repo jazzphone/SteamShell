@@ -4211,6 +4211,29 @@ SharedWindowInventoryBuild(includeHidden := false) {
     return items
 }
 
+; The inventory, reused if it is fresh enough.
+;
+; The shell's Task Switcher used to read WindowEngineGetFreshSnapshot, which
+; serves a cached snapshot up to 1500 ms old. Moving it onto the shared builder
+; silently dropped that: GetPinnedForegroundSummary is the "tasks" row's VALUE,
+; so every Quick Menu repaint -- every D-pad press, held or not -- ran a full
+; enumeration where it used to read a cache. That is a regression the shared
+; version introduced, not a difference between the products.
+;
+; Keyed by variant, because the includeHidden inventory is a different list and
+; sharing one slot would serve the wrong one.
+SharedWindowInventoryGet(maxAgeMs := 1000, includeHidden := false) {
+    static cached := Map()
+    static stamped := Map()
+    key := includeHidden ? "hidden" : "visible"
+    if (maxAgeMs <= 0 || !stamped.Has(key)
+        || A_TickCount - stamped[key] > maxAgeMs) {
+        cached[key] := SharedWindowInventoryBuild(includeHidden)
+        stamped[key] := A_TickCount
+    }
+    return cached[key]
+}
+
 ; The windows the Task Switcher offers, for both products.
 ;
 ; IT EXISTED TWICE, under names sharing no word -- GetTaskSwitcherWindows in the
@@ -4246,12 +4269,18 @@ SharedWindowInventoryBuild(includeHidden := false) {
 ; narrow -- Steam only -- because relaxing it generally would bring back every
 ; virtual desktop's worth of hidden windows.
 ;
-; The enumeration is FRESH, not WindowEngineGetFreshSnapshot's cache. The cache
-; cannot answer this question: it drops cloaked windows on the way in, which is
-; precisely the case the Steam waiver exists for.
-SharedTaskSwitcherWindows() {
+; maxAgeMs SEPARATES THE LIST FROM THE COUNT. The list a user is about to act on
+; is enumerated fresh, which is the default; the number in the Quick Menu's
+; "tasks" row is allowed to be a second old, because that row is re-evaluated on
+; every repaint and enumerating the desktop per D-pad press is what the shell's
+; old 1500 ms snapshot cache existed to avoid.
+;
+; It cannot read WindowEngineGetFreshSnapshot's cache instead: that one drops
+; cloaked windows on the way in, which is precisely the case the Steam waiver
+; below exists for.
+SharedTaskSwitcherWindows(maxAgeMs := 0) {
     windows := []
-    for _, item in SharedWindowInventoryBuild(true) {
+    for _, item in SharedWindowInventoryGet(maxAgeMs, true) {
         if (item["scriptOwned"] || item["desktop"])
             continue
         ; The Xbox game bar's host surface. Never a thing to switch to, and it

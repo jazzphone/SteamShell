@@ -5908,15 +5908,17 @@ FindTaskSwitcherWindow(hwnd) {
     return 0
 }
 
+; A ROW VALUE, so this runs on every Quick Menu repaint. It takes the cached
+; inventory; the task PAGE, which is the list the user then acts on, does not.
 GetPinnedForegroundSummary() {
     global PinnedForegroundHwnd, PinnedForegroundTitle
     if (!PinnedForegroundHwnd) {
-        count := SharedTaskSwitcherWindows().Length
+        count := SharedTaskSwitcherWindows(1000).Length
         return count ? count " Window" (count = 1 ? "" : "s") : "No Windows"
     }
     if !DllCall("IsWindow", "Ptr", PinnedForegroundHwnd) {
         ReleasePinnedForeground(false)
-        count := SharedTaskSwitcherWindows().Length
+        count := SharedTaskSwitcherWindows(1000).Length
         return count ? count " Window" (count = 1 ? "" : "s") : "No Windows"
     }
     return "Locked  •  " ShortenText(PinnedForegroundTitle, 18)

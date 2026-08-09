@@ -62,7 +62,15 @@ Everything below was written or changed statically and has not been run.
   "Log all XInput slots on every change", then read the log for `Diag` lines.
   Before this it was a control that did nothing; the failure mode to watch for
   is the opposite one, a tick that never stops.
-- **The Task Switcher, in both products.** The list is one shared function now.
+- **The Task Switcher, in both products.** The list is one shared function now,
+  and three smaller differences came out of the merge, each worth one glance:
+  the companion's rows show the executable in lower case where they used to show
+  it as Windows reports it; the count in the "tasks" row may be up to a second
+  stale, while the page itself is always enumerated fresh; and the screen probe
+  now drops a window whose title, class or position cannot be read at all, where
+  it used to list it as 0x0. That last one is a small loss for a diagnostic whose
+  job is completeness, and is the only one of the three that is not an
+  improvement.
   In the companion, Steam Big Picture must still appear under Xbox FSE -- that
   is the fix the shared filter was built around. In the shell, check that an
   ordinary desktop session's switcher looks exactly as it did, and that a
@@ -232,9 +240,10 @@ exit code — never trust presence on `PATH`.
 *"the shell can assume the game is on `A_Screen*`"*. The shell cannot. That
 sentence read as a decision for as long as nobody checked it.
 
-Contrast the Steam-cloaking comment in `GetSwitchableWindows`, which asserts
-something **verifiable** — FSE cloaks Steam, the shell does not run under FSE —
-and is checkable in a minute. The difference between those two comments is the
+Contrast the Steam-cloaking comment, then in `GetSwitchableWindows` and now in
+`SharedTaskSwitcherWindows`, which asserts something **verifiable** — FSE cloaks
+Steam, the shell does not run under FSE — and is checkable in a minute. It also
+turned out to be the half worth keeping when the two copies were merged. The difference between those two comments is the
 difference between a design record and a rationalisation.
 
 ### Corrections made to my own analysis this pass

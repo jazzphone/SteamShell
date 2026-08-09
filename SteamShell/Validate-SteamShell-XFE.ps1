@@ -669,7 +669,7 @@ Assert-True ($fullWindowScans.Count -eq 1) (
 
 Assert-True (
     $source -match
-        '(?s)SharedTaskSwitcherWindows\(\)\s*\{.*?' +
+        '(?s)SharedTaskSwitcherWindows\([^)]*\)\s*\{.*?' +
         'steam\s*:=\s*item\["steam"\].*?' +
         'item\["cloaked"\]\s*&&\s*!steam.*?' +
         'item\["title"\]\s*=\s*""\s*&&\s*!steam.*?' +

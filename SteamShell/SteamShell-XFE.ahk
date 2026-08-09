@@ -3403,8 +3403,10 @@ AssistTick() {
             . (closed = 1 ? "" : "s"))
 }
 
+; A ROW VALUE, so this runs on every Quick Menu repaint. It takes the cached
+; inventory; the task PAGE, which is the list the user then acts on, does not.
 GetSwitchableWindowsSummary() {
-    count := SharedTaskSwitcherWindows().Length
+    count := SharedTaskSwitcherWindows(1000).Length
     if (count = 0)
         return "No Windows"
     return count " window" (count = 1 ? "" : "s")
