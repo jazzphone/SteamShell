@@ -3723,10 +3723,9 @@ LauncherCleanupAudioPeakThreshold := ReadNumber("LauncherCleanup", "AudioPeakThr
             . "'; using auto.", "Warning")
         ControllerBackend := "auto"
     }
-    ControllerPollIntervalMs := ReadInt("Controller", "ControllerPollIntervalMs", 15, 5, 200)
-    ControllerMouseFastMultiplier := ReadNumber("Controller", "ControllerMouseFastMultiplier", 2.5, 1.0, 10.0)
-    ControllerScrollIntervalMs := ReadInt("Controller", "ControllerScrollIntervalMs", 80, 10, 1000)
-
+    ; ControllerPollIntervalMs, ControllerScrollIntervalMs and
+    ; ControllerMouseFastMultiplier are read by LoadSharedSettings now, on these
+    ; exact bounds -- the companion's were narrower and were widened to match.
     TaskForceCloseHoldMs := ReadInt("QuickMenu", "TaskForceCloseHoldMs", 1200, 600, 3000)
     QuickMenuMainOrderRaw := IniReadS(
         "QuickMenu", "MainOrder",

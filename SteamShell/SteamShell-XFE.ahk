@@ -1034,14 +1034,13 @@ LoadSettings() {
             . "'; using Auto.", "Warning")
         ControllerBackend := "auto"
     }
-    ControllerPollIntervalMs := ReadInt("Controller", "ControllerPollIntervalMs", 15, 8, 100)
-    ; Bounds match standalone's deliberately: this is one setting, and the Quick
-    ; Menu row that steps it is shared. A range the row can leave -- or one the
-    ; row cannot reach -- makes the row lie, showing a value the next reload
-    ; clamps away. Widened rather than narrowed so no configured value is ever
-    ; silently reduced.
-    ControllerMouseFastMultiplier := ReadNumber("Controller", "ControllerMouseFastMultiplier", 2.5, 1, 6)
-    ControllerScrollIntervalMs := ReadInt("Controller", "ControllerScrollIntervalMs", 80, 20, 500)
+    ; ControllerPollIntervalMs, ControllerScrollIntervalMs and
+    ; ControllerMouseFastMultiplier are read by LoadSharedSettings now. The
+    ; comment that stood here said the bounds matched standalone's deliberately,
+    ; and gave the right reason -- one setting, one shared Quick Menu row
+    ; stepping it -- while the bounds did not actually match: 8-100 against
+    ; 5-200, 20-500 against 10-1000, 1-6 against 1.0-10.0. They match now,
+    ; widened to the shell's, so no value any INI already holds is reduced.
     SteamMenuShortcut := ReadText("Steam", "MenuShortcut", "^1")
     SteamQuickAccessShortcut := ReadText("Steam", "QuickAccessShortcut", "^2")
     SteamOverlayShortcut := ReadText("Steam", "OverlayShortcut", "+{Tab}")

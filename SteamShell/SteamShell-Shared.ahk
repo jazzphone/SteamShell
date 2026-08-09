@@ -10330,7 +10330,7 @@ ControllerLogInputChange(buttons, lt, rt, pressed, released) {
 ; own settings path. That is the existing seam and the reason this works without
 ; knowing which product compiled it.
 ;
-; FIVE COMMON KEYS ARE DELIBERATELY NOT HERE, because unifying them would change
+; TWO COMMON KEYS ARE DELIBERATELY NOT HERE, because unifying them would change
 ; behaviour rather than remove duplication:
 ;
 ;   EnableElevatedFrameCapWrites   default true in the shell, false in the
@@ -10338,16 +10338,23 @@ ControllerLogInputChange(buttons, lt, rt, pressed, released) {
 ;                                  elevated helper, the companion's is opt-in
 ;   EnableViewButtonActions        default false in the shell, true in the
 ;                                  companion
-;   ControllerPollIntervalMs       same default, clamp 5-200 against 8-100
-;   ControllerScrollIntervalMs     same default, clamp 10-1000 against 20-500
-;   ControllerMouseFastMultiplier  same default, clamp 1.0-10.0 against 1-6
 ;
-; The two defaults look deliberate and the three ranges look like drift, but
-; "looks like" is not a reason to move a number that decides what a user's
-; existing INI is clamped to. They stay per-tree until somebody decides them.
+; Both are DEFAULTS, and a default is a product's answer to "what should this do
+; before anyone says otherwise". The two products answer differently for good
+; reason, and an INI that sets the key explicitly is unaffected either way.
+;
+; Three more used to be listed here -- ControllerPollIntervalMs,
+; ControllerScrollIntervalMs and ControllerMouseFastMultiplier, same default in
+; both trees and different CLAMPS. That is a different thing from a default: a
+; clamp decides what an EXISTING user's INI is bounded to, so it was left for
+; the maintainer rather than unified on the grounds that it looked like drift.
+; It was drift, it has been decided, and the three moved into this function on
+; the shell's wider bounds. See the note beside them below.
 LoadSharedSettings() {
     global ControllerChordHoldMs, ControllerDeadzone, ControllerIndex
-    global ControllerMouseSpeed, ControllerScrollStep
+    global ControllerMouseFastMultiplier, ControllerMouseSpeed
+    global ControllerPollIntervalMs, ControllerScrollIntervalMs
+    global ControllerScrollStep
     global EnableControllerDiagnostics, EnableControllerMouseMode
     global EnableGameDetectionMenu, EnablePersistentMouseMode
     global EnableQuickMenu, EnableRTSSIntegration, EnableRawInputProbe
@@ -10374,6 +10381,25 @@ LoadSharedSettings() {
     ControllerMouseSpeed := ReadInt("Controller", "ControllerMouseSpeed", 3200, 200, 12000)
     ControllerScrollStep := ReadInt("Controller", "ControllerScrollStep", 1, 1, 10)
     ControllerChordHoldMs := ReadInt("Controller", "ControllerChordHoldMs", 500, 100, 3000)
+    ; These three had the same default in both trees and DIFFERENT clamps -- 5-200
+    ; against 8-100, 10-1000 against 20-500, 1.0-10.0 against 1-6. The companion
+    ; already carried a comment saying its bounds matched the shell's deliberately
+    ; and gave the reason, and the bounds did not match; the reason is right and
+    ; is why they are the shell's wider pair here rather than the companion's:
+    ;
+    ; This is ONE setting and the Quick Menu row that steps it is SHARED. A range
+    ; the row can step outside of, or one the row cannot reach, makes the row lie
+    ; -- it shows a value that the next reload clamps away.
+    ;
+    ; Widened rather than narrowed, which is the only direction that cannot
+    ; change what an existing INI already means: every value the narrow range
+    ; accepted the wide one accepts unchanged, so nobody's configuration moves
+    ; under them. Narrowing would have silently reduced a shell user's poll
+    ; interval of 5 to 8.
+    ControllerPollIntervalMs := ReadInt("Controller", "ControllerPollIntervalMs", 15, 5, 200)
+    ControllerScrollIntervalMs := ReadInt("Controller", "ControllerScrollIntervalMs", 80, 10, 1000)
+    ControllerMouseFastMultiplier := ReadNumber(
+        "Controller", "ControllerMouseFastMultiplier", 2.5, 1.0, 10.0)
     EnableQuickMenu := ReadBool("QuickMenu", "Enable", true)
     EnableGameDetectionMenu := ReadBool("QuickMenu", "ShowGameDetection", true)
     GameScoreMaxRows := ReadInt("QuickMenu", "GameScoreMaxRows", 8, 1, 20)
