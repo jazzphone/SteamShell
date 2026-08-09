@@ -2,21 +2,15 @@
 
 **Document status:** August 9, 2026
 
-**Stable SteamShell release:** 2.0.0 (locked at `releases/2.0.0/`, with the verified installer)
+**Stable SteamShell release:** 2.0.1 (locked at `releases/2.0.1/`, with the verified installer)
 
 **SteamShell working tree:** 2.0.1, settings schema 23 (helper 2.0.1.1)
 
-**Stable SteamShell-XFE release:** 2.0.0 (locked at `releases/2.0.0/`)
+**Stable SteamShell-XFE release:** 2.0.1 (locked at `releases/2.0.1/`)
 
 **SteamShell-XFE working tree:** 2.0.1, settings schema 18
 
 **Development line:** 2.0.1, a coordinated patch release on top of 2.0.0; earlier releases preserved as immutable checkpoints
-
-> **2.0.1 is not locked yet.** The version strings in both trees say 2.0.1 and
-> the changelog entry is written, but `releases/2.0.1/` does not exist until a
-> Windows run of `Run-SteamShellValidation.ps1` builds and verifies the
-> installer. Until then 2.0.0 remains the release anyone can download, and every
-> `releases/2.0.0` path in this repository is deliberately still pointing there.
 
 ## Executive summary
 
@@ -271,7 +265,7 @@ Coverage rather than title is the discriminator on purpose. It survives client u
 
 | Area | SteamShell 1.7 | SteamShell-XFE |
 |---|---|---|
-| Status | Locked release 2.0.0 | Locked release 2.0.0 |
+| Status | Locked release 2.0.1 | Locked release 2.0.1 |
 | Current working version | 2.0.1 | 2.0.1 |
 | Primary role | Complete Steam-centered Windows shell | Utility companion to Xbox FSE |
 | Owns the Windows shell | Yes, when installed or registered as the shell | No |
@@ -315,8 +309,8 @@ It coordinates the entire session:
 
 ## Current release state
 
-- **Stable release:** 2.0.0, frozen with XFE in `releases/2.0.0`
-- **Active source:** 2.0.1 in `SteamShell/`, pending its own lock
+- **Stable release:** 2.0.1, frozen with XFE in `releases/2.0.1`
+- **Active source:** 2.0.1 in `SteamShell/`
 - **Runtime:** AutoHotkey v2, 64-bit
 - **Validated compiler baseline:** AutoHotkey v2.0.26 64-bit
 - **Settings schema:** 18

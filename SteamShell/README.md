@@ -27,8 +27,8 @@ The validated pre-rewrite 1.4 source baseline is preserved in
 `../releases/1.6.0`. The 1.7.0 source is preserved in `../releases/1.7.0`.
 
 The 1.7.1 source is preserved in `../releases/1.7.1`. This tree is the
-SteamShell **2.0.1** source; 2.0.0 is locked together with XFE in
-`../releases/2.0.0`, and 1.7.3 remains the
+SteamShell **2.0.1** source, locked together with XFE in
+`../releases/2.0.1`; 1.7.3 remains the
 pre-rendering-rewrite revert point. The feature-by-feature XFE port decisions are recorded in
 `XFE_PARITY_NOTES.md`. The current settings schema is 23.
 
