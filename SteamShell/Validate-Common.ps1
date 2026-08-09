@@ -2089,36 +2089,35 @@ function Assert-SharedParity {
         $executable = @($sharedActions) +
             @([regex]::Matches($seamBody, 'case\s+"(\w+)"') |
                 ForEach-Object { $_.Groups[1].Value }) + @("None")
-        $prettyBody = [regex]::Match(
+        # ONE TABLE PER PRODUCT NOW, in one shape. This used to read
+        # ControllerBindingPretty and had to know that the shell wrote its labels
+        # as `case "X":` and the companion as a Map, because the vocabulary lived
+        # in the resolver. It is ControllerBindingLabels -- an ordered array of
+        # [action, label] pairs -- for both, and the resolver is shared.
+        $labelBody = [regex]::Match(
             $treeText,
-            '(?ms)^ControllerBindingPretty\(key\)\s*\{.*?^\}\s*$').Value
-        Assert-True ($prettyBody -ne "") (
-            "$tree defines no ControllerBindingPretty; binding labels cannot be checked.")
+            '(?ms)^ControllerBindingLabels\(\)\s*\{.*?^\}\s*$').Value
+        Assert-True ($labelBody -ne "") (
+            "$tree defines no ControllerBindingLabels; binding labels cannot be checked.")
+        $labelled = @([regex]::Matches($labelBody, '\[\s*"([^"]+)"\s*,\s*"[^"]*"\s*\]') |
+            ForEach-Object { $_.Groups[1].Value })
+        Assert-True ($labelled.Count -ge 10) (
+            "${tree}: the ControllerBindingLabels table could not be read, so a " +
+            "label with no action behind it would go unnoticed.")
         foreach ($action in ($executable | Sort-Object -Unique)) {
-            Assert-True ($prettyBody -match ('"' + [regex]::Escape($action) + '"')) (
+            Assert-True ($labelled -contains $action) (
                 "$tree executes controller binding '$action' but " +
-                "ControllerBindingPretty gives it no label, so the binding UI " +
+                "ControllerBindingLabels gives it no label, so the binding UI " +
                 "would show its raw internal name.")
         }
-        # The reverse. Labelled actions are the KEYS: standalone writes them as
-        # `case "X":` and the companion as the odd-numbered entries of a Map, so
-        # each is read the way that tree actually spells them.
-        if ($tree -eq "SteamShell.ahk") {
-            $labelled = @([regex]::Matches($prettyBody, 'case\s+"(\w+)"') |
-                ForEach-Object { $_.Groups[1].Value })
-        } else {
-            $labelMap = [regex]::Match($prettyBody, '(?s)labels\s*:=\s*Map\((.*?)\n\s*\)').Groups[1].Value
-            $tokens = @([regex]::Matches($labelMap, '"([^"]*)"') |
-                ForEach-Object { $_.Groups[1].Value })
-            $labelled = @(for ($i = 0; $i -lt $tokens.Count; $i += 2) { $tokens[$i] })
-        }
-        Assert-True ($labelled.Count -ge 10) (
-            "${tree}: the ControllerBindingPretty label set could not be read, so " +
-            "a label with no action behind it would go unnoticed.")
+        # The reverse: a label with nothing behind it would bind a button to
+        # nothing. Assert-BindingLabelTables makes the same check against the
+        # dispatchers; this one comes at it from the executable side, and the two
+        # together close the loop in both directions.
         foreach ($label in ($labelled | Sort-Object -Unique)) {
             Assert-True ($executable -contains $label) (
                 "$tree offers controller binding '$label' in " +
-                "ControllerBindingPretty, but nothing executes it: choosing it " +
+                "ControllerBindingLabels, but nothing executes it: choosing it " +
                 "would bind a button that does nothing.")
         }
     }

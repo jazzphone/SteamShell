@@ -1450,23 +1450,21 @@ Assert-True (
 
 # Resolve named GUI, timer, and Windows-message callbacks. Inline lambdas and
 # the deliberately variable `callback` argument are not included here.
-$callbackReferences = @()
-$callbackReferences += [regex]::Matches(
-    $source,
-    '\.OnEvent\(\s*"[^"]+"\s*,\s*([A-Za-z_][A-Za-z0-9_]*)(?![A-Za-z0-9_\[])') |
-    ForEach-Object { $_.Groups[1].Value }
-$callbackReferences += [regex]::Matches(
-    $source,
-    'SetTimer\(\s*([A-Za-z_][A-Za-z0-9_]*)(?![A-Za-z0-9_\[])') |
-    ForEach-Object { $_.Groups[1].Value }
-$callbackReferences += [regex]::Matches(
-    $source,
-    'OnMessage\(\s*[^,]+,\s*([A-Za-z_][A-Za-z0-9_]*)(?![A-Za-z0-9_\[])') |
-    ForEach-Object { $_.Groups[1].Value }
-$callbackReferences += [regex]::Matches(
-    $source,
-    'CallbackCreate\(\s*([A-Za-z_][A-Za-z0-9_]*)(?![A-Za-z0-9_\[])') |
-    ForEach-Object { $_.Groups[1].Value }
+# Name AND position: the position is what lets a reference be checked against
+# the parameters of the function it sits in, below.
+$callbackReferences = New-Object System.Collections.Generic.List[object]
+foreach ($pattern in @(
+    '\.OnEvent\(\s*"[^"]+"\s*,\s*([A-Za-z_][A-Za-z0-9_]*)(?![A-Za-z0-9_\[])',
+    'SetTimer\(\s*([A-Za-z_][A-Za-z0-9_]*)(?![A-Za-z0-9_\[])',
+    'OnMessage\(\s*[^,]+,\s*([A-Za-z_][A-Za-z0-9_]*)(?![A-Za-z0-9_\[])',
+    'CallbackCreate\(\s*([A-Za-z_][A-Za-z0-9_]*)(?![A-Za-z0-9_\[])')) {
+    foreach ($m in [regex]::Matches($source, $pattern)) {
+        $callbackReferences.Add([PSCustomObject]@{
+            Name = $m.Groups[1].Value
+            Index = $m.Index
+        })
+    }
+}
 # A SUBSCRIPT is not a name. The patterns above reject an identifier followed by
 # "[", because SettingsAddButtonRow wires its buttons with
 # .OnEvent("Click", entry[2]) -- "entry" is the loop variable holding a
@@ -1477,16 +1475,42 @@ $callbackReferences += [regex]::Matches(
 # The lookahead deliberately still allows "." so that SetTimer(Foo.Bind(...))
 # keeps checking that Foo exists; only the subscript form is excluded.
 #
-# "callback" below is a different case and stays: it is a PARAMETER holding a
-# function, which no regex over a call site can distinguish from a name.
-$missingCallbacks = @(
-    $callbackReferences |
-        Where-Object {
-            $_ -ne "callback" -and
-            -not $functionNames.ContainsKey($_.ToLowerInvariant())
-        } |
-        Sort-Object -Unique
-)
+# A PARAMETER HOLDING A FUNCTION is not a missing callback, and this used to be
+# a one-name exception for "callback". That was a hand-kept list of parameter
+# names, so the next shared helper to take one -- SharedLaunchWithStagger's
+# `launcher` -- failed the build for doing the same legitimate thing.
+#
+# Derived now. A reference is excused when the name is a parameter of the
+# function it appears IN, which is the actual rule the exception was standing in
+# for. Bounded to the enclosing function rather than to the file: a parameter
+# named `launcher` in one function must not excuse a genuinely missing
+# `launcher` callback in another.
+#
+# The enclosing function is the last one whose header starts at column zero
+# before the reference. Every function in these sources does.
+$functionHeaders = [regex]::Matches(
+    $source, '(?m)^([A-Za-z_]\w*)\(([^)]*)\)\s*\{')
+$missingCallbacks = New-Object System.Collections.Generic.List[string]
+foreach ($reference in $callbackReferences) {
+    $name = $reference.Name
+    if ($functionNames.ContainsKey($name.ToLowerInvariant())) { continue }
+    $enclosing = $null
+    foreach ($header in $functionHeaders) {
+        if ($header.Index -gt $reference.Index) { break }
+        $enclosing = $header
+    }
+    if ($enclosing) {
+        $isParameter = $false
+        foreach ($parameter in ($enclosing.Groups[2].Value -split ',')) {
+            # `&byRef`, `name := default` and plain names all reduce to a word.
+            $word = [regex]::Match($parameter, '[A-Za-z_]\w*')
+            if ($word.Success -and $word.Value -eq $name) { $isParameter = $true; break }
+        }
+        if ($isParameter) { continue }
+    }
+    $missingCallbacks.Add($name)
+}
+$missingCallbacks = @($missingCallbacks | Sort-Object -Unique)
 Assert-True ($missingCallbacks.Count -eq 0) (
     "Named callbacks without matching functions: " +
     ($missingCallbacks -join ", "))
@@ -3968,7 +3992,7 @@ Assert-True (
 Report-StructuralDrift -ProjectRoot $projectRoot -Quiet:$Quiet | Out-Null
 
 if (-not $Quiet) {
-    $callbackCount = @($callbackReferences | Sort-Object -Unique).Count
+    $callbackCount = @($callbackReferences | ForEach-Object { $_.Name } | Sort-Object -Unique).Count
     Write-Host (
         "Static validation passed: {0} functions, {1} settings keys, {2} Quick Menu rows, {3} named callbacks." -f
         $functionNames.Count,
