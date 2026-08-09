@@ -6655,17 +6655,25 @@ PollController() {
             ; guard exists to prevent, and the common case rather than the corner,
             ; because the wizard is dismissed by pressing something.
             ControllerNeedsFreshBaseline := true
-            previousViewDown := false
-            viewWasDown := false
             quickChordSince := 0
             quickChordFired := false
-            ResetControllerEdgeState(downTick, longFired, triggerDown, buttonDefinitions)
+            ResetControllerHoldState(
+                &previousViewDown, downTick, longFired, triggerDown,
+                buttonDefinitions, &viewWasDown)
             return
         }
 
         if (wasDisabled || ControllerNeedsFreshBaseline) {
             ; Establish a fresh baseline without firing edges for buttons that
             ; happen to be held at the instant the companion is enabled.
+            ;
+            ; THE ONE STAND-DOWN THAT IS NOT ResetControllerHoldState, and it
+            ; must stay that way. Every other one DROPS the View button; this one
+            ; ADOPTS it, from the sample taken three lines below -- that is what
+            ; makes it a baseline rather than a reset. Calling the wrapper here
+            ; would set both View flags false and then be overwritten by the
+            ; adoption, which is harmless today and reads as though View is being
+            ; dropped, which is the opposite of what this block decides.
             if ControllerReadState(&state) {
                 ResetControllerEdgeState(downTick, longFired, triggerDown,
                     buttonDefinitions)
@@ -6694,11 +6702,11 @@ PollController() {
 
         if !ControllerReadState(&state) {
             previousButtons := 0
-            previousViewDown := false
-            viewWasDown := false
             quickChordSince := 0
             quickChordFired := false
-            ResetControllerEdgeState(downTick, longFired, triggerDown, buttonDefinitions)
+            ResetControllerHoldState(
+                &previousViewDown, downTick, longFired, triggerDown,
+                buttonDefinitions, &viewWasDown)
             return
         }
 
@@ -6810,9 +6818,9 @@ PollController() {
                 settingsLtDown := false
                 settingsRtDown := false
             }
-            previousViewDown := false
-            viewWasDown := false
-            ResetControllerEdgeState(downTick, longFired, triggerDown, buttonDefinitions)
+            ResetControllerHoldState(
+                &previousViewDown, downTick, longFired, triggerDown,
+                buttonDefinitions, &viewWasDown)
             return
         }
         settingsLtDown := false
@@ -6824,9 +6832,9 @@ PollController() {
             &viewWasDown, &viewPressTick, &viewUsedAsModifier)
 
         if !EnableControllerMouseMode {
-            previousViewDown := false
-            viewWasDown := false
-            ResetControllerEdgeState(downTick, longFired, triggerDown, buttonDefinitions)
+            ResetControllerHoldState(
+                &previousViewDown, downTick, longFired, triggerDown,
+                buttonDefinitions, &viewWasDown)
             return
         }
 
@@ -6847,9 +6855,9 @@ PollController() {
         }
         mappingActive := viewDown || autoMouse
         if !mappingActive {
-            previousViewDown := false
-            viewWasDown := false
-            ResetControllerEdgeState(downTick, longFired, triggerDown, buttonDefinitions)
+            ResetControllerHoldState(
+                &previousViewDown, downTick, longFired, triggerDown,
+                buttonDefinitions, &viewWasDown)
             return
         }
 

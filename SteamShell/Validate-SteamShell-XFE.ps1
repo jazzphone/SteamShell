@@ -1049,7 +1049,11 @@ if (Test-Path $controllerSimulationPath) {
 # had side effects too. The whole pipeline must be inert while learning.
 Assert-True (
     $source -match '(?s)PollController\(\)\s*\{(?:(?!\n\})[\s\S])*?global[^\r\n]*LearnActive' -and
-    $source -match '(?s)PollController\(\)\s*\{(?:(?!\n\})[\s\S])*?if LearnActive\s*\{.*?ResetControllerEdgeState[^\r\n]*\r?\n\s*return.*?if !ControllerReadState') (
+    # ResetControllerHoldState, not ResetControllerEdgeState: the five stand-downs
+    # that spelled the wrapper out by hand now call it, and this is one of them.
+    # The call is three lines, so the tail anchors on the closing paren rather
+    # than on end-of-line.
+    $source -match '(?s)PollController\(\)\s*\{(?:(?!\n\})[\s\S])*?if LearnActive\s*\{.*?ResetControllerHoldState\((?:(?!\)\s)[\s\S])*?\)\s*\r?\n\s*return.*?if !ControllerReadState') (
     "PollController must ignore controller input entirely while the learning wizard is open.")
 # With the controller inert, Skip is unreachable from the couch, so a digital step
 # that never sees its control has to advance by itself.
