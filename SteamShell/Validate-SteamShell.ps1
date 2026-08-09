@@ -1157,7 +1157,7 @@ Assert-True (
     $helperSource -match 'ApplyControllerMouseMove\(rightX, rightY,') (
     "The controller-mouse arithmetic must exist only in SteamShell-Common.ahk.")
 # Likewise the press/hold reset. Standalone keeps a thin wrapper because it also
-# clears prevViewDown at every one of its sites; XFE and the helper call the
+# clears previousViewDown at every one of its sites; XFE and the helper call the
 # shared body directly, because which edge scalars they clear varies per site.
 Assert-True (
     $commonSource -match
@@ -1320,13 +1320,18 @@ Assert-True (
 # synthetic mouse button" to exactly this set -- where a missed site leaves a
 # button held down in the Windows shell with no keyboard.
 #
-# The second half is the assertion that matters: prevViewDown may be assigned
+# The second half is the assertion that matters: previousViewDown may be assigned
 # false in exactly ONE place, its own static declaration. Any other occurrence is
 # a reset block that has grown back, which is how the seven appeared originally.
+# rawSource, not source, for BOTH of these. The one body lives in
+# SteamShell-Shared.ahk now, which the effective source inlines -- so reading
+# $source here would count the definition as a ninth call site and flag its own
+# `previousViewDown := false` as an open-coded reset. The rule is about what
+# THIS tree does, and this tree's own text is where to ask.
 $holdResetCalls = [regex]::Matches(
-    $source, 'ResetControllerHoldState\(\s*\r?\n\s*&prevViewDown, downTick, longFired, prevTrigDown, btnDefs,\s*\r?\n\s*&viewWasDown\)')
+    $rawSource, 'ResetControllerHoldState\(\s*\r?\n\s*&previousViewDown, downTick, longFired, triggerDown, buttonDefinitions,\s*\r?\n\s*&viewWasDown\)')
 $strayViewDownResets = @(
-    [regex]::Matches($source, '(?m)^(\s*)(static\s+)?prevViewDown := false') |
+    [regex]::Matches($rawSource, '(?m)^(\s*)(static\s+)?previousViewDown := false') |
         Where-Object { -not $_.Groups[2].Success })
 Assert-True (
     $source -match
@@ -1346,7 +1351,7 @@ Assert-True (
     "PollController must clear press/hold state through the one " +
     "ResetControllerHoldState body. Found " + $holdResetCalls.Count +
     " call sites and " + $strayViewDownResets.Count +
-    " open-coded prevViewDown resets.")
+    " open-coded previousViewDown resets.")
 
 # The feature must be disableable without discarding the EXE list, and the
 # toggle must be read ahead of the result cache or turning it off would linger.
