@@ -2455,6 +2455,7 @@ Assert-RecentApplicationPicker -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-CurrentApplicationTargets -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-QuickMenuPageChangesRebuild -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-ControllerLearnerIdentifyRelease -ProjectRoot $projectRoot -Quiet:$Quiet
+Assert-RtssUnreadableIsNotOff -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-ValidatorAssertionShapes -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-NoAmbiguousDeindentedBlocks -ProjectRoot $projectRoot -File "SteamShell-XFE.ahk" -Quiet:$Quiet
 Assert-NoAmbiguousDeindentedBlocks -ProjectRoot $projectRoot -File "SteamShell-Shared.ahk" -Quiet:$Quiet

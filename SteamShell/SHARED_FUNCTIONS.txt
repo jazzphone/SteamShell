@@ -325,6 +325,7 @@ RtssFrameCapModeForFps
 RtssFrameCapValueText
 RtssFrameCapWritable
 RtssGlobalFrameLimit
+RtssGlobalFrameLimitRead
 RtssProfileTargetExe
 RtssSaveProfileValueText
 SanitizeDiagnosticText

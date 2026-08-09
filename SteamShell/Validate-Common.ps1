@@ -1340,6 +1340,78 @@ function Assert-QuickMenuPageChangesRebuild {
     }
 }
 
+# "Could not read the cap" must never render as "the limiter is off".
+#
+# GetRtssFrameLimit returns 0 for six different reasons and only one of them is
+# "uncapped": integration disabled, DLL integration disabled, RTSS not running,
+# the API unavailable, GetProfileProperty returning false, or an exception. That
+# was harmless until GetRtssFrameCapState read the 0 as a STATE -- it reports
+# mode "off" when fps <= 0 -- so a failed profile read displayed "OFF" on the
+# Quick Menu row while GetFlags, in the same pass, was reporting the limiter ON.
+#
+# Reported as intermittent and boot-clustered, which is exactly the shape: RTSS's
+# shared memory answers as soon as the process is alive, while its profile store
+# can fail to answer for a moment longer during startup. The two data sources
+# come up at different times and the row believed the one that had not.
+#
+# The same 0 also reached PersistRtssFrameCapStateNow, which records the live
+# state as the user's remembered selection -- so a failed read could persist
+# "off" and there would be nothing left to restore on the next boot. That is the
+# "does SteamShell turn it off?" report, and it is a write, not a toggle.
+#
+# Three rules, none of which a diff makes obvious:
+#   1. The distinguishing read exists and returns a success flag.
+#   2. GetRtssFrameCapState uses it and returns unavailable, not "off".
+#   3. A failed read is not cached, or the wrong answer outlives the fault.
+function Assert-RtssUnreadableIsNotOff {
+    param(
+        [Parameter(Mandatory = $true)][string]$ProjectRoot,
+        [switch]$Quiet
+    )
+    $sharedText = Get-SourceText (Join-Path $ProjectRoot "SteamShell-Shared.ahk")
+    $read = Get-AhkFunctionBody -Source $sharedText -Name "RtssGlobalFrameLimitRead"
+    Assert-True ($read -ne "") (
+        "RtssGlobalFrameLimitRead is gone. It is the only thing that tells a " +
+        "failed RTSS profile read apart from a genuine zero, and without it the " +
+        "Quick Menu reports the limiter off whenever the read fails.")
+    Assert-True ($read -match 'return\s+false') (
+        "RtssGlobalFrameLimitRead no longer reports failure to its caller.")
+    # The failure path must return before the cache is written. Anchored on the
+    # order of the two, because caching a failure holds the wrong reading for
+    # the full cache window past the moment RTSS became readable.
+    Assert-True ($read -match
+        '(?s)if\s*!IsObject\(limit\)\s*\{[^}]*return\s+false[^}]*\}(?:(?!\n\})[\s\S])*?RtssFrameLimitCacheTick\s*:=') (
+        "RtssGlobalFrameLimitRead caches the result before it has established " +
+        "the read succeeded. A cached failure keeps reporting 'off' for the " +
+        "whole cache window after RTSS became readable.")
+
+    $state = Get-AhkFunctionBody -Source $sharedText -Name "GetRtssFrameCapState"
+    Assert-True ($state -match 'if\s*!RtssGlobalFrameLimitRead\(&fps\)') (
+        "GetRtssFrameCapState no longer distinguishes an unreadable cap from " +
+        "zero. It reports mode 'off' when fps <= 0, so an unreadable cap would " +
+        "again display as a limiter that is off -- and would be persisted as " +
+        "the user's selection by PersistRtssFrameCapStateNow.")
+    Assert-True ($state -notmatch 'fps\s*:=\s*RtssGlobalFrameLimit\(\)') (
+        "GetRtssFrameCapState reads the cap through the number-only helper " +
+        "again, which cannot report a failed read.")
+
+    # The two profile writes must refuse a failed read rather than write 0 over
+    # the profile the user is populating.
+    $save = Get-AhkFunctionBody -Source $sharedText -Name "SaveRtssFrameLimitToProfile"
+    if ($save -ne "") {
+        Assert-True (([regex]::Matches($save,
+            'if\s*!RtssGlobalFrameLimitRead\(&fps\)')).Count -ge 2) (
+            "Save Limit to Profile no longer refuses an unreadable cap on both " +
+            "its paths. A failed read is 0, so it would write 'uncapped' over " +
+            "the game profile it was asked to populate and report success.")
+    }
+    if (-not $Quiet) {
+        Write-Host ("RTSS frame cap: an unreadable cap reports unavailable, " +
+            "is never cached, and is never written to a profile.")
+    }
+}
+
+
 # The learner must not measure rest while the identifying button is still down.
 #
 # The wizard picks the device from the first report where a bit changed, and for

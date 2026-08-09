@@ -558,7 +558,14 @@ GetRtssFrameCapState() {
     state := GetRtssGlobalState()
     if !IsObject(state)
         return 0
-    fps := RtssGlobalFrameLimit()
+    ; A cap that could not be READ is not a cap that is off. Returning 0 here
+    ; renders as "Unavailable", which is the honest answer and the one every
+    ; caller already handles; reporting mode "off" instead is what put "‹ OFF ›"
+    ; on the row while the limiter was on, and what let
+    ; PersistRtssFrameCapStateNow record "off" as the user's selection.
+    fps := 0
+    if !RtssGlobalFrameLimitRead(&fps)
+        return 0
     if (!state["limiter"] || fps <= 0)
         return Map("mode", "off", "fps", fps, "limiter", state["limiter"])
     if RtssFrameCapCustomMode
@@ -639,16 +646,52 @@ RtssFrameCapBlockedReason() {
     return ""
 }
 
-RtssGlobalFrameLimit() {
+; The global cap, with "could not read it" kept separate from "it is zero".
+;
+; THIS IS THE DIFFERENCE THAT MADE THE LIMITER LOOK OFF WHEN IT WAS ON.
+; GetRtssFrameLimit returns 0 for six different reasons -- integration off, DLL
+; integration off, RTSS not running, the API unavailable, GetProfileProperty
+; returning false, or an exception -- and only one of them means "uncapped".
+; Collapsing all six into 0 was fine until something read that 0 as a STATE:
+; GetRtssFrameCapState reports mode "off" when fps <= 0, so a failed profile
+; read displayed as a limiter that is off, while GetFlags in the very same pass
+; was reporting the limiter on.
+;
+; That is why it was intermittent and why it clustered around boot. GetFlags and
+; the profile store come up at different times: shared memory answers as soon as
+; RTSS is alive, while LoadProfile/GetProfileProperty can fail for a moment
+; longer while RTSS is still initialising. The window is short, which is exactly
+; what makes it look like a flicker rather than a fault.
+;
+; A failure is deliberately NOT cached. Caching it would hold the wrong reading
+; for 400 ms past the moment RTSS became readable, turning a one-report glitch
+; into a visible one.
+RtssGlobalFrameLimitRead(&fps) {
     global RtssFrameLimitCacheFps, RtssFrameLimitCacheTick
     static CACHE_MS := 400
     if (RtssFrameLimitCacheTick
-        && A_TickCount - RtssFrameLimitCacheTick < CACHE_MS)
-        return RtssFrameLimitCacheFps
+        && A_TickCount - RtssFrameLimitCacheTick < CACHE_MS) {
+        fps := RtssFrameLimitCacheFps
+        return true
+    }
     limit := GetRtssFrameLimit("")
-    RtssFrameLimitCacheFps := IsObject(limit) ? limit["fps"] : 0
+    if !IsObject(limit) {
+        fps := 0
+        return false
+    }
+    RtssFrameLimitCacheFps := limit["fps"]
     RtssFrameLimitCacheTick := A_TickCount
-    return RtssFrameLimitCacheFps
+    fps := RtssFrameLimitCacheFps
+    return true
+}
+
+; The number alone, for callers that only compare it. A failed read is 0 here,
+; which is the behaviour every one of them already had; the callers that must
+; not confuse the two use RtssGlobalFrameLimitRead.
+RtssGlobalFrameLimit() {
+    fps := 0
+    RtssGlobalFrameLimitRead(&fps)
+    return fps
 }
 
 ; Which entry of the cycle a bare FPS number corresponds to. Used when the
@@ -3925,7 +3968,15 @@ SaveRtssFrameLimitToProfile() {
     ; named profile re-reads the copy SetProfileProperty just wrote and says yes.
     if (ProductElevatedHelperAlive() && ElevatedRtssWritesAvailable()) {
         CommitRtssPendingFrameCap()
-        fps := RtssGlobalFrameLimit()
+        ; A failed read must not be written. "Save Limit to Profile" copies the
+        ; global cap into the game's own profile, and a read that failed reports
+        ; 0 -- which would write "uncapped" over the profile the user was trying
+        ; to populate, and report success for it.
+        fps := 0
+        if !RtssGlobalFrameLimitRead(&fps) {
+            SharedNotify(exeName ": RTSS did not report the current cap", "Warning")
+            return false
+        }
         if ApplyElevatedRtssProfileFrameLimit(exeName, fps) {
             SharedNotify(
                 exeName ": " (fps > 0 ? fps " FPS" : "uncapped") " saved",
@@ -3943,7 +3994,12 @@ SaveRtssFrameLimitToProfile() {
 
     ; Flush anything still pending so the profile gets the value on screen.
     CommitRtssPendingFrameCap()
-    fps := RtssGlobalFrameLimit()
+    ; Same refusal as the elevated path above, for the same reason.
+    fps := 0
+    if !RtssGlobalFrameLimitRead(&fps) {
+        SharedNotify(exeName ": RTSS did not report the current cap", "Warning")
+        return false
+    }
     value := Buffer(4, 0)
     NumPut("UInt", fps, value, 0)
     LogLine("RTSS profile target " exeName " (foreground was '"
