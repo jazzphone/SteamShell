@@ -19,22 +19,32 @@ The 2026-08-08 queue ran. A, B, C, D, E and F are done and are in the history
 with their reasoning; what follows is the remainder, and one item that was
 proposed and turned out not to be worth doing as described.
 
-### G. `PollController` core extraction — half done, half needs hardware
+### G. `PollController` core extraction — done, and unrun
 
-Banked: `ControllerPrimeHoldTables` and `ControllerApplyStickDeadzone`, both in
-`SteamShell-Common.ahk`. Those were the two blocks each tree ran on every tick
-and could be moved by inspection.
+Shared: `ControllerPrimeHoldTables`, `ControllerApplyStickDeadzone`, and now
+`ControllerPollFrame` — the whole mapping tail, from "the modifier is held" to
+the Guide button. Both loops went from ~330 code lines to ~245, and the heads
+that remain are genuinely two programs: the shell gates on its controller test,
+the settings editor, two recovery dialogs and an elevated foreground; the
+companion on `CompanionDisabled` and its own fresh-baseline path.
 
-Not done, and deliberately: the shared `ControllerPollFrame` -- read, edge
-detection, hold and chord tracking. The loop is 550 lines in the shell against
-435 in the companion, the state is a dozen statics threaded through by
-reference, and the differences are real: the shell has the controller test and
-the settings editor, the companion has `CompanionDisabled`, a fresh-baseline
-path and per-edge diagnostic logging.
+**Two behaviours changed in the companion**, both toward the shell's more careful
+version, and both need a controller to confirm:
 
-**It needs a machine with AutoHotkey and a controller.** Extract with both trees
-behaving identically and verify on hardware, THEN touch dispatch -- two commits,
-in that order. The gate scores the pair 0.31, so nothing demands it.
+- A button already being timed keeps its clock when View goes down, instead of
+  restarting it.
+- An adopted trigger has its long-fired flag cleared, so a trigger that fired a
+  Long in an earlier hold can fire one again.
+
+Both are asserted in `Assert-ControllerPollFrame` and its Python twin, and all
+four mutations were checked. **Neither has been run on hardware.** They are the
+kind of change that shows up as "that button sometimes does nothing" rather than
+as a crash, so they belong at the top of the controller pass:
+
+- hold each face button briefly and long, on both products;
+- hold a trigger long enough to fire its Long, release, and fire it again;
+- hold a button, THEN press View, and confirm releasing it still fires Short;
+- a Left-click binding must still drag rather than accrue a hold.
 
 ### H. Event-driving the window enumeration — still parked on one number
 

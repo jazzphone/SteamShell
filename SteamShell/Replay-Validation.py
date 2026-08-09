@@ -1535,6 +1535,69 @@ def check_binding_label_tables(sources):
                  "selecting it would do nothing.")
 
 
+def check_controller_poll_frame(sources):
+    """The shared mapping tail, and the two things it resolved.
+
+    KEPT IN STEP WITH Assert-ControllerPollFrame in Validate-Common.ps1.
+
+    Both poll loops end in the same routine -- adopt buttons already held, move
+    the cursor, scroll, run Short/Long for buttons and triggers, D-pad, Guide --
+    and it is ControllerPollFrame now. The heads above it stay per-product and
+    genuinely differ.
+
+    Two differences were not cosmetic, and both resolved toward the shell's
+    version. They are asserted here because they are invisible in use until a
+    specific sequence of presses, and a well-meaning tidy could undo either.
+
+    ADOPTING IS GUARDED. A button already being timed keeps its clock when the
+    modifier goes down; the companion overwrote unconditionally and restarted it.
+
+    ADOPTED TRIGGERS CLEAR longFired. The companion set the timestamp and the
+    down-flag but left the flag, so a trigger that had fired a Long in an earlier
+    hold could be adopted with it still set and would never fire a Long again.
+
+    Also the ordering, which is what keeps the expensive work off buttons that
+    are not bound that way: the hold-to-drag test comes before any Short/Long
+    timing, and Long fires while the button is still held rather than on release.
+    """
+    body = function_body(sources["SteamShell-Shared.ahk"], "ControllerPollFrame")
+    if not body:
+        fail("SteamShell-Shared.ahk defines no ControllerPollFrame(); both poll "
+             "loops would have to carry the mapping tail again.")
+        return
+    if not re.search(r'\(buttons & mask\) && !downTick\[name\]', body):
+        fail("ControllerPollFrame adopts a held button without checking "
+             "!downTick[name]. A hold already being timed restarts its clock "
+             "the moment the modifier goes down.")
+    for trigger in ("LT", "RT"):
+        if not re.search(r'\(%s > 30\) && !downTick\["%s"\]\s*\)?\s*\{'
+                         % (trigger.lower(), trigger), body):
+            fail(f"ControllerPollFrame adopts {trigger} without checking "
+                 f'!downTick["{trigger}"].')
+        adopt = re.search(r'!downTick\["%s"\]\)\s*\{(.*?)\n        \}'
+                          % trigger, body, re.S)
+        if not adopt or 'longFired["%s"] := false' % trigger not in adopt.group(1):
+            fail(f"ControllerPollFrame adopts {trigger} without clearing "
+                 f'longFired["{trigger}"]. A trigger that fired a Long in an '
+                 "earlier hold would never fire one again.")
+    # Ordering, per loop. Checked in EACH of the two rather than across the
+    # whole body: a single scan is satisfied by the trigger loop's copy even
+    # when the button loop's has gone, which is how the first version of this
+    # passed a mutation that deleted one of them.
+    halves = body.split('for _, triggerName in ["LT", "RT"]')
+    if len(halves) != 2:
+        fail("ControllerPollFrame no longer has one button loop and one trigger "
+             "loop; the ordering below cannot be checked.")
+        return
+    for half, what in ((halves[0], "button"), (halves[1], "trigger")):
+        hold = half.find("ControllerBindingHoldsMouseButton(")
+        long_test = half.find("HasLongBinding(")
+        if hold < 0 or long_test < 0 or hold > long_test:
+            fail(f"ControllerPollFrame's {what} loop no longer decides "
+                 "hold-to-drag before Short and Long timing, so a drag binding "
+                 "would also accrue a hold and fire an action on release.")
+
+
 def check_learner_guard(sources):
     """The controller poll's learner stand-down, in both trees.
 
@@ -1745,6 +1808,7 @@ def main():
     check_binding_label_tables(sources)
     check_game_score_weight_keys(sources)
     check_elevated_helper_protocol(sources)
+    check_controller_poll_frame(sources)
     check_learner_guard(sources)
     check_rtss_limiter_restore(sources)
     check_source_encoding()

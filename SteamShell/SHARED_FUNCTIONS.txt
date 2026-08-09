@@ -153,6 +153,7 @@ ControllerLearnSteps
 ControllerLearnTick
 ControllerLearnUpdateUi
 ControllerLearnValidateDpad
+ControllerPollFrame
 ControllerResumeGapCheck
 ControllerProfileAxisRaw
 ControllerProfileAxisSpan

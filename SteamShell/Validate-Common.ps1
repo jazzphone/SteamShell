@@ -918,6 +918,76 @@ function Assert-QuickMenuRows {
     }
 }
 
+# The shared mapping tail of the controller poll, and the two things it resolved.
+#
+# KEPT IN STEP WITH check_controller_poll_frame in Replay-Validation.py.
+#
+# Both poll loops end in the same routine -- adopt buttons already held, move the
+# cursor, scroll, Short/Long for buttons and triggers, D-pad, Guide -- and that
+# is ControllerPollFrame. The heads above it stay per-product and genuinely
+# differ. Two of the differences in the tail were not cosmetic and both resolved
+# toward the shell's version; they are pinned here because they are invisible in
+# use until a specific sequence of presses, and a tidy could undo either.
+function Assert-ControllerPollFrame {
+    param(
+        [Parameter(Mandatory = $true)][string]$ProjectRoot,
+        [switch]$Quiet
+    )
+    $body = Get-AhkFunctionBody `
+        -Source (Get-SourceText (Join-Path $ProjectRoot "SteamShell-Shared.ahk")) `
+        -Name "ControllerPollFrame"
+    Assert-True ($body -ne "") (
+        "SteamShell-Shared.ahk defines no ControllerPollFrame(); both poll loops " +
+        "would have to carry the mapping tail again.")
+    if ($body -eq "") { return }
+
+    # A button already being timed keeps its clock when the modifier goes down.
+    Assert-True ($body -match '\(buttons & mask\) && !downTick\[name\]') (
+        "ControllerPollFrame adopts a held button without checking " +
+        "!downTick[name]. A hold already being timed restarts its clock the " +
+        "moment the modifier goes down.")
+
+    # An adopted trigger clears its long-fired flag, or a trigger that fired a
+    # Long in an earlier hold never fires one again.
+    foreach ($trigger in @("LT", "RT")) {
+        $low = $trigger.ToLowerInvariant()
+        Assert-True ($body -match "\($low > 30\) && !downTick\[""$trigger""\]") (
+            "ControllerPollFrame adopts $trigger without checking " +
+            "!downTick[""$trigger""].")
+        $adopt = [regex]::Match(
+            $body, "!downTick\[""$trigger""\]\)\s*\{(?<block>[\s\S]*?)\n        \}")
+        Assert-True (
+            $adopt.Success -and
+            $adopt.Groups["block"].Value -match "longFired\[""$trigger""\] := false") (
+            "ControllerPollFrame adopts $trigger without clearing " +
+            "longFired[""$trigger""]. A trigger that fired a Long in an earlier " +
+            "hold would never fire one again.")
+    }
+
+    # Ordering, per loop. Checked in EACH of the two rather than across the whole
+    # body: one scan is satisfied by the trigger loop's copy even when the button
+    # loop's has gone, which is how the first version of this passed a mutation
+    # that deleted one of them.
+    $halves = $body -split [regex]::Escape('for _, triggerName in ["LT", "RT"]')
+    Assert-True ($halves.Count -eq 2) (
+        "ControllerPollFrame no longer has one button loop and one trigger " +
+        "loop; the ordering below cannot be checked.")
+    if ($halves.Count -ne 2) { return }
+    foreach ($pair in @(
+        @{ Text = $halves[0]; What = "button" },
+        @{ Text = $halves[1]; What = "trigger" })) {
+        $hold = $pair.Text.IndexOf("ControllerBindingHoldsMouseButton(")
+        $longTest = $pair.Text.IndexOf("HasLongBinding(")
+        Assert-True ($hold -ge 0 -and $longTest -ge 0 -and $hold -lt $longTest) (
+            "ControllerPollFrame's $($pair.What) loop no longer decides " +
+            "hold-to-drag before Short and Long timing, so a drag binding would " +
+            "also accrue a hold and fire an action on release.")
+    }
+    if (-not $Quiet) {
+        Write-Host "Controller poll frame: shared, with its adopt and ordering rules intact."
+    }
+}
+
 # The flags the trees build must be exactly the ones the helper parses.
 #
 # KEPT IN STEP WITH check_elevated_helper_protocol in Replay-Validation.py.

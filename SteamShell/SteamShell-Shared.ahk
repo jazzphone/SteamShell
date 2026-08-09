@@ -4234,6 +4234,164 @@ SharedWindowInventoryGet(maxAgeMs := 1000, includeHidden := false) {
     return cached[key]
 }
 
+; One tick of controller MAPPING, once the product has decided the mappings are
+; live: stick to cursor, stick to wheel, then Short/Long for every button and
+; both triggers, then the D-pad and Guide.
+;
+; ITEM G, THE HALF THAT WAS SAFE TO MOVE. The two poll loops are ~330 lines each
+; and their HEADS are genuinely two programs -- the shell gates on the controller
+; test, the settings editor, two recovery dialogs and an elevated foreground; the
+; companion gates on CompanionDisabled and its own fresh-baseline path. Their
+; TAILS, from "the modifier is held, so mappings apply" to the end, were the same
+; routine written twice, differing only in local names, comma-chained assignments
+; against braces, and two things that were not cosmetic. Both of those are
+; resolved toward the shell's version, which was the more careful:
+;
+;   ADOPTING BUTTONS ALREADY HELD when the modifier goes down is guarded on
+;   `!downTick[name]` here. The companion overwrote unconditionally, so a hold
+;   already being timed restarted its clock at the moment View was pressed.
+;
+;   THE TRIGGERS ALSO CLEAR longFired when they are adopted. The companion set
+;   downTick and the down-flag but left longFired alone, so a trigger that had
+;   fired a Long in an earlier hold could be adopted with the flag still set and
+;   would not fire again.
+;
+; NEITHER HAS BEEN RUN ON HARDWARE. They are small, they are in the direction of
+; the more careful implementation, and they are exactly the kind of change that
+; shows up as "that button sometimes does nothing" rather than as a crash.
+;
+; modifierWasDown and lastScroll are the caller's statics, by reference: they
+; live across ticks and each product owns its own.
+ControllerPollFrame(buttons, pressed, released, lt, rt, rx, ry, ly, now,
+        buttonDefinitions, downTick, longFired, triggerDown,
+        &modifierWasDown, &lastScroll) {
+    global ControllerMouseSpeed, ControllerMouseFastMultiplier
+    global ControllerScrollIntervalMs, ControllerScrollStep, ControllerChordHoldMs
+
+    ; If the modifier was just pressed, adopt any button already held so that
+    ; releasing it still triggers its Short.
+    if !modifierWasDown {
+        for definition in buttonDefinitions {
+            name := definition[1]
+            mask := definition[2]
+            if ((buttons & mask) && !downTick[name]) {
+                downTick[name] := now
+                longFired[name] := false
+            }
+        }
+        if ((lt > 30) && !downTick["LT"]) {
+            downTick["LT"] := now
+            longFired["LT"] := false
+            triggerDown["LT"] := true
+        }
+        if ((rt > 30) && !downTick["RT"]) {
+            downTick["RT"] := now
+            longFired["RT"] := false
+            triggerDown["RT"] := true
+        }
+    }
+    modifierWasDown := true
+
+    ; Right stick to cursor. RT is the fast modifier, and the speed is a
+    ; velocity: ApplyControllerMouseMove scales it by measured elapsed time.
+    ApplyControllerMouseMove(rx, ry,
+        rt > 30 ? Round(ControllerMouseSpeed * ControllerMouseFastMultiplier)
+                : ControllerMouseSpeed)
+
+    ; Left stick Y to the wheel, rate-limited: a wheel notch is a discrete
+    ; event and the poll runs twenty times a second.
+    if (ly != 0 && now - lastScroll >= ControllerScrollIntervalMs) {
+        lastScroll := now
+        ApplyControllerMouseScroll(ly, ControllerScrollStep)
+    }
+
+    for definition in buttonDefinitions {
+        name := definition[1]
+        mask := definition[2]
+        ; A binding that HOLDS a mouse button is press-and-hold, so it can drag.
+        ; Down on the press edge, up on the release, and no Short/Long timing.
+        if ControllerBindingHoldsMouseButton(GetBindingValue(name ".Short")) {
+            if (pressed & mask)
+                HoldControllerMouseButton("LButton")
+            if (released & mask)
+                ReleaseControllerMouseButtons()
+            downTick[name] := 0
+            longFired[name] := false
+            continue
+        }
+        if (pressed & mask) {
+            downTick[name] := now
+            longFired[name] := false
+        }
+        ; Long fires while still held, once the threshold passes -- not on
+        ; release, so the user gets the action at the moment it is earned.
+        if ((buttons & mask) && !longFired[name] && downTick[name]
+            && (now - downTick[name]) >= ControllerChordHoldMs) {
+            if HasLongBinding(name) {
+                longFired[name] := true
+                ExecuteControllerBinding(name ".Long")
+            }
+        }
+        if ((released & mask) && downTick[name]) {
+            if (!longFired[name])
+                ExecuteControllerBinding(name ".Short")
+            downTick[name] := 0
+            longFired[name] := false
+        }
+    }
+
+    ; The triggers are analogue, so their edges are derived from a threshold
+    ; rather than read from a button word.
+    for _, triggerName in ["LT", "RT"] {
+        isDown := (triggerName = "LT" ? lt : rt) > 30
+        pressedEdge := (isDown && !triggerDown[triggerName])
+        releasedEdge := (!isDown && triggerDown[triggerName])
+        triggerDown[triggerName] := isDown
+        if ControllerBindingHoldsMouseButton(GetBindingValue(triggerName ".Short")) {
+            if (pressedEdge)
+                HoldControllerMouseButton("LButton")
+            if (releasedEdge)
+                ReleaseControllerMouseButtons()
+            downTick[triggerName] := 0
+            longFired[triggerName] := false
+            continue
+        }
+        if (pressedEdge) {
+            downTick[triggerName] := now
+            longFired[triggerName] := false
+        }
+        if (isDown && !longFired[triggerName] && downTick[triggerName]
+            && (now - downTick[triggerName]) >= ControllerChordHoldMs) {
+            if HasLongBinding(triggerName) {
+                longFired[triggerName] := true
+                ExecuteControllerBinding(triggerName ".Long")
+            }
+        }
+        if (releasedEdge && downTick[triggerName]) {
+            if (!longFired[triggerName])
+                ExecuteControllerBinding(triggerName ".Short")
+            downTick[triggerName] := 0
+            longFired[triggerName] := false
+        }
+    }
+
+    ; D-pad arrows, one shot per press. Not bindable: they are navigation, and
+    ; every surface either product puts on screen expects them to move a
+    ; selection.
+    if (pressed & 0x0001)
+        try SendInput("{Up}")
+    if (pressed & 0x0002)
+        try SendInput("{Down}")
+    if (pressed & 0x0004)
+        try SendInput("{Left}")
+    if (pressed & 0x0008)
+        try SendInput("{Right}")
+
+    ; Guide, where the pad reports it at all, maps to Y's Short.
+    if (pressed & 0x0400)
+        ExecuteControllerBinding("Y.Short")
+}
+
 ; Score an inventory and return the game candidates, best first.
 ;
 ; ONE SCORER FOR BOTH PRODUCTS, which the earlier passes had already made almost

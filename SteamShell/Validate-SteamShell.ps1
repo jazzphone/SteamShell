@@ -1187,9 +1187,14 @@ Assert-True (
         '(?sm)^ControllerBindingHoldsMouseButton\(bindingValue\)\s*\{' +
         '(?:(?!\n\})[\s\S])*?"builtin:leftclick"' -and
     $commonSource -notmatch 'builtin:rightclick' -and
-    $rawSource -match 'ControllerBindingHoldsMouseButton\(' -and
-    $rawSource -match 'HoldControllerMouseButton\("LButton"\)' -and
-    $rawSource -notmatch
+    # Against the EFFECTIVE source: the poll loop's mapping tail is
+    # ControllerPollFrame in SteamShell-Shared.ahk now. The -notmatch was
+    # vacuous while it read $rawSource -- ExecuteControllerBinding is defined in
+    # Shared and was never in a tree's own text, so "it is not in the executor"
+    # was true by construction rather than by fact.
+    $source -match 'ControllerBindingHoldsMouseButton\(' -and
+    $source -match 'HoldControllerMouseButton\("LButton"\)' -and
+    $source -notmatch
         '(?sm)^ExecuteControllerBinding\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?HoldControllerMouseButton') (
     "Hold-to-drag must be Left click only and decided in the poll loop, not in the binding executor.")
 # The conflict is made unreachable rather than explained afterwards: a button
@@ -3936,6 +3941,7 @@ Assert-CrossNameAnchors -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-BindingLabelTables -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-GameScoreWeightKeys -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-ElevatedHelperProtocol -ProjectRoot $projectRoot -Quiet:$Quiet
+Assert-ControllerPollFrame -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-NoAmbiguousDeindentedBlocks -ProjectRoot $projectRoot -File "SteamShell.ahk" -Quiet:$Quiet
 Assert-NoAmbiguousDeindentedBlocks -ProjectRoot $projectRoot -File "SteamShell-Shared.ahk" -Quiet:$Quiet
 Assert-NoAmbiguousDeindentedBlocks -ProjectRoot $projectRoot -File "SteamShell-Common.ahk" -Quiet:$Quiet

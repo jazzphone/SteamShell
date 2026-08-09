@@ -6841,101 +6841,17 @@ PollController() {
             return
         }
 
-        if !previousViewDown {
-            for definition in buttonDefinitions {
-                name := definition[1]
-                mask := definition[2]
-                if (buttons & mask) {
-                    downTick[name] := now
-                    longFired[name] := false
-                }
-            }
-            if (lt > 30)
-                downTick["LT"] := now, triggerDown["LT"] := true
-            if (rt > 30)
-                downTick["RT"] := now, triggerDown["RT"] := true
-        }
-        previousViewDown := true
-
-        ApplyControllerMouseMove(rx, ry,
-            rt > 30 ? Round(ControllerMouseSpeed * ControllerMouseFastMultiplier)
-                    : ControllerMouseSpeed)
-        if (ly != 0 && now - lastScroll >= ControllerScrollIntervalMs) {
-            lastScroll := now
-            ApplyControllerMouseScroll(ly, ControllerScrollStep)
-        }
-
-        for definition in buttonDefinitions {
-            name := definition[1]
-            mask := definition[2]
-            ; Left click is press-and-hold, so it can drag. Down on press, up on
-            ; release, and no Short/Long for that button: Short fires on release,
-            ; by which time a drag has already happened. The mapping editor shows
-            ; the Long slot as reserved.
-            if ControllerBindingHoldsMouseButton(GetBindingValue(name ".Short")) {
-                if (pressed & mask)
-                    HoldControllerMouseButton("LButton")
-                if (released & mask)
-                    ReleaseControllerMouseButtons()
-                downTick[name] := 0, longFired[name] := false
-                continue
-            }
-            if (pressed & mask)
-                downTick[name] := now, longFired[name] := false
-            if ((buttons & mask) && !longFired[name] && downTick[name]
-                && now - downTick[name] >= ControllerChordHoldMs
-                && HasLongBinding(name)) {
-                longFired[name] := true
-                ExecuteControllerBinding(name ".Long")
-            }
-            if ((released & mask) && downTick[name]) {
-                if !longFired[name]
-                    ExecuteControllerBinding(name ".Short")
-                downTick[name] := 0
-                longFired[name] := false
-            }
-        }
-
-        for _, triggerName in ["LT", "RT"] {
-            isDown := triggerName = "LT" ? lt > 30 : rt > 30
-            justPressed := isDown && !triggerDown[triggerName]
-            justReleased := !isDown && triggerDown[triggerName]
-            triggerDown[triggerName] := isDown
-            if ControllerBindingHoldsMouseButton(
-                GetBindingValue(triggerName ".Short")) {
-                if justPressed
-                    HoldControllerMouseButton("LButton")
-                if justReleased
-                    ReleaseControllerMouseButtons()
-                downTick[triggerName] := 0, longFired[triggerName] := false
-                continue
-            }
-            if justPressed
-                downTick[triggerName] := now, longFired[triggerName] := false
-            if (isDown && !longFired[triggerName] && downTick[triggerName]
-                && now - downTick[triggerName] >= ControllerChordHoldMs
-                && HasLongBinding(triggerName)) {
-                longFired[triggerName] := true
-                ExecuteControllerBinding(triggerName ".Long")
-            }
-            if (justReleased && downTick[triggerName]) {
-                if !longFired[triggerName]
-                    ExecuteControllerBinding(triggerName ".Short")
-                downTick[triggerName] := 0
-                longFired[triggerName] := false
-            }
-        }
-
-        if (pressed & 0x0001)
-            try SendInput("{Up}")
-        if (pressed & 0x0002)
-            try SendInput("{Down}")
-        if (pressed & 0x0004)
-            try SendInput("{Left}")
-        if (pressed & 0x0008)
-            try SendInput("{Right}")
-        if (pressed & 0x0400)
-            ExecuteControllerBinding("Y.Short")
+        ; Everything from here is ControllerPollFrame in SteamShell-Shared.ahk:
+        ; adopt held buttons, cursor, wheel, Short/Long for buttons and
+        ; triggers, D-pad, Guide. The head above it is this product's own.
+        ;
+        ; Two behaviours change, both toward the shell's more careful version:
+        ; a button already being timed keeps its clock when the modifier goes
+        ; down rather than restarting it, and an adopted trigger has its
+        ; long-fired flag cleared so a Long can fire again.
+        ControllerPollFrame(buttons, pressed, released, lt, rt, rx, ry, ly, now,
+            buttonDefinitions, downTick, longFired, triggerDown,
+            &previousViewDown, &lastScroll)
     } finally {
         inPoll := false
     }
