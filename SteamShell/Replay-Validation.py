@@ -976,8 +976,66 @@ POWERSHELL_SCOPES = ("env", "script", "global", "local", "using", "private",
                      "variable", "function")
 
 
+ASSERTION_SHAPE_KEYWORDS = {
+    "static", "global", "local", "true", "false", "return", "else", "case",
+    "while", "loop", "break", "continue", "catch", "finally", "throw", "then",
+}
+
+
+def _assertion_words(text):
+    return {w for w in re.findall(r"[A-Za-z_]\w{3,}", text)
+            if w.lower() not in ASSERTION_SHAPE_KEYWORDS}
+
+
+def counted_pattern_literals(pattern):
+    r"""What a counted pattern needs the subject to still contain.
+
+    KEPT IN STEP WITH Get-CountedPatternLiterals in Validate-Common.ps1.
+
+    Returns (required, alternations). `required` is every identifier the pattern
+    names outside an alternation; `alternations` is one branch-set per `|` group,
+    of which at least ONE branch must be present. The split matters: the shell's
+    composed-read ban is `(?:ClampInt|ClampFloat)\(...IniReadS\(`, and
+    ClampFloat is defined in SteamShell-Common.ahk but never called in
+    SteamShell.ahk. Requiring every name would flag that branch as dead when it
+    is deliberately forward-looking -- it bans a form nobody has written yet.
+
+    Regex syntax is stripped first -- group prefixes, character classes, then
+    escapes -- so `\s`, `[^\r\n]` and the like contribute nothing. Identifiers
+    shorter than four characters are dropped with them, which is what makes a
+    pure shape ban like `"x\d+ y\d+` name nothing and be skipped.
+    """
+    text = re.sub(r"\(\?[a-zA-Z]*[:=!<]*", "(", pattern)
+    text = re.sub(r"\[(?:[^\]\\]|\\.)*\]", " ", text)
+    text = re.sub(r"\\.", " ", text)
+    groups, depth, start = [], 0, None
+    for index, char in enumerate(text):
+        if char == "(":
+            if depth == 0:
+                start = index
+            depth += 1
+        elif char == ")" and depth:
+            depth -= 1
+            if depth == 0:
+                groups.append((start, index))
+    alternations, outside, last = [], "", 0
+    for start, end in groups:
+        outside += text[last:start]
+        last = end + 1
+        inner = text[start + 1:end]
+        if "|" in inner:
+            branches = [_assertion_words(b) for b in inner.split("|")]
+            # A branch naming nothing means the group imposes no requirement.
+            if all(branches):
+                alternations.append(branches)
+        else:
+            outside += " " + inner + " "
+    outside += text[last:]
+    return _assertion_words(outside), alternations
+
+
 def check_validator_assertion_shapes():
-    """Two ways an assertion stops checking anything without failing.
+    r"""Three ways an assertion stops checking anything without failing.
 
     KEPT IN STEP WITH Assert-ValidatorAssertionShapes in Validate-Common.ps1.
 
@@ -1002,6 +1060,21 @@ def check_validator_assertion_shapes():
     Name at all, it is true no matter what, forever. Asserting that a function is
     ABSENT is a different and legitimate thing, and reads as `-notmatch
     '(?m)^Name\('` with nothing after it; that form is not flagged.
+
+    VACUOUS NEGATIVES. `$x = [regex]::Matches($subject, P)` with `$x.Count -eq 0`
+    says "P must find nothing". Zero is also what P returns when it can no longer
+    match anything at all, and the two are indistinguishable from the outside --
+    a passing count of zero is the same green whether the defect is absent or the
+    assertion has lost its subject. This one bit: $strayViewDownResets counts
+    open-coded `previousViewDown := false` resets, a variable rename took the
+    name out from under it, and it stayed green while checking nothing.
+
+    So a counted-to-zero pattern must still be ANCHORED: every identifier it
+    names outside an alternation has to appear in the subject, and each
+    alternation needs at least one live branch. That is deliberately weak -- a
+    substring is enough, no structure is required -- because the failure being
+    caught is total disconnection, and a weak rule that never cries wolf is one
+    that survives in a build gate.
     """
     trees = {
         "Validate-SteamShell.ps1": "SteamShell.ahk",
@@ -1051,6 +1124,33 @@ def check_validator_assertion_shapes():
                      "so it is true whatever the code does. Assert against a "
                      "subject that has the function, or, if the point is that the "
                      "function must not exist, drop the body constraint.")
+        # The vacuous negative. Collect the variables whose Count is asserted to
+        # be zero first, then check only the ones a [regex]::Matches feeds.
+        zeroed = set(re.findall(r"\$(\w+)\.Count\s+-eq\s+0", text))
+        for match in re.finditer(
+                r"\$(\w+)\s*=\s*@?\(?\s*\[regex\]::Matches\(\s*\$(\w+)\s*,\s*"
+                r"((?:\s*(?:\+\s*)?'(?:[^']|'')*'\s*)+)", text, re.S):
+            variable, subject = match.group(1), match.group(2).lower()
+            if variable not in zeroed or subject not in subjects:
+                continue
+            pattern = "".join(part.replace("''", "'") for part in
+                              re.findall(r"'((?:[^']|'')*)'", match.group(3)))
+            required, alternations = counted_pattern_literals(pattern)
+            body = subjects[subject]
+            missing = sorted(n for n in required if n not in body)
+            for branches in alternations:
+                if not any(all(n in body for n in b) for b in branches):
+                    # One representative name per branch, lexicographically
+                    # smallest so the PowerShell side words this identically.
+                    missing.append("|".join(sorted(min(b) for b in branches)))
+            if missing:
+                line = text[:match.start()].count("\n") + 1
+                fail(f"{validator}:{line} asserts ${variable}.Count -eq 0, but "
+                     f"its pattern names {', '.join(missing)}, which "
+                     f"${match.group(2)} no longer contains -- so it counts zero "
+                     "because it can no longer match anything, not because the "
+                     "thing it forbids is absent. Re-point the pattern at the "
+                     "name the code uses now.")
 
 
 def check_powershell_variable_shapes():

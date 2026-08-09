@@ -952,6 +952,90 @@ function Assert-QuickMenuRows {
 # body must not contain X", and if the subject does not define Name it is true
 # forever. Asserting a function is ABSENT is legitimate and reads as
 # `-notmatch '(?m)^Name\('` with nothing after it; that form is not flagged.
+#
+# VACUOUS NEGATIVES. `$x = [regex]::Matches($subject, P)` with `$x.Count -eq 0`
+# says "P must find nothing". Zero is also what P returns when it can no longer
+# match anything at all, and from the outside those are the same green. This one
+# bit: $strayViewDownResets counts open-coded `previousViewDown := false` resets,
+# a variable rename took the name out from under it, and it went on passing while
+# checking nothing. So the pattern must stay ANCHORED -- see
+# Get-CountedPatternLiterals below.
+
+# What a counted pattern needs the subject to still contain.
+#
+# KEPT IN STEP WITH counted_pattern_literals in Replay-Validation.py.
+#
+# Returns Required -- every identifier named outside an alternation -- and
+# Alternations, one branch-set per `|` group, of which at least ONE branch must
+# be present. The split matters: the shell's composed-read ban is
+# `(?:ClampInt|ClampFloat)\(...IniReadS\(`, and ClampFloat is defined in
+# SteamShell-Common.ahk but never called in SteamShell.ahk. Requiring every name
+# would flag that branch as dead when it deliberately bans a form nobody has
+# written yet.
+#
+# Regex syntax is stripped first -- group prefixes, character classes, then
+# escapes -- so `\s` and `[^\r\n]` contribute nothing. Identifiers shorter than
+# four characters go with them, which is what makes a pure shape ban like
+# `"x\d+ y\d+` name nothing and be skipped.
+function Get-AssertionWords {
+    param([string]$Text)
+    $keywords = @(
+        "static", "global", "local", "true", "false", "return", "else", "case",
+        "while", "loop", "break", "continue", "catch", "finally", "throw", "then")
+    $words = New-Object 'System.Collections.Generic.HashSet[string]'
+    foreach ($m in [regex]::Matches($Text, '[A-Za-z_]\w{3,}')) {
+        if ($keywords -notcontains $m.Value.ToLowerInvariant()) {
+            [void]$words.Add($m.Value)
+        }
+    }
+    return , $words
+}
+
+function Get-CountedPatternLiterals {
+    param([string]$Pattern)
+    $text = [regex]::Replace($Pattern, '\(\?[a-zA-Z]*[:=!<]*', '(')
+    $text = [regex]::Replace($text, '\[(?:[^\]\\]|\\.)*\]', ' ')
+    $text = [regex]::Replace($text, '\\.', ' ')
+    $groups = @()
+    $depth = 0
+    $start = 0
+    for ($i = 0; $i -lt $text.Length; $i++) {
+        if ($text[$i] -eq '(') {
+            if ($depth -eq 0) { $start = $i }
+            $depth++
+        } elseif ($text[$i] -eq ')' -and $depth -gt 0) {
+            $depth--
+            if ($depth -eq 0) { $groups += , @($start, $i) }
+        }
+    }
+    $alternations = @()
+    $outside = ""
+    $last = 0
+    foreach ($g in $groups) {
+        $outside += $text.Substring($last, $g[0] - $last)
+        $last = $g[1] + 1
+        $inner = $text.Substring($g[0] + 1, $g[1] - $g[0] - 1)
+        if ($inner.Contains("|")) {
+            $branches = @()
+            $empty = $false
+            foreach ($branch in $inner.Split("|")) {
+                $words = Get-AssertionWords -Text $branch
+                if ($words.Count -eq 0) { $empty = $true }
+                $branches += , $words
+            }
+            # A branch naming nothing means the group imposes no requirement.
+            if (-not $empty) { $alternations += , $branches }
+        } else {
+            $outside += " " + $inner + " "
+        }
+    }
+    $outside += $text.Substring($last)
+    return @{
+        Required = Get-AssertionWords -Text $outside
+        Alternations = $alternations
+    }
+}
+
 function Assert-ValidatorAssertionShapes {
     param(
         [Parameter(Mandatory = $true)][string]$ProjectRoot,
@@ -959,6 +1043,7 @@ function Assert-ValidatorAssertionShapes {
     )
     $definition = '([A-Za-z_]\w*)\\\((?:\[\^\)\]\*|)\\\)\\s\*\\\{'
     $checked = 0
+    $counted = 0
     foreach ($pair in @(
         @{ Validator = "Validate-SteamShell.ps1";     Tree = "SteamShell.ahk" },
         @{ Validator = "Validate-SteamShell-XFE.ps1"; Tree = "SteamShell-XFE.ahk" })) {
@@ -1004,10 +1089,66 @@ function Assert-ValidatorAssertionShapes {
                     "function must not exist, drop the body constraint.")
             }
         }
+        # The vacuous negative. Collect the variables whose Count is asserted to
+        # be zero first, then check only the ones a [regex]::Matches feeds.
+        $zeroed = @{}
+        foreach ($m in [regex]::Matches($text, "\`$(\w+)\.Count\s+-eq\s+0")) {
+            $zeroed[$m.Groups[1].Value] = $true
+        }
+        foreach ($m in [regex]::Matches(
+            $text,
+            "(?s)\`$(\w+)\s*=\s*@?\(?\s*\[regex\]::Matches\(\s*\`$(\w+)\s*,\s*" +
+            "((?:\s*(?:\+\s*)?'(?:[^']|'')*'\s*)+)")) {
+            $variable = $m.Groups[1].Value
+            $subject = $m.Groups[2].Value.ToLowerInvariant()
+            if (-not $zeroed.ContainsKey($variable)) { continue }
+            if (-not $subjects.ContainsKey($subject)) { continue }
+            $pattern = ""
+            foreach ($piece in [regex]::Matches($m.Groups[3].Value, "'((?:[^']|'')*)'")) {
+                $pattern += $piece.Groups[1].Value.Replace("''", "'")
+            }
+            $literals = Get-CountedPatternLiterals -Pattern $pattern
+            $body = $subjects[$subject]
+            $missing = @()
+            foreach ($name in $literals.Required) {
+                if (-not $body.Contains($name)) { $missing += $name }
+            }
+            foreach ($branches in $literals.Alternations) {
+                $live = $false
+                foreach ($branch in $branches) {
+                    $all = $true
+                    foreach ($name in $branch) {
+                        if (-not $body.Contains($name)) { $all = $false }
+                    }
+                    if ($all) { $live = $true }
+                }
+                if (-not $live) {
+                    # One representative name per branch, lexicographically
+                    # smallest so the Python side words this identically.
+                    $names = @()
+                    foreach ($branch in $branches) {
+                        $names += @($branch | Sort-Object)[0]
+                    }
+                    $missing += (($names | Sort-Object) -join "|")
+                }
+            }
+            if ($missing.Count -gt 0) {
+                $line = ($text.Substring(0, $m.Index) -split "`n").Count
+                Assert-True $false (
+                    "$($pair.Validator):${line} asserts `$$variable.Count -eq 0, " +
+                    "but its pattern names " + (($missing | Sort-Object) -join ", ") +
+                    ", which `$$($m.Groups[2].Value) no longer contains -- so it " +
+                    "counts zero because it can no longer match anything, not " +
+                    "because the thing it forbids is absent. Re-point the pattern " +
+                    "at the name the code uses now.")
+            }
+            $counted++
+        }
     }
     if (-not $Quiet) {
         Write-Host ("Validator assertions: $checked anchored to a function body; " +
-            "all bounded to it and all against a subject that defines it.")
+            "all bounded to it and all against a subject that defines it. " +
+            "$counted counted to zero; all still anchored to a name the tree has.")
     }
 }
 
