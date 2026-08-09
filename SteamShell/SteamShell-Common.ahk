@@ -2820,6 +2820,47 @@ ForceForegroundWindow(hwnd) {
     return false
 }
 
+; Is this Gui's window actually on screen right now?
+;
+; ASKS THE WINDOW, rather than reading a flag that says what the window ought to
+; be doing. That distinction is the reason this is here at all: the shell tested
+; its Settings window this way and the companion tested a SettingsVisible
+; boolean it maintains by hand, and only one of those can be shared, because
+; SettingsVisible is declared in the companion alone. A shared function may name
+; a global only when both trees declare it, so the window-state form is the one
+; that survives -- and it is also the one that cannot go stale when a show or
+; hide path forgets to update the flag.
+;
+; The try is not decoration. Reading .Hwnd on a destroyed Gui throws, and this is
+; called from a poll, where a throw is the difference between a missed frame and
+; an unusable machine.
+IsGuiVisible(guiObj) {
+    try return DllCall("User32\IsWindowVisible", "Ptr", guiObj.Hwnd, "Int")
+    return 0
+}
+
+; "This Gui is on screen AND has the foreground" -- the question every
+; controller-ownership predicate in both products was asking, written out by
+; hand each time.
+;
+; There were four copies: the shell's two recovery predicates, which are
+; character-identical to each other apart from which global they read, its
+; Settings predicate, and the companion's. Nothing had noticed, because the
+; cross-tree duplicate detector compares the two TREES and these sat three-in-one
+; tree and one in the other; it only spoke up when an unrelated change dropped
+; the shell's IsWindowVisible count past its distinctiveness threshold and paired
+; a recovery predicate with the companion's game-detection heuristic, which it
+; resembles not at all. The real duplication was the thing the false pairing was
+; standing next to.
+;
+; The IsSet() guard stays with the CALLER. This takes the Gui object, so an
+; unset global cannot be passed in without throwing first, and only the caller
+; knows the name to test.
+GuiVisibleAndActive(guiObj) {
+    try return IsGuiVisible(guiObj) && WinActive("ahk_id " guiObj.Hwnd)
+    return false
+}
+
 ; ==============================================================================
 ; Game-score log formatting
 ; ==============================================================================

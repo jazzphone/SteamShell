@@ -68,9 +68,11 @@ GetTokenInformationBuffer
 GetTokenSessionId
 GetTokenUserSidString
 GuidBuf
+GuiVisibleAndActive
 HandleUncaughtError
 HexColorChannel
 HoldControllerMouseButton
+IsGuiVisible
 JoinWith
 LoadControllerProfileFrom
 MoveWindowPhysical

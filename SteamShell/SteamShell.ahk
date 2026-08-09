@@ -8293,12 +8293,7 @@ DesktopRecoveryControllerActive() {
     global DesktopRecoveryGui
     if !IsSet(DesktopRecoveryGui)
         return false
-    try {
-        return DllCall("IsWindowVisible", "Ptr", DesktopRecoveryGui.Hwnd, "Int")
-            && WinActive("ahk_id " DesktopRecoveryGui.Hwnd)
-    } catch {
-        return false
-    }
+    return GuiVisibleAndActive(DesktopRecoveryGui)
 }
 
 HideStartupRecovery() {
@@ -8314,12 +8309,7 @@ StartupRecoveryControllerActive() {
     global StartupRecoveryGui
     if !IsSet(StartupRecoveryGui)
         return false
-    try {
-        return DllCall("IsWindowVisible", "Ptr", StartupRecoveryGui.Hwnd, "Int")
-            && WinActive("ahk_id " StartupRecoveryGui.Hwnd)
-    } catch {
-        return false
-    }
+    return GuiVisibleAndActive(StartupRecoveryGui)
 }
 
 ; Shared by both recovery dialogs. Tab/Shift-Tab across the button row, A to
@@ -14452,14 +14442,6 @@ HideControlPanel() {
     }
     EnsureLogRefreshTimer()
     EnsureStatusRefreshTimer()
-}
-
-IsGuiVisible(guiObj) {
-    try {
-    return DllCall("IsWindowVisible", "Ptr", guiObj.Hwnd, "Int")
-    } catch {
-    return 0
-    }
 }
 
 EnsureLogRefreshTimer() {
