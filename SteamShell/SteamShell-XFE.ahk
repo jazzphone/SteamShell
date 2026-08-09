@@ -293,6 +293,9 @@ global RtssSetProfilePropertyProc := 0
 global RtssSaveProfileProc := 0
 global RtssUpdateProfilesProc := 0
 global RtssHooksLastFailure := ""
+; The last RTSS flag word seen, so a CHANGE can be logged without logging every
+; read. -1 is "nothing seen yet"; 0 is a real flag word.
+global RtssLastFlagsSeen := -1
 ; Quick Menu frame-cap presets, in cycle order. "Off" and "Custom" are derived
 ; states rather than list entries; see GetRtssFrameCapState.
 global RtssFrameCapPresets := [30, 40, 60, 90, 120]

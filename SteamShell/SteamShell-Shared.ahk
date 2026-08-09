@@ -1729,7 +1729,7 @@ AdjustRtssCustomFrameCap(direction) {
 ; means the global disable override is clear. It does not prove that a game's
 ; profile has OSD support or a non-zero frame cap configured.
 GetRtssGlobalState() {
-    global EnableRTSSIntegration, RtssUseDllIntegration
+    global EnableRTSSIntegration, RtssUseDllIntegration, RtssLastFlagsSeen
     if (!EnableRTSSIntegration || !RtssUseDllIntegration
         || !ProcessExist("RTSS.exe"))
         return 0
@@ -1741,6 +1741,27 @@ GetRtssGlobalState() {
     catch as err {
         LogLine("RTSS state: GetFlags failed: " err.Message, "Warning")
         return 0
+    }
+    ; Logged when it CHANGES, not when it is read -- this runs on every repaint
+    ; of the RTSS page, so logging each read would be several lines a second and
+    ; would say nothing.
+    ;
+    ; A change is exactly what is worth seeing. The row reports the limiter from
+    ; bit 0x4, and the open question is whether something clears that bit after
+    ; the startup restore has set it: RTSS re-hooking, a profile reload, another
+    ; tool, or one of this program's own writes. Without a timestamped record of
+    ; the word itself there is nothing to tell those apart afterwards, and the
+    ; fault is intermittent enough that it has to be caught rather than
+    ; reproduced.
+    if (RtssLastFlagsSeen != flags) {
+        LogLine("RTSS flags: 0x" Format("{:08X}", flags)
+            . " (overlay " ((flags & 0x1) != 0 ? "on" : "off")
+            . ", limiter " ((flags & 0x4) = 0 ? "on" : "OFF")
+            . ", global FramerateLimit " RtssGlobalFrameLimit() ")"
+            . (RtssLastFlagsSeen = -1
+                ? ""
+                : " -- was 0x" Format("{:08X}", RtssLastFlagsSeen)))
+        RtssLastFlagsSeen := flags
     }
     return Map(
         "overlay", (flags & 0x1) != 0,       ; RTSSHOOKSFLAG_OSD_VISIBLE
