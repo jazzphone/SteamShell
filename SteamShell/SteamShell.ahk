@@ -6721,9 +6721,15 @@ QuickMenuActivateSelected() {
     ; The destination rows on CURRENTAPP. The write, the duplicate check and the
     ; refusal all live in SteamShell-Shared.ahk, so this tree names the product
     ; and nothing else.
+    ;
+    ; Rebuild rather than repaint, for the reason spelled out at the four
+    ; navigation cases below: "(already added)" is part of the row's LABEL, and
+    ; labels are composed in QuickMenuGetDefinitions. A repaint would redraw the
+    ; label the page was built with, so the add would appear to have done
+    ; nothing until the page was left and re-entered.
     if (SubStr(id, 1, 11) = "currentapp:") {
         QuickMenuAddCurrentAppTo(id, "standalone")
-        QuickMenuRefresh()
+        QuickMenuBuildGui()
         return
     }
 
@@ -6828,10 +6834,25 @@ QuickMenuActivateSelected() {
                 return
             HideQuickMenu(false)
             ExitSteamShell()
+        ; QuickMenuBuildGui and NOT QuickMenuRefresh, in all four of these.
+        ;
+        ; Refresh repaints the rows that are already in QuickMenuRows; the rows
+        ; themselves come from QuickMenuGetDefinitions, which only BuildGui
+        ; calls. Setting QuickMenuPage and refreshing therefore changes which
+        ; page the menu THINKS it is on while leaving the previous page's rows
+        ; on screen and selectable -- which looks like the row did nothing, and
+        ; is worse than that, because the next keypress is read against a page
+        ; the user is not looking at.
+        ;
+        ; The row-carried navigation above gets this right, and so does the
+        ; companion. These four are the cases that navigate from the switch
+        ; instead, because each does something first -- a guard, or a return to
+        ; a named page rather than wherever QuickMenuGoBack would land -- and
+        ; the wrong call was copied along with the shape.
         case "gameDetection":
             QuickMenuPage := "GAMESCORE"
             QuickMenuSelected := 1
-            QuickMenuRefresh()
+            QuickMenuBuildGui()
             return
         case "currentApp":
             ; Nothing to offer, and the row already says why. Opening a page of
@@ -6842,17 +6863,17 @@ QuickMenuActivateSelected() {
             }
             QuickMenuPage := "CURRENTAPP"
             QuickMenuSelected := 1
-            QuickMenuRefresh()
+            QuickMenuBuildGui()
             return
         case "currentAppBack":
             QuickMenuPage := "SYSTEM"
             QuickMenuSelected := 1
-            QuickMenuRefresh()
+            QuickMenuBuildGui()
             return
         case "gameScoreBack":
             QuickMenuPage := "SYSTEM"
             QuickMenuSelected := 1
-            QuickMenuRefresh()
+            QuickMenuBuildGui()
             return
         case "sleep":
             if !QuickMenuConfirm("sleep", "sleep")

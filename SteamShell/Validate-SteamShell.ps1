@@ -3974,6 +3974,7 @@ Assert-ControllerSurfaceParity -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-AutoMouseDefaults -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-RecentApplicationPicker -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-CurrentApplicationTargets -ProjectRoot $projectRoot -Quiet:$Quiet
+Assert-QuickMenuPageChangesRebuild -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-ValidatorAssertionShapes -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-NoAmbiguousDeindentedBlocks -ProjectRoot $projectRoot -File "SteamShell.ahk" -Quiet:$Quiet
 Assert-NoAmbiguousDeindentedBlocks -ProjectRoot $projectRoot -File "SteamShell-Shared.ahk" -Quiet:$Quiet

@@ -1248,10 +1248,93 @@ function Assert-CurrentApplicationTargets {
             "QuickMenuAddCurrentAppTo with its own product name. Its " +
             "destination rows would render and do nothing, or offer the other " +
             "product's list.")
+        # "(already added)" is part of the LABEL, and labels are composed where
+        # the rows are. A repaint after the write redraws the label the page was
+        # built with, so a successful add looks like nothing happened.
+        $dispatch = [regex]::Match($code,
+            '(?s)QuickMenuAddCurrentAppTo\([^)]*\)(.{0,200})')
+        Assert-True ($dispatch.Success -and
+            $dispatch.Groups[1].Value -match 'QuickMenuBuildGui\(\)') (
+            "$($pair.Name) does not rebuild the menu after adding the current " +
+            "application. '(already added)' is part of the row label and " +
+            "labels are composed in the row builder, so the row would keep " +
+            "inviting the same add until the page was left and re-entered.")
     }
     if (-not $Quiet) {
         Write-Host ("Current Application: $($targets.Count) destinations, all " +
             "read by the product offered them, Store apps refused.")
+    }
+}
+
+# Changing the Quick Menu's page must REBUILD it, not repaint it.
+#
+# The distinction is invisible in the source and total in use. QuickMenuRefresh
+# (the shell) and QuickMenuRender (the companion) redraw the rows already in
+# QuickMenuRows; the rows themselves come from the row builder, which only
+# QuickMenuBuildGui calls -- the companion's renderer says so in its own comment,
+# because it used to rebuild on every repaint and re-enumerated the desktop each
+# time the D-pad moved.
+#
+# So `QuickMenuPage := "SOMEWHERE"` followed by a refresh changes which page the
+# menu THINKS it is on while leaving the previous page's rows on screen. The
+# symptom is "selecting the row does nothing", and the state is worse than that:
+# the next keypress is read against a page the user cannot see.
+#
+# This shipped. Four cases in the shell -- Game Detection, Current Application
+# and the two Back To System rows -- navigated with a refresh, and the companion
+# got the same four-line shape right, so nothing about the diff looked wrong.
+# The row-carried navigation both trees prefer (`row.Has("page")`) is immune,
+# which is the argument for it; these are the sites that cannot use it because
+# they guard first or return to a named page.
+function Assert-QuickMenuPageChangesRebuild {
+    param(
+        [Parameter(Mandatory = $true)][string]$ProjectRoot,
+        [switch]$Quiet
+    )
+    $checked = 0
+    foreach ($file in @("SteamShell.ahk", "SteamShell-XFE.ahk")) {
+        # Comments stripped: the paragraph above names both calls, and a comment
+        # that mentions the right one would otherwise satisfy the check.
+        $lines = @((Get-SourceLines (Join-Path $ProjectRoot $file)) |
+            ForEach-Object { $_ -replace '(?<!`);.*$', '' })
+        for ($i = 0; $i -lt $lines.Count; $i++) {
+            # A literal page. `row["page"]` is the row-carried path, which is
+            # already correct and reads its destination from data.
+            if ($lines[$i] -notmatch '^\s*QuickMenuPage\s*:=\s*"') { continue }
+            if ($lines[$i] -match '^\s*global\s') { continue }
+            $checked++
+            # Six lines is the whole shape: the assignment, the selection reset,
+            # and the call. Anything longer is a different construct and should
+            # be read by a person.
+            #
+            # The empty-window guard is not defensive padding. A PowerShell range
+            # whose end is below its start counts DOWNWARD, so an assignment in
+            # the last six lines of a file would silently read the lines ABOVE
+            # it and check the wrong text.
+            $windowEnd = [Math]::Min($i + 6, $lines.Count - 1)
+            $window = ""
+            if ($windowEnd -gt $i) {
+                $window = ($lines[($i + 1)..$windowEnd] -join "`n")
+            }
+            $rebuild = [regex]::Match($window, 'QuickMenuBuildGui\(\)')
+            $repaint = [regex]::Match($window, 'QuickMenuRefresh\(\)|QuickMenuRender\(\)')
+            $page = [regex]::Match($lines[$i], '"([^"]+)"').Groups[1].Value
+            Assert-True ($rebuild.Success -and
+                (-not $repaint.Success -or $rebuild.Index -lt $repaint.Index)) (
+                "${file}:$($i + 1) moves the Quick Menu to '$page' and then " +
+                "repaints instead of calling QuickMenuBuildGui. Only " +
+                "QuickMenuBuildGui composes the rows, so the previous page's " +
+                "rows stay on screen and stay selectable -- the row looks dead, " +
+                "and the next keypress is read against a page nobody can see.")
+        }
+    }
+    Assert-True ($checked -ge 8) (
+        "Only $checked Quick Menu page changes were found across both trees, " +
+        "and there are at least eight. The scan is not seeing the assignments, " +
+        "which makes this check vacuous.")
+    if (-not $Quiet) {
+        Write-Host ("Quick Menu navigation: $checked page changes across 2 " +
+            "products; every one of them rebuilds the rows.")
     }
 }
 

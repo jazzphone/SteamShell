@@ -4690,9 +4690,14 @@ QuickMenuActivateSelected() {
     ; The destination rows on CURRENTAPP. The write, the duplicate check and the
     ; refusal all live in SteamShell-Shared.ahk, so this tree names the product
     ; and nothing else.
+    ;
+    ; QuickMenuBuildGui, because "(already added)" is part of the row's LABEL
+    ; and QuickMenuRender explicitly does not recompose rows -- a repaint would
+    ; redraw the label the page was built with, so the add would look like it
+    ; did nothing until the page was left and re-entered.
     if (SubStr(action, 1, 11) = "currentapp:") {
         QuickMenuAddCurrentAppTo(action, "xfe")
-        QuickMenuRefresh()
+        QuickMenuBuildGui()
         return
     }
 
