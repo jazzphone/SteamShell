@@ -276,6 +276,92 @@ QuickMenuMeasuredBottomMargin(measuredStatusHeight) {
         measuredStatusHeight * QuickMenuBottomMargin() / QuickMenuStatusHeight())
 }
 
+; Grow the Quick Menu window if its content does not fit, and re-centre it.
+;
+; WRITTEN TWICE UNTIL THE ONE-PIXEL BUG ABOVE HAD TO BE FIXED IN BOTH COPIES.
+; DIVERGENT_FUNCTIONS.txt scored the pair at 0.70 and recorded a reason that did
+; not survive being read again: the "real difference" was where the work area
+; comes from -- the shell asks the monitor of QuickMenuPreviousHwnd, the
+; companion its stored QuickMenuMonitorIndex. That is four numbers. The shared
+; file's own header names the remedy for exactly this shape: move the callee in,
+; PASS THE VALUE AS A PARAMETER, or widen the seam. Nobody had asked whether it
+; could be a parameter.
+;
+; The second difference was real and is kept as one: the companion returns once
+; the content fits, while the shell re-centres unconditionally, because that
+; unconditional move is how its menu follows the foreground window's monitor. One
+; boolean, decided by the caller.
+;
+; What that left duplicated was the measurement, the requirement, the work-area
+; clamp, the centring and the log -- and every one of those is where the bug was.
+;
+; IN COMMON RATHER THAN SHARED, which the invariant allows because this touches
+; no global: the window, the control and the work area all arrive as arguments,
+; and CenteredPosition, MoveWindowPhysical and QuickMenuMeasuredBottomMargin are
+; all defined here. LogLine is the one permitted seam.
+QuickMenuFitContent(guiObj, statusCtrl,
+        workLeft, workTop, workRight, workBottom, recentreWhenItFits) {
+    statusY := 0
+    statusHeight := 0
+    clientHeight := 0
+    winWidth := 0
+    winHeight := 0
+    try {
+        ControlGetPos(
+            , &measuredStatusY, , &measuredStatusHeight, statusCtrl, guiObj)
+        WinGetClientPos(, , , &measuredClientHeight, "ahk_id " guiObj.Hwnd)
+        WinGetPos(
+            , , &measuredWinWidth, &measuredWinHeight, "ahk_id " guiObj.Hwnd)
+        statusY := measuredStatusY
+        statusHeight := measuredStatusHeight
+        clientHeight := measuredClientHeight
+        winWidth := measuredWinWidth
+        winHeight := measuredWinHeight
+    }
+    ; winWidth is in the gate, which was the shell's rule and not the
+    ; companion's. Proceeding with a zero width would centre a zero-width window
+    ; rather than decline to touch a window that cannot be measured, so the
+    ; stricter of the two is the correct one for both.
+    if (statusHeight <= 0 || clientHeight <= 0 || winWidth <= 0 || winHeight <= 0)
+        return
+
+    needed := statusY + statusHeight + QuickMenuMeasuredBottomMargin(statusHeight)
+    grow := Max(0, needed - clientHeight)
+    ; A single pixel of shortfall is the two roundings disagreeing, not a clipped
+    ; row. AutoHotkey scales each control coordinate independently, so the layout
+    ; and this reconstruction can land a pixel apart at some scales however the
+    ; margin is derived -- and growing the window by one pixel to fix a one-pixel
+    ; miscount is the loop this used to be stuck in.
+    if (grow <= 1)
+        grow := 0
+    if (grow = 0 && !recentreWhenItFits)
+        return
+
+    ; Never grow past the screen. If the content genuinely does not fit, a window
+    ; the size of the work area is the honest outcome; growing beyond it would
+    ; just move the clipping off-screen where it cannot be seen.
+    maxHeight := workBottom - workTop
+    finalHeight := Min(winHeight + grow, maxHeight)
+    CenteredPosition(
+        workLeft, workTop, workRight, workBottom, winWidth, finalHeight, &x, &y)
+    if (grow > 0 || finalHeight != winHeight)
+        MoveWindowPhysical(guiObj.Hwnd, x, y, winWidth, finalHeight)
+    else
+        MoveWindowPhysical(guiObj.Hwnd, x, y)
+
+    ; Only when it GREW. A re-centre below a grow of zero is not worth a line --
+    ; it is how the menu follows the foreground window's monitor, and it happens
+    ; on every refresh. A Quick Menu that silently resizes itself is the one
+    ; surface where a clipped row has no other diagnostic: on a shell replacement
+    ; it may be the only interface on screen.
+    if (grow > 0)
+        LogLine("Quick Menu: content needed " grow "px more than the window had "
+            . "(client " clientHeight ", status ends " (statusY + statusHeight)
+            . "); grew to " winWidth "x" finalHeight " and re-centred."
+            . (finalHeight < winHeight + grow ? " Clamped to the work area." : ""),
+            "Warning")
+}
+
 ; GDI+ has no blur. The glow is concentric strokes stepping outward with
 ; falling alpha, which is cheap, needs no second surface, and at these radii is
 ; visually indistinguishable from a real one.

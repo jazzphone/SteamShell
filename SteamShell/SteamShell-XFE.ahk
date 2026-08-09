@@ -4668,48 +4668,13 @@ QuickMenuEnsureContentFits() {
     global QuickMenuGui, QuickMenuStatusCtrl, QuickMenuMonitorIndex
     if (!IsSet(QuickMenuGui) || !IsSet(QuickMenuStatusCtrl))
         return
-    statusY := 0, statusHeight := 0, clientHeight := 0
-    winX := 0, winY := 0, winWidth := 0, winHeight := 0
-    try {
-        ControlGetPos(, &measuredStatusY, , &measuredStatusHeight,
-            QuickMenuStatusCtrl, QuickMenuGui)
-        WinGetClientPos(, , , &measuredClientHeight, "ahk_id " QuickMenuGui.Hwnd)
-        WinGetPos(&measuredWinX, &measuredWinY, &measuredWinWidth,
-            &measuredWinHeight, "ahk_id " QuickMenuGui.Hwnd)
-        statusY := measuredStatusY, statusHeight := measuredStatusHeight
-        clientHeight := measuredClientHeight
-        winX := measuredWinX, winY := measuredWinY
-        winWidth := measuredWinWidth, winHeight := measuredWinHeight
-    }
-    if (statusHeight <= 0 || clientHeight <= 0 || winHeight <= 0)
-        return
-    ; The bottom margin is derived from the status line's own MEASURED height and
-    ; the layout's own two constants, so it stays proportional without
-    ; reintroducing a DPI calculation and without a second constant that can
-    ; disagree with the layout. See QuickMenuMeasuredBottomMargin.
-    needed := statusY + statusHeight + QuickMenuMeasuredBottomMargin(statusHeight)
-    grow := needed - clientHeight
-    ; A single pixel of shortfall is the two roundings disagreeing, not a clipped
-    ; row. AutoHotkey scales each control coordinate independently, so the layout
-    ; and this reconstruction can land a pixel apart at some scales however the
-    ; margin is derived -- and growing the window by one pixel to fix a one-pixel
-    ; miscount is the loop this used to be stuck in.
-    if (grow <= 1)
-        return
+    ; The monitor the menu was opened on, stored rather than re-derived. Xbox FSE
+    ; owns presentation here, so there is no foreground window to follow and no
+    ; re-centre once the content fits -- the false below is that decision.
     monitorIndex := ClampInt(QuickMenuMonitorIndex, 1, MonitorGetCount())
     MonitorGetWorkArea(monitorIndex, &left, &top, &right, &bottom)
-    ; Never grow past the screen. If the content genuinely does not fit, a window
-    ; the size of the work area is the honest outcome; growing beyond it would
-    ; just move the clipping off-screen where it cannot be seen.
-    maxHeight := bottom - top
-    newHeight := Min(winHeight + grow, maxHeight)
-    CenteredPosition(left, top, right, bottom, winWidth, newHeight, &x, &y)
-    MoveWindowPhysical(QuickMenuGui.Hwnd, x, y, winWidth, newHeight)
-    LogLine("Quick Menu: content needed " grow "px more than the window had "
-        . "(client " clientHeight ", status ends " (statusY + statusHeight)
-        . "); grew to " winWidth "x" newHeight " and re-centred."
-        . (newHeight < winHeight + grow ? " Clamped to the work area." : ""),
-        "Warning")
+    QuickMenuFitContent(
+        QuickMenuGui, QuickMenuStatusCtrl, left, top, right, bottom, false)
 }
 
 QuickMenuRender() {

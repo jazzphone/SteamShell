@@ -5753,66 +5753,14 @@ QuickMenuEnsureContentFits() {
     global QuickMenuGui, QuickMenuStatusCtrl, QuickMenuPreviousHwnd
     if (!IsSet(QuickMenuGui) || !IsObject(QuickMenuStatusCtrl))
         return
-
-    statusY := 0
-    statusHeight := 0
-    clientHeight := 0
-    winWidth := 0
-    winHeight := 0
-    try {
-        ControlGetPos(
-            , &measuredStatusY, , &measuredStatusHeight,
-            QuickMenuStatusCtrl, QuickMenuGui)
-        WinGetClientPos(
-            , , , &measuredClientHeight, "ahk_id " QuickMenuGui.Hwnd)
-        WinGetPos(
-            , , &measuredWinWidth, &measuredWinHeight,
-            "ahk_id " QuickMenuGui.Hwnd)
-        statusY := measuredStatusY
-        statusHeight := measuredStatusHeight
-        clientHeight := measuredClientHeight
-        winWidth := measuredWinWidth
-        winHeight := measuredWinHeight
-    }
-    if (statusHeight <= 0 || clientHeight <= 0 || winWidth <= 0 || winHeight <= 0)
-        return
-
-    neededClientHeight := statusY + statusHeight
-        + QuickMenuMeasuredBottomMargin(statusHeight)
-    grow := Max(0, neededClientHeight - clientHeight)
-    ; A single pixel of shortfall is the two roundings disagreeing, not a clipped
-    ; row. AutoHotkey scales each control coordinate independently, so the layout
-    ; and this reconstruction can land a pixel apart at some scales however the
-    ; margin is derived -- and growing the window by one pixel to fix a one-pixel
-    ; miscount is the loop this used to be stuck in.
-    if (grow <= 1)
-        grow := 0
+    ; The monitor of the window that was in front before the menu opened, which
+    ; is the per-tree half: this product re-centres onto it unconditionally, so
+    ; the menu follows the foreground window across displays.
     GetTargetMonitorWorkArea(
         QuickMenuPreviousHwnd, &workLeft, &workTop, &workRight, &workBottom)
-    maxHeight := workBottom - workTop
-    finalHeight := Min(winHeight + grow, maxHeight)
-    CenteredPosition(
-        workLeft, workTop, workRight, workBottom,
-        winWidth, finalHeight, &x, &y)
-    if (grow > 0 || finalHeight != winHeight)
-        MoveWindowPhysical(QuickMenuGui.Hwnd, x, y, winWidth, finalHeight)
-    else
-        MoveWindowPhysical(QuickMenuGui.Hwnd, x, y)
-    ; Say so when the window had to grow, which the companion has always done and
-    ; this tree did not. A Quick Menu that silently resizes itself is the one
-    ; surface where a clipped row has no other diagnostic: on a shell replacement
-    ; it may be the only interface on screen, and "the bottom row looks wrong" is
-    ; not something a log can otherwise answer.
-    ;
-    ; Only when it GREW. The unconditional re-centre below a grow of zero is not
-    ; worth a line -- it is how the menu follows the foreground window's monitor,
-    ; and it happens on every refresh.
-    if (grow > 0)
-        LogLine("Quick Menu: content needed " grow "px more than the window had "
-            . "(client " clientHeight ", status ends " (statusY + statusHeight)
-            . "); grew to " winWidth "x" finalHeight " and re-centred."
-            . (finalHeight < winHeight + grow ? " Clamped to the work area." : ""),
-            "Warning")
+    QuickMenuFitContent(
+        QuickMenuGui, QuickMenuStatusCtrl,
+        workLeft, workTop, workRight, workBottom, true)
 }
 
 GetTargetMonitorWorkArea(targetHwnd, &left, &top, &right, &bottom) {

@@ -3939,7 +3939,7 @@ Assert-NoAmbiguousDeindentedBlocks -ProjectRoot $projectRoot -File "SteamShell-C
 # define the layout, so it cannot disagree with what the layout actually does.
 Assert-True (
     $source -match
-        '(?s)QuickMenuEnsureContentFits\([^)]*\)\s*\{.*?' +
+        '(?s)QuickMenuFitContent\([^)]*\)\s*\{.*?' +
         'QuickMenuMeasuredBottomMargin\(statusHeight\)' -and
     $source -notmatch 'statusHeight \* 0\.45') (
     "The Quick Menu fit check restates the layout's bottom margin instead of " +

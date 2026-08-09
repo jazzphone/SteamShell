@@ -78,6 +78,7 @@ QuickMenuBottomMargin
 QuickMenuDrawGlow
 QuickMenuDrawText
 QuickMenuFillRounded
+QuickMenuFitContent
 QuickMenuGlowPadding
 QuickMenuIdSet
 QuickMenuMakeFont

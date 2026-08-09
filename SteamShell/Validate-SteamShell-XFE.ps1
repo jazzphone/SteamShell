@@ -1046,9 +1046,14 @@ Assert-True (
 # The Quick Menu must fit its own content. Computing the height in logical units
 # and trusting AutoHotkey to scale it the same way as the controls failed on a 4K
 # television: the first show came out short and the bottom rows were cut off.
+#
+# The measurement lives in QuickMenuFitContent now, and the per-tree wrapper only
+# resolves which monitor to centre on. Both halves are asserted: the wrapper must
+# still be reached from the build path, and the shared body must still measure
+# rather than compute from logical units.
 Assert-True (
     $source -match 'QuickMenuEnsureContentFits\(' -and
-    $source -match '(?s)QuickMenuEnsureContentFits\([^)]*\)\s*\{.*?ControlGetPos\(') (
+    $source -match '(?s)QuickMenuFitContent\([^)]*\)\s*\{.*?ControlGetPos\(') (
     "The Quick Menu must verify its height against the measured control positions.")
 # WinSetRegion CLIPS the window, and a hidden window can report a wrong size. A
 # region built from a hidden measurement cut the menu off with a rounded edge
@@ -2345,7 +2350,7 @@ Assert-NoAmbiguousDeindentedBlocks -ProjectRoot $projectRoot -File "SteamShell-C
 # define the layout, so it cannot disagree with what the layout actually does.
 Assert-True (
     $source -match
-        '(?s)QuickMenuEnsureContentFits\([^)]*\)\s*\{.*?' +
+        '(?s)QuickMenuFitContent\([^)]*\)\s*\{.*?' +
         'QuickMenuMeasuredBottomMargin\(statusHeight\)' -and
     $source -notmatch 'statusHeight \* 0\.45') (
     "The Quick Menu fit check restates the layout's bottom margin instead of " +
