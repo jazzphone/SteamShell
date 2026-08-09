@@ -128,7 +128,9 @@ which replays both validators' assertions without Windows:
 immediately before locking. `SteamShell\WINDOWS_TEST_CHECKLIST.md` describes what
 to exercise. The maintainer hardware-tested the Quick Menu navigation fix — the
 defect that prompted this release — and confirmed Current Application opens its
-destination page and writes the setting.
+destination page. The write itself, the *(already added)* state on a second
+visit, and the Store-app refusal are covered by validator assertions rather than
+by a reported hardware pass.
 
 ## Known limits
 
