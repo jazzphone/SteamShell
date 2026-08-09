@@ -163,6 +163,7 @@ ControllerResumeGapCheck
 ControllerProfilePath
 ControllerProfileRestCheck
 ControllerProfileRestCheckBegin
+ControllerSettingsSurfaceActive
 ControllerTrackViewButton
 CopyHealthReport
 CycleDefaultAudioOutput
@@ -214,6 +215,7 @@ InitializeTrayMenu
 InitXInput
 InstallationRecordAlert
 IsCloaked
+IsOurWindow
 IsRtssFrameCapPreset
 IsSteamProcess
 IsUsableProfileExe
@@ -351,6 +353,7 @@ SetRtssFrameLimiterState
 SetRtssGlobalFrameLimit
 SetRtssOverlayState
 SettingsLayout
+SettingsPrimaryActive
 SettingsRefreshSliderReadouts
 SettingsRowAppliesTo
 SettingsRowChoices

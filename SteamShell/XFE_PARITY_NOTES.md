@@ -334,9 +334,13 @@ because they are `WS_EX_NOACTIVATE`. Standalone now asks XFE's question.
 
 Worth recording as a pattern rather than an incident: the justification for a
 divergence is itself a claim, and an old one is worth re-testing before it is
-used to defend the next decision. `SettingsEditorControllerActive` and
-`ControllerSettingsSurfaceActive` are still separate functions because their
-surrounding globals differ, but they now implement the same rule.
+used to defend the next decision. This paragraph is its own example. It used to
+end "`SettingsEditorControllerActive` and `ControllerSettingsSurfaceActive` are
+still separate functions because their surrounding globals differ" — and the
+globals were exactly two things, a helper each tree had and the other did not,
+and one flag with two names. Named, they took a commit. There is now ONE
+`ControllerSettingsSurfaceActive`, in `SteamShell-Shared.ahk`, and the companion
+gained the shell's owner-chain walk by inheriting it.
 
 ### A second one that should have matched: automatic mouse mode
 
@@ -770,7 +774,7 @@ Three things had to follow it and did not, all found later:
   it: A opens the touch keyboard, Y opens Game Bar, L3+R3 throws the Quick Menu
   on top. The shell gained the wizard and not the guard, and the wizard was
   unfinishable — the D-pad moved focus between its own buttons while it asked
-  for a D-pad direction, because `SettingsEditorControllerActive()` answers true
+  for a D-pad direction, because `ControllerSettingsSurfaceActive()` answers true
   for any window this process owns.
 - The RawInput arrival counter logged every two seconds regardless of the probe
   setting. Survivable in a companion that registers only inside Xbox FSE;

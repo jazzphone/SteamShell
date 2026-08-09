@@ -6950,7 +6950,7 @@ PollController() {
     ; itself through WM_INPUT, so standing this poll down costs it nothing and
     ; stops everything else acting on the same buttons.
     ;
-    ; Not just the automatic mouse. SettingsEditorControllerActive() answers true
+    ; Not just the automatic mouse. ControllerSettingsSurfaceActive() answers true
     ; for ANY window this process owns that is active, which is deliberate and
     ; which the learner's window satisfies -- so the poll treated the wizard as a
     ; surface to navigate: the right stick drove the pointer across it and the
@@ -6986,8 +6986,8 @@ PollController() {
             &viewWasDown)
         return
     }
-    settingsControllerActive := SettingsEditorControllerActive()
-    settingsPrimaryActive := SettingsEditorPrimaryActive()
+    settingsControllerActive := ControllerSettingsSurfaceActive()
+    settingsPrimaryActive := SettingsPrimaryActive()
     isControllerTestActive := ControllerTestActive()
     if (!EnableControllerMouseMode && !EnableQuickMenu
         && !settingsControllerActive && !isControllerTestActive)
@@ -10453,52 +10453,10 @@ SettingsEditorRevealControl(ctrl) {
     SettingsEditorApplyCategoryLayout(category)
 }
 
-SettingsEditorControllerActive() {
-    global SettingsDialogActive, ScriptPid
-    ; Any window this process owns is a surface the user has to be able to move
-    ; around, so this asks that question directly instead of naming windows.
-    ;
-    ; This is the same rule XFE uses, and it used to be an enumerated list here.
-    ; The list was justified on the grounds that standalone evaluates this before
-    ; the Quick Menu branch; that was simply wrong -- PollController returns from
-    ; the Quick Menu branch first. The other worry, that the splash and the
-    ; desktop backdrop would wrongly qualify, is also unfounded: all three
-    ; presentation windows are created WS_EX_NOACTIVATE and can never be the
-    ; active window. What the list actually did was go stale.
-    if SettingsDialogActive
-        return true
-    activeHwnd := 0
-    try activeHwnd := WinGetID("A")
-    if !activeHwnd
-        return false
-    try {
-        if (WinGetPID("ahk_id " activeHwnd) = ScriptPid)
-            return true
-    }
-    ; Native common dialogs may be hosted outside this process. Accept an active
-    ; window whose owner chain leads back to a window of ours.
-    ownerHwnd := activeHwnd
-    Loop 8 {
-        ownerHwnd := DllCall(
-            "User32\GetWindow", "Ptr", ownerHwnd, "UInt", 4, "Ptr") ; GW_OWNER
-        if !ownerHwnd
-            break
-        try {
-            if (WinGetPID("ahk_id " ownerHwnd) = ScriptPid)
-                return true
-        }
-    }
-    return false
-}
-
-SettingsEditorPrimaryActive() {
-    global SettingsGui
-    if !IsSet(SettingsGui)
-        return false
-    try return IsGuiVisible(SettingsGui)
-        && WinActive("ahk_id " SettingsGui.Hwnd)
-    return false
-}
+; SettingsEditorControllerActive and SettingsEditorPrimaryActive are
+; ControllerSettingsSurfaceActive and SettingsPrimaryActive in
+; SteamShell-Shared.ahk now, defined once for both products. This tree's owner
+; chain walk went with them, so the companion has it too.
 
 SettingsEditorGetActiveCategory() {
     global SettingsGui, SettingsEditorCategories

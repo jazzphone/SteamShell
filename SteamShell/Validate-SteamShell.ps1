@@ -787,8 +787,8 @@ Assert-True (
     "The main-page controller mapping hint is incomplete.")
 Assert-True (
     $source -match
-        '(?sm)^SettingsEditorControllerActive\(\)\s*\{(?:(?!\n\})[\s\S])*?' +
-        'SettingsDialogActive(?:(?!\n\})[\s\S])*?ScriptPid' -and
+        '(?sm)^ControllerSettingsSurfaceActive\(\)\s*\{(?:(?!\n\})[\s\S])*?' +
+        'SettingsDialogActive(?:(?!\n\})[\s\S])*?IsOurWindow' -and
     $source -match
         '(?s)if\s*\(settingsControllerActive\).*?SystemCursor\("Show"\).*?' +
         'SettingsEditorHandlePointer' -and
@@ -1896,8 +1896,8 @@ Assert-True (
     "Full Settings no longer exposes RB's configured pointer action.")
 Assert-True (
     $source -match
-        '(?sm)^SettingsEditorControllerActive\(\)\s*\{(?:(?!\n\})[\s\S])*?' +
-        'WinGetPID(?:(?!\n\})[\s\S])*?ScriptPid(?:(?!\n\})[\s\S])*?GetWindow(?:(?!\n\})[\s\S])*?GW_OWNER' -and
+        '(?sm)^ControllerSettingsSurfaceActive\(\)\s*\{(?:(?!\n\})[\s\S])*?' +
+        'IsOurWindow(?:(?!\n\})[\s\S])*?GetWindow(?:(?!\n\})[\s\S])*?GW_OWNER' -and
     $source -match
         '(?sm)^SettingsEditorFileSelect\((?:(?!\n\})[\s\S])*?' +
         'SettingsDialogActive\s*:=\s*true(?:(?!\n\})[\s\S])*?' +
@@ -2702,14 +2702,14 @@ Assert-True (
 # with the same requirement should not have two different answers to it.
 Assert-True (
     $source -match
-        '(?sm)^SettingsEditorControllerActive\(\)\s*\{(?:(?!\n\})[\s\S])*?' +
-        'WinGetPID\("ahk_id " activeHwnd\) = ScriptPid' -and
+        '(?sm)^ControllerSettingsSurfaceActive\(\)\s*\{(?:(?!\n\})[\s\S])*?' +
+        'IsOurWindow\(activeHwnd\)' -and
     $source -match
-        '(?sm)^SettingsEditorControllerActive\(\)\s*\{(?:(?!\n\})[\s\S])*?' +
+        '(?sm)^ControllerSettingsSurfaceActive\(\)\s*\{(?:(?!\n\})[\s\S])*?' +
         'GW_OWNER' -and
     # No window may be named here. A name is a list, and a list goes stale.
     $source -notmatch
-        '(?sm)^SettingsEditorControllerActive\(\)\s*\{(?:(?!\n\})[\s\S])*?' +
+        '(?sm)^ControllerSettingsSurfaceActive\(\)\s*\{(?:(?!\n\})[\s\S])*?' +
         'IsSet\([A-Za-z]\w*Gui\)' -and
     $source -match
         '(?sm)^SteamShellDialogOwnerHwnd\(\)\s*\{(?:(?!\n\})[\s\S])*?' +

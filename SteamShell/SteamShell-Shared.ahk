@@ -10230,6 +10230,86 @@ SettingsAddNote(guiObj, category, text, &y, height := 34) {
 }
 
 
+; Does this process own the given window?
+;
+; SHARED because ScriptPid is declared in both trees, which is the whole rule for
+; naming a global in this file. It lived in the companion, where eight call sites
+; used it, while the shell open-coded the same WinGetPID comparison inside the
+; predicate below.
+IsOurWindow(hwnd) {
+    global ScriptPid
+    if !hwnd
+        return false
+    pid := 0
+    try pid := WinGetPID("ahk_id " hwnd)
+    return pid = ScriptPid
+}
+
+
+; Does a Settings-family surface own the controller right now?
+;
+; Every window this process owns is a surface the user has to be able to move
+; around, so this asks that question directly instead of naming windows. An
+; enumerated list was tried in the shell and went stale, which is what lists of
+; window names do.
+;
+; ONE FUNCTION FROM TWO, and the shell's was the more capable: it walks the OWNER
+; CHAIN, and the companion only tested the active window's own PID. Native common
+; dialogs -- a file picker, a colour chooser -- may be hosted OUTSIDE this
+; process while being owned by one of our windows, so the companion answered
+; false with a file picker on screen and the controller stopped being a pointer
+; at the moment the pointer was the only way to finish the dialog. Taking the
+; shell's version fixes that for the companion rather than preserving it as a
+; difference.
+;
+; SettingsDialogActive still short-circuits: a native dialog's process may not be
+; ours and may not be owned by us either, so the flag covers what the walk
+; cannot. That flag had two names until the previous commit, and that is the only
+; reason this function could not be shared before.
+ControllerSettingsSurfaceActive() {
+    global SettingsDialogActive
+    if SettingsDialogActive
+        return true
+    activeHwnd := 0
+    try activeHwnd := WinGetID("A")
+    if !activeHwnd
+        return false
+    if IsOurWindow(activeHwnd)
+        return true
+    ownerHwnd := activeHwnd
+    Loop 8 {
+        ownerHwnd := DllCall(
+            "User32\GetWindow", "Ptr", ownerHwnd, "UInt", 4, "Ptr") ; GW_OWNER
+        if !ownerHwnd
+            break
+        if IsOurWindow(ownerHwnd)
+            return true
+    }
+    return false
+}
+
+
+; Is the main Settings window itself the active window?
+;
+; Narrower than the predicate above deliberately: that one is true for any of our
+; windows, this one only for the Settings window proper, which is what the
+; category triggers and the controller-first navigation key off.
+;
+; ASKS THE WINDOW. The companion gated this on a SettingsVisible boolean it
+; maintains by hand; the shell asked the window. Only the second can be shared,
+; because SettingsVisible is declared in the companion alone and a shared
+; function may name a global only when both trees declare it -- so the
+; architecture chose here, and it chose the form that cannot go stale when a show
+; or hide path forgets to set the flag. SettingsVisible remains in the companion
+; for its other uses.
+SettingsPrimaryActive() {
+    global SettingsGui
+    if !IsSet(SettingsGui)
+        return false
+    return GuiVisibleAndActive(SettingsGui)
+}
+
+
 ; The stand-down, in one place.
 ;
 ; ResetControllerEdgeState clears the button and trigger tables; this adds the

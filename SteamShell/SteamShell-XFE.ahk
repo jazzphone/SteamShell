@@ -1371,34 +1371,13 @@ NormalizePath(path) {
     return path
 }
 
-IsOurWindow(hwnd) {
-    global ScriptPid
-    if !hwnd
-        return false
-    pid := 0
-    try pid := WinGetPID("ahk_id " hwnd)
-    return pid = ScriptPid
-}
-
-; Every companion-owned settings/editor surface gets temporary controller mouse
-; behavior without changing the persisted Mouse Mode toggle. Native dialogs are
-; covered by SettingsDialogActive because their process may not be ours.
-ControllerSettingsSurfaceActive() {
-    global SettingsDialogActive
-    if SettingsDialogActive
-        return true
-    hwnd := 0
-    try hwnd := WinExist("A")
-    return hwnd && IsOurWindow(hwnd)
-}
-
-SettingsPrimaryActive() {
-    global SettingsGui, SettingsVisible
-    if (!SettingsVisible || !IsSet(SettingsGui))
-        return false
-    try return WinActive("ahk_id " SettingsGui.Hwnd) != 0
-    return false
-}
+; IsOurWindow, ControllerSettingsSurfaceActive and SettingsPrimaryActive are all
+; in SteamShell-Shared.ahk now, defined once for both products.
+;
+; SettingsPrimaryActive no longer reads the SettingsVisible flag this file
+; maintains -- it asks the window, through GuiVisibleAndActive. SettingsVisible
+; is declared in this tree alone, so a shared function could not have named it;
+; the flag stays for its other uses here.
 
 ; ------------------------------------------------------------------------------
 ; Dialogs opened by an always-on-top window
