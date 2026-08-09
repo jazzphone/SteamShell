@@ -812,7 +812,7 @@ Assert-True (
     $source -match
         '(?m)^\s*if ControllerNeedsFreshBaseline \{\s*\r?\n' +
         '\s*ResetControllerHoldState\(\s*\r?\n' +
-        '\s*&prevViewDown, downTick, longFired, prevTrigDown, btnDefs,\s*\r?\n' +
+        '\s*&previousViewDown, downTick, longFired, triggerDown, buttonDefinitions,\s*\r?\n' +
         '\s*&viewWasDown\)\s*\r?\n' +
         '\s*ControllerNeedsFreshBaseline := false\s*\r?\n\s*return\s*\r?\n\s*\}') (
     "Closing Quick Settings can leak its final button release into persistent mappings.")

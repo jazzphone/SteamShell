@@ -6960,10 +6960,10 @@ PollController() {
     global ControllerPollIntervalMs
 
     static state := Buffer(16, 0)
-    static prevButtons := 0
+    static previousButtons := 0
     static lastScroll := 0
-    static prevViewDown := false
-    ; The View button's own press, tracked apart from prevViewDown: that one
+    static previousViewDown := false
+    ; The View button's own press, tracked apart from previousViewDown: that one
     ; follows the mapping gate and so is true throughout automatic mouse mode,
     ; which is not a press anybody made.
     static viewWasDown := false
@@ -6976,12 +6976,12 @@ PollController() {
     ; Per-button press tracking (to support Short/Long bindings) without ByRef locals.
     static downTick := Map()
     static longFired := Map()
-    static prevTrigDown := Map("LT", false, "RT", false)
-    static settingsPrevLtDown := false
-    static settingsPrevRtDown := false
+    static triggerDown := Map("LT", false, "RT", false)
+    static settingsLtDown := false
+    static settingsRtDown := false
 
     static inPoll := false
-    static btnDefs := [
+    static buttonDefinitions := [
     ["A", 0x1000],
     ["B", 0x2000],
     ["X", 0x4000],
@@ -6993,7 +6993,7 @@ PollController() {
     ["R3", 0x0080],
     ]
 
-    ControllerPrimeHoldTables(downTick, longFired, btnDefs)
+    ControllerPrimeHoldTables(downTick, longFired, buttonDefinitions)
 
     if (inPoll)
         return
@@ -7027,7 +7027,7 @@ PollController() {
     ; Edge state is cleared rather than left, or every button held when the
     ; wizard opened fires its mapping the moment it closes.
     ;
-    ; A fresh baseline is REQUESTED rather than prevButtons being zeroed. Zeroing
+    ; A fresh baseline is REQUESTED rather than previousButtons being zeroed. Zeroing
     ; it produces the exact misfire this paragraph promises to prevent: the next
     ; poll computes pressed as buttons & ~0, so every button still held when the
     ; wizard closes arrives as a press edge and fires its mapping. The wizard
@@ -7043,7 +7043,7 @@ PollController() {
         settingsChordSince := 0
         settingsChordFired := false
         ResetControllerHoldState(
-            &prevViewDown, downTick, longFired, prevTrigDown, btnDefs,
+            &previousViewDown, downTick, longFired, triggerDown, buttonDefinitions,
             &viewWasDown)
         return
     }
@@ -7064,15 +7064,15 @@ PollController() {
         }
         ; Discard all edge/hold state while disconnected. Otherwise reconnecting
         ; can synthesize stale releases or complete an old long-press.
-        prevButtons := 0
+        previousButtons := 0
         quickChordSince := 0
         quickChordFired := false
         settingsChordSince := 0
         settingsChordFired := false
-        settingsPrevLtDown := false
-        settingsPrevRtDown := false
+        settingsLtDown := false
+        settingsRtDown := false
         ResetControllerHoldState(
-            &prevViewDown, downTick, longFired, prevTrigDown, btnDefs,
+            &previousViewDown, downTick, longFired, triggerDown, buttonDefinitions,
             &viewWasDown)
         return
     }
@@ -7085,15 +7085,15 @@ PollController() {
     ; accidentally launch mapped actions, open overlays, or navigate another app.
     if ControllerTestActive() {
         UpdateControllerTest(buttons, lt, rt, lx, ly, rx, ry)
-        prevButtons := buttons
+        previousButtons := buttons
         quickChordSince := 0
         quickChordFired := false
         settingsChordSince := 0
         settingsChordFired := false
-        settingsPrevLtDown := false
-        settingsPrevRtDown := false
+        settingsLtDown := false
+        settingsRtDown := false
         ResetControllerHoldState(
-            &prevViewDown, downTick, longFired, prevTrigDown, btnDefs,
+            &previousViewDown, downTick, longFired, triggerDown, buttonDefinitions,
             &viewWasDown)
         return
     }
@@ -7153,7 +7153,7 @@ PollController() {
         return
     }
 
-    ControllerButtonEdges(buttons, &prevButtons, &pressed, &released)
+    ControllerButtonEdges(buttons, &previousButtons, &pressed, &released)
 
     ; Full Settings reserves the analog triggers for category changes. Track
     ; their edges here—even while View/Back is held—so releasing Back cannot
@@ -7174,20 +7174,20 @@ PollController() {
         && !SettingsEditorDialogActive
         && !(buttons & 0x0020)
         && !(settingsLtDown && settingsRtDown)) {
-        if (settingsLtDown && !settingsPrevLtDown)
+        if (settingsLtDown && !settingsLtDown)
             settingsCategoryDirection := -1
-        else if (settingsRtDown && !settingsPrevRtDown)
+        else if (settingsRtDown && !settingsRtDown)
             settingsCategoryDirection := 1
     }
-    settingsPrevLtDown := settingsLtDown
-    settingsPrevRtDown := settingsRtDown
+    settingsLtDown := settingsLtDown
+    settingsRtDown := settingsRtDown
 
     ; A menu-selection button can still be physically down when the menu is
     ; destroyed. Establish one edge-free sample and clear every hold tracker so
     ; its later release cannot also fire the normal persistent mapping.
     if ControllerNeedsFreshBaseline {
         ResetControllerHoldState(
-            &prevViewDown, downTick, longFired, prevTrigDown, btnDefs,
+            &previousViewDown, downTick, longFired, triggerDown, buttonDefinitions,
             &viewWasDown)
         ControllerNeedsFreshBaseline := false
         return
@@ -7244,7 +7244,7 @@ PollController() {
                 MouseHidden := false
             }
             ResetControllerHoldState(
-                &prevViewDown, downTick, longFired, prevTrigDown, btnDefs,
+                &previousViewDown, downTick, longFired, triggerDown, buttonDefinitions,
                 &viewWasDown)
             if (SettingsEditorDialogActive || settingsPrimaryActive)
                 SettingsEditorHandleController(
@@ -7272,7 +7272,7 @@ PollController() {
             buttons, lt, rt, pressed, released, now,
             quickChordNow || settingsComboNow)
         ResetControllerHoldState(
-            &prevViewDown, downTick, longFired, prevTrigDown, btnDefs,
+            &previousViewDown, downTick, longFired, triggerDown, buttonDefinitions,
             &viewWasDown)
         return
     }
@@ -7293,7 +7293,7 @@ PollController() {
     ; View/Back mapping, stick movement, scrolling, or D-pad passthrough.
     if (!EnableControllerMouseMode) {
         ResetControllerHoldState(
-            &prevViewDown, downTick, longFired, prevTrigDown, btnDefs,
+            &previousViewDown, downTick, longFired, triggerDown, buttonDefinitions,
             &viewWasDown)
         return
     }
@@ -7322,7 +7322,7 @@ viewDown := viewPhysical || autoMouse
 if (!viewDown) {
     ; Reset press tracking so Short/Long doesn't misfire when View/Back is not held.
     ResetControllerHoldState(
-        &prevViewDown, downTick, longFired, prevTrigDown, btnDefs,
+        &previousViewDown, downTick, longFired, triggerDown, buttonDefinitions,
         &viewWasDown)
     return
 }
@@ -7332,8 +7332,8 @@ if (!viewDown) {
     ; Guide. It was the same routine in both products; the heads above it are
     ; not, and stay here.
     ControllerPollFrame(buttons, pressed, released, lt, rt, rx, ry, ly, now,
-        btnDefs, downTick, longFired, prevTrigDown,
-        &prevViewDown, &lastScroll)
+        buttonDefinitions, downTick, longFired, triggerDown,
+        &previousViewDown, &lastScroll)
     } finally {
     inPoll := false
     }
