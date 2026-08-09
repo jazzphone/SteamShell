@@ -1266,7 +1266,8 @@ function Assert-CurrentApplicationTargets {
     }
 }
 
-# Changing the Quick Menu's page must REBUILD it, not repaint it.
+# Changing the Quick Menu's page must REBUILD it, not repaint it -- and neither
+# tree is allowed to say so in its own words.
 #
 # The distinction is invisible in the source and total in use. QuickMenuRefresh
 # (the shell) and QuickMenuRender (the companion) redraw the rows already in
@@ -1275,66 +1276,67 @@ function Assert-CurrentApplicationTargets {
 # because it used to rebuild on every repaint and re-enumerated the desktop each
 # time the D-pad moved.
 #
-# So `QuickMenuPage := "SOMEWHERE"` followed by a refresh changes which page the
+# So `QuickMenuPage := "SOMEWHERE"` followed by a repaint changes which page the
 # menu THINKS it is on while leaving the previous page's rows on screen. The
 # symptom is "selecting the row does nothing", and the state is worse than that:
 # the next keypress is read against a page the user cannot see.
 #
-# This shipped. Four cases in the shell -- Game Detection, Current Application
-# and the two Back To System rows -- navigated with a refresh, and the companion
-# got the same four-line shape right, so nothing about the diff looked wrong.
-# The row-carried navigation both trees prefer (`row.Has("page")`) is immune,
-# which is the argument for it; these are the sites that cannot use it because
-# they guard first or return to a named page.
+# This shipped, in four shell cases -- Game Detection, Current Application, and
+# the two Back To System rows -- while the companion had the identical four-line
+# shape correct, so there was nothing in a diff to notice.
+#
+# THE CHECK IS THEREFORE NOT "did you follow the assignment with the right
+# call". That rule can be obeyed in eleven places and broken in the twelfth. The
+# rule is that the assignment happens in ONE place: QuickMenuGoToPage, in
+# SteamShell-Shared.ahk, which both products call. A tree that assigns
+# QuickMenuPage at all has re-created the shape this bug lived in, whatever it
+# does on the next line.
 function Assert-QuickMenuPageChangesRebuild {
     param(
         [Parameter(Mandatory = $true)][string]$ProjectRoot,
         [switch]$Quiet
     )
-    $checked = 0
+    $sharedPath = Join-Path $ProjectRoot "SteamShell-Shared.ahk"
+    $navigator = Get-AhkFunctionBody -Source (Get-SourceText $sharedPath) `
+        -Name "QuickMenuGoToPage"
+    Assert-True ($navigator -ne "" -and $navigator -match 'QuickMenuPage\s*:=' -and
+        $navigator -match 'QuickMenuBuildGui\(\)') (
+        "QuickMenuGoToPage in SteamShell-Shared.ahk no longer sets the page and " +
+        "rebuilds. It is the only navigator both products have; without it each " +
+        "tree is back to spelling the shape by hand, which is how four of them " +
+        "came to repaint instead.")
+    Assert-True ($navigator -notmatch 'QuickMenuRefresh\(\)|QuickMenuRender\(\)') (
+        "QuickMenuGoToPage repaints. A repaint redraws the rows the page was " +
+        "built with, so every page change in both products would leave the " +
+        "previous page on screen.")
+
+    $callers = 0
     foreach ($file in @("SteamShell.ahk", "SteamShell-XFE.ahk")) {
-        # Comments stripped: the paragraph above names both calls, and a comment
-        # that mentions the right one would otherwise satisfy the check.
+        # Comments stripped. The paragraph above spells the forbidden assignment
+        # in full, and a comment quoting it would otherwise fail the build.
         $lines = @((Get-SourceLines (Join-Path $ProjectRoot $file)) |
             ForEach-Object { $_ -replace '(?<!`);.*$', '' })
         for ($i = 0; $i -lt $lines.Count; $i++) {
-            # A literal page. `row["page"]` is the row-carried path, which is
-            # already correct and reads its destination from data.
-            if ($lines[$i] -notmatch '^\s*QuickMenuPage\s*:=\s*"') { continue }
-            if ($lines[$i] -match '^\s*global\s') { continue }
-            $checked++
-            # Six lines is the whole shape: the assignment, the selection reset,
-            # and the call. Anything longer is a different construct and should
-            # be read by a person.
-            #
-            # The empty-window guard is not defensive padding. A PowerShell range
-            # whose end is below its start counts DOWNWARD, so an assignment in
-            # the last six lines of a file would silently read the lines ABOVE
-            # it and check the wrong text.
-            $windowEnd = [Math]::Min($i + 6, $lines.Count - 1)
-            $window = ""
-            if ($windowEnd -gt $i) {
-                $window = ($lines[($i + 1)..$windowEnd] -join "`n")
-            }
-            $rebuild = [regex]::Match($window, 'QuickMenuBuildGui\(\)')
-            $repaint = [regex]::Match($window, 'QuickMenuRefresh\(\)|QuickMenuRender\(\)')
-            $page = [regex]::Match($lines[$i], '"([^"]+)"').Groups[1].Value
-            Assert-True ($rebuild.Success -and
-                (-not $repaint.Success -or $rebuild.Index -lt $repaint.Index)) (
-                "${file}:$($i + 1) moves the Quick Menu to '$page' and then " +
-                "repaints instead of calling QuickMenuBuildGui. Only " +
-                "QuickMenuBuildGui composes the rows, so the previous page's " +
-                "rows stay on screen and stay selectable -- the row looks dead, " +
-                "and the next keypress is read against a page nobody can see.")
+            # The one-time declaration is the variable coming into existence, not
+            # a navigation. Every other assignment is one.
+            if ($lines[$i] -match '^\s*global\s+QuickMenuPage\b') { continue }
+            $callers += ([regex]::Matches($lines[$i], 'QuickMenuGoToPage\(')).Count
+            Assert-True ($lines[$i] -notmatch '(?<!\w)QuickMenuPage\s*:=') (
+                "${file}:$($i + 1) assigns QuickMenuPage. Navigation belongs to " +
+                "QuickMenuGoToPage in SteamShell-Shared.ahk, which sets the page " +
+                "and rebuilds; a tree that sets it directly can pair it with a " +
+                "repaint, which leaves the previous page's rows on screen and " +
+                "selectable while the menu believes it has moved.")
         }
     }
-    Assert-True ($checked -ge 8) (
-        "Only $checked Quick Menu page changes were found across both trees, " +
-        "and there are at least eight. The scan is not seeing the assignments, " +
-        "which makes this check vacuous.")
+    Assert-True ($callers -ge 8) (
+        "Only $callers calls to QuickMenuGoToPage were found across both trees, " +
+        "and there are at least eight. Either the scan is not seeing them -- " +
+        "which makes the rule above vacuous -- or navigation has moved somewhere " +
+        "this check is not looking.")
     if (-not $Quiet) {
-        Write-Host ("Quick Menu navigation: $checked page changes across 2 " +
-            "products; every one of them rebuilds the rows.")
+        Write-Host ("Quick Menu navigation: one shared navigator, $callers calls " +
+            "across 2 products, and no page assignment in either tree.")
     }
 }
 

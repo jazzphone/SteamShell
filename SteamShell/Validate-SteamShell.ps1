@@ -772,7 +772,7 @@ Assert-True (
 Assert-True (
     $source -match
         '(?s)QuickMenuHandleController\([^)]*\).*?buttons\s*&\s*0x8000.*?' +
-        'QuickMenuPage\s*:=\s*"LAYOUT".*?QuickMenuBuildGui\(\)' -and
+        'QuickMenuGoToPage\("LAYOUT"\)' -and
     $source -match
         '(?s)if\s*\(QuickMenuPage\s*=\s*"LAYOUT"\).*?' +
         '"setControllerMappings".*?"Set Controller Mappings".*?return rows' -and

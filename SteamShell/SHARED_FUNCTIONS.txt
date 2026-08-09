@@ -258,6 +258,7 @@ QuickMenuGameScoreIds
 QuickMenuGameScoreLabel
 QuickMenuGameScoreValue
 QuickMenuGoBack
+QuickMenuGoToPage
 QuickMenuHideThenSend
 QuickMenuKeyboardActive
 QuickMenuLayoutLabel

@@ -5782,18 +5782,46 @@ GetPhysicalModsMap() {
     )
 }
 
-QuickMenuGoBack() {
+; THE ONLY PLACE EITHER PRODUCT CHANGES THE QUICK MENU'S PAGE.
+;
+; Three lines, and one of them is the whole feature: QuickMenuBuildGui composes
+; the rows from the product's row builder, and nothing else does. The repaint
+; routines -- QuickMenuRefresh in the shell, QuickMenuRender in the companion --
+; redraw the rows that are ALREADY in QuickMenuRows, which is what makes them
+; cheap and what makes them wrong here.
+;
+; Eleven sites spelled these three lines by hand, and four of them (all in the
+; shell: Game Detection, Current Application, and the two Back To System rows)
+; ended in a repaint. The page variable moved, the previous page's rows stayed on
+; screen, and the row read as dead -- while the next keypress was dispatched
+; against a page the user could not see. The companion had the same four lines
+; correct, so there was nothing in a diff to notice.
+;
+; The point of this function is not that it is shorter. It is that "set the page
+; and repaint" is now unspellable: there is no page assignment left outside this
+; file for anyone to get wrong, and Assert-QuickMenuPageChangesRebuild fails the
+; build if one comes back.
+;
+; ORDER TRAP, for anyone routing a new caller through this. BuildGui returns
+; immediately when QuickMenuVisible is false, in BOTH trees. A caller that is
+; opening the menu must set QuickMenuVisible before calling this, not after --
+; the companion's ShowQuickMenu set the page first and the flag second, which
+; was harmless only because its BuildGui call came after both.
+QuickMenuGoToPage(page) {
     global QuickMenuPage, QuickMenuSelected
+    QuickMenuPage := page
+    QuickMenuSelected := 1
+    QuickMenuBuildGui()
+}
+
+QuickMenuGoBack() {
+    global QuickMenuPage
     if (QuickMenuPage = "MAIN") {
         HideQuickMenu()
         return
     }
-    if (SubStr(QuickMenuPage, 1, 9) = "SETTINGS_" )
-        QuickMenuPage := "SETTINGS"
-    else
-        QuickMenuPage := "MAIN"
-    QuickMenuSelected := 1
-    QuickMenuBuildGui()
+    QuickMenuGoToPage(
+        SubStr(QuickMenuPage, 1, 9) = "SETTINGS_" ? "SETTINGS" : "MAIN")
 }
 
 QuickMenuSetRedraw(enabled) {

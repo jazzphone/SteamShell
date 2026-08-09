@@ -4277,10 +4277,11 @@ ShowQuickMenu(*) {
     ; Remember what had focus so it can be handed back on close.
     QuickMenuPreviousHwnd := (foreground && !IsOurWindow(foreground)) ? foreground : 0
     QuickMenuMonitorIndex := GetMonitorIndexForWindow(foreground)
-    QuickMenuPage := "MAIN"
-    QuickMenuSelected := 1
+    ; Visible FIRST. QuickMenuGoToPage builds, and QuickMenuBuildGui returns
+    ; immediately while this flag is false -- the old order set the page before
+    ; the flag and got away with it only because its own build came after both.
     QuickMenuVisible := true
-    QuickMenuBuildGui()
+    QuickMenuGoToPage("MAIN")
     ; Showing an always-on-top window makes it visible but does not necessarily
     ; give it the foreground. Without the foreground, the application behind
     ; keeps receiving controller input and keeps reacting to it.
@@ -4678,9 +4679,7 @@ QuickMenuActivateSelected() {
         return
     action := QuickMenuRows[QuickMenuSelected]["action"]
     if (SubStr(action, 1, 5) = "page:") {
-        QuickMenuPage := SubStr(action, 6)
-        QuickMenuSelected := 1
-        QuickMenuBuildGui()
+        QuickMenuGoToPage(SubStr(action, 6))
         return
     }
     if (SubStr(action, 1, 11) = "taskWindow:") {
@@ -4747,9 +4746,7 @@ QuickMenuActivateSelected() {
                 ShowNotification(QuickMenuCurrentAppBlockedReason(), "Warning")
                 return
             }
-            QuickMenuPage := "CURRENTAPP"
-            QuickMenuSelected := 1
-            QuickMenuBuildGui()
+            QuickMenuGoToPage("CURRENTAPP")
             return
     }
     ; Actions both products implement identically.
@@ -4934,9 +4931,7 @@ QuickMenuHandleController(pressed, lx, ly, buttons := 0) {
         if (!mainYLongFired
             && A_TickCount - mainYDownTick >= ControllerChordHoldMs) {
             mainYLongFired := true
-            QuickMenuPage := "LAYOUT"
-            QuickMenuSelected := 1
-            QuickMenuBuildGui()
+            QuickMenuGoToPage("LAYOUT")
         }
         return
     } else {
