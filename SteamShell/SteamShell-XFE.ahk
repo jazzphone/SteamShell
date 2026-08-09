@@ -5114,7 +5114,7 @@ ShowSettings(*) {
     ; because it belongs to AnyFSE's own configuration.
     SettingsAddNote(settings, category,
         "Integration: configure AnyFSE to launch Steam Big Picture as the Home "
-        . "app, and leave “Exit FSE when Home app exits�? off. Setup Assistant "
+        . "app, and leave “Exit FSE when Home app exits” off. Setup Assistant "
         . "already starts this companion at sign-in — do not also add it to "
         . "AnyFSE's startup applications.", &y, 60)
 
@@ -5268,7 +5268,18 @@ ShowSettings(*) {
     foreground := 0
     try foreground := WinExist("A")
     monitorIndex := GetMonitorIndexForWindow(foreground)
-    CenterGuiOnMonitorActual(settings, monitorIndex, 920, 660)
+    ; 980, not 920, because 980 is what the columns need: content runs to 945 and
+    ; the scrollbar to 972. MinSize980x600 was hiding the mismatch at 100% DPI --
+    ; Show cannot go below the minimum, so the window came out right and the
+    ; request being 52px short never showed.
+    ;
+    ; It stops hiding it the moment the display is scaled. Gui.Show scales the
+    ; REQUEST by DPI and MinSize is fixed pixels, so at 150% the ask is 1380
+    ; while the content needs 1458, and the right of every row plus the whole
+    ; scrollbar falls outside the window. Asking for the width the layout
+    ; actually uses makes the request and the content scale by the same thing,
+    ; which is the same rule PositionGuiCentered follows for the same reason.
+    CenterGuiOnMonitorActual(settings, monitorIndex, 980, 660)
     RecenterVisibleGuiOnMonitorActual(settings, monitorIndex)
     ; Same reason as the Quick Menu: without the foreground, the application
     ; behind keeps receiving controller input while Settings is on screen.

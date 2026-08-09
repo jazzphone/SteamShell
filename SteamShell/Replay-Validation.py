@@ -1930,6 +1930,26 @@ def check_source_encoding():
                  "valid UTF-8. The sources are UTF-8; a cp1252-only byte makes the "
                  "file unreadable to tools that assume UTF-8 and they fail by "
                  "finding nothing rather than by complaining.")
+            continue
+        # U+FFFD is the OTHER half of the same story, and the half that ships.
+        #
+        # The check above catches a byte that never decoded. This catches one
+        # that decoded LOSSILY and was then written back: the replacement
+        # character is what a lossy decode leaves behind, it is valid UTF-8, and
+        # so nothing downstream objects. Four of them reached a release --
+        # `exits<FFFD>? off` in the companion's Settings and two in the shell's
+        # own "Apply (runtime only)" tip -- all four the corpse of a right double
+        # quote, all four on screen in front of a user.
+        #
+        # No source here ever wants one on purpose, which is what makes this
+        # worth failing on rather than reporting.
+        for index, line_text in enumerate(raw.decode("utf-8").split("\n"), 1):
+            if "�" in line_text:
+                fail(f"{name}:{index} contains U+FFFD, the Unicode replacement "
+                     "character. It is what a lossy decode leaves behind, it is "
+                     "valid UTF-8 so nothing else objects, and it renders as a "
+                     "black diamond in whatever window shows the string. Restore "
+                     "the character it replaced: " + line_text.strip()[:80])
 
 
 def check_settings_row_placement(sources):

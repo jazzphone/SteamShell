@@ -2675,7 +2675,7 @@ AlwaysFocusCooldownMs=1000                                  ; Minimum time betwe
 GameCPUThresholdPercent=5.0                                 ; CPU % that adds a score bonus
 FullscreenTolerance=0.98                                    ; Window must be >= this % of screen size to count as fullscreen-ish
 FullscreenPosTolerancePx=2                                  ; Window position must be within this many px of 0,0 for fullscreen-ish
-AudioPeakThreshold=0.02                                     ; Advanced: audio peak (0.0–1.0) to treat as “active game audio�?
+AudioPeakThreshold=0.02                                     ; Advanced: audio peak (0.0–1.0) to treat as “active game audio”
 GameForegroundCooldownMs=1500                               ; Minimum time between forced game activations
 GameAllowZeroCpuAsCandidate=true                            ; If CPU samples 0, still allow candidate
 GameRequireSteamForeground=true                             ; Only run game assist when Steam is foreground (safe default)
@@ -14089,7 +14089,7 @@ ShowControlPanel(*) {
     ControlGui.AddText("x" x1 " ym", "Feature toggles (runtime)")
     ControlGui.SetFont("s9 Norm")
     ControlGui.AddText("x" x1 " y+2 w" colW " h42 +Wrap"
-    , "Tip: Use “Apply (runtime only)�? for temporary changes. Use “Save to INI�? to persist after reboot.")
+    , "Tip: Use “Apply (runtime only)” for temporary changes. Use “Save to INI” to persist after reboot.")
     ControlGui.SetFont("s10 Norm")
 
     ControlGui.AddCheckbox("x" x1 " y+10 vcbGame", "Game focusing (fullscreen game assist)")

@@ -1145,7 +1145,11 @@ Assert-True (
 # Settings visibly too low and its bottom outside the monitor work area. Correct
 # it from the actual visible outer rectangle after Gui.Show has sized it.
 Assert-True (
-    $source -match 'CenterGuiOnMonitorActual\(settings,\s*monitorIndex,\s*920,\s*660\)' -and
+    # 980 must match the MinSize and the columns above. It was 920, which only
+    # looked right because MinSize clamped it at 100% DPI; Gui.Show scales the
+    # request and MinSize does not, so a scaled display got a window narrower
+    # than its own content.
+    $source -match 'CenterGuiOnMonitorActual\(settings,\s*monitorIndex,\s*980,\s*660\)' -and
     $source -match 'RecenterVisibleGuiOnMonitorActual\(settings,\s*monitorIndex\)' -and
     $source -match '(?s)RecenterVisibleGuiOnMonitorActual\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?WinGetPos\(&visibleX,\s*&visibleY,\s*&visibleW,\s*&visibleH.*?CenteredPosition\(.*?MoveWindowPhysical\(') (
     "Settings must be recentered from its actual visible outer size.")
