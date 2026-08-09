@@ -3274,3 +3274,473 @@ FormatSettingsFloat(value, maxDecimals := 6) {
     text := RegExReplace(text, "\.$")
     return text = "-0" ? "0" : text
 }
+
+
+; ==============================================================================
+; RawInput controller identity and profile decoding
+; ==============================================================================
+; Moved here from SteamShell-Shared.ahk so the ELEVATED HELPER can compile it.
+;
+; The helper's only input source was XInputGetState, so a pad that answers only
+; RawInput -- which is the entire reason the RawInput backend and the learning
+; wizard exist -- lost the pointer the moment an elevated window came forward.
+; Everywhere else it worked. From the user's side that is one input mode being
+; second-class, not a design decision, so the decoder had to reach the one
+; process that could not see it.
+;
+; It qualifies for this file because every function below was ALREADY pure: no
+; globals, and nothing called outside itself except LogLine, which is the one
+; permitted seam. What was tree-coupled was not the decoding but the two pieces
+; of state around it -- where the profile file lives, and which buffer the
+; decoded report is written into -- so those became parameters and the two thin
+; wrappers that supply them stayed behind in SteamShell-Shared.ahk.
+; ==============================================================================
+
+; The XInput button bit for each name the learner knows.
+ControllerButtonBits() {
+    static bits := Map(
+        "Up", 0x0001, "Down", 0x0002, "Left", 0x0004, "Right", 0x0008,
+        "Menu", 0x0010, "View", 0x0020, "L3", 0x0040, "R3", 0x0080,
+        "LB", 0x0100, "RB", 0x0200, "Guide", 0x0400,
+        "A", 0x1000, "B", 0x2000, "X", 0x4000, "Y", 0x8000)
+    return bits
+}
+
+
+
+
+; The section name used when Windows will not identify a device at all.
+;
+; Keying a profile on report length is less precise than VID/PID, but it is
+; exactly as precise as the built-in layout it replaces -- that already matches on
+; nothing but `length = 16`. So this is not a new risk, it is the existing one
+; made writable, and it is what lets a controller whose metadata Windows withholds
+; still be taught.
+ControllerProfileLengthKey(length) {
+    return "LEN_" length
+}
+
+
+
+
+; Reads one axis field out of a report.
+ControllerProfileAxisRaw(data, base, axis) {
+    offset := base + axis["offset"]
+    if (axis["size"] = "u8")
+        return NumGet(data, offset, "UChar")
+    if (axis["size"] = "u16be") {
+        high := NumGet(data, offset, "UChar")
+        return (high << 8) | NumGet(data, offset + 1, "UChar")
+    }
+    return NumGet(data, offset, "UShort")
+}
+
+
+
+
+; Full scale of an axis field, used to normalise to XInput's ranges.
+ControllerProfileAxisSpan(axis) {
+    return axis["size"] = "u8" ? 255 : 65535
+}
+
+
+
+
+RawInputAxis(raw) {
+    value := raw - 0x8000
+    if (value < -32767)
+        return -32767
+    return value > 32767 ? 32767 : value
+}
+
+
+
+
+; A stable identity for a RawInput device.
+;
+; hDevice handles change across sleep and re-plugging, so they cannot key a saved
+; profile. The device interface path does contain a stable identity -- the USB
+; vendor and product IDs, plus the interface and collection when a device exposes
+; several -- so that is what is extracted. If the driver withholds both the path
+; and numeric IDs, the HID preparsed descriptor is hashed as a final stable
+; layout identity.
+RawInputDeviceKey(hDevice, refresh := false) {
+    static RIDI_DEVICENAME := 0x20000007
+    static RIDI_DEVICEINFO := 0x2000000B
+    static RIDI_PREPARSEDDATA := 0x20000005
+    static cache := Map()
+    ; Identity lookups that failed recently, and when they may be retried.
+    ;
+    ; Failure must not be cached permanently -- a metadata query can fail while
+    ; the HID stack is still settling, and Save needs a later attempt to be able
+    ; to succeed. But it must not be retried on every report either: this runs
+    ; from the WM_INPUT handler at over 100 Hz, and the fallback chain below costs
+    ; five syscalls plus a byte-at-a-time hash of the entire HID descriptor. For a
+    ; device that can never be identified, that is pure waste on the input hot
+    ; path of a handheld. So failure backs off for a couple of seconds instead.
+    static failedUntil := Map()
+    static IDENTITY_RETRY_MS := 2000
+    ; Map.Delete THROWS when the key is absent. The cache line below got that
+    ; right and this one did not, one line apart.
+    ;
+    ; It surfaced from the rest check: a profile that reads as pegged offers to
+    ; delete itself, DeleteControllerProfileForActiveDevice asks for the device
+    ; key with refresh := true, and this threw "Item has no value" out of a timer
+    ; -- so answering Yes to "delete the bad profile?" crashed instead of
+    ; deleting it, leaving the user with the runaway pointer they had just asked
+    ; to be rid of.
+    if (refresh && cache.Has(hDevice))
+        cache.Delete(hDevice)
+    if (refresh && failedUntil.Has(hDevice))
+        failedUntil.Delete(hDevice)
+    if cache.Has(hDevice)
+        return cache[hDevice]
+    if (failedUntil.Has(hDevice) && A_TickCount < failedUntil[hDevice])
+        return ""
+    ; Captured for the diagnostic at the end of this function.
+    infoVid := 0
+    infoPid := 0
+    infoResult := "not tried"
+    descriptorBytes := 0
+    descriptorResult := "not tried"
+    name := ""
+    size := 0
+    nameError := ""
+    ; NOT named "buffer", and the catch is not optional.
+    ;
+    ; AutoHotkey identifiers are case-insensitive, so a local called buffer IS
+    ; the Buffer class: the constructor on the right resolved to the unassigned
+    ; local and threw before it ever ran. Inside the bare try that used to be
+    ; here that throw was swallowed, so RIDI_DEVICENAME appeared to fail on every
+    ; device on every machine -- which silently removed the &MI_/&Col suffixes
+    ; below, collapsing every collection of a composite gamepad onto one profile
+    ; key, and made the DEV_ checksum fallback unreachable. The failure is
+    ; carried to the once-per-device diagnostic at the end of this function
+    ; rather than logged here, because this runs from WM_INPUT above 100 Hz.
+    ;
+    ; ElevatedRtssFinalPath in SteamShell-Helper.ahk carries the same note.
+    try {
+        DllCall("GetRawInputDeviceInfoW", "Ptr", hDevice, "UInt", RIDI_DEVICENAME,
+            "Ptr", 0, "UInt*", &size)
+        if size {
+            nameBuffer := Buffer(size * 2 + 2, 0)
+            if (DllCall("GetRawInputDeviceInfoW", "Ptr", hDevice, "UInt", RIDI_DEVICENAME,
+                "Ptr", nameBuffer, "UInt*", &size, "UInt") != 0xFFFFFFFF)
+                name := StrGet(nameBuffer, "UTF-16")
+        }
+    } catch as err {
+        nameError := err.Message
+    }
+    key := ""
+    if RegExMatch(name, "i)VID_([0-9A-F]{4})&PID_([0-9A-F]{4})", &match) {
+        key := "VID_" StrUpper(match[1]) "_PID_" StrUpper(match[2])
+        ; A composite device exposes several collections; the gamepad is only one
+        ; of them, so the interface and collection numbers are part of the identity.
+        if RegExMatch(name, "i)&MI_([0-9A-F]{2})", &mi)
+            key .= "_MI_" StrUpper(mi[1])
+        if RegExMatch(name, "i)&Col([0-9]{2})", &col)
+            key .= "_Col" col[1]
+    } else if (name != "") {
+        ; No VID/PID in the path. Fall back to a checksum of it, which is still
+        ; stable for this device on this machine.
+        sum := 0
+        Loop Parse name
+            sum := Mod(sum * 31 + Ord(A_LoopField), 0xFFFFFFF)
+        key := "DEV_" Format("{:07X}", sum)
+    }
+    if (key = "") {
+        ; Some HID stacks deliver reports but do not return an interface path
+        ; for RIDI_DEVICENAME. RIDI_DEVICEINFO carries the numeric HID VID/PID
+        ; independently, so use it before declaring the device unidentifiable.
+        try {
+            info := Buffer(32, 0)
+            NumPut("UInt", 32, info, 0)
+            infoSize := 32
+            infoResult := DllCall("GetRawInputDeviceInfoW", "Ptr", hDevice, "UInt",
+                RIDI_DEVICEINFO, "Ptr", info, "UInt*", &infoSize, "UInt")
+            infoVid := NumGet(info, 8, "UInt") & 0xFFFF
+            infoPid := NumGet(info, 12, "UInt") & 0xFFFF
+            if (infoResult != 0xFFFFFFFF) {
+                vid := NumGet(info, 8, "UInt")
+                pid := NumGet(info, 12, "UInt")
+                if (vid || pid)
+                    key := "VID_" Format("{:04X}", vid & 0xFFFF)
+                        . "_PID_" Format("{:04X}", pid & 0xFFFF)
+            }
+        }
+    }
+    if (key = "") {
+        ; RawInput cannot deliver HID reports without preparsed descriptor data.
+        ; Some virtualised/filtered Ally drivers expose that data while
+        ; returning neither a device path nor usable RID_DEVICE_INFO IDs. Hash
+        ; the descriptor so the learned layout still survives handle changes.
+        try {
+            descriptorSize := 0
+            result := DllCall("GetRawInputDeviceInfoW", "Ptr", hDevice, "UInt",
+                RIDI_PREPARSEDDATA, "Ptr", 0, "UInt*", &descriptorSize, "UInt")
+            descriptorResult := result
+            descriptorBytes := descriptorSize
+            if (result != 0xFFFFFFFF && descriptorSize > 0) {
+                descriptor := Buffer(descriptorSize, 0)
+                result := DllCall("GetRawInputDeviceInfoW", "Ptr", hDevice,
+                    "UInt", RIDI_PREPARSEDDATA, "Ptr", descriptor,
+                    "UInt*", &descriptorSize, "UInt")
+                if (result != 0xFFFFFFFF && descriptorSize > 0) {
+                    hash := 2166136261
+                    Loop descriptorSize
+                        hash := Mod((hash ^ NumGet(descriptor,
+                            A_Index - 1, "UChar")) * 16777619, 0x100000000)
+                    key := "HID_DESC_" Format("{:08X}", hash)
+                        . "_" descriptorSize
+                }
+            }
+        }
+    }
+    ; Record what each route actually returned the first time a device cannot be
+    ; identified. "No identity available" is unactionable on its own, and this
+    ; failed on real hardware -- the Ally's own controller -- so the three return
+    ; values are the diagnosis.
+    static reported := Map()
+    if (key = "" && !reported.Has(hDevice)) {
+        reported[hDevice] := true
+        LogLine("RawInput identity: device 0x" Format("{:X}", hDevice)
+            . " unidentifiable. RIDI_DEVICENAME chars=" size
+            . " path='" (name != "" ? name : "(none)") "'"
+            ; Without this, a throw inside the path lookup was indistinguishable
+            ; from the HID stack returning a size and no path, and pointed the
+            ; diagnosis at the driver instead of at this function.
+            . (nameError != "" ? " pathError='" nameError "'" : "")
+            . ", RIDI_DEVICEINFO vid=0x" Format("{:04X}", infoVid)
+            . " pid=0x" Format("{:04X}", infoPid) " rc=" infoResult
+            . ", RIDI_PREPARSEDDATA bytes=" descriptorBytes
+            . " rc=" descriptorResult ".", "Warning")
+    }
+    ; Success caches permanently; failure only backs off. See failedUntil above.
+    if (key != "") {
+        cache[hDevice] := key
+        ; Guarded for the same reason: a device that identifies on its first
+        ; attempt was never in failedUntil, and deleting a key that is not there
+        ; throws.
+        if failedUntil.Has(hDevice)
+            failedUntil.Delete(hDevice)
+    } else {
+        failedUntil[hDevice] := A_TickCount + IDENTITY_RETRY_MS
+    }
+    return key
+}
+
+
+LoadControllerProfileFrom(path, key, refresh := false) {
+    static cache := Map()
+    if (key = "")
+        return 0
+    ; Saving a VID/PID-only fallback must invalidate any previously cached miss
+    ; for the same device's more-specific MI/collection key.
+    if refresh
+        cache := Map()
+    if cache.Has(key)
+        return cache[key]
+    if !FileExist(path) {
+        cache[key] := 0
+        return 0
+    }
+    section := key
+    length := 0
+    try length := Integer(IniRead(path, section, "ReportLength", "0"))
+    ; A device path may be available on one boot and unavailable on another.
+    ; Profiles saved from numeric RIDI_DEVICEINFO therefore use VID/PID only;
+    ; allow a later, more-specific MI/collection key to find that base profile.
+    if (length <= 0
+        && RegExMatch(key, "i)^(VID_[0-9A-F]{4}_PID_[0-9A-F]{4})", &base)
+        && base[1] != key) {
+        section := base[1]
+        try length := Integer(IniRead(path, section, "ReportLength", "0"))
+    }
+    if (length <= 0) {
+        cache[key] := 0
+        return 0
+    }
+    profile := Map("length", length, "buttons", [], "hat", 0, "axes", Map(),
+        "name", "", "key", section)
+    try profile["name"] := IniRead(path, section, "Name", "")
+
+    buttonText := ""
+    try buttonText := IniRead(path, section, "Buttons", "")
+    bits := ControllerButtonBits()
+    for _, entry in StrSplit(buttonText, "|") {
+        parts := StrSplit(Trim(entry), ":")
+        if (parts.Length < 3 || !bits.Has(parts[1]))
+            continue
+        try {
+            offset := Integer(parts[2])
+            mask := Integer(parts[3])
+            pressed := parts.Length >= 4 ? Integer(parts[4]) : mask
+            if (offset < 0 || offset >= length || mask < 1 || mask > 255)
+                continue
+            profile["buttons"].Push(Map(
+                "bit", bits[parts[1]],
+                "offset", offset,
+                "mask", mask,
+                "pressed", pressed & mask))
+        }
+    }
+
+    hatText := ""
+    try hatText := IniRead(path, section, "Hat", "")
+    parts := StrSplit(Trim(hatText), ":")
+    ; Current: offset : mask : released : N : NE : E : SE : S : SW : W : NW
+    ; Early profiles omitted mask; 0xFF preserves their whole-byte behaviour.
+    if (parts.Length >= 10) {
+        try {
+            offset := Integer(parts[1])
+            hasMask := parts.Length >= 11
+            mask := hasMask ? Integer(parts[2]) : 0xFF
+            releasedIndex := hasMask ? 3 : 2
+            firstDirectionIndex := hasMask ? 4 : 3
+            released := Integer(parts[releasedIndex])
+            if (offset < 0 || offset >= length || mask < 1 || mask > 255
+                || released < 0 || released > 255)
+                throw Error("Invalid hat")
+            directions := Map()
+            ; Same clockwise-from-north order the built-in layout uses.
+            order := [0x0001, 0x0001 | 0x0008, 0x0008, 0x0002 | 0x0008,
+                0x0002, 0x0002 | 0x0004, 0x0004, 0x0001 | 0x0004]
+            Loop 8 {
+                value := Integer(parts[firstDirectionIndex + A_Index - 1])
+                if (value < 0 || value > 255)
+                    throw Error("Invalid hat")
+                directions[value] := order[A_Index]
+            }
+            profile["hat"] := Map("offset", offset,
+                "mask", mask, "released", released, "directions", directions)
+        }
+    }
+
+    axisText := ""
+    try axisText := IniRead(path, section, "Axes", "")
+    validAxisNames := Map("LX", true, "LY", true, "RX", true, "RY", true,
+        "LT", true, "RT", true)
+    validAxisSizes := Map("u8", true, "u16le", true, "u16be", true)
+    for _, entry in StrSplit(axisText, "|") {
+        parts := StrSplit(Trim(entry), ":")
+        if (parts.Length < 5)
+            continue
+        try {
+            name := parts[1]
+            offset := Integer(parts[2])
+            size := parts[3]
+            neutral := Integer(parts[4])
+            direction := Integer(parts[5])
+            extent := parts.Length >= 6 ? Integer(parts[6]) : 0
+            width := size = "u8" ? 1 : 2
+            fullScale := size = "u8" ? 255 : 65535
+            if (!validAxisNames.Has(name) || !validAxisSizes.Has(size)
+                || offset < 0 || offset + width > length
+                || neutral < 0 || neutral > fullScale
+                || (direction != -1 && direction != 1)
+                || extent < 0 || extent > fullScale)
+                continue
+            profile["axes"][name] := Map(
+                "offset", offset,
+                "size", size,
+                "neutral", neutral,
+                "direction", direction,
+                "extent", extent)
+        }
+    }
+    if (profile["buttons"].Length = 0 && !IsObject(profile["hat"])
+        && profile["axes"].Count = 0) {
+        cache[key] := 0
+        return 0
+    }
+    cache[key] := profile
+    return profile
+}
+
+
+
+
+RawInputProfileDecodeInto(profile, data, base, length, stateBuffer) {
+    if (length != profile["length"])
+        return false
+
+    buttons := 0
+    for _, button in profile["buttons"] {
+        value := NumGet(data, base + button["offset"], "UChar")
+        if ((value & button["mask"]) = button["pressed"])
+            buttons |= button["bit"]
+    }
+    hat := profile["hat"]
+    if IsObject(hat) {
+        value := NumGet(data, base + hat["offset"], "UChar") & hat["mask"]
+        if (value != hat["released"] && hat["directions"].Has(value))
+            buttons |= hat["directions"][value]
+    }
+
+    lt := 0
+    rt := 0
+    axes := profile["axes"]
+    ; A shared trigger axis is not a special case here: LT and RT simply resolve
+    ; to the same offset with opposite directions, which is how the learner
+    ; records what it observed.
+    for _, name in ["LT", "RT"] {
+        if !axes.Has(name)
+            continue
+        axis := axes[name]
+        raw := ControllerProfileAxisRaw(data, base, axis)
+        delta := (raw - axis["neutral"]) * axis["direction"]
+        if (delta <= 0)
+            continue
+        ; The travel is only ever one side of neutral, and which side depends on
+        ; the direction, so the divisor has to follow it. Using the full span
+        ; would halve a trigger that rests at mid-scale -- which a shared trigger
+        ; axis does.
+        span := axis["extent"]
+        if (span <= 0) {
+            span := (axis["direction"] > 0)
+                ? ControllerProfileAxisSpan(axis) - axis["neutral"]
+                : axis["neutral"]
+        }
+        value := Min(255, Round(delta * 255 / Max(1, span)))
+        if (name = "LT")
+            lt := value
+        else
+            rt := value
+    }
+
+    thumbs := Map("LX", 8, "LY", 10, "RX", 12, "RY", 14)
+    NumPut("UInt", 0, stateBuffer, 0)
+    NumPut("UShort", buttons, stateBuffer, 4)
+    NumPut("UChar", lt, stateBuffer, 6)
+    NumPut("UChar", rt, stateBuffer, 7)
+    for name, stateOffset in thumbs {
+        value := 0
+        if axes.Has(name) {
+            axis := axes[name]
+            raw := ControllerProfileAxisRaw(data, base, axis)
+            offsetFromRest := raw - axis["neutral"]
+            ; Each side of neutral is scaled by its own travel, so an axis whose
+            ; rest point is not exactly mid-scale still reaches full deflection
+            ; both ways instead of clipping one side and falling short on the
+            ; other.
+            span := axis["extent"]
+            if (span <= 0) {
+                span := (offsetFromRest >= 0)
+                    ? ControllerProfileAxisSpan(axis) - axis["neutral"]
+                    : axis["neutral"]
+            }
+            scaled := Round(offsetFromRest * 32767 / Max(1, span))
+            value := ClampFloat(scaled * axis["direction"], -32767, 32767)
+        }
+        NumPut("Short", value, stateBuffer, stateOffset)
+    }
+    return true
+}
+
+
+; Where a product's learned controller profiles live, derived from its settings
+; file. One spelling, because the helper derives the same path from the settings
+; path it was handed and a second copy of this rule would be a second answer.
+ControllerProfilePathFor(iniPath) {
+    return RegExReplace(iniPath, "\.ini$", "") "-Controllers.ini"
+}

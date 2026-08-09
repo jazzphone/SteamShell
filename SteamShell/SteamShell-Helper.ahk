@@ -54,6 +54,12 @@ global LogPath := ""
 global LogMaxBytes := 256 * 1024
 global LogBackups := 2
 global ControllerIndex := 0
+; RawInput, so every input backend behaves the same over an elevated window.
+; See HelperRawInputStart.
+global HelperRawInputActive := false
+global HelperRawInputState := Buffer(16, 0)
+global HelperRawInputTick := 0
+global HelperProfilePath := ""
 global PollIntervalMs := 15
 global Deadzone := 3000
 global MouseSpeed := 3200 ; Cursor pixels per SECOND at full deflection
@@ -895,22 +901,180 @@ LoadConfiguration() {
     return true
 }
 
-; XINPUT IS THE ONLY INPUT THIS PROCESS HAS.
+; ==============================================================================
+; RawInput, so an elevated window is not a second-class input mode
+; ==============================================================================
+; XInput used to be the only input this process had. Main reads the pad through
+; whichever backend is configured -- RawInput, GameInput or XInput -- and a
+; learned controller profile decodes reports for pads XInput does not expose at
+; all. None of that reached here, so over an elevated window a pad that does not
+; answer XInput produced no pointer, and the symptom was that the mouse stopped
+; working the moment Task Manager came forward.
 ;
-; Main reads the pad through whichever backend is configured -- RawInput,
-; GameInput or XInput -- and a learned controller profile decodes RawInput
-; reports for pads XInput does not expose at all. None of that exists here: the
-; helper decodes nothing, loads no profile, and registers no RawInput window. So
-; over an elevated window, a pad that does not answer XInput produces no
-; pointer, and the only symptom is that the mouse stops working when Task
-; Manager comes forward.
+; That was never decided for this product. The banner at the top of this file
+; argues elevated input can be XInput-only because "the remedy here is XInput",
+; and that was reasoning about the XFE companion, where elevated input was
+; dropped entirely. It became the standalone helper's behaviour by inheritance,
+; and from a user's side it read as one input mode being second-class rather
+; than as a limitation anyone had chosen.
 ;
-; That is a real limitation and not a decision made for this product. The banner
-; at the top of this file argues elevated input can be XInput-only because "the
-; remedy here is XInput" -- which was reasoning about the XFE companion, where
-; elevated input was dropped entirely. It became the standalone helper's
-; behaviour by inheritance rather than by choice.
+; The decoder now lives in SteamShell-Common.ahk, which all three programs
+; compile, so this process resolves the same device identity, reads the same
+; profile file and runs the same decode as main -- not a second implementation
+; of any of it. What is local is only the plumbing: a registration, a WM_INPUT
+; handler and a staleness rule.
 ;
+; RIDEV_INPUTSINK, because the whole point is to read the pad while something
+; else owns the foreground. That is exactly the case this process exists for.
+
+; Registers for background gamepad and joystick reports.
+;
+; Failure is not fatal and is deliberately not treated as such: XInput remains
+; the fallback below, and a pad that answers XInput keeps working exactly as it
+; did before this existed.
+HelperRawInputStart() {
+    global HelperRawInputActive, HelperProfilePath, SettingsPath
+    static RIDEV_INPUTSINK := 0x00000100
+    static USAGE_PAGE_GENERIC := 0x01
+    static USAGE_GAMEPAD := 0x05
+    static USAGE_JOYSTICK := 0x04
+    if HelperRawInputActive
+        return true
+    HelperProfilePath := SettingsPath != ""
+        ? ControllerProfilePathFor(SettingsPath) : ""
+    hwnd := A_ScriptHwnd
+    if !hwnd {
+        LogLine("Elevated input: no script window; RawInput not registered.",
+            "Warning")
+        return false
+    }
+    ; Two RAWINPUTDEVICE entries, 16 bytes each on x64 -- gamepad and joystick,
+    ; because controllers vary in which usage they report. Same pair main
+    ; registers, for the same reason.
+    devices := Buffer(32, 0)
+    NumPut("UShort", USAGE_PAGE_GENERIC, devices, 0)
+    NumPut("UShort", USAGE_GAMEPAD, devices, 2)
+    NumPut("UInt", RIDEV_INPUTSINK, devices, 4)
+    NumPut("Ptr", hwnd, devices, 8)
+    NumPut("UShort", USAGE_PAGE_GENERIC, devices, 16)
+    NumPut("UShort", USAGE_JOYSTICK, devices, 18)
+    NumPut("UInt", RIDEV_INPUTSINK, devices, 20)
+    NumPut("Ptr", hwnd, devices, 24)
+    ok := false
+    try ok := DllCall("RegisterRawInputDevices", "Ptr", devices, "UInt", 2,
+        "UInt", 16, "Int") != 0
+    if !ok {
+        LogLine("Elevated input: RegisterRawInputDevices failed (err "
+            . A_LastError "); XInput only over elevated windows.", "Warning")
+        return false
+    }
+    OnMessage(0x00FF, HelperRawInputMessage)
+    HelperRawInputActive := true
+    LogLine("Elevated input: RawInput registered; profiles from "
+        . (HelperProfilePath != "" ? HelperProfilePath : "(no settings path)")
+        . ".")
+    return true
+}
+
+
+; One WM_INPUT report: identify the device, decode it with that device's learned
+; profile, and stamp it.
+;
+; A device with no profile is skipped in silence and costs one cached lookup.
+; That is the common case on a machine with a pad the built-in layout already
+; handles -- XInput answers for it, and this path has nothing to add.
+HelperRawInputMessage(wParam, lParam, msg, hwnd) {
+    global HelperRawInputState, HelperRawInputTick, HelperProfilePath
+    static RID_INPUT := 0x10000003
+    static HEADER_SIZE := 24
+    static RIM_TYPEHID := 2
+    static profiles := Map()
+    if (HelperProfilePath = "")
+        return 0
+    try {
+        size := 0
+        if (DllCall("GetRawInputData", "Ptr", lParam, "UInt", RID_INPUT,
+            "Ptr", 0, "UInt*", &size, "UInt", HEADER_SIZE) = 0xFFFFFFFF || !size)
+            return 0
+        data := Buffer(size, 0)
+        if (DllCall("GetRawInputData", "Ptr", lParam, "UInt", RID_INPUT,
+            "Ptr", data, "UInt*", &size, "UInt", HEADER_SIZE) = 0xFFFFFFFF)
+            return 0
+        if (NumGet(data, 0, "UInt") != RIM_TYPEHID)
+            return 0
+        device := NumGet(data, 8, "Ptr")
+        sizeHid := NumGet(data, HEADER_SIZE, "UInt")
+        count := NumGet(data, HEADER_SIZE + 4, "UInt")
+        if (!sizeHid || !count)
+            return 0
+        if !profiles.Has(device) {
+            ; Identity first, report length second -- the same order and the
+            ; same two keys main uses. A device whose interface path and numeric
+            ; IDs are both withheld saves its profile under a length key, and
+            ; skipping that fallback here would mean a pad that works in main
+            ; and not over an elevated window: the exact shape of the bug this
+            ; whole change exists to remove.
+            key := RawInputDeviceKey(device)
+            profile := key != ""
+                ? LoadControllerProfileFrom(HelperProfilePath, key) : 0
+            if !IsObject(profile) {
+                profile := LoadControllerProfileFrom(
+                    HelperProfilePath, ControllerProfileLengthKey(sizeHid))
+            }
+            profiles[device] := profile
+            if IsObject(profile) {
+                LogLine("Elevated input: using learned profile '"
+                    . profile["key"] "' for device 0x" Format("{:X}", device)
+                    . " (" sizeHid "-byte reports).")
+            }
+        }
+        profile := profiles[device]
+        if !IsObject(profile)
+            return 0
+        ; EVERY report in the packet, not just the first.
+        ;
+        ; RAWINPUT carries `count` reports of `sizeHid` bytes and Windows
+        ; coalesces them under load. On a change-only pad -- which is most of the
+        ; pads that need a learned profile at all -- a coalesced press is not a
+        ; late press, it is a press that never arrives. Main's handler carries
+        ; the same loop and the same note; this is that rule, not a second
+        ; opinion about it.
+        ;
+        ; Bounded by the buffer rather than by the header, because `count` and
+        ; `sizeHid` are read out of the packet and are then used to index
+        ; straight into memory. In a High-integrity process that guard is not
+        ; optional.
+        available := (size - (HEADER_SIZE + 8)) // sizeHid
+        Loop Min(count, Max(0, available)) {
+            reportBase := HEADER_SIZE + 8 + (A_Index - 1) * sizeHid
+            if RawInputProfileDecodeInto(
+                profile, data, reportBase, sizeHid, HelperRawInputState)
+                HelperRawInputTick := A_TickCount
+        }
+    }
+    return 0
+}
+
+
+; The decoded RawInput state, if one arrived recently enough to trust.
+;
+; RawInput is event-driven, so a pad that is not being touched stops reporting.
+; A stale buffer would hold the last stick position forever, which over an
+; elevated window means a cursor that keeps moving after the thumb comes off.
+; 250 ms is far longer than the report interval of any pad this reads and far
+; shorter than a person notices.
+HelperRawInputRead(&state) {
+    global HelperRawInputState, HelperRawInputTick, HelperRawInputActive
+    static STALE_MS := 250
+    if (!HelperRawInputActive || !HelperRawInputTick)
+        return false
+    if (A_TickCount - HelperRawInputTick > STALE_MS)
+        return false
+    state := HelperRawInputState
+    return true
+}
+
+
 ; Sweeping the slots rather than asking only the configured one.
 ;
 ; Main resolves the live slot into ActiveControllerIndex and has done since a pad
@@ -1293,7 +1457,7 @@ ExecuteBinding(key) {
 PollController() {
     global ParentPid, MainPath, EnableControllerMouse, EnableQuickMenu
     global Deadzone, MouseSpeed, FastMultiplier, ScrollIntervalMs, ScrollStep
-    global ChordHoldMs, PollIntervalMs, HelperInputEnabled
+    global ChordHoldMs, PollIntervalMs, HelperInputEnabled, HelperRawInputActive
     static state := Buffer(16, 0)
     static previousButtons := 0
     static lastScrollTick := 0
@@ -1356,24 +1520,33 @@ PollController() {
             downTick, longFired, previousTriggers, buttonDefinitions)
         return
     }
-    if !GetXInputState(&state) {
+    ; RawInput first, XInput second, and never both.
+    ;
+    ; RawInput is preferred because it is the backend that has something to say
+    ; that XInput does not: it is only ever answering here when the pad matched a
+    ; learned profile, and a learned profile exists precisely because the
+    ; built-in decode was not enough for that device. A pad that answers both
+    ; reads identically either way -- the decode produces the same XInput-shaped
+    ; state -- so preferring it costs nothing and removes the case where the two
+    ; disagree.
+    ;
+    ; XInput remains the fallback rather than being replaced. Most pads answer
+    ; it, it needs no registration, and it keeps working if RawInput
+    ; registration failed.
+    if !HelperRawInputRead(&state) && !GetXInputState(&state) {
         ; Say why, once a minute, while it actually matters.
         ;
         ; This branch is the whole of "the controller stopped working when Task
         ; Manager came forward", and it was silent -- so the fault presented as
         ; the pointer freezing over one window, with nothing in either log to
-        ; distinguish "no pad" from "a pad this process cannot read". It is
-        ; reported only when an elevated window is in front and mouse mode is
-        ; wanted, because at any other moment there is nothing wrong with having
-        ; no XInput reading.
+        ; distinguish "no pad" from "a pad this process cannot read".
         static lastNoPadTick := 0
         if (!lastNoPadTick || A_TickCount - lastNoPadTick >= 60000) {
             lastNoPadTick := A_TickCount
-            LogLine("Elevated input: no XInput controller answered on any slot "
-                . "while '" foregroundExe "' was in front. This process reads "
-                . "XInput only -- a pad that needs RawInput or a learned "
-                . "profile cannot drive the pointer over an elevated window.",
-                "Warning")
+            LogLine("Elevated input: no controller answered while '"
+                . foregroundExe "' was in front (RawInput "
+                . (HelperRawInputActive ? "registered" : "not registered")
+                . ", no XInput slot responding).", "Warning")
         }
         previousButtons := 0
         ResetControllerEdgeState(
@@ -1588,6 +1761,10 @@ if (HelperGeometryEnabled && !OpenParentGeometryEvent())
 ; Opened here so the failure is reported once at startup rather than being
 ; inferred from automatic mouse mode never engaging. PollController retries, so
 ; this is a diagnostic and not the only chance to open it.
+; Registered before the poll starts, and only for the product that has elevated
+; input at all. A failure is logged and not fatal: XInput is still the fallback.
+if HelperInputEnabled
+    HelperRawInputStart()
 if (HelperInputEnabled && !OpenParentAutoMouseEvent())
     LogLine(
         "The parent automatic-mouse event could not be opened; only a physically"

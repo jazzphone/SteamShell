@@ -1340,6 +1340,84 @@ function Assert-QuickMenuPageChangesRebuild {
     }
 }
 
+# Every input backend must reach the elevated helper, not just XInput.
+#
+# The helper drives the pointer while a High-integrity window owns the
+# foreground. Its only input source was XInputGetState, so a pad that answers
+# only RawInput -- which is what the RawInput backend and the whole learning
+# wizard exist for -- lost the pointer the instant Task Manager came forward,
+# while working everywhere else. From a user's side that is one input mode being
+# second-class; it was never a decision anyone made for this product, only the
+# XFE reasoning ("the remedy here is XInput") inherited by a product it was not
+# written about.
+#
+# The decode therefore lives in SteamShell-Common.ahk, which all three programs
+# compile. That placement is the rule worth holding: moved back into
+# SteamShell-Shared.ahk it would compile into the two trees and silently vanish
+# from the helper again, and nothing about that reads as a regression.
+#
+# Four things, and the last two are the ones a reimplementation gets wrong --
+# main's handler carries both rules with their reasons, and a helper that
+# disagreed with either would be a second opinion rather than the same decoder.
+function Assert-ElevatedHelperReadsEveryBackend {
+    param(
+        [Parameter(Mandatory = $true)][string]$ProjectRoot,
+        [switch]$Quiet
+    )
+    $commonText = Get-SourceText (Join-Path $ProjectRoot "SteamShell-Common.ahk")
+    $helperText = Get-SourceText (Join-Path $ProjectRoot "SteamShell-Helper.ahk")
+    foreach ($name in @("RawInputProfileDecodeInto", "LoadControllerProfileFrom",
+                        "RawInputDeviceKey", "ControllerProfilePathFor",
+                        "ControllerProfileLengthKey")) {
+        Assert-True ($commonText -match ('(?m)^' + $name + '\(')) (
+            "$name is not in SteamShell-Common.ahk. The elevated helper only " +
+            "compiles Common, so moving it out takes RawInput away from the " +
+            "one process that needs it to read a learned pad over an elevated " +
+            "window -- and nothing about that change looks like a regression.")
+    }
+    Assert-True ($helperText -match 'RegisterRawInputDevices') (
+        "The elevated helper no longer registers for RawInput, so a pad that " +
+        "XInput does not expose has no pointer over an elevated window.")
+    Assert-True ($helperText -match 'RIDEV_INPUTSINK') (
+        "The elevated helper's RawInput registration is not INPUTSINK. It " +
+        "reads the pad precisely when another window owns the foreground, " +
+        "which is the only thing INPUTSINK provides.")
+
+    $handler = Get-AhkFunctionBody -Source $helperText -Name "HelperRawInputMessage"
+    Assert-True ($handler -ne "") (
+        "HelperRawInputMessage is gone; nothing decodes RawInput in the helper.")
+    Assert-True ($handler -match 'ControllerProfileLengthKey\(') (
+        "The helper no longer falls back to a length-keyed profile. A device " +
+        "whose identity Windows withholds saves its profile under that key, so " +
+        "it would work in main and not over an elevated window -- the exact " +
+        "asymmetry this exists to remove.")
+    Assert-True ($handler -match '\(size - \(HEADER_SIZE \+ 8\)\) // sizeHid') (
+        "The helper trusts the packet header for its report count. count and " +
+        "sizeHid come out of the packet and are used to index straight into " +
+        "memory; in a High-integrity process that bound is not optional.")
+    Assert-True ($handler -match '(?s)Loop\s+Min\(count,\s*Max\(0,\s*available\)\)') (
+        "The helper decodes fewer than all the reports in a packet. Windows " +
+        "coalesces them under load, and on a change-only pad -- which is most " +
+        "of the pads needing a learned profile -- a coalesced press is not a " +
+        "late press, it is a press that never arrives.")
+
+    $read = Get-AhkFunctionBody -Source $helperText -Name "HelperRawInputRead"
+    Assert-True ($read -match 'STALE_MS') (
+        "The helper's RawInput state has no staleness rule. RawInput is " +
+        "event-driven, so an untouched pad stops reporting and the last stick " +
+        "position would drive the cursor forever over an elevated window.")
+    $poll = Get-AhkFunctionBody -Source $helperText -Name "PollController"
+    Assert-True ($poll -match 'HelperRawInputRead\(&state\)[\s\S]{0,80}GetXInputState\(&state\)') (
+        "PollController no longer tries RawInput before XInput, or has lost " +
+        "the XInput fallback. Both matter: RawInput only answers for a pad " +
+        "with a learned profile, and XInput is what every other pad uses.")
+    if (-not $Quiet) {
+        Write-Host ("Elevated helper input: RawInput and XInput, one shared " +
+            "decoder, every report in a packet.")
+    }
+}
+
+
 # The startup limiter hold must stay bounded, and must never defend "off".
 #
 # RTSS applies its own saved runtime state while it finishes starting, which

@@ -25,12 +25,17 @@ CommitIniChangesAt
 ControllerApplyStickDeadzone
 ControllerBindingHasLong
 ControllerBindingHoldsMouseButton
+ControllerButtonBits
 ControllerButtonEdges
 ControllerChordFired
 ControllerDecodeState
 ControllerHeldMouseButtons
 ControllerMouseSafetyTick
 ControllerPrimeHoldTables
+ControllerProfileAxisRaw
+ControllerProfileAxisSpan
+ControllerProfileLengthKey
+ControllerProfilePathFor
 DefaultAutoMouseExeList
 DisplayScaleLevels
 ElevatedHelperTaskXml
@@ -67,6 +72,7 @@ HandleUncaughtError
 HexColorChannel
 HoldControllerMouseButton
 JoinWith
+LoadControllerProfileFrom
 MoveWindowPhysical
 NormalizeGameLogMode
 NormalizeHexColor
@@ -96,6 +102,9 @@ QuickMenuStatusY
 QuickMenuStrokeRounded
 QuickMenuWidth
 QuoteWindowsCommandLineArg
+RawInputAxis
+RawInputDeviceKey
+RawInputProfileDecodeInto
 ReadIniBool
 ReadIniInt
 ReadStartupProgramList

@@ -1226,12 +1226,12 @@ Assert-True (
     $source -match 'ShowControllerLearner\(') (
     "The learned-controller profile path or wizard integration is incomplete.")
 Assert-True (
-    $source -match '(?s)LoadControllerProfile\([^)]*\).*?offset \+ width > length' -and
+    $source -match '(?s)LoadControllerProfileFrom\([^)]*\).*?offset \+ width > length' -and
     $source -match 'validAxisSizes := Map\("u8".*"u16le".*"u16be"') (
     "Learned profile fields must be bounds-checked and support 8-bit, little-endian, and big-endian axes.")
 Assert-True (
-    $source -match '(?s)RawInputProfileDecode\([^)]*\).*?\(value & button\["mask"\]\) = button\["pressed"\]' -and
-    $source -match '(?s)RawInputProfileDecode\([^)]*\).*?hat\["offset"\].*?hat\["mask"\]' -and
+    $source -match '(?s)RawInputProfileDecodeInto\([^)]*\).*?\(value & button\["mask"\]\) = button\["pressed"\]' -and
+    $source -match '(?s)RawInputProfileDecodeInto\([^)]*\).*?hat\["offset"\].*?hat\["mask"\]' -and
     $source -match 'ControllerLearnDpadButtons\(') (
     "Learned buttons and D-pad bits must preserve active-high or active-low pressed state.")
 Assert-True (
@@ -2457,6 +2457,7 @@ Assert-QuickMenuPageChangesRebuild -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-ControllerLearnerIdentifyRelease -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-RtssUnreadableIsNotOff -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-RtssFrameLimitHoldIsBounded -ProjectRoot $projectRoot -Quiet:$Quiet
+Assert-ElevatedHelperReadsEveryBackend -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-ValidatorAssertionShapes -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-NoAmbiguousDeindentedBlocks -ProjectRoot $projectRoot -File "SteamShell-XFE.ahk" -Quiet:$Quiet
 Assert-NoAmbiguousDeindentedBlocks -ProjectRoot $projectRoot -File "SteamShell-Shared.ahk" -Quiet:$Quiet
