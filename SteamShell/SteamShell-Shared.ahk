@@ -4234,6 +4234,106 @@ SharedWindowInventoryGet(maxAgeMs := 1000, includeHidden := false) {
     return cached[key]
 }
 
+; Score an inventory and return the game candidates, best first.
+;
+; ONE SCORER FOR BOTH PRODUCTS, which the earlier passes had already made almost
+; true without finishing it. Every step this takes was shared already --
+; GameShapeFactsForWindow, GameWindowShapeVerdict, GameWindowCpuVerdict,
+; SortCandidatesByScoreAreaDesc, GetActiveAudioPidPeaksCached, and since the CPU
+; sampler moved, that too. What was left duplicated was the loop holding them in
+; order, and the two copies of it agreed on every step.
+;
+; They even agreed on the audio bonus by accident: the shell added the global
+; ScoreAudioActive and the companion added weights["audioActive"], which is the
+; same number, because that is the key the shell's own weights table fills from
+; that global.
+;
+; THE FILTER IS A CALLBACK, and that is deliberate rather than lazy. The two
+; products exclude genuinely different things -- the shell drops desktop and
+; Steam windows, minimized surfaces that are not legacy games, and the on-screen
+; keyboard; the companion drops its protected and launcher process lists -- and
+; folding either set into the other would change what each product detects as a
+; game. Only "never our own window" is common enough to live here.
+;
+; REJECTS ARE COLLECTED AS FACTS, not formatted. The shell writes them into its
+; diagnostic score table and the companion has no such table, so the caller
+; formats. rejectMinArea of 0 means do not collect at all, which is the
+; companion's case and the shell's whenever diagnostic logging is off.
+SharedScoreGameCandidates(inventory, weights, sampleCpu, skip,
+        audioEnabled, audioThreshold, rejectMinArea := 0) {
+    candidates := []
+    rejects := []
+    audioMap := 0
+    for _, item in inventory {
+        ; Never a game, in either product, and the one exclusion both agreed on.
+        if item["scriptOwned"]
+            continue
+        if (skip && skip(item))
+            continue
+
+        minimizedLegacy := WindowEngineIsMinimizedLegacyGameSurface(item)
+        shapeVerdict := GameWindowShapeVerdict(
+            GameShapeFactsForWindow(item, minimizedLegacy), weights)
+        nearFS := shapeVerdict["nearFS"]
+        if !shapeVerdict["accepted"] {
+            if (rejectMinArea > 0 && item["area"] >= rejectMinArea) {
+                rejects.Push(Map("item", item, "stage", "shape",
+                    "score", 0, "cpu", 0.0, "cpuKnown", false,
+                    "nearFS", nearFS, "reason", "TOO_SMALL"))
+            }
+            continue
+        }
+
+        ; A pid of 0 cannot be sampled; the sampler answers "unknown" for it
+        ; anyway, and asking is a wasted OpenProcess on every pass.
+        score := shapeVerdict["score"]
+        cpu := 0.0
+        cpuKnown := false
+        if item["pid"] {
+            sample := sampleCpu(item["pid"])
+            if IsObject(sample) {
+                cpu := sample["usage"]
+                cpuKnown := sample["known"]
+            }
+        }
+        cpuVerdict := GameWindowCpuVerdict(score, cpu, cpuKnown, weights)
+        score := cpuVerdict["score"]
+        if !cpuVerdict["accepted"] {
+            if (rejectMinArea > 0 && item["area"] >= rejectMinArea) {
+                rejects.Push(Map("item", item, "stage", "cpu",
+                    "score", score, "cpu", cpu, "cpuKnown", cpuKnown,
+                    "nearFS", nearFS, "reason", cpuVerdict["reject"]))
+            }
+            continue
+        }
+
+        ; The audio map is built at most once per pass, and only if something
+        ; got this far -- enumerating audio sessions is not free.
+        audioActive := false
+        if (audioEnabled && item["pid"]) {
+            if !IsObject(audioMap)
+                audioMap := GetActiveAudioPidPeaksCached()
+            if (audioMap.Has(item["pid"]) && audioMap[item["pid"]] > audioThreshold) {
+                score += weights["audioActive"]
+                audioActive := true
+            }
+        }
+
+        candidate := Map()
+        for key, value in item
+            candidate[key] := value
+        candidate["nearFS"] := nearFS
+        candidate["cpu"] := cpu
+        candidate["cpuKnown"] := cpuKnown
+        candidate["audio"] := audioActive
+        candidate["score"] := score
+        candidates.Push(candidate)
+    }
+    if (candidates.Length > 1)
+        SortCandidatesByScoreAreaDesc(candidates)
+    return Map("candidates", candidates, "rejects", rejects)
+}
+
 ; The windows the Task Switcher offers, for both products.
 ;
 ; IT EXISTED TWICE, under names sharing no word -- GetTaskSwitcherWindows in the

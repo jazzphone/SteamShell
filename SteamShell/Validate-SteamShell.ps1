@@ -1955,12 +1955,19 @@ Assert-True (
         'WindowEngineIsLegacyApplicationSurface\(item,\s*true\).*?' +
         '0x80000000.*?0x00C00000') (
     "Minimized legacy-game restoration is missing its popup/caption safeguards.")
+# ANCHORED TO THE FUNCTION THAT HOLDS THE RULE, not to a forward scan from the
+# scorer. When the exclusions moved into WindowEngineSkipForGameScore this
+# assertion kept passing -- (?s) with .*? found the same three tokens further
+# down the effective source, in unrelated functions -- so deleting the waiver
+# outright did not fail the build. Bounded to one body now, and verified by
+# deleting it again.
+$skipBody = [regex]::Match(
+    $source, '(?ms)^WindowEngineSkipForGameScore\(item\)\s*\{.*?^\}')
 Assert-True (
-    $source -match
-        '(?s)WindowEngineEvaluateGame\(snapshot.*?' +
-        'WindowEngineIsMinimizedLegacyGameSurface\(item\).*?' +
-        'WindowEngineIsLegacyApplicationSurface\(item\).*?' +
-        'item\["title"\]\s*=\s*""\s*&&\s*!legacySurface') (
+    $skipBody.Success -and
+    $skipBody.Value -match 'WindowEngineIsMinimizedLegacyGameSurface\(item\)' -and
+    $skipBody.Value -match 'WindowEngineIsLegacyApplicationSurface\(item\)' -and
+    $skipBody.Value -match 'item\["title"\]\s*=\s*""\s*&&\s*!legacySurface') (
     "Game Foreground Assist no longer accepts safe untitled legacy surfaces.")
 Assert-True (
     $source -match

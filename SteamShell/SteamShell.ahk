@@ -8587,18 +8587,56 @@ WindowEngineScoreWeights() {
         "audioActive", ScoreAudioActive)
 }
 
+; What this product excludes before a window is even scored.
+;
+; A callback rather than a shared filter, because the companion's exclusions are
+; a different set and folding either into the other would change what each
+; product detects as a game. Untitled is allowed through for a legacy surface:
+; older DirectX games publish one, and rejecting them here is how a fullscreen
+; game goes unnoticed.
+WindowEngineSkipForGameScore(item) {
+    minimizedLegacyGame := WindowEngineIsMinimizedLegacyGameSurface(item)
+    legacySurface := WindowEngineIsLegacyApplicationSurface(item)
+        || minimizedLegacyGame
+    if (item["desktop"] || item["steam"]
+        || (item["minMax"] = -1 && !minimizedLegacyGame)
+        || (item["title"] = "" && !legacySurface))
+        return true
+    ; Never the on-screen keyboard, which is large, titled and always up.
+    winClass := StrLower(item["class"])
+    return item["proc"] = "osk.exe" || winClass = "oskmainclass"
+        || InStr(StrLower(item["title"]), "on-screen keyboard")
+}
+
+; One reject row for the diagnostic score table, in this product's format.
+;
+; The shared scorer collects rejects as FACTS and leaves the formatting here,
+; because the companion has no such table. The shape stage reports "---" for a
+; score it never computed and "N" for nearFS, which is what this table has always
+; printed for that stage.
+WindowEngineRejectRow(reject) {
+    item := reject["item"]
+    shapeStage := reject["stage"] = "shape"
+    return LogRow(
+        NowStamp(), "REJ",
+        shapeStage ? "---" : FmtScore(reject["score"], true),
+        item["proc"], FmtPid(item["pid"]),
+        FmtCpu(reject["cpu"], !shapeStage),
+        "-",
+        (!shapeStage && reject["nearFS"]) ? "Y" : "N",
+        FmtRect(item["x"], item["y"], item["w"], item["h"]),
+        FmtHwnd(item["hwnd"]), reject["reason"], item["title"])
+}
+
 WindowEngineEvaluateGame(snapshot, forceRun, &allowActivate, &skipReason) {
     global EnableGameForegroundAssist, GameForegroundCooldownMs, LastGameBringToFrontTick
-    global FullscreenTolerance, FullscreenPosTolerancePx
-    global GameCPUThresholdPercent, GameAllowZeroCpuAsCandidate
     global GameRequireSteamForeground, GameAssistLogEvenWhenSkipped
-    global ScoreFullscreen, ScoreBorderlessLarge, ScoreTitleBonus, ScoreCpuAboveThreshold, ScoreCpuNonZeroBonus, GameMinScoreToActivate
-    global EnableAudioAssist, ScoreAudioActive
-    global EnableGameScoreLogging, GameLogMode, GameLogTopN, GameLogRejectNearCandidates, GameLogRejectMinAreaPercent
-    global AudioPeakThreshold
-    global LastActionText, LastBestCandidateScore, LastBestCandidateProc, LastBestCandidateTitle, LastBestCandidateText
-    global LastGameCandidates, GameScoreMaxRows
-
+    global GameMinScoreToActivate
+    global EnableAudioAssist, AudioPeakThreshold
+    global EnableGameScoreLogging, GameLogMode, GameLogRejectNearCandidates
+    global GameLogRejectMinAreaPercent
+    global LastBestCandidateScore, LastBestCandidateProc
+    global LastBestCandidateTitle, LastBestCandidateText
     allowActivate := true
     skipReason := ""
     if (!EnableGameForegroundAssist)
@@ -8607,7 +8645,6 @@ WindowEngineEvaluateGame(snapshot, forceRun, &allowActivate, &skipReason) {
         allowActivate := false
         skipReason := "COOLDOWN"
     }
-
     if (!forceRun && GameRequireSteamForeground) {
         if !IsSteamForeground() {
             if (!GameAssistLogEvenWhenSkipped)
@@ -8616,113 +8653,28 @@ WindowEngineEvaluateGame(snapshot, forceRun, &allowActivate, &skipReason) {
             skipReason := "STEAM_NOT_FOREGROUND"
         }
     }
-
     if forceRun {
         allowActivate := true
         skipReason := ""
     }
 
-    screenArea := A_ScreenWidth * A_ScreenHeight
-    rejectAreaMin := screenArea * GameLogRejectMinAreaPercent
-    candidates := []
+    ; Zero means do not collect rejects at all, which folds the three logging
+    ; switches into the one number the scorer needs.
+    rejectMinArea := (EnableGameScoreLogging && GameLogMode = "DIAGNOSTIC"
+        && GameLogRejectNearCandidates)
+        ? A_ScreenWidth * A_ScreenHeight * GameLogRejectMinAreaPercent
+        : 0
+    scored := SharedScoreGameCandidates(
+        snapshot, WindowEngineScoreWeights(), GetProcessCpuSample,
+        WindowEngineSkipForGameScore,
+        EnableAudioAssist, AudioPeakThreshold, rejectMinArea)
+    candidates := scored["candidates"]
+
     rejects := []
-    audioMap := 0
-    ; Built once per tick rather than twice per window. Every entry is read from a
-    ; global that cannot change inside this loop, and the companion already hoists
-    ; its equivalent -- this was the only side still paying for it per candidate.
-    weights := WindowEngineScoreWeights()
+    for _, reject in scored["rejects"]
+        rejects.Push(WindowEngineRejectRow(reject))
 
-    for _, item in snapshot {
-        minimizedLegacyGame := WindowEngineIsMinimizedLegacyGameSurface(item)
-        legacySurface := WindowEngineIsLegacyApplicationSurface(item)
-            || minimizedLegacyGame
-        if (item["scriptOwned"] || item["desktop"] || item["steam"]
-            || (item["minMax"] = -1 && !minimizedLegacyGame)
-            || (item["title"] = "" && !legacySurface))
-            continue
-
-        title := item["title"]
-        proc := item["proc"]
-        winClass := item["class"]
-        tLower := StrLower(title)
-        if (proc = "osk.exe" || StrLower(winClass) = "oskmainclass"
-            || InStr(tLower, "on-screen keyboard"))
-            continue
-
-        x := item["x"]
-        y := item["y"]
-        w := item["w"]
-        h := item["h"]
-        area := item["area"]
-        ; Shape verdict from SteamShell-Common.ahk, so the companion reaches the
-        ; same answer from the same numbers -- which now means the same ARGUMENTS
-        ; too, built by GameShapeFactsForWindow. Sharing the arbiter while each
-        ; tree assembled its own facts map is what let this side stay
-        ; primary-monitor-only long after the companion was fixed.
-        ; CPU is still sampled only after this passes, and audio only after CPU
-        ; passes -- that laziness is why the scorer is two calls rather than one.
-        shapeVerdict := GameWindowShapeVerdict(
-            GameShapeFactsForWindow(item, minimizedLegacyGame), weights)
-        nearFS := shapeVerdict["nearFS"]
-        if (!shapeVerdict["accepted"]) {
-            if (EnableGameScoreLogging && GameLogMode = "DIAGNOSTIC"
-                && GameLogRejectNearCandidates && area >= rejectAreaMin) {
-                rejects.Push(LogRow(
-                    NowStamp(), "REJ", "---", proc, FmtPid(item["pid"]),
-                    FmtCpu(0, false), "-", "N",
-                    FmtRect(x, y, w, h), FmtHwnd(item["hwnd"]),
-                    "TOO_SMALL", title))
-            }
-            continue
-        }
-
-        score := shapeVerdict["score"]
-
-        cpuSample := GetProcessCpuSample(item["pid"])
-        cpu := cpuSample["usage"]
-        cpuKnown := cpuSample["known"]
-        cpuVerdict := GameWindowCpuVerdict(score, cpu, cpuKnown, weights)
-        score := cpuVerdict["score"]
-        if (!cpuVerdict["accepted"]) {
-            if (EnableGameScoreLogging && GameLogMode = "DIAGNOSTIC"
-                && GameLogRejectNearCandidates && area >= rejectAreaMin) {
-                rejects.Push(LogRow(
-                    NowStamp(), "REJ", FmtScore(score, true), proc,
-                    FmtPid(item["pid"]), FmtCpu(cpu, true), "-",
-                    nearFS ? "Y" : "N", FmtRect(x, y, w, h),
-                    FmtHwnd(item["hwnd"]), cpuVerdict["reject"], title))
-            }
-            continue
-        }
-
-        audioActive := false
-        if (EnableAudioAssist && item["pid"]) {
-            if (!IsObject(audioMap))
-                audioMap := GetActiveAudioPidPeaksCached()
-            if (audioMap.Has(item["pid"]) && audioMap[item["pid"]] > AudioPeakThreshold) {
-                score += ScoreAudioActive
-                audioActive := true
-            }
-        }
-
-        candidate := Map()
-        for key, value in item
-            candidate[key] := value
-        candidate["nearFS"] := nearFS
-        candidate["cpu"] := cpu
-        candidate["cpuKnown"] := cpuKnown
-        candidate["audio"] := audioActive
-        candidate["score"] := score
-        candidates.Push(candidate)
-    }
-
-    if (candidates.Length > 1)
-        SortCandidatesByScoreAreaDesc(candidates)
-
-    ; Snapshot for the Game Detection page, kept where the winner is already
-    ; recorded. The trimming and the presentation live in the shared files.
     CaptureGameCandidates(candidates)
-
     if (candidates.Length > 0) {
         best := candidates[1]
         LastBestCandidateScore := best["score"]
@@ -8735,10 +8687,6 @@ WindowEngineEvaluateGame(snapshot, forceRun, &allowActivate, &skipReason) {
         LastBestCandidateTitle := ""
         LastBestCandidateText := "-"
     }
-
-    ; The table itself lives in SteamShell-Shared.ahk so the companion can render
-    ; the same one. Only the header is built here: the activation threshold and
-    ; the skip reason are this engine's own context.
     headerNote := "min=" GameMinScoreToActivate
     if (!allowActivate && skipReason != "")
         headerNote := "SKIP_" skipReason " " headerNote

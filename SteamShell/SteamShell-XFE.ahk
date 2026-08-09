@@ -2742,80 +2742,39 @@ XfeGameScoreWeights() {
 ;
 ; Still no geometry, focus or activation. This reads the inventory it already
 ; builds and returns a name.
+; What this product excludes before a window is even scored.
+;
+; A callback rather than a shared filter: the shell's exclusions are a different
+; set, and folding either into the other would change what each detects as a
+; game. Untitled is rejected here and allowed through for a legacy surface in the
+; shell -- left as it is, because changing what the companion treats as a game is
+; not a refactor.
+AssistSkipForGameScore(item) {
+    global AssistProtectedProcesses, AssistLauncherProcesses
+    static protectedSet := ""
+    static launcherSet := ""
+    static builtFrom := ""
+    ; Rebuilt only when the settings strings change, rather than per window.
+    signature := AssistProtectedProcesses "|" AssistLauncherProcesses
+    if (builtFrom != signature) {
+        protectedSet := ProcessNameSetFromList(AssistProtectedProcesses)
+        launcherSet := ProcessNameSetFromList(AssistLauncherProcesses)
+        builtFrom := signature
+    }
+    if (item["title"] = "" || item["exe"] = "")
+        return true
+    return protectedSet.Has(item["exe"]) || launcherSet.Has(item["exe"])
+}
+
 XfeBestGameWindow() {
     global LastBestCandidateProc, LastBestCandidateScore
-    global AssistCpuThresholdPercent, AssistProtectedProcesses
-    global AssistLauncherProcesses, EnableAudioAssist, AudioPeakThreshold
-    protectedSet := ProcessNameSetFromList(AssistProtectedProcesses)
-    launcherSet := ProcessNameSetFromList(AssistLauncherProcesses)
-    weights := XfeGameScoreWeights()
-    candidates := []
-    audioMap := ""
-    for _, item in AssistInventoryGet() {
-        if (item["ours"] || item["title"] = "" || item["exe"] = "")
-            continue
-        if (protectedSet.Has(item["exe"]) || launcherSet.Has(item["exe"]))
-            continue
-        ; Per MONITOR, not the primary screen -- and now through the shared
-        ; GameShapeFactsForWindow, because the shell needs exactly this and was
-        ; silently doing without it. The comment that used to sit here said the
-        ; shell "can assume the game is on A_Screen*"; it cannot, and asserting
-        ; that in a companion-only comment is what kept the fix on one side.
-        ;
-        ; One behaviour change comes with the move: an unreadable monitor no
-        ; longer skips the window, it falls back to the primary. Dropping the
-        ; candidate turned a failed MonitorGet into a game this scorer cannot see,
-        ; which is the worse and quieter of the two outcomes.
-        minimizedLegacy := WindowEngineIsMinimizedLegacyGameSurface(item)
-        shapeVerdict := GameWindowShapeVerdict(
-            GameShapeFactsForWindow(item, minimizedLegacy), weights)
-        if (!shapeVerdict["accepted"])
-            continue
-        ; Sampled only after the shape passes, and audio only after CPU passes.
-        ; Both are measurements with a cost, and the shell orders them the same
-        ; way for the same reason.
-        cpu := 0.0
-        cpuKnown := false
-        if item["pid"] {
-            sample := AssistProcessCpuSample(item["pid"])
-            if IsObject(sample) {
-                cpu := sample["usage"]
-                cpuKnown := sample["known"]
-            }
-        }
-        cpuVerdict := GameWindowCpuVerdict(
-            shapeVerdict["score"], cpu, cpuKnown, weights)
-        if (!cpuVerdict["accepted"])
-            continue
-        score := cpuVerdict["score"]
-        audioActive := false
-        if (EnableAudioAssist && item["pid"]) {
-            if (!IsObject(audioMap))
-                audioMap := GetActiveAudioPidPeaksCached()
-            if (audioMap.Has(item["pid"]) && audioMap[item["pid"]] > AudioPeakThreshold) {
-                score += weights["audioActive"]
-                audioActive := true
-            }
-        }
-        candidate := Map()
-        for key, value in item
-            candidate[key] := value
-        candidate["score"] := score
-        ; The columns LogGameCandidateTable renders. "proc" duplicates "exe":
-        ; the shell's inventory calls it proc and the table was written against
-        ; that, and one aliased key is cheaper than a second table format.
-        candidate["proc"] := item["exe"]
-        candidate["cpu"] := cpu
-        candidate["cpuKnown"] := cpuKnown
-        candidate["audio"] := audioActive
-        candidate["nearFS"] := shapeVerdict["nearFS"]
-        candidates.Push(candidate)
-    }
-    if (candidates.Length > 1)
-        SortCandidatesByScoreAreaDesc(candidates)
+    global EnableAudioAssist, AudioPeakThreshold
+    scored := SharedScoreGameCandidates(
+        AssistInventoryGet(), XfeGameScoreWeights(), AssistProcessCpuSample,
+        AssistSkipForGameScore,
+        EnableAudioAssist, AudioPeakThreshold)
+    candidates := scored["candidates"]
     LogGameCandidateTable(candidates, [], "best-candidate")
-    ; The same snapshot the shell takes, at the same point: after the sort,
-    ; before anything decides what to do with the answer.
     CaptureGameCandidates(candidates)
     if (candidates.Length > 0) {
         LastBestCandidateProc := candidates[1]["proc"]
@@ -2826,20 +2785,6 @@ XfeBestGameWindow() {
     }
     if (candidates.Length = 0)
         return ""
-    ; No score floor, matching the shell, which sets LastBestCandidateProc from
-    ; the best candidate unconditionally.
-    ;
-    ; A floor was worse than none here. The shell's GameMinScoreToActivate is
-    ; named for ACTIVATION -- the confidence needed to pull focus back to a game,
-    ; which is a disruptive act. Naming a profile is not that. Worse, falling
-    ; below the floor sent this back to LastObservedGameExe, the foreground-only
-    ; observation the scorer exists to replace, so a low score discarded a scored
-    ; answer in favour of an unscored one.
-    ;
-    ; Everything not plausibly a game is already gone before a score exists:
-    ; protected processes, launchers, our own windows and anything that fails the
-    ; shape test never become candidates, and IsUsableProfileExe rejects Steam,
-    ; Explorer and this executable afterwards.
     return candidates[1]["exe"]
 }
 

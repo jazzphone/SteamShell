@@ -715,11 +715,14 @@ Assert-True (
         'return LastObservedGameExe' -and
     # ...and the scorer must actually ask about minimized surfaces, or removing
     # the fallback would have lost the case it covered.
-    $rawSource -match
-        '(?sm)^XfeBestGameWindow\(\)\s*\{(?:(?!\n\})[\s\S])*?' +
+    # The scorer is SharedScoreGameCandidates now, so this reads the effective
+    # source; the guarantee is unchanged -- a minimized surface must still be
+    # offered to the shape test rather than skipped.
+    $source -match
+        '(?sm)^SharedScoreGameCandidates\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?' +
         'minimizedLegacy := WindowEngineIsMinimizedLegacyGameSurface\(item\)' -and
-    $rawSource -notmatch
-        '(?sm)^XfeBestGameWindow\(\)\s*\{(?:(?!\n\})[\s\S])*?' +
+    $source -notmatch
+        '(?sm)^SharedScoreGameCandidates\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?' +
         '"minimizedLegacy", false') (
     "The per-game RTSS target has a foreground-observation fallback again, or " +
     "the scorer stopped recognising a minimized game, which is what that " +
@@ -727,21 +730,27 @@ Assert-True (
 
 # The scorer weighs CPU and audio, and both are sampled lazily.
 Assert-True (
+    # In the shared scorer the sampler arrives as a parameter, so the ordering
+    # is asserted against the call through it -- and separately that this
+    # product is the one passing AssistProcessCpuSample in.
     $rawSource -match
         '(?sm)^XfeBestGameWindow\(\)\s*\{(?:(?!\n\})[\s\S])*?' +
+        'SharedScoreGameCandidates\((?:(?!\n\})[\s\S])*?AssistProcessCpuSample' -and
+    $source -match
+        '(?sm)^SharedScoreGameCandidates\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?' +
         'GameWindowShapeVerdict\((?:(?!\n\})[\s\S])*?' +
-        'AssistProcessCpuSample\((?:(?!\n\})[\s\S])*?' +
+        'sampleCpu\((?:(?!\n\})[\s\S])*?' +
         'GameWindowCpuVerdict\((?:(?!\n\})[\s\S])*?' +
         'GetActiveAudioPidPeaksCached\((?:(?!\n\})[\s\S])*?' +
         'SortCandidatesByScoreAreaDesc\(' -and
     # The ordering above is necessary but not sufficient: an EXTRA sample added
     # ahead of the shape test leaves that sequence intact while destroying the
     # laziness it exists to protect. These forbid the earlier call outright.
-    $rawSource -notmatch
-        '(?sm)^XfeBestGameWindow\(\)\s*\{(?:(?!\n\})[\s\S])*?' +
-        'AssistProcessCpuSample\((?:(?!\n\})[\s\S])*?GameWindowShapeVerdict\(' -and
-    $rawSource -notmatch
-        '(?sm)^XfeBestGameWindow\(\)\s*\{(?:(?!\n\})[\s\S])*?' +
+    $source -notmatch
+        '(?sm)^SharedScoreGameCandidates\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?' +
+        'sampleCpu\((?:(?!\n\})[\s\S])*?GameWindowShapeVerdict\(' -and
+    $source -notmatch
+        '(?sm)^SharedScoreGameCandidates\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?' +
         'GetActiveAudioPidPeaksCached\((?:(?!\n\})[\s\S])*?GameWindowCpuVerdict\(') (
     "The game scorer no longer runs shape then CPU then audio in order, which " +
     "is what keeps the expensive signals off windows that were already rejected.")

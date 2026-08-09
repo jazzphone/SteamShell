@@ -335,6 +335,7 @@ SettingsSelectChoiceByText
 SettingsSliderReadoutRegistry
 SettingsUpdateScrollBar
 SharedNotify
+SharedScoreGameCandidates
 SharedTaskSwitcherWindows
 SharedWindowInventoryBuild
 SharedWindowInventoryGet
