@@ -27,8 +27,8 @@ The validated pre-rewrite 1.4 source baseline is preserved in
 `../releases/1.6.0`. The 1.7.0 source is preserved in `../releases/1.7.0`.
 
 The 1.7.1 source is preserved in `../releases/1.7.1`. This tree is the
-SteamShell **2.0.0** source, locked together with XFE in
-`../releases/2.0.0`; 1.7.3 remains the
+SteamShell **2.0.1** source; 2.0.0 is locked together with XFE in
+`../releases/2.0.0`, and 1.7.3 remains the
 pre-rendering-rewrite revert point. The feature-by-feature XFE port decisions are recorded in
 `XFE_PARITY_NOTES.md`. The current settings schema is 23.
 
@@ -164,7 +164,10 @@ hold and never triggers it either; only the physical button counts.
 ### Automatic mouse mode
 
 `[Controller] AutoMouseExeList` names executables where those same mappings apply **without holding View/Back**.
-Settings ▸ Controller & Cursor ▸ **Automatic mouse mode for these EXEs** edits the list.
+Settings ▸ Controller & Cursor edits the list — **Shell-mode automatic mouse
+allowlist** in SteamShell, **Automatic mouse applications (pipe-separated)** in
+the companion. The exclusion list beside it is **Desktop-mode exclusions
+(games/apps)**.
 
 Both products ship the same default list:
 `explorer.exe|brave.exe|chrome.exe|msedge.exe|firefox.exe|notepad.exe|taskmgr.exe`
@@ -347,7 +350,7 @@ the uninstaller rather than the product.
 
 ## Elevated window helper
 
-SteamShell 2.0.0 uses two privilege levels. `SteamShell.exe`—including Quick
+SteamShell 2.0.1 uses two privilege levels. `SteamShell.exe`—including Quick
 Menu, Settings, recovery, Steam launch, and every ordinary child—runs at normal
 integrity. This lets Steam observe that a normal SteamShell window took the
 foreground, preventing controller input from continuing into Big Picture behind
@@ -423,7 +426,8 @@ can stamp onto any file, so without these checks a writable helper directory
 would be a way to have SteamShell hand arbitrary code an administrator token.
 
 If Health Check reports **Elevated helper protection** as failed — most likely
-because the folder was moved by hand or the helper predates 2.0.0.1 — start
+because the folder was moved by hand, or the helper on disk is not the
+2.0.1.1 build this release expects — start
 SteamShell with **Run as administrator** and apply Setup again to re-secure it.
 
 ### Controller behavior over administrator windows
@@ -558,8 +562,22 @@ back, Home/End jump, and Delete closes the selected Task Switcher window.
   **Launch Steam**, starts Big Picture, and returns SteamShell to shell mode.
   Steam Quick Access reports `Steam is not running` and is inert meanwhile.
 - **System:** **Exit Steam to Desktop** (or **Return to SteamShell** while in
-  desktop mode), **Exit SteamShell**, Sleep, Restart, and Shut Down. The
-  transition, exit, and power actions require a second press to confirm.
+  desktop mode), **Game Detection**, **Current Application**, **Exit
+  SteamShell**, Sleep, Restart, and Shut Down. The transition, exit, and power
+  actions require a second press to confirm.
+- **Game Detection:** a read-only page showing what the window scorer decided —
+  the winner and every candidate it beat, with the numbers that produced the
+  result. Every one of those numbers was already computed in order to pick a
+  game; this only shows the losers beside the winner, which is the difference
+  between "it picked the wrong window" and a report someone can act on without
+  asking for a log. Present when `EnableGameDetectionMenu` is on.
+- **Current Application:** names the executable that was in front when the menu
+  opened and adds it to one of four executable lists — Automatic Mouse, Always
+  In Focus, Protect From Cleanup, Exclude From Desktop Mouse. It sits beside
+  Game Detection rather than inside it: that page explains what the scorer
+  decided, this one *writes settings*, and a user should not have to enter a
+  diagnostic to configure something. See **Naming an application without typing
+  it** above for the destination table and the Store-app refusal.
 - **Audio:** the XFE-matched submenu contains Back, Output, Volume, and Mute.
   Output and Volume support left/right adjustment.
 - **Display:** the XFE picker stages Resolution, Refresh Rate, and Scale
@@ -806,6 +824,16 @@ The same area provides configuration recovery and diagnostics:
   safety, and desktop recovery. It also reports the **installation record** — see below. The window, the report
   format, **Refresh** and **Copy Report** are shared with SteamShell-XFE, so a report from either product reads
   the same; only the checks themselves differ.
+
+  Its four controller rows — **Controller**, **Input backend**, **RawInput** and
+  **Controller mappings** — are also shared, so both products word them
+  identically. **Input backend** reads `Setting: <configured>. Active:
+  <backend>` — the preference and the backend actually serving reads, side by
+  side, which is the distinction that matters when `Backend=Auto` picked
+  something other than what you expected. The XInput slot is shown for XInput
+  only, 1-based, with the configured slot beside it when they differ; it used to
+  be printed beside a RawInput reading, where the number was whatever XInput had
+  last left behind.
 - **Export Diagnostic ZIP** creates a sanitized bundle on the desktop containing the health report, system
   information, settings, and recent log lines.
 - **Create Settings Backup**, **Export Settings**, and **Import / Restore** preserve portable configurations.
@@ -1015,10 +1043,10 @@ calculation invariants without starting the normal shell session.
 `Build-SteamShell.ps1` is the only build script and produces all three
 binaries. It runs **both** validators — `Validate-SteamShell.ps1` and
 `Validate-SteamShell-XFE.ps1` — then validates and compiles
-`SteamShell-Helper.ahk` and verifies helper version 2.0.0.1, validates and
-compiles `SteamShell-XFE.ahk` and verifies version 2.0.0.0, and finally
+`SteamShell-Helper.ahk` and verifies helper version 2.0.1.1, validates and
+compiles `SteamShell-XFE.ahk` and verifies version 2.0.1.0, and finally
 validates and compiles `SteamShell.ahk` with both payloads embedded, verifying
-the published executable reports 2.0.0.0.
+the published executable reports 2.0.1.0.
 
 Everything it needs is in this folder, which is what makes locking a release a
 copy of one directory.

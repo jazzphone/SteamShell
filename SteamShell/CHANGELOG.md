@@ -1,10 +1,69 @@
 # SteamShell changelog
 
-## Unreleased
+## 2.0.1 — 2026-08-09
 
-The 2.0.0 follow-up queue, worked in order. One user-visible fix, one dead
-control made real, and the architectural change underneath both.
+The 2.0.0 follow-up queue, worked in order, plus one feature that came out of
+reading the settings rather than the code.
 
+**The lists could only be filled by typing.** Every exclusion, allowlist and
+protection setting in both products names executables, and all of them assumed
+you knew what a process was called and had a keyboard to type it with. From a
+sofa neither is true, so the lists stayed empty and the features that read them
+looked broken. Two answers, kept separate because they answer different
+questions.
+
+- **Recent…** offers the last five applications you had in front, deduped by
+  executable, with the last window title beside each name. In the shell it is a
+  third button on every executable-list field in Settings and an **Add Recent
+  App…** button in the AlwaysFocus Manager; in the companion it is **Add Recent
+  Application…** under Controller & Cursor. The history is sampled on its own
+  one-second timer rather than from either tree's foreground observer — the
+  shell's stops in desktop mode, which would have left a hole in the history in
+  exactly the state you go looking for the setting. It is held in memory and
+  never written to disk. The point of a history rather than a live window list
+  is the applications you have already **closed**: those are the ones whose
+  executable name you can no longer look up.
+- **Quick Menu ▸ System ▸ Current Application** names what is in front right
+  now, into four destinations in the shell and two in the companion, and shows
+  *(already added)* on a second visit. It works there and cannot work in
+  Settings, because both trees snapshot the previous foreground window before
+  the menu takes it and Settings has no equivalent moment.
+- **Store apps are refused out loud**, in both routes. A packaged app's visible
+  window belongs to `ApplicationFrameHost.exe`, so adding it by name would write
+  one entry that silently matches Settings, Photos, Calculator and the Store at
+  once. The picker drops the frame host from its history; Current Application
+  says *"Store app — cannot be added by name"* rather than staying silent, since
+  there you are pointing at the window.
+
+**The shipped automatic-mouse list is no longer one entry.** It is now
+`explorer.exe`, four browsers, `notepad.exe` and `taskmgr.exe`, stated once in
+`DefaultAutoMouseExeList()` and held to the embedded default INI and both sample
+files by the build. `DesktopAutoMouseExcludeExeList` now ships **empty**: it
+shipped `brave.exe`, which is the opposite list, so automatic mouse was turned
+*off* for Brave on the desktop and never turned on in shell mode.
+
+**Fixed: Quick Menu pages that did not open.** Selecting Current Application in
+the shell appeared to do nothing. The page variable moved and the previous
+page's rows stayed on screen, because the four cases that navigate from the
+activation switch repainted instead of rebuilding — and a repaint redraws the
+rows the page was built with. Game Detection and both Back To System rows had
+it too. All navigation in both products now goes through one shared
+`QuickMenuGoToPage`, neither tree assigns the page any more, and the build fails
+if one starts again.
+
+- **Delete the learned controller profile**, in the shell, which had no route to
+  it at all: `Ctrl+Alt+Shift+D`, the notification-area menu, and Settings ▸
+  Controller & Cursor. Three routes because a profile that learned an axis
+  wrongly reads as a stick held over, so the controller becomes the thing you
+  cannot use to reach the fix, and the keyboard chord is what still works when
+  the pointer has run off the screen.
+- **The shell's four controller Health Check rows** come from one shared
+  builder. The XInput slot is reported for XInput only; it used to be printed
+  beside a RawInput reading, where it was whatever XInput last left behind.
+- **A on the companion's Quick Menu** steps Quick Menu Accent, Controller Mouse
+  Speed, Cursor Hide Delay and Preset Frame Cap, which did nothing there before.
+- **StartMenu on a controller button** goes through `SendChordSafe`, matching
+  what the elevated helper always did.
 - **Steam Big Picture can vanish from the Task Switcher when Windows cloaks it.**
   The companion had the fix; the shell had the same latent bug and triggered it
   less often, because Windows cloaks windows for reasons beyond Xbox FSE. Both

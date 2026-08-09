@@ -41,13 +41,13 @@ $sample = Get-SourceText $samplePath
 $buildScript = Get-SourceText $buildScriptPath
 
 Assert-True (
-    $source -match '@Ahk2Exe-SetVersion 2\.0\.0\.0' -and
-    $source -match 'AppVersion\s*:=\s*"2\.0\.0"' -and
-    $buildScript -match 'SteamShell-XFE version verification failed.*?2\.0\.0\.0' -and
+    $source -match '@Ahk2Exe-SetVersion 2\.0\.1\.0' -and
+    $source -match 'AppVersion\s*:=\s*"2\.0\.1"' -and
+    $buildScript -match 'SteamShell-XFE version verification failed.*?2\.0\.1\.0' -and
     # The companion is compiled by the one build script in this folder, and its
     # syntax is checked before the compiler is started.
     $buildScript -match '/in", \$xfeSourcePath') (
-    "SteamShell-XFE 2.0.0 version metadata is inconsistent.")
+    "SteamShell-XFE 2.0.1 version metadata is inconsistent.")
 
 Assert-AhkStructure -Text $source -Label "SteamShell-XFE.ahk"
 $functionMatches = [regex]::Matches(

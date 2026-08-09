@@ -28,6 +28,14 @@ __pycache__/
 /releases/2.0.0/current.staging-*/
 /releases/2.0.0/current.backup-*/
 
+# 2.0.1 ships its binary on the same terms, and these are listed BEFORE the
+# release exists so the first lock cannot accidentally commit its own build
+# output. Everything under releases/2.0.1/current stays tracked.
+/releases/2.0.1/SteamShell/dist/
+/releases/2.0.1/SteamShell/build/
+/releases/2.0.1/current.staging-*/
+/releases/2.0.1/current.backup-*/
+
 # Generated only when the self-contained 1.9.9 release bundle is rebuilt. That
 # bundle predates the single-folder layout and still has a SteamShell-XFE tree
 # of its own, so its paths are listed as they actually are.

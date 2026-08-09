@@ -4,11 +4,11 @@ SteamShell XFE is a portable controller-utility companion for Windows Xbox Full
 Screen Experience. It is separate from the standalone SteamShell application
 and does not replace, install, or modify the Windows shell.
 
-The working tree is **2.0.0**, locked with standalone SteamShell in the
-self-contained `releases/2.0.0` bundle. Controller input, the Quick Menu, Settings,
-display/HDR controls, RTSS integration, and notification-area control work inside
-Xbox FSE. The companion remains deliberately separate from the SteamShell
-Windows-shell application, whose working tree is also 2.0.0.
+The working tree is **2.0.1**; 2.0.0 is locked with standalone SteamShell in
+the self-contained `releases/2.0.0` bundle. Controller input, the Quick Menu,
+Settings, display/HDR controls, RTSS integration, and notification-area control
+work inside Xbox FSE. The companion remains deliberately separate from the
+SteamShell Windows-shell application, whose working tree is also 2.0.1.
 
 1.9.9 advances to settings schema 9 and consolidates the validated 0.1.21 feature
 line into the coordinated pre-2.0 version. Every companion-owned settings/editor
@@ -674,6 +674,27 @@ controller pointer/mappings without requiring View/Back. Hold Y on the main
 page to open the styled Controller Mappings submenu; its final **Set Controller
 Mappings** row opens the full editor.
 
+**System** holds Sleep, Restart, Shut Down, **Exit Companion**, and two rows
+shared with standalone SteamShell:
+
+- **Game Detection** — a read-only page showing what the window scorer decided,
+  the winner and every candidate it beat, with the numbers behind the result.
+  Present when `EnableGameDetectionMenu` is on.
+- **Current Application** — the executable that was in front when the menu
+  opened, addable to **Automatic Mouse** (`[Controller] AutoMouseExeList`) or
+  **Protect From Cleanup** (`[Assist] ProtectedProcesses`) without typing its
+  name. The row's value is the executable itself, and a destination already
+  holding it reads *(already added)*.
+
+  With a **Store app** in front the row instead reads *"Store app — cannot be
+  added by name"* and refuses to open. A packaged app's visible window belongs
+  to `ApplicationFrameHost.exe`, so adding it by name would write one entry
+  matching Settings, Photos, Calculator and the Store at once.
+
+  It works here and cannot work in Settings for the same reason: the companion
+  snapshots the previous foreground window when the menu takes the foreground,
+  and Settings has no equivalent moment.
+
 ### Automatic mouse mode
 
 The controller can act as a pointer without holding View/Back, decided by what
@@ -681,6 +702,23 @@ is in the foreground. `EnableAutoMouseMode` is the master switch and
 `AutoMouseExeList` names the applications it applies to. That is the whole
 feature; an empty list turns it off as surely as the switch does. Both settings
 are on **Settings → Controller & Cursor**.
+
+The shipped list is
+`explorer.exe|brave.exe|chrome.exe|msedge.exe|firefox.exe|notepad.exe|taskmgr.exe`
+— the same default standalone SteamShell ships, stated once in the shared code
+and held to both sample INIs by the build.
+
+**Two ways to add to it without a keyboard**, because a list you can only fill
+by typing an executable name is a list that stays empty on a couch:
+
+- **Settings → Controller & Cursor → Add Recent Application…** offers the last
+  five applications you had in the foreground, most recent first, with the last
+  window title beside each name. The history is in memory only and includes
+  applications you have since **closed** — which are exactly the ones whose
+  executable name you can no longer look up. SteamShell's own windows, shell
+  surfaces, and anything hosted by `ApplicationFrameHost.exe` are excluded.
+- **Quick Menu → System → Current Application** adds whatever is in front right
+  now. See *Quick Menu* above.
 
 Xbox FSE needs no special handling here — leave it off the list. It is
 controller-driven, and a pointer inside it gets in the way rather than helping.
@@ -1217,7 +1255,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Build-SteamShell.ps1
 
 It runs both validators, then validates each source with the installed 64-bit
 AutoHotkey v2 interpreter before compiling it. The companion is compiled to
-`build\SteamShell-XFE.exe` for embedding and verified at file version 2.0.0.0,
+`build\SteamShell-XFE.exe` for embedding and verified at file version 2.0.1.0,
 and `assets\SteamShell-XFE.ico` is applied automatically. A copy is left in
 `dist\SteamShell-XFE.exe` for developing the companion — pass `-NoXfeDist` to
 skip it.
