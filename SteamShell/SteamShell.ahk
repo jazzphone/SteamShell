@@ -7119,20 +7119,33 @@ PollController() {
     ; trigger held and the poll after the baseline one saw a rising edge that
     ; never happened and changed the Settings category on its own. The direction
     ; computed on a baseline poll is discarded with the rest of that sample.
-    settingsLtDown := lt > 30
-    settingsRtDown := rt > 30
+    ; THIS SAMPLE is currentLtDown/currentRtDown; the PREVIOUS one is the two
+    ; statics. Both halves are needed -- a category change is a rising edge, not
+    ; a held trigger -- and giving them the same name is what broke this once
+    ; already: the statics were settingsPrevLtDown/settingsPrevRtDown until they
+    ; were renamed onto the sample locals, which left the edge tests reading
+    ; `settingsLtDown && !settingsLtDown` and the commit-back reading
+    ; `settingsLtDown := settingsLtDown`. Both are valid AHK, neither changes a
+    ; reference count, so the build stayed green while settingsCategoryDirection
+    ; was permanently 0 and the triggers did nothing in Full Settings.
+    ;
+    ; The names here are the companion's, at SteamShell-XFE.ahk's settings
+    ; surface: persistent state keeps settingsLtDown/settingsRtDown, the sample
+    ; is current*. Same two roles, same two names, in both products.
+    currentLtDown := lt > 30
+    currentRtDown := rt > 30
     settingsCategoryDirection := 0
     if (settingsPrimaryActive
         && !SettingsEditorDialogActive
         && !(buttons & 0x0020)
-        && !(settingsLtDown && settingsRtDown)) {
-        if (settingsLtDown && !settingsLtDown)
+        && !(currentLtDown && currentRtDown)) {
+        if (currentLtDown && !settingsLtDown)
             settingsCategoryDirection := -1
-        else if (settingsRtDown && !settingsRtDown)
+        else if (currentRtDown && !settingsRtDown)
             settingsCategoryDirection := 1
     }
-    settingsLtDown := settingsLtDown
-    settingsRtDown := settingsRtDown
+    settingsLtDown := currentLtDown
+    settingsRtDown := currentRtDown
 
     ; A menu-selection button can still be physically down when the menu is
     ; destroyed. Establish one edge-free sample and clear every hold tracker so
