@@ -122,9 +122,11 @@ ChangeQuickMenuTaskPage
 CloseControllerLearner
 CommitRtssPendingFrameCap
 ConfirmPrimaryDisplayMode
+ControllerBindingIsNormalIntegrityOnly
 ControllerBindingSharedAction
 ControllerButtonNames
 ControllerDiagnosticTick
+ControllerHandleElevatedForeground
 ControllerLearnAccept
 ControllerLearnAwaitQuiet
 ControllerLearnAxisStats
@@ -180,13 +182,16 @@ DeleteControllerProfileForActiveDevice
 DeviceChangeMessage
 DisplayChangeSafetyTick
 DistinctDisplayResolutions
+ElevatedAutoMouseEventName
 ElevatedHelperLocationIsProtected
+ElevatedHelperOwnsForeground
 ElevatedRtssDoneEventName
 ElevatedRtssEventName
 ElevatedRtssRequestPath
 ElevatedRtssWritesAvailable
 EnsureDisplayScaleSelection
 EnsureDisplaySelection
+EnsureElevatedAutoMouseEvent
 EnsureElevatedRtssDoneEvent
 EnsureElevatedRtssEvent
 EnsureGdiPlus
@@ -339,6 +344,7 @@ SanitizeDiagnosticText
 SaveRtssFrameLimitToProfile
 SendChordSafe
 SendRtssShortcut
+SetElevatedAutoMouseRuntimeEnabled
 SettingsAddButtonRow
 SettingsAddCheckbox
 SettingsAddChoice

@@ -2290,40 +2290,8 @@ SetElevatedGeometryRuntimeEnabled(enabled) {
 ; Only the automatic half crosses. The helper reads the physical View/Back
 ; button from the same controller and ORs it in itself, so a held button still
 ; works even if this event never arrives.
-ElevatedAutoMouseEventName() {
-    global ScriptPid
-    return "Local\SteamShellAutoMouse-" ScriptPid
-}
 
-EnsureElevatedAutoMouseEvent() {
-    global ElevatedAutoMouseEventHandle
-    if ElevatedAutoMouseEventHandle
-        return true
-    ElevatedAutoMouseEventHandle := DllCall(
-        "Kernel32\CreateEventW",
-        "Ptr", 0,
-        "Int", true,  ; manual reset: the runtime mode persists until changed
-        "Int", false,
-        "WStr", ElevatedAutoMouseEventName(),
-        "Ptr")
-    if !ElevatedAutoMouseEventHandle
-        LogLine(
-            "The automatic-mouse coordination event could not be created ("
-            . A_LastError "). The elevated helper will fall back to the "
-            . "physical View/Back button.", "Warning")
-    return ElevatedAutoMouseEventHandle != 0
-}
 
-SetElevatedAutoMouseRuntimeEnabled(enabled) {
-    global ElevatedAutoMouseEventHandle
-    if !EnsureElevatedAutoMouseEvent()
-        return false
-    functionName := enabled ? "SetEvent" : "ResetEvent"
-    return DllCall(
-        "Kernel32\" functionName,
-        "Ptr", ElevatedAutoMouseEventHandle,
-        "Int") != 0
-}
 
 StartElevatedInputHelper() {
     global EnableElevatedInputHelper, ElevatedHelperPath, ElevatedHelperPid
@@ -2509,24 +2477,6 @@ ElevatedHelperIsVerified() {
     return true
 }
 
-ElevatedHelperOwnsForeground() {
-    if !ElevatedHelperIsVerified()
-        return false
-    foregroundHwnd := 0
-    try foregroundHwnd := WinExist("A")
-    if !foregroundHwnd
-        return false
-    foregroundPid := 0
-    DllCall("GetWindowThreadProcessId", "Ptr", foregroundHwnd,
-        "UInt*", &foregroundPid)
-    if !foregroundPid
-        return false
-    if !GetProcessTokenSecurity(
-        foregroundPid, &foregroundSid, &foregroundSession,
-        &integrityName, &integrityError)
-        return false
-    return integrityName = "High" || integrityName = "System"
-}
 
 ; ==============================================================================
 ; ADMIN + CAPTURE CURRENT SHELL
@@ -4708,114 +4658,11 @@ SaveControllerMappingsToIni() {
 ; process and two that raise a SteamShell window. The elevated helper implements
 ; every other builtin as a fixed keystroke and deliberately declines these, so
 ; the two sets partition the builtin list with no overlap and no gap.
-ControllerBindingIsNormalIntegrityOnly(key) {
-    static NORMAL_INTEGRITY_ACTIONS := Map(
-        "builtin:tabtip", true,
-        "builtin:osk", true,
-        "builtin:explorer", true,
-        "builtin:quickmenu", true,
-        "builtin:controlpanel", true)
-    return NORMAL_INTEGRITY_ACTIONS.Has(StrLower(GetBindingValue(key)))
-}
 
 ; Runs while a High/System-integrity window owns the foreground and the helper is
 ; handling everything else. Keeps its own press/hold state because the caller
 ; clears the shared trackers on this path, and fires nothing but the bindings
 ; above, so a button cannot be serviced by both processes.
-ControllerHandleElevatedForeground(buttons, lt, rt, pressed, released, now, chordActive) {
-    global ControllerChordHoldMs
-    static btnDefs := [
-        ["A", 0x1000], ["B", 0x2000], ["X", 0x4000], ["Y", 0x8000],
-        ["LB", 0x0100], ["RB", 0x0200], ["Start", 0x0010],
-        ["L3", 0x0040], ["R3", 0x0080]]
-    static downTick := Map(
-        "A", 0, "B", 0, "X", 0, "Y", 0, "LB", 0, "RB", 0,
-        "Start", 0, "L3", 0, "R3", 0, "LT", 0, "RT", 0)
-    static longFired := Map(
-        "A", false, "B", false, "X", false, "Y", false,
-        "LB", false, "RB", false, "Start", false,
-        "L3", false, "R3", false, "LT", false, "RT", false)
-    static prevTrigDown := Map("LT", false, "RT", false)
-    ; A fixed list rather than enumerating downTick, so the reset never mutates
-    ; a Map while iterating it.
-    static trackedNames := [
-        "A", "B", "X", "Y", "LB", "RB", "Start", "L3", "R3", "LT", "RT"]
-    static lastCallTick := 0
-
-    ; This runs only while an elevated window is foreground, so between episodes
-    ; it is not called at all and its trackers freeze mid-press. Without this, a
-    ; button held as Task Manager lost focus and released after it regained focus
-    ; would fire a mapping the user never completed.
-    resumed := lastCallTick = 0 || (now - lastCallTick) > 250
-    lastCallTick := now
-
-    ; Mirrors the helper's own suppression: while the Quick Menu or Settings
-    ; chord is physically held, main is timing it and its buttons are not
-    ; mappings.
-    ;
-    ; The automatic half is PUBLISHED to the helper here, on the same tick it is
-    ; computed, so the two processes act on one answer instead of two that could
-    ; not agree. This is the only place it needs publishing, because an elevated
-    ; window being foreground is the only time the helper reads it.
-    autoMouse := AutoMouseModeActive()
-    SetElevatedAutoMouseRuntimeEnabled(autoMouse)
-    viewDown := (buttons & 0x0020) || autoMouse
-    if (resumed || chordActive || !viewDown) {
-        for _, name in trackedNames {
-            downTick[name] := 0
-            longFired[name] := false
-        }
-        prevTrigDown["LT"] := false
-        prevTrigDown["RT"] := false
-        return
-    }
-
-    for def in btnDefs {
-        name := def[1]
-        mask := def[2]
-        if (pressed & mask) {
-            downTick[name] := now
-            longFired[name] := false
-        }
-        if ((buttons & mask) && !longFired[name] && downTick[name]
-            && (now - downTick[name]) >= ControllerChordHoldMs
-            && ControllerBindingIsNormalIntegrityOnly(name ".Long")) {
-            longFired[name] := true
-            ExecuteControllerBinding(name ".Long")
-        }
-        if ((released & mask) && downTick[name]) {
-            if (!longFired[name]
-                && ControllerBindingIsNormalIntegrityOnly(name ".Short"))
-                ExecuteControllerBinding(name ".Short")
-            downTick[name] := 0
-            longFired[name] := false
-        }
-    }
-
-    for _, trigger in ["LT", "RT"] {
-        triggerDown := (trigger = "LT") ? (lt > 30) : (rt > 30)
-        triggerPressed := triggerDown && !prevTrigDown[trigger]
-        triggerReleased := !triggerDown && prevTrigDown[trigger]
-        prevTrigDown[trigger] := triggerDown
-        if (triggerPressed) {
-            downTick[trigger] := now
-            longFired[trigger] := false
-        }
-        if (triggerDown && !longFired[trigger] && downTick[trigger]
-            && (now - downTick[trigger]) >= ControllerChordHoldMs
-            && ControllerBindingIsNormalIntegrityOnly(trigger ".Long")) {
-            longFired[trigger] := true
-            ExecuteControllerBinding(trigger ".Long")
-        }
-        if (triggerReleased && downTick[trigger]) {
-            if (!longFired[trigger]
-                && ControllerBindingIsNormalIntegrityOnly(trigger ".Short"))
-                ExecuteControllerBinding(trigger ".Short")
-            downTick[trigger] := 0
-            longFired[trigger] := false
-        }
-    }
-}
 
 ; Per-tree seam required by SteamShell-Shared.ahk: what this product can add to
 ; a controller diagnostic tick.

@@ -2872,10 +2872,32 @@ Assert-True (
 Assert-True (
     $helperSource -match
         'HelperProduct\s*:=\s*StrLower\(Trim\(ReadArgument\("product",\s*"standalone"\)\)\)\s*=\s*"xfe"\s*\r?\n\s*\?\s*"xfe"\s*:\s*"standalone"' -and
+    # --product=xfe narrows GEOMETRY only now. It used to narrow input as well,
+    # on two grounds that had both stopped being true: that the binary hunts for
+    # steamshell.exe as its parent, which MainImageName on the line above already
+    # answers and which the next assertion pins, and that its input half is
+    # XInput-only, which ended when the helper gained RawInput. The second was
+    # the load-bearing one -- it argued the port would help every pad EXCEPT the
+    # ones the companion exists for.
+    #
+    # Geometry stays narrowed and this still pins it: centring and resizing
+    # elevated windows is shell behaviour, and Xbox FSE owns presentation for the
+    # companion.
     $helperSource -match
         '(?sm)^\s*if \(HelperProduct = "xfe"\) \{[\s\S]*?MainImageName := "steamshell-xfe\.exe"[\s\S]*?' +
-        'HelperInputEnabled := false[\s\S]*?HelperGeometryEnabled := false') (
-    "The helper no longer defaults to the standalone product, or --product=xfe does not narrow it.")
+        'HelperGeometryEnabled := false' -and
+    $helperSource -notmatch 'HelperInputEnabled := false' -and
+    # The two sets must stay disjoint AND cover everything. These three are the
+    # companion's own actions: two are fixed keystrokes the helper can send, and
+    # Builtin:Settings raises one of our own windows so it stays at normal
+    # integrity. Before the port they were in neither list and were dropped by
+    # both processes over an elevated window.
+    $helperSource -match '(?m)^\s*case "taskview":' -and
+    $helperSource -match '(?m)^\s*case "windowsdesktop":' -and
+    $source -match
+        '(?sm)^ControllerBindingIsNormalIntegrityOnly\([^)]*\)\s*\{' +
+        '(?:(?!\n\})[\s\S])*?"builtin:settings", true') (
+    "The helper no longer defaults to the standalone product, or --product=xfe does not narrow geometry.")
 
 # The parent process name must come from --product, not from a literal. A helper
 # still hunting for steamshell.exe would never find an XFE parent, would never

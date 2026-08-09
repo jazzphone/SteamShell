@@ -460,6 +460,13 @@ $sharedSeamAllowed = @(
     # poll timer cancelled. HideControllerTest hands that back to
     # ApplyRuntimeTimers, which cancels it again if it should be.
     "ApplyRuntimeTimers", "PollController",
+    # Widened for the elevated-foreground input path, which moved to
+    # SteamShell-Shared.ahk when the companion gained it. Automatic mouse
+    # mode is a per-product question -- each tree matches the foreground
+    # against its own list -- and the shared handler PUBLISHES the answer to
+    # the helper on the tick it is computed, so both processes act on one
+    # answer instead of two that could disagree.
+    "AutoMouseModeActive",
     # Only SettingsRegisterBuiltField is CALLED from the shared file. The
     # browse, record and mark-dirty seams are passed as CALLBACKS --
     # OnEvent("Click", SettingsProductBrowsePath.Bind(...)) -- and they are on
@@ -495,7 +502,7 @@ $sharedSeamAllowed = @(
 # Restated here, next to the list, and asserted in Assert-SharedParity: changing
 # one without the other fails the build. Update the expectation in the same
 # commit that changes the list, and say in the message why the seam moved.
-$sharedSeamExpectedCount = 42
+$sharedSeamExpectedCount = 43
 
 # Reports same-named functions in both trees whose difference is only naming and
 # formatting -- the drift that a raw similarity score hides.

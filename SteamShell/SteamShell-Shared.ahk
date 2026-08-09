@@ -10514,6 +10514,194 @@ ShowControllerTest(*) {
 }
 
 
+
+; ==============================================================================
+; Elevated foreground: input over a High-integrity window
+; ==============================================================================
+; A High or System integrity window owns the foreground, so this process cannot
+; reach it -- UIPI blocks synthetic input from a lower integrity level. The
+; elevated helper can, and does, for everything in its own closed switch.
+;
+; SHARED, and it was the shell's alone. The helper's --product=xfe mode turned
+; input off, on two recorded grounds that had both stopped being true: that the
+; binary looks for steamshell.exe as its parent, which it has not since
+; MainImageName was parameterised, and that its input half is XInput-only, which
+; ended when the helper gained RawInput. The second was the load-bearing one --
+; it argued the port would help every pad EXCEPT the ones the companion exists
+; for -- and it is the one that is now false.
+;
+; WHAT IS STILL TRUE, and is the whole shape of this: the two processes handle
+; DISJOINT sets and between them drop nothing. The helper takes the fixed
+; keystrokes. Main keeps the five -- six, with the companion's Settings -- that
+; start processes or raise our own windows, because the helper refuses to do
+; either from a High-integrity token. ControllerBindingIsNormalIntegrityOnly is
+; main's half of that split and the helper's switch is the other; a binding
+; missing from both is the failure, and porting this found three of them.
+;
+; Geometry is NOT shared. Centring elevated windows stays shell-only.
+
+ElevatedAutoMouseEventName() {
+    global ScriptPid
+    return "Local\SteamShellAutoMouse-" ScriptPid
+}
+
+EnsureElevatedAutoMouseEvent() {
+    global ElevatedAutoMouseEventHandle
+    if ElevatedAutoMouseEventHandle
+        return true
+    ElevatedAutoMouseEventHandle := DllCall(
+        "Kernel32\CreateEventW",
+        "Ptr", 0,
+        "Int", true,  ; manual reset: the runtime mode persists until changed
+        "Int", false,
+        "WStr", ElevatedAutoMouseEventName(),
+        "Ptr")
+    if !ElevatedAutoMouseEventHandle
+        LogLine(
+            "The automatic-mouse coordination event could not be created ("
+            . A_LastError "). The elevated helper will fall back to the "
+            . "physical View/Back button.", "Warning")
+    return ElevatedAutoMouseEventHandle != 0
+}
+
+SetElevatedAutoMouseRuntimeEnabled(enabled) {
+    global ElevatedAutoMouseEventHandle
+    if !EnsureElevatedAutoMouseEvent()
+        return false
+    functionName := enabled ? "SetEvent" : "ResetEvent"
+    return DllCall(
+        "Kernel32\" functionName,
+        "Ptr", ElevatedAutoMouseEventHandle,
+        "Int") != 0
+}
+
+ControllerBindingIsNormalIntegrityOnly(key) {
+    static NORMAL_INTEGRITY_ACTIONS := Map(
+        "builtin:tabtip", true,
+        "builtin:osk", true,
+        "builtin:explorer", true,
+        "builtin:quickmenu", true,
+        "builtin:controlpanel", true,
+        ; Companion-only, and the same class as quickmenu
+        ; above: it raises one of our own windows.
+        "builtin:settings", true)
+    return NORMAL_INTEGRITY_ACTIONS.Has(StrLower(GetBindingValue(key)))
+}
+
+ElevatedHelperOwnsForeground() {
+    if !ProductElevatedHelperAlive()
+        return false
+    foregroundHwnd := 0
+    try foregroundHwnd := WinExist("A")
+    if !foregroundHwnd
+        return false
+    foregroundPid := 0
+    DllCall("GetWindowThreadProcessId", "Ptr", foregroundHwnd,
+        "UInt*", &foregroundPid)
+    if !foregroundPid
+        return false
+    if !GetProcessTokenSecurity(
+        foregroundPid, &foregroundSid, &foregroundSession,
+        &integrityName, &integrityError)
+        return false
+    return integrityName = "High" || integrityName = "System"
+}
+
+ControllerHandleElevatedForeground(buttons, lt, rt, pressed, released, now, chordActive) {
+    global ControllerChordHoldMs
+    static btnDefs := [
+        ["A", 0x1000], ["B", 0x2000], ["X", 0x4000], ["Y", 0x8000],
+        ["LB", 0x0100], ["RB", 0x0200], ["Start", 0x0010],
+        ["L3", 0x0040], ["R3", 0x0080]]
+    static downTick := Map(
+        "A", 0, "B", 0, "X", 0, "Y", 0, "LB", 0, "RB", 0,
+        "Start", 0, "L3", 0, "R3", 0, "LT", 0, "RT", 0)
+    static longFired := Map(
+        "A", false, "B", false, "X", false, "Y", false,
+        "LB", false, "RB", false, "Start", false,
+        "L3", false, "R3", false, "LT", false, "RT", false)
+    static prevTrigDown := Map("LT", false, "RT", false)
+    ; A fixed list rather than enumerating downTick, so the reset never mutates
+    ; a Map while iterating it.
+    static trackedNames := [
+        "A", "B", "X", "Y", "LB", "RB", "Start", "L3", "R3", "LT", "RT"]
+    static lastCallTick := 0
+
+    ; This runs only while an elevated window is foreground, so between episodes
+    ; it is not called at all and its trackers freeze mid-press. Without this, a
+    ; button held as Task Manager lost focus and released after it regained focus
+    ; would fire a mapping the user never completed.
+    resumed := lastCallTick = 0 || (now - lastCallTick) > 250
+    lastCallTick := now
+
+    ; Mirrors the helper's own suppression: while the Quick Menu or Settings
+    ; chord is physically held, main is timing it and its buttons are not
+    ; mappings.
+    ;
+    ; The automatic half is PUBLISHED to the helper here, on the same tick it is
+    ; computed, so the two processes act on one answer instead of two that could
+    ; not agree. This is the only place it needs publishing, because an elevated
+    ; window being foreground is the only time the helper reads it.
+    autoMouse := AutoMouseModeActive()
+    SetElevatedAutoMouseRuntimeEnabled(autoMouse)
+    viewDown := (buttons & 0x0020) || autoMouse
+    if (resumed || chordActive || !viewDown) {
+        for _, name in trackedNames {
+            downTick[name] := 0
+            longFired[name] := false
+        }
+        prevTrigDown["LT"] := false
+        prevTrigDown["RT"] := false
+        return
+    }
+
+    for def in btnDefs {
+        name := def[1]
+        mask := def[2]
+        if (pressed & mask) {
+            downTick[name] := now
+            longFired[name] := false
+        }
+        if ((buttons & mask) && !longFired[name] && downTick[name]
+            && (now - downTick[name]) >= ControllerChordHoldMs
+            && ControllerBindingIsNormalIntegrityOnly(name ".Long")) {
+            longFired[name] := true
+            ExecuteControllerBinding(name ".Long")
+        }
+        if ((released & mask) && downTick[name]) {
+            if (!longFired[name]
+                && ControllerBindingIsNormalIntegrityOnly(name ".Short"))
+                ExecuteControllerBinding(name ".Short")
+            downTick[name] := 0
+            longFired[name] := false
+        }
+    }
+
+    for _, trigger in ["LT", "RT"] {
+        triggerDown := (trigger = "LT") ? (lt > 30) : (rt > 30)
+        triggerPressed := triggerDown && !prevTrigDown[trigger]
+        triggerReleased := !triggerDown && prevTrigDown[trigger]
+        prevTrigDown[trigger] := triggerDown
+        if (triggerPressed) {
+            downTick[trigger] := now
+            longFired[trigger] := false
+        }
+        if (triggerDown && !longFired[trigger] && downTick[trigger]
+            && (now - downTick[trigger]) >= ControllerChordHoldMs
+            && ControllerBindingIsNormalIntegrityOnly(trigger ".Long")) {
+            longFired[trigger] := true
+            ExecuteControllerBinding(trigger ".Long")
+        }
+        if (triggerReleased && downTick[trigger]) {
+            if (!longFired[trigger]
+                && ControllerBindingIsNormalIntegrityOnly(trigger ".Short"))
+                ExecuteControllerBinding(trigger ".Short")
+            downTick[trigger] := 0
+            longFired[trigger] := false
+        }
+    }
+}
+
 ; Does this process own the given window?
 ;
 ; SHARED because ScriptPid is declared in both trees, which is the whole rule for

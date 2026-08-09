@@ -1451,6 +1451,22 @@ ExecuteBinding(key) {
             SendChordSafe("#g")
         case "ctrlalttab":
             SendChordSafe("^!{Tab}")
+        ; Companion-only actions, and they are here for the invariant stated
+        ; above rather than because this product asked for them. Both are fixed
+        ; keystrokes from the same closed set as the rest; the shell has no such
+        ; bindings, so it can never select them.
+        ;
+        ; Without them the companion's TaskView and WindowsDesktop bindings were
+        ; dropped by BOTH processes over an elevated window -- absent from this
+        ; switch and absent from the normal-integrity list main keeps handling --
+        ; which is exactly the overlap failure the comment above promises cannot
+        ; happen. Builtin:Settings is the third of that set and goes the other
+        ; way: it raises the companion's own window, so it belongs at normal
+        ; integrity with QuickMenu.
+        case "taskview":
+            SendChordSafe("#{Tab}")
+        case "windowsdesktop":
+            SendChordSafe("#d")
     }
 }
 
@@ -1719,7 +1735,26 @@ HelperProduct := StrLower(Trim(ReadArgument("product", "standalone"))) = "xfe"
     ? "xfe" : "standalone"
 if (HelperProduct = "xfe") {
     MainImageName := "steamshell-xfe.exe"
-    HelperInputEnabled := false
+    ; INPUT IS ON FOR BOTH PRODUCTS NOW. It was off here, and the two reasons
+    ; recorded for that have both since stopped being true:
+    ;
+    ;   "it looks for steamshell.exe as its parent" -- it does not, and did not
+    ;   when that was written: MainImageName is set on the line above.
+    ;
+    ;   "the input half would work only for XInput controllers, which is
+    ;   precisely the case XFE exists to handle differently" -- retired when the
+    ;   helper gained RawInput. It now reads whichever backend is configured, so
+    ;   the objection that the port would help every pad EXCEPT the ones the
+    ;   companion exists for no longer holds.
+    ;
+    ; What is left is the plain reason to do it: without this, a controller is
+    ; dead over Task Manager and every other High-integrity window, in the
+    ; product most likely to be driven from a couch with no keyboard.
+    ;
+    ; GEOMETRY STAYS OFF, and that is not an oversight. Centring and resizing
+    ; elevated windows is shell behaviour -- Xbox FSE owns presentation for the
+    ; companion, and a helper that moved windows underneath it would fight the
+    ; thing that is supposed to be in charge.
     HelperGeometryEnabled := false
 }
 identityError := ""

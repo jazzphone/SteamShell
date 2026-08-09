@@ -336,6 +336,10 @@ global RtssPendingFrameCap := 0
 global RtssElevatedFrameCapWrites := true
 global ElevatedHelperPath := ""
 global ElevatedHelperPid := 0
+; Handle for the manual-reset event that tells the elevated helper whether
+; automatic mouse mode is on. Named per parent PID, so it is the same
+; mechanism in both products. See EnsureElevatedAutoMouseEvent.
+global ElevatedAutoMouseEventHandle := 0
 global ElevatedHelperAvailable := false
 global ElevatedHelperLastError := "Not started"
 ; Must match SteamShell.ahk. One payload, embedded once in SteamShell.exe and
@@ -6889,6 +6893,32 @@ PollController() {
         }
         settingsLtDown := false
         settingsRtDown := false
+
+        ; A High or System integrity application owns the foreground. The
+        ; elevated helper reads the same physical controller for this narrow
+        ; interval; stop here so cursor motion and releases are not handled
+        ; twice.
+        ;
+        ; Placed exactly where the shell places it, and for the same reasons:
+        ; after the Quick Menu, the chords and the Settings surface, so their
+        ; own routes stay reachable and can bring a normal-integrity window
+        ; forward; before the View tracking, because everything below this line
+        ; belongs to the process that cannot reach the foreground window.
+        ;
+        ; Not a clean yield. The helper refuses to start processes or raise our
+        ; own windows from a High-integrity token, so TabTip, OSK, Explorer, the
+        ; Quick Menu and this product's Settings stay here at normal integrity --
+        ; exactly the set its switch declines, which is what keeps the two
+        ; processes from both dropping a binding.
+        if ElevatedHelperOwnsForeground() {
+            ControllerHandleElevatedForeground(
+                buttons, lt, rt, pressed, released, now,
+                quickChordDown || settingsComboDown)
+            ResetControllerHoldState(
+                &previousViewDown, downTick, longFired, triggerDown,
+                buttonDefinitions, &viewWasDown)
+            return
+        }
 
         ; View button Steam actions, tracked before the controller-mouse gate so
         ; they work whether or not mouse mode is enabled.
