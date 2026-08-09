@@ -1723,15 +1723,23 @@ def check_view_button_actions(sources):
     use the moment anything else is touched during the hold, or "hold View, press
     A" fires a Steam shortcut underneath the mapping.
     """
+    # The tracker is ControllerTrackViewButton in SteamShell-Shared.ahk now, so
+    # the rule is checked once, where it lives -- and each tree is checked for
+    # still calling it, which is the half that could silently go away.
+    tracker = function_body(sources["SteamShell-Shared.ahk"],
+                            "ControllerTrackViewButton")
+    ok = (tracker
+          and re.search(r"ViewButtonReleased\(\s*\n?\s*now - pressTick, usedAsModifier\)", tracker)
+          and re.search(r"(?s)if !wasDown \{[\s\S]{0,200}?pressTick := now", tracker)
+          and re.search(r"(?s)\|\| lt > 30 \|\| rt > 30[\s\S]{0,120}?usedAsModifier := true", tracker))
+    if not ok:
+        fail("ControllerTrackViewButton must record the press tick and mark the "
+             "press as a modifier use as soon as anything else is touched during "
+             "the hold, then report the hold to ViewButtonReleased.")
     for name in ("SteamShell.ahk", "SteamShell-XFE.ahk"):
-        text = sources[name]
-        ok = (re.search(r"ViewButtonReleased\(\s*\n?\s*now - viewPressTick, viewUsedAsModifier\)", text)
-              and re.search(r"(?s)if !viewWasDown \{[\s\S]{0,200}?viewPressTick := now", text)
-              and re.search(r"(?s)\|\| lt > 30 \|\| rt > 30[\s\S]{0,120}?viewUsedAsModifier := true", text))
-        if not ok:
-            fail(f"{name}: the View button's tap/hold action must be tracked, and a "
-                 "press must be marked as a modifier use as soon as anything else "
-                 "is touched during the hold.")
+        if not re.search(r"ControllerTrackViewButton\(", sources[name]):
+            fail(f"{name} no longer tracks the View button's own press, so its "
+                 "tap and hold actions can never fire.")
     # The rows live in the shared table's "Steam" category, so the shell has to
     # DRAW a Steam page or they are unreachable however they are tagged. That is
     # how they shipped invisible the first time.

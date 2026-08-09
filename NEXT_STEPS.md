@@ -21,6 +21,15 @@ proposed and turned out not to be worth doing as described.
 
 ### G. `PollController` core extraction — done, and unrun
 
+The head is shared too, in pieces. A block diff of the two loops found the tail
+because the tail is contiguous; the head's duplication is INTERLEAVED with gates
+that genuinely differ, so a block diff reports "these differ" and says nothing
+about four routines inside them. Those four are shared now:
+`ControllerDecodeState`, `ControllerButtonEdges`, `ControllerChordFired` (which
+had FOUR copies -- two chords, two products) and `ControllerTrackViewButton`.
+The XINPUT_GAMEPAD byte layout is in one place; it was in three.
+
+
 Shared: `ControllerPrimeHoldTables`, `ControllerApplyStickDeadzone`, and now
 `ControllerPollFrame` — the whole mapping tail, from "the modifier is held" to
 the Guide button. Both loops went from ~330 code lines to ~245, and the heads

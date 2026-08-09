@@ -25,6 +25,9 @@ CommitIniChangesAt
 ControllerApplyStickDeadzone
 ControllerBindingHasLong
 ControllerBindingHoldsMouseButton
+ControllerButtonEdges
+ControllerChordFired
+ControllerDecodeState
 ControllerHeldMouseButtons
 ControllerMouseSafetyTick
 ControllerPrimeHoldTables

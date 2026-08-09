@@ -4234,6 +4234,40 @@ SharedWindowInventoryGet(maxAgeMs := 1000, includeHidden := false) {
     return cached[key]
 }
 
+; The View/Back button's own press, tracked apart from its use as a modifier.
+;
+; In SteamShell-Shared.ahk rather than Common because it calls ViewButtonReleased,
+; which is the seam each product answers for itself -- Steam's menu here, Xbox
+; FSE's there.
+;
+; THE MODIFIER RULE IS THE WHOLE OF IT. View is both a button with an action and
+; the modifier every mapping is held with, so any other input during the hold
+; marks the press as a modifier use and drops its own action on release. "Hold
+; View, press A" fires the A mapping and nothing else.
+;
+; Returns whether View is physically down, which both callers need for their own
+; gating; the tracking state is theirs, by reference, because it lives across
+; ticks.
+ControllerTrackViewButton(buttons, lt, rt, lx, ly, rx, ry, now,
+        &wasDown, &pressTick, &usedAsModifier) {
+    isDown := (buttons & 0x0020) != 0
+    if isDown {
+        if !wasDown {
+            wasDown := true
+            pressTick := now
+            usedAsModifier := false
+        }
+        if ((buttons & ~0x0020) || lt > 30 || rt > 30
+            || lx != 0 || ly != 0 || rx != 0 || ry != 0)
+            usedAsModifier := true
+    } else if wasDown {
+        wasDown := false
+        ViewButtonReleased(now - pressTick, usedAsModifier)
+        usedAsModifier := false
+    }
+    return isDown
+}
+
 ; One tick of controller MAPPING, once the product has decided the mappings are
 ; live: stick to cursor, stick to wheel, then Short/Long for every button and
 ; both triggers, then the D-pad and Guide.

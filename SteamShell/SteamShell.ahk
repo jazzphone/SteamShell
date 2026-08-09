@@ -6983,13 +6983,7 @@ PollController() {
 
     now := A_TickCount
 
-    buttons := NumGet(state, 4, "UShort")
-    lt := NumGet(state, 6, "UChar")
-    rt := NumGet(state, 7, "UChar")
-    lx := NumGet(state, 8, "Short")
-    ly := NumGet(state, 10, "Short")
-    rx := NumGet(state, 12, "Short")
-    ry := NumGet(state, 14, "Short")
+    ControllerDecodeState(state, &buttons, &lt, &rt, &lx, &ly, &rx, &ry)
 
     ; The controller test owns all input while visible so calibration cannot
     ; accidentally launch mapped actions, open overlays, or navigate another app.
@@ -7049,26 +7043,21 @@ PollController() {
     ; keeps the looser chord from firing during play.
     settingsComboNow := ((buttons & 0x0100) && (buttons & 0x0200)
         && (buttons & 0x0040) && (buttons & 0x0080))
-    if (settingsComboNow
+    ; The gates are folded into the held-ness rather than wrapped around it, so
+    ; a surface taking ownership mid-hold CLEARS the measurement instead of
+    ; freezing it -- which is what the old else-branch did by hand.
+    settingsChordEligible := (settingsComboNow
         && !QuickMenuVisible
         && !settingsControllerActive
-        && !StartupRecoveryControllerActive()) {
-        if (!settingsChordSince)
-            settingsChordSince := now
-        if (!settingsChordFired && (now - settingsChordSince >= QuickMenuChordHoldMs)) {
-            settingsChordFired := true
-            try LogLine("Controller Settings chord detected.")
-            try ShowSettingsEditor()
-            return
-        }
-    } else {
-        settingsChordSince := 0
-        settingsChordFired := false
+        && !StartupRecoveryControllerActive())
+    if ControllerChordFired(settingsChordEligible, QuickMenuChordHoldMs, now,
+        &settingsChordSince, &settingsChordFired) {
+        try LogLine("Controller Settings chord detected.")
+        try ShowSettingsEditor()
+        return
     }
 
-    pressed := buttons & ~prevButtons
-    released := (~buttons) & prevButtons
-    prevButtons := buttons
+    ControllerButtonEdges(buttons, &prevButtons, &pressed, &released)
 
     ; Full Settings reserves the analog triggers for category changes. Track
     ; their edges here—even while View/Back is held—so releasing Back cannot
@@ -7133,17 +7122,10 @@ PollController() {
         && !(buttons & 0x0020) && !(buttons & 0x0010)
         && !(buttons & 0x0100) && !(buttons & 0x0200)
         && lt <= 30 && rt <= 30)
-    if (quickChordNow) {
-        if (!quickChordSince)
-            quickChordSince := now
-        if (!quickChordFired && (now - quickChordSince >= QuickMenuChordHoldMs)) {
-            quickChordFired := true
-            ToggleQuickMenu()
-            return
-        }
-    } else {
-        quickChordSince := 0
-        quickChordFired := false
+    if ControllerChordFired(quickChordNow, QuickMenuChordHoldMs, now,
+        &quickChordSince, &quickChordFired) {
+        ToggleQuickMenu()
+        return
     }
 
     ; While the quick menu owns focus, route controller presses to it before
@@ -7207,21 +7189,8 @@ PollController() {
     ; during the hold marks the press as a modifier use and its own action is
     ; dropped on release. "Hold View, press A" therefore fires the A mapping and
     ; nothing else.
-    viewPhysical := (buttons & 0x0020) != 0
-    if viewPhysical {
-        if !viewWasDown {
-            viewWasDown := true
-            viewPressTick := now
-            viewUsedAsModifier := false
-        }
-        if ((buttons & ~0x0020) || lt > 30 || rt > 30
-            || lx != 0 || ly != 0 || rx != 0 || ry != 0)
-            viewUsedAsModifier := true
-    } else if viewWasDown {
-        viewWasDown := false
-        ViewButtonReleased(now - viewPressTick, viewUsedAsModifier)
-        viewUsedAsModifier := false
-    }
+    viewPhysical := ControllerTrackViewButton(buttons, lt, rt, lx, ly, rx, ry, now,
+        &viewWasDown, &viewPressTick, &viewUsedAsModifier)
 
     ; Quick Menu and Settings navigation still require polling when normal
     ; controller mouse/mapping mode is disabled. Stop here before processing any

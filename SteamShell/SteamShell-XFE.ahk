@@ -6611,7 +6611,14 @@ PollController() {
             if ControllerReadState(&state) {
                 ResetControllerEdgeState(downTick, longFired, triggerDown,
                     buttonDefinitions)
-                previousButtons := NumGet(state, 4, "UShort")
+                ; Through the shared decoder like every other read of this
+                ; buffer. This was the third place the XINPUT_GAMEPAD byte
+                ; layout was written out, and a partial one -- offsets 4, 6 and
+                ; 7 only -- which is the shape that goes wrong last and is
+                ; noticed least.
+                ControllerDecodeState(state, &baseButtons, &baseLt, &baseRt,
+                    &baseLx, &baseLy, &baseRx, &baseRy)
+                previousButtons := baseButtons
                 previousViewDown := (previousButtons & 0x0020) != 0
                 viewWasDown := previousViewDown
                 ; The triggers are sampled here for the same reason the buttons
@@ -6619,8 +6626,8 @@ PollController() {
                 ; everything around them was reset, so a trigger held across the
                 ; interruption read as a rising edge afterwards and changed the
                 ; Settings category on its own.
-                settingsLtDown := NumGet(state, 6, "UChar") > 30
-                settingsRtDown := NumGet(state, 7, "UChar") > 30
+                settingsLtDown := baseLt > 30
+                settingsRtDown := baseRt > 30
                 wasDisabled := false
                 ControllerNeedsFreshBaseline := false
             }
@@ -6638,16 +6645,8 @@ PollController() {
         }
 
         now := A_TickCount
-        buttons := NumGet(state, 4, "UShort")
-        lt := NumGet(state, 6, "UChar")
-        rt := NumGet(state, 7, "UChar")
-        lx := NumGet(state, 8, "Short")
-        ly := NumGet(state, 10, "Short")
-        rx := NumGet(state, 12, "Short")
-        ry := NumGet(state, 14, "Short")
-        pressed := buttons & ~previousButtons
-        released := (~buttons) & previousButtons
-        previousButtons := buttons
+        ControllerDecodeState(state, &buttons, &lt, &rt, &lx, &ly, &rx, &ry)
+        ControllerButtonEdges(buttons, &previousButtons, &pressed, &released)
         currentDiagnosticLtDown := lt > 30
         currentDiagnosticRtDown := rt > 30
         ; One line per button edge and per trigger crossing. That is the right
@@ -6683,18 +6682,11 @@ PollController() {
         static settingsChordFired := false
         settingsComboDown := (buttons & 0x0100) && (buttons & 0x0200)
             && (buttons & 0x0040) && (buttons & 0x0080)
-        if settingsComboDown {
-            if !settingsChordSince
-                settingsChordSince := now
-            if (!settingsChordFired && now - settingsChordSince >= QuickMenuChordHoldMs) {
-                settingsChordFired := true
-                LogLine("Controller Settings chord detected [" ActiveInputBackend "].")
-                ShowSettings()
-                return
-            }
-        } else {
-            settingsChordSince := 0
-            settingsChordFired := false
+        if ControllerChordFired(settingsComboDown, QuickMenuChordHoldMs, now,
+            &settingsChordSince, &settingsChordFired) {
+            LogLine("Controller Settings chord detected [" ActiveInputBackend "].")
+            ShowSettings()
+            return
         }
 
         ; Quick Menu: hold L3 + R3 with no conflicting chord buttons.
@@ -6703,19 +6695,12 @@ PollController() {
             && !(buttons & 0x0020) && !(buttons & 0x0010)
             && !(buttons & 0x0100) && !(buttons & 0x0200)
             && lt <= 30 && rt <= 30
-        if quickChordDown {
-            if !quickChordSince
-                quickChordSince := now
-            if (!quickChordFired && now - quickChordSince >= QuickMenuChordHoldMs) {
-                quickChordFired := true
-                LogLine("Controller Quick Menu chord detected on slot "
-                    ActiveControllerIndex ".")
-                ToggleQuickMenu()
-                return
-            }
-        } else {
-            quickChordSince := 0
-            quickChordFired := false
+        if ControllerChordFired(quickChordDown, QuickMenuChordHoldMs, now,
+            &quickChordSince, &quickChordFired) {
+            LogLine("Controller Quick Menu chord detected on slot "
+                ActiveControllerIndex ".")
+            ToggleQuickMenu()
+            return
         }
 
         if QuickMenuVisible {
@@ -6792,24 +6777,8 @@ PollController() {
 
         ; View button Steam actions, tracked before the controller-mouse gate so
         ; they work whether or not mouse mode is enabled.
-        viewDown := (buttons & 0x0020) != 0
-        if viewDown {
-            if !viewWasDown {
-                viewWasDown := true
-                viewPressTick := now
-                viewUsedAsModifier := false
-            }
-            ; Any other input during the hold means View was being used as the
-            ; mapping modifier or to drive the pointer, so its own action is
-            ; suppressed on release.
-            if ((buttons & ~0x0020) || lt > 30 || rt > 30
-                || lx != 0 || ly != 0 || rx != 0 || ry != 0)
-                viewUsedAsModifier := true
-        } else if viewWasDown {
-            viewWasDown := false
-            ViewButtonReleased(now - viewPressTick, viewUsedAsModifier)
-            viewUsedAsModifier := false
-        }
+        viewDown := ControllerTrackViewButton(buttons, lt, rt, lx, ly, rx, ry, now,
+            &viewWasDown, &viewPressTick, &viewUsedAsModifier)
 
         if !EnableControllerMouseMode {
             previousViewDown := false

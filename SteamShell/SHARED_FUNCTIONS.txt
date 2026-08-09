@@ -161,6 +161,7 @@ ControllerProfileLengthKey
 ControllerProfilePath
 ControllerProfileRestCheck
 ControllerProfileRestCheckBegin
+ControllerTrackViewButton
 CopyHealthReport
 CycleDefaultAudioOutput
 CycleDisplayFrequency

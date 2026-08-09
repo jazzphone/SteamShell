@@ -2136,16 +2136,28 @@ function Assert-SharedParity {
     # the other two safe: the press must be marked as a modifier use the moment
     # any other input arrives during the hold, or "hold View, press A" fires a
     # Steam shortcut underneath the mapping.
+    # The tracker is ControllerTrackViewButton in SteamShell-Shared.ahk now, so
+    # the three rules are checked once where they live, and each tree is checked
+    # for still calling it -- which is the half that could silently go away and
+    # take both actions with it.
+    $viewTracker = Get-AhkFunctionBody `
+        -Source (Get-SourceText (Join-Path $projectRoot "SteamShell-Shared.ahk")) `
+        -Name "ControllerTrackViewButton"
+    Assert-True (
+        $viewTracker -ne "" -and
+        $viewTracker -match 'ViewButtonReleased\(\s*\r?\n?\s*now - pressTick, usedAsModifier\)' -and
+        $viewTracker -match '(?s)if !wasDown \{[\s\S]{0,200}?pressTick := now' -and
+        $viewTracker -match
+            '(?s)\|\| lt > 30 \|\| rt > 30[\s\S]{0,120}?usedAsModifier := true') (
+        "ControllerTrackViewButton must record the press tick and mark the press " +
+        "as a modifier use as soon as anything else is touched during the hold, " +
+        "then report the hold to ViewButtonReleased.")
     foreach ($tree in @("SteamShell.ahk", "SteamShell-XFE.ahk")) {
-        $viewTreeText = Get-SourceText (Join-Path $projectRoot $tree)
         Assert-True (
-            $viewTreeText -match 'ViewButtonReleased\(\s*\r?\n?\s*now - viewPressTick, viewUsedAsModifier\)' -and
-            $viewTreeText -match '(?s)if !viewWasDown \{[\s\S]{0,200}?viewPressTick := now' -and
-            $viewTreeText -match
-                '(?s)\|\| lt > 30 \|\| rt > 30[\s\S]{0,120}?viewUsedAsModifier := true') (
-            "${tree}: the View button's tap/hold action must be tracked, and a " +
-            "press must be marked as a modifier use as soon as anything else is " +
-            "touched during the hold.")
+            (Get-SourceText (Join-Path $projectRoot $tree)) -match
+                'ControllerTrackViewButton\(') (
+            "${tree} no longer tracks the View button's own press, so its tap " +
+            "and hold actions can never fire.")
     }
 
     # ...and the page those rows live on has to be one the product DRAWS.

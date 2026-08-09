@@ -434,6 +434,70 @@ SharedPruneCpuSamples(store, liveInventory, graceMs := 30000) {
     return stale.Length
 }
 
+; XINPUT_GAMEPAD, unpacked.
+;
+; The byte layout of the struct, in ONE place. It was written out in both poll
+; loops and a third time, partially, in the companion's fresh-baseline path,
+; which re-reads offsets 4, 6 and 7 to seed its edge state. Three copies of a
+; layout that is fixed by Windows and silently wrong everywhere at once if it is
+; wrong anywhere.
+;
+; Offsets are from the start of XINPUT_STATE: 0 is the packet number, which
+; nothing here uses, then the gamepad struct from 4.
+ControllerDecodeState(state, &buttons, &lt, &rt, &lx, &ly, &rx, &ry) {
+    buttons := NumGet(state, 4, "UShort")
+    lt := NumGet(state, 6, "UChar")
+    rt := NumGet(state, 7, "UChar")
+    lx := NumGet(state, 8, "Short")
+    ly := NumGet(state, 10, "Short")
+    rx := NumGet(state, 12, "Short")
+    ry := NumGet(state, 14, "Short")
+}
+
+; Which buttons went down and which came up since the previous tick.
+;
+; previousButtons is the caller's static, updated here, because forgetting to
+; update it is the failure this hides: edges then fire on every tick for as long
+; as a button is held.
+ControllerButtonEdges(buttons, &previousButtons, &pressed, &released) {
+    pressed := buttons & ~previousButtons
+    released := (~buttons) & previousButtons
+    previousButtons := buttons
+}
+
+; A chord that must be HELD, and fires once.
+;
+; FOUR COPIES OF THIS EXISTED -- the Quick Menu chord and the Settings chord, in
+; each product -- and the three rules they implement were written out in prose in
+; one of them and described as "equivalent" in the others:
+;
+;   1. It must be HELD. Firing on the press edge meant a stray grip during play
+;      could throw a window over a running game.
+;   2. It fires ONCE per hold. Without `fired`, the action repeats every tick
+;      past the threshold.
+;   3. Releasing clears both, so the next hold starts a fresh measurement.
+;
+; The caller keeps the gates that decide whether the chord is eligible at all --
+; those are per-product, because they name each product's own surfaces -- and
+; returns when this returns true, which is rule 3 of the caller's own contract:
+; the press that opened something must not also drive it.
+;
+; `since` and `fired` are the caller's statics, by reference.
+ControllerChordFired(isHeld, holdMs, now, &since, &fired) {
+    if !isHeld {
+        since := 0
+        fired := false
+        return false
+    }
+    if !since
+        since := now
+    if (!fired && now - since >= holdMs) {
+        fired := true
+        return true
+    }
+    return false
+}
+
 ; A startup entry turned into something launchable, or a logged reason it is not.
 ;
 ; The three checks either side of the split were the same in both products, down
