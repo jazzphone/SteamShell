@@ -7804,9 +7804,9 @@ ControllerLearnConsumesReport(data, base, length, device) {
 }
 
 CloseControllerLearner(*) {
-    global LearnActive, LearnGui
+    global LearnActive, LearnGui, SettingsDialogActive
     LearnActive := false
-    ProductSetDialogActive(false)
+    SettingsDialogActive := false
     SetTimer(ControllerLearnTick, 0)
     SetTimer(ControllerLearnBeginSteps, 0)
     SetTimer(ControllerLearnNextStep, 0)
@@ -9483,7 +9483,7 @@ ShowControllerLearner(*) {
     global LearnPromptCtrl, LearnDetailCtrl, LearnProgressCtrl, LearnCaptureUntil
     global LearnLastAccepted, LearnLastFriendly
     global LearnIdentifyDevices, LearnIdentifyReady
-    global MouseHidden
+    global MouseHidden, SettingsDialogActive
     global LearnAnalogBytes, LearnAnalogValues, LearnDpadRetries
     global LearnCountdownCtrl
     ; An active wizard has a window, and this brings it forward. If it does not
@@ -9543,7 +9543,7 @@ ShowControllerLearner(*) {
     ; Treated as a dialog so the assist features stay out of the way and the
     ; controller's own mappings do not fire while it is being pressed for
     ; learning.
-    ProductSetDialogActive(true)
+    SettingsDialogActive := true
 
     ; Everything from LearnActive above to LearnGui below is state the rest of
     ; the process reads, committed before the window that owns it exists. If the

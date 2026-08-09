@@ -381,7 +381,7 @@ global SettingsEditorWindowHeight := 620
 global SettingsEditorScrollBar := 0
 global SettingsEditorFooterControls := []
 global SettingsEditorDividerCtrl := 0
-global SettingsEditorDialogActive := false
+global SettingsDialogActive := false
 global SettingsStartupListView := 0
 global SettingsStartupCommandEdit := 0
 global SettingsStartupSelectedSlot := 1
@@ -3451,11 +3451,6 @@ ControllerReadState(&state) {
 
 ; Per-tree seam required by SteamShell-Shared.ahk: a modal dialog is up, so
 ; controller input must not also drive the shell behind it.
-ProductSetDialogActive(active) {
-    global SettingsEditorDialogActive
-    SettingsEditorDialogActive := active
-}
-
 SharedPersistSettings(changes) {
     return CommitIniChanges(changes)
 }
@@ -6899,7 +6894,7 @@ PollController() {
     global ControllerScrollIntervalMs, ControllerScrollStep, ControllerChordHoldMs
     global QuickMenuVisible, EnableQuickMenu, QuickMenuChordHoldMs
     global MouseHidden
-    global SettingsEditorDialogActive
+    global SettingsDialogActive
     global ControllerTestGui
     global ControllerPollIntervalMs
 
@@ -7135,7 +7130,7 @@ PollController() {
     currentRtDown := rt > 30
     settingsCategoryDirection := 0
     if (settingsPrimaryActive
-        && !SettingsEditorDialogActive
+        && !SettingsDialogActive
         && !(buttons & 0x0020)
         && !(currentLtDown && currentRtDown)) {
         if (currentLtDown && !settingsLtDown)
@@ -7202,7 +7197,7 @@ PollController() {
     ; to the normal configurable mappings so mapped clicks and shortcuts remain
     ; available inside Settings.
     if (settingsControllerActive) {
-        if (SettingsEditorDialogActive || !(buttons & 0x0020)) {
+        if (SettingsDialogActive || !(buttons & 0x0020)) {
             if MouseHidden {
                 SystemCursor("Show")
                 MouseHidden := false
@@ -7210,7 +7205,7 @@ PollController() {
             ResetControllerHoldState(
                 &previousViewDown, downTick, longFired, triggerDown, buttonDefinitions,
                 &viewWasDown)
-            if (SettingsEditorDialogActive || settingsPrimaryActive)
+            if (SettingsDialogActive || settingsPrimaryActive)
                 SettingsEditorHandleController(
                     pressed, lx, ly, rx, ry, settingsCategoryDirection)
             else
@@ -8949,7 +8944,7 @@ AF_SelectConfiguredExe(exe) {
 }
 
 AF_SelectExecutable(prompt) {
-    global AlwaysFocusGui, SettingsGui, SettingsEditorDialogActive
+    global AlwaysFocusGui, SettingsGui, SettingsDialogActive
     if !IsSet(AlwaysFocusGui)
         return ""
 
@@ -8965,12 +8960,12 @@ AF_SelectExecutable(prompt) {
     }
 
     selectedPath := ""
-    SettingsEditorDialogActive := true
+    SettingsDialogActive := true
     try selectedPath := FileSelect(1, A_ProgramFiles, prompt, "Programs (*.exe)")
     catch {
         selectedPath := ""
     } finally {
-        SettingsEditorDialogActive := false
+        SettingsDialogActive := false
         if IsSet(SettingsGui) {
             try SettingsGui.Opt("+AlwaysOnTop")
             try WinSetAlwaysOnTop(1, "ahk_id " SettingsGui.Hwnd)
@@ -9651,7 +9646,7 @@ SettingsEditorNormalizeWindow() {
 }
 
 SettingsEditorMsgBox(message, options := "OK", title := "SteamShell Settings") {
-    global SettingsGui, SettingsEditorDialogActive
+    global SettingsGui, SettingsDialogActive
     SettingsEditorNormalizeWindow()
     dialogOptions := Trim(options)
     ; Not "SettingsGui if it exists": it may be hidden, and a dialog opened from
@@ -9659,11 +9654,11 @@ SettingsEditorMsgBox(message, options := "OK", title := "SteamShell Settings") {
     ownerHwnd := SteamShellDialogOwnerHwnd()
     dialogOptions .= ownerHwnd ? " Owner" ownerHwnd : " 262144"
     result := "Cancel"
-    SettingsEditorDialogActive := true
+    SettingsDialogActive := true
     try {
         result := MsgBox(message, title, dialogOptions)
     } finally {
-        SettingsEditorDialogActive := false
+        SettingsDialogActive := false
     }
     if IsSet(SettingsGui) {
         SettingsEditorNormalizeWindow()
@@ -9673,7 +9668,7 @@ SettingsEditorMsgBox(message, options := "OK", title := "SteamShell Settings") {
 }
 
 SettingsEditorFileSelect(options, startDir, prompt, filter) {
-    global SettingsGui, SettingsEditorDialogActive
+    global SettingsGui, SettingsDialogActive
     settingsHwnd := 0
     if IsSet(SettingsGui) {
         settingsHwnd := SettingsGui.Hwnd
@@ -9681,13 +9676,13 @@ SettingsEditorFileSelect(options, startDir, prompt, filter) {
         try WinSetAlwaysOnTop(0, "ahk_id " settingsHwnd)
     }
     selectedPath := ""
-    SettingsEditorDialogActive := true
+    SettingsDialogActive := true
     try {
         selectedPath := FileSelect(options, startDir, prompt, filter)
     } catch {
         selectedPath := ""
     } finally {
-        SettingsEditorDialogActive := false
+        SettingsDialogActive := false
         if IsSet(SettingsGui) {
             try SettingsGui.Opt("+AlwaysOnTop")
             try WinSetAlwaysOnTop(1, "ahk_id " SettingsGui.Hwnd)
@@ -10459,7 +10454,7 @@ SettingsEditorRevealControl(ctrl) {
 }
 
 SettingsEditorControllerActive() {
-    global SettingsEditorDialogActive, ScriptPid
+    global SettingsDialogActive, ScriptPid
     ; Any window this process owns is a surface the user has to be able to move
     ; around, so this asks that question directly instead of naming windows.
     ;
@@ -10470,7 +10465,7 @@ SettingsEditorControllerActive() {
     ; desktop backdrop would wrongly qualify, is also unfounded: all three
     ; presentation windows are created WS_EX_NOACTIVATE and can never be the
     ; active window. What the list actually did was go stale.
-    if SettingsEditorDialogActive
+    if SettingsDialogActive
         return true
     activeHwnd := 0
     try activeHwnd := WinGetID("A")
@@ -10726,7 +10721,7 @@ SettingsEditorHandlePointer(pressed, rx := 0, ry := 0) {
 }
 
 SettingsEditorHandleController(pressed, lx := 0, ly := 0, rx := 0, ry := 0, settingsCategoryDirection := 0) {
-    global SettingsEditorDirty, SettingsEditorStatusCtrl, SettingsEditorDialogActive
+    global SettingsEditorDirty, SettingsEditorStatusCtrl, SettingsDialogActive
     static stickDir := ""
     static lastStickTick := 0
 
@@ -10755,7 +10750,7 @@ SettingsEditorHandleController(pressed, lx := 0, ly := 0, rx := 0, ry := 0, sett
             pressed |= 0x0008
     }
 
-    if (SettingsEditorDialogActive) {
+    if (SettingsDialogActive) {
         if (pressed & 0x0001) {
             try SendInput("{Left}")
             return
@@ -11945,31 +11940,31 @@ SteamShellDialogOwnerHwnd() {
 ; neither an owner nor topmost can end up behind a fullscreen game with no way
 ; to reach it.
 SteamShellMsgBox(message, options := "OK", title := "SteamShell") {
-    global SettingsEditorDialogActive
+    global SettingsDialogActive
     dialogOptions := Trim(options)
     ownerHwnd := SteamShellDialogOwnerHwnd()
     dialogOptions .= ownerHwnd ? " Owner" ownerHwnd : " 262144"
-    SettingsEditorDialogActive := true
+    SettingsDialogActive := true
     try return MsgBox(message, title, dialogOptions)
     finally {
-        SettingsEditorDialogActive := false
+        SettingsDialogActive := false
         if ownerHwnd
             try WinActivate("ahk_id " ownerHwnd)
     }
 }
 
 SetupAssistantMsgBox(message, options := "OK", title := "SteamShell Setup") {
-    global SetupAssistantGui, SettingsGui, SettingsEditorDialogActive
+    global SetupAssistantGui, SettingsGui, SettingsDialogActive
     dialogOptions := Trim(options)
     ownerHwnd := SteamShellDialogOwnerHwnd()
     if ownerHwnd
         dialogOptions .= " Owner" ownerHwnd
     else
         dialogOptions .= " 262144"
-    SettingsEditorDialogActive := true
+    SettingsDialogActive := true
     try return MsgBox(message, title, dialogOptions)
     finally {
-        SettingsEditorDialogActive := false
+        SettingsDialogActive := false
         if ownerHwnd
             try WinActivate("ahk_id " ownerHwnd)
     }
@@ -12104,7 +12099,7 @@ SetupAssistantSetStatus(message) {
 }
 
 SetupAssistantSelectExecutable(prompt, currentPath := "") {
-    global SetupAssistantGui, SettingsGui, SettingsEditorDialogActive
+    global SetupAssistantGui, SettingsGui, SettingsDialogActive
     if !IsSet(SetupAssistantGui)
         return ""
     try {
@@ -12116,7 +12111,7 @@ SetupAssistantSelectExecutable(prompt, currentPath := "") {
         }
     }
     selectedPath := ""
-    SettingsEditorDialogActive := true
+    SettingsDialogActive := true
     startDirectory := SetupAssistantProgramFilesX86()
     if (currentPath != "") {
         candidateDirectory := ""
@@ -12128,7 +12123,7 @@ SetupAssistantSelectExecutable(prompt, currentPath := "") {
     catch {
         selectedPath := ""
     } finally {
-        SettingsEditorDialogActive := false
+        SettingsDialogActive := false
         if IsSet(SettingsGui) {
             try SettingsGui.Opt("+AlwaysOnTop")
             try WinSetAlwaysOnTop(1, "ahk_id " SettingsGui.Hwnd)
@@ -12185,13 +12180,13 @@ SplitPathName(path) {
 }
 
 SetupAssistantSelectDirectory(prompt, initialDirectory := "") {
-    global SetupAssistantGui, SettingsEditorDialogActive
+    global SetupAssistantGui, SettingsDialogActive
     if !IsSet(SetupAssistantGui)
         return ""
     if (initialDirectory = "" || !DirExist(initialDirectory))
         initialDirectory := A_ProgramFiles
     selectedDirectory := ""
-    SettingsEditorDialogActive := true
+    SettingsDialogActive := true
     try {
         ; +OwnDialogs is per-thread in AutoHotkey, so it has to be set again
         ; here rather than relying on the one applied when the GUI was created.
@@ -12201,7 +12196,7 @@ SetupAssistantSelectDirectory(prompt, initialDirectory := "") {
     } catch {
         selectedDirectory := ""
     } finally {
-        SettingsEditorDialogActive := false
+        SettingsDialogActive := false
         try SetupAssistantGui.Opt("+AlwaysOnTop")
         try WinSetAlwaysOnTop(1, "ahk_id " SetupAssistantGui.Hwnd)
         try WinActivate("ahk_id " SetupAssistantGui.Hwnd)
@@ -13361,7 +13356,7 @@ DisableWindowsAutoLogon(&failureReason) {
 }
 
 AutoLogonDialogMessage(message, options := "OK", title := "SteamShell Auto-Login") {
-    global AutoLogonGui, SettingsEditorDialogActive
+    global AutoLogonGui, SettingsDialogActive
     dialogOptions := Trim(options)
     ; Owner when the Auto-Login window exists, MB_TOPMOST when it does not.
     ;
@@ -13374,9 +13369,9 @@ AutoLogonDialogMessage(message, options := "OK", title := "SteamShell Auto-Login
         dialogOptions .= " Owner" AutoLogonGui.Hwnd
     else
         dialogOptions .= " 262144"
-    SettingsEditorDialogActive := true
+    SettingsDialogActive := true
     try return MsgBox(message, title, dialogOptions)
-    finally SettingsEditorDialogActive := false
+    finally SettingsDialogActive := false
 }
 
 AutoLogonDialogClose(*) {
@@ -13447,7 +13442,7 @@ AutoLogonDialogDisable(*) {
 }
 
 SetupAssistantConfigureAutoLogon(*) {
-    global SetupAssistantGui, AutoLogonGui, SettingsEditorDialogActive
+    global SetupAssistantGui, AutoLogonGui, SettingsDialogActive
     if !A_IsAdmin {
         SetupAssistantMsgBox(
             "Auto-Login configuration requires administrator approval. "
@@ -13502,10 +13497,10 @@ SetupAssistantConfigureAutoLogon(*) {
     cancelButton.OnEvent("Click", AutoLogonDialogClose)
     AutoLogonGui.OnEvent("Close", AutoLogonDialogClose)
     AutoLogonGui.OnEvent("Escape", AutoLogonDialogClose)
-    SettingsEditorDialogActive := true
+    SettingsDialogActive := true
     AutoLogonGui.Show()
     CenterGuiOnTargetMonitor(AutoLogonGui)
-    SettingsEditorDialogActive := false
+    SettingsDialogActive := false
 }
 
 SetupAssistantOpenUacSettings(*) {

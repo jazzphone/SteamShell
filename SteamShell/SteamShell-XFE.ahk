@@ -4180,11 +4180,6 @@ ProductApplyQuickMenuSetting(section, key, value) {
 ; Per-tree seam required by SteamShell-Shared.ahk: a modal dialog is up, so
 ; controller input must not also drive the menu behind it. Each tree already had
 ; a flag for this and they are not the same name.
-ProductSetDialogActive(active) {
-    global SettingsDialogActive
-    SettingsDialogActive := active
-}
-
 ; The seam shared code persists through, bound to this program's INI and PID.
 ;
 ; This wrote each key straight into the live file in a loop and returned false at

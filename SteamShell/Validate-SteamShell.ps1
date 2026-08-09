@@ -788,7 +788,7 @@ Assert-True (
 Assert-True (
     $source -match
         '(?sm)^SettingsEditorControllerActive\(\)\s*\{(?:(?!\n\})[\s\S])*?' +
-        'SettingsEditorDialogActive(?:(?!\n\})[\s\S])*?ScriptPid' -and
+        'SettingsDialogActive(?:(?!\n\})[\s\S])*?ScriptPid' -and
     $source -match
         '(?s)if\s*\(settingsControllerActive\).*?SystemCursor\("Show"\).*?' +
         'SettingsEditorHandlePointer' -and
@@ -1900,11 +1900,11 @@ Assert-True (
         'WinGetPID(?:(?!\n\})[\s\S])*?ScriptPid(?:(?!\n\})[\s\S])*?GetWindow(?:(?!\n\})[\s\S])*?GW_OWNER' -and
     $source -match
         '(?sm)^SettingsEditorFileSelect\((?:(?!\n\})[\s\S])*?' +
-        'SettingsEditorDialogActive\s*:=\s*true(?:(?!\n\})[\s\S])*?' +
+        'SettingsDialogActive\s*:=\s*true(?:(?!\n\})[\s\S])*?' +
         'FileSelect\((?:(?!\n\})[\s\S])*?finally(?:(?!\n\})[\s\S])*?' +
-        'SettingsEditorDialogActive\s*:=\s*false' -and
+        'SettingsDialogActive\s*:=\s*false' -and
     $source -match
-        '(?s)if\s*\(SettingsEditorDialogActive\s*\|\|\s*settingsPrimaryActive\).*?' +
+        '(?s)if\s*\(SettingsDialogActive\s*\|\|\s*settingsPrimaryActive\).*?' +
         'SettingsEditorHandleController.*?else\s*' +
         'SettingsEditorHandlePointer' -and
     $source -match
@@ -2098,7 +2098,7 @@ Assert-True (
     "Upgrade cleanup, intentional updater exit, or Restart Now/Later completion flow is incomplete.")
 Assert-True (
     $source -match
-        '(?sm)^SetupAssistantMsgBox\([^)]*\)(?:(?!\n\})[\s\S])*?Owner(?:(?!\n\})[\s\S])*?SettingsEditorDialogActive' -and
+        '(?sm)^SetupAssistantMsgBox\([^)]*\)(?:(?!\n\})[\s\S])*?Owner(?:(?!\n\})[\s\S])*?SettingsDialogActive' -and
     $source -match
         '(?sm)^DeploySteamShell\([^)]*\)(?:(?!\n\})[\s\S])*?SetupAssistantMsgBox' -and
     $source -match

@@ -21,6 +21,14 @@
 # ------
 #   FunctionName: the reason it must differ
 #
+# ONE ENTRY IS ONE LINE, however long the reason runs. Blank lines and comments
+# separate SECTIONS, not entries, and a reason that wraps onto a second line
+# becomes a second entry named after whatever precedes its first colon. Both
+# mistakes are easy to make from a script: a wrapped reason adds a bogus name
+# that fails as undefined, and a delete-the-paragraph edit silently takes the
+# next entry with it. Delete by matching the one line; count the entries before
+# and after.
+#
 # An entry with no reason FAILS the build. The reason is the entire value here --
 # a bare name is the state this file was created to end. Delete an entry the
 # moment its two copies are merged; a stale entry also fails, so the file cannot
@@ -53,7 +61,6 @@ ProductSettingsScrollBar: the two Settings surfaces are separate implementations
 ProductDataDir: where each program writes what it writes -- the shell reads a global Setup can relocate, the companion is portable and answers A_ScriptDir. Asking through the seam is what let ElevatedRtssRequestPath stop being two functions.
 SettingsRegisterBuiltField: both record a field the shared builders created, and the gate scores them 1.00 because both are a push and a loop. What they push to is not the same thing: the shell keeps an ARRAY of field Maps carrying section, key and type, which its save iterates; the companion keeps a MAP from Section.Key to the control, which its accessors index. Sharing this would mean sharing the registry, and the two registries are shaped for the two different things each product does with them.
 SettingsProductWireDependency: each tree wires the driver control to ITS OWN dependency pass -- SettingsEditorRefreshDependencies in the shell, SettingsRefreshDependencies in the companion -- and the body can only name one of them, which is the same shape as RecordShortcutChord below. The two passes cover different row sets and that is not drift: six of the eight rows the shared spec marks with "dependency" are "product", "standalone" and are never built into the companion's window. The other two are "product", "both" -- the RTSS overlay and frame-limiter control modes -- and both trees now honour those. This entry used to say the companion's body was deliberately empty; it was empty, but those two shared rows reached its window and did nothing, so what was recorded as a design choice was an unimplemented one.
-ProductSetDialogActive: both bodies assign one global and the gate scores them 1.00 because neither calls anything -- but they assign DIFFERENT globals. The shell suppresses controller input through SettingsEditorDialogActive and the companion through SettingsDialogActive, each of which the rest of that tree already reads in several places. Merging them would mean renaming a flag across one tree to satisfy a similarity score.
 ProductSettingBool: the one lookup shared code cannot do. AutoHotkey v2 cannot read a global by a name held in a variable, so QuickMenuToggleTable carries each row's section and key but never its live state, and each product answers for its own globals. The two bodies score 1.00 on call sequence because neither body CALLS anything -- both are a switch over row ids returning globals -- so the similarity is measuring the shape of a lookup table, not shared logic. They name entirely different variables and always will; the companion has no EnableDesktopBlackout and the shell has no EnableGameFocusLite. Merging them would mean declaring every setting of both products in one function, in a tree where Common must declare no globals at all.
 
 # ------------------------------------------------------------------------------
