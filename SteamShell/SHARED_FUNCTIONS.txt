@@ -219,6 +219,7 @@ IsSteamProcess
 IsUsableProfileExe
 LoadControllerMappingsFromIni
 LoadControllerProfile
+LoadSharedSettings
 LogGameCandidateTable
 LogLine
 LogRawLine

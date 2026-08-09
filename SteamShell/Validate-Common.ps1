@@ -1340,6 +1340,57 @@ function Assert-QuickMenuPageChangesRebuild {
     }
 }
 
+# A setting both products read identically is read in one place.
+#
+# LoadSharedSettings holds the twenty-seven keys whose global name, reader,
+# default and clamp range are the same in both trees. A tree that reads one of
+# them again would not fail anything: the value would simply be assigned twice,
+# and whichever ran last would win. That is drift with no symptom until the two
+# defaults disagree, which is precisely what this removed.
+#
+# Checked as "no tree reads these keys itself", not as "the function exists",
+# because the second is satisfied by a function nobody calls.
+function Assert-SharedSettingsReadOnce {
+    param(
+        [Parameter(Mandatory = $true)][string]$ProjectRoot,
+        [switch]$Quiet
+    )
+    $sharedText = Get-SourceText (Join-Path $ProjectRoot "SteamShell-Shared.ahk")
+    $body = Get-AhkFunctionBody -Source $sharedText -Name "LoadSharedSettings"
+    Assert-True ($body -ne "") (
+        "LoadSharedSettings is gone; the settings both products read the same " +
+        "way are back to being read twice.")
+    $keys = @([regex]::Matches($body,
+        '(\w+)\s*:=\s*Read(?:Bool|Int|Text|Number)\(') |
+        ForEach-Object { $_.Groups[1].Value })
+    Assert-True ($keys.Count -ge 20) (
+        "Only $($keys.Count) shared settings reads were found in " +
+        "LoadSharedSettings, and there are twenty-seven. The scan is not " +
+        "seeing them, which makes the rule below vacuous.")
+    foreach ($pair in @(
+        @{ File = "SteamShell.ahk"; Product = "the shell" },
+        @{ File = "SteamShell-XFE.ahk"; Product = "the companion" })) {
+        $text = Get-SourceText (Join-Path $ProjectRoot $pair.File)
+        $load = Get-AhkFunctionBody -Source $text -Name "LoadSettings"
+        Assert-True ($load -match 'LoadSharedSettings\(\)') (
+            "$($pair.File): LoadSettings does not call LoadSharedSettings, so " +
+            "every shared key is left at its startup default in $($pair.Product).")
+        foreach ($name in $keys) {
+            Assert-True ($load -notmatch
+                ('(?m)^\s*' + [regex]::Escape($name) + '\s*:=\s*Read')) (
+                "$($pair.File): LoadSettings reads '$name' itself, and " +
+                "LoadSharedSettings already does. Two reads of one key differ " +
+                "only when somebody edits one of them, which is the drift this " +
+                "consolidation removed.")
+        }
+    }
+    if (-not $Quiet) {
+        Write-Host ("Shared settings: $($keys.Count) keys read once, in " +
+            "LoadSharedSettings, and by neither tree directly.")
+    }
+}
+
+
 # No function may be truncated by a closing brace at column zero.
 #
 # Assertions all over this project bound themselves to a function with

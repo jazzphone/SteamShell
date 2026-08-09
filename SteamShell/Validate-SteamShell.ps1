@@ -3980,6 +3980,7 @@ Assert-RtssUnreadableIsNotOff -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-RtssFrameLimitHoldIsBounded -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-ElevatedHelperReadsEveryBackend -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-NoTruncatingBraces -ProjectRoot $projectRoot -Quiet:$Quiet
+Assert-SharedSettingsReadOnce -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-ValidatorAssertionShapes -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-NoAmbiguousDeindentedBlocks -ProjectRoot $projectRoot -File "SteamShell.ahk" -Quiet:$Quiet
 Assert-NoAmbiguousDeindentedBlocks -ProjectRoot $projectRoot -File "SteamShell-Shared.ahk" -Quiet:$Quiet

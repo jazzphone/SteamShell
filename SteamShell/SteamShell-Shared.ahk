@@ -10311,3 +10311,77 @@ ControllerLogInputChange(buttons, lt, rt, pressed, released) {
     ltDown := currentLt
     rtDown := currentRt
 }
+
+
+; The settings BOTH products read identically, in one place.
+;
+; Twenty-seven keys, each of which was written out twice with the same global
+; name, the same reader, the same default and the same clamp range -- so the two
+; copies could only ever differ by one of them being edited and the other not,
+; which is the definition of drift with no upside.
+;
+; A shared reader is possible here for the reason ProductSettingBool documents
+; as the wall: these globals are declared in BOTH trees under the same names, so
+; this file may name them. That is also the limit of it. A key that exists in
+; one product only, or under a different global, stays in that product's own
+; LoadSettings; there is nowhere shared to put a value whose home is per-tree.
+;
+; ReadBool/ReadInt/ReadNumber resolve to each tree's own wrapper, which binds its
+; own settings path. That is the existing seam and the reason this works without
+; knowing which product compiled it.
+;
+; FIVE COMMON KEYS ARE DELIBERATELY NOT HERE, because unifying them would change
+; behaviour rather than remove duplication:
+;
+;   EnableElevatedFrameCapWrites   default true in the shell, false in the
+;                                  companion -- the shell already runs an
+;                                  elevated helper, the companion's is opt-in
+;   EnableViewButtonActions        default false in the shell, true in the
+;                                  companion
+;   ControllerPollIntervalMs       same default, clamp 5-200 against 8-100
+;   ControllerScrollIntervalMs     same default, clamp 10-1000 against 20-500
+;   ControllerMouseFastMultiplier  same default, clamp 1.0-10.0 against 1-6
+;
+; The two defaults look deliberate and the three ranges look like drift, but
+; "looks like" is not a reason to move a number that decides what a user's
+; existing INI is clamped to. They stay per-tree until somebody decides them.
+LoadSharedSettings() {
+    global ControllerChordHoldMs, ControllerDeadzone, ControllerIndex
+    global ControllerMouseSpeed, ControllerScrollStep
+    global EnableControllerDiagnostics, EnableControllerMouseMode
+    global EnableGameDetectionMenu, EnablePersistentMouseMode
+    global EnableQuickMenu, EnableRTSSIntegration, EnableRawInputProbe
+    global EnableViewHoldAction, EnableViewTapAction, GameLogIncludeTitles
+    global GameLogIntervalMs, GameLogTopN, GameScoreMaxRows
+    global QuickMenuChordHoldMs, RawInputStaleMs, RtssCustomFrameCap
+    global RtssLastFrameCapFps, RtssPresetFrameCap
+    global RtssRestoreFrameLimitOnStartup, RtssUseDllIntegration
+    global ViewHoldInGameMs, ViewHoldMs
+    EnableViewTapAction := ReadBool("Steam", "EnableViewTapAction", true)
+    EnableViewHoldAction := ReadBool("Steam", "EnableViewHoldAction", true)
+    ViewHoldMs := ReadInt("Steam", "ViewHoldMs", 500, 200, 5000)
+    ViewHoldInGameMs := ReadInt("Steam", "ViewHoldInGameMs", 1000, 200, 5000)
+    GameLogTopN := ReadInt("Logging", "GameLogTopN", 3, 1, 10)
+    GameLogIntervalMs := ReadInt("Logging", "GameLogIntervalMs", 3000, 250, 60000)
+    GameLogIncludeTitles := ReadBool("Logging", "GameLogIncludeTitles", true)
+    EnableControllerMouseMode := ReadBool("Controller", "EnableControllerMouseMode", true)
+    EnablePersistentMouseMode := ReadBool("Controller", "EnablePersistentMouseMode", false)
+    EnableRawInputProbe := ReadBool("Controller", "RawInputProbe", false)
+    EnableControllerDiagnostics := ReadBool("Controller", "DiagnosticLogging", false)
+    RawInputStaleMs := ReadInt("Controller", "RawInputStaleMs", 5000, 500, 60000)
+    ControllerIndex := ReadInt("Controller", "ControllerIndex", 0, 0, 3)
+    ControllerDeadzone := ReadInt("Controller", "ControllerDeadzone", 3000, 0, 32000)
+    ControllerMouseSpeed := ReadInt("Controller", "ControllerMouseSpeed", 3200, 200, 12000)
+    ControllerScrollStep := ReadInt("Controller", "ControllerScrollStep", 1, 1, 10)
+    ControllerChordHoldMs := ReadInt("Controller", "ControllerChordHoldMs", 500, 100, 3000)
+    EnableQuickMenu := ReadBool("QuickMenu", "Enable", true)
+    EnableGameDetectionMenu := ReadBool("QuickMenu", "ShowGameDetection", true)
+    GameScoreMaxRows := ReadInt("QuickMenu", "GameScoreMaxRows", 8, 1, 20)
+    QuickMenuChordHoldMs := ReadInt("QuickMenu", "ChordHoldMs", 500, 250, 3000)
+    EnableRTSSIntegration := ReadBool("RTSS", "EnableIntegration", true)
+    RtssUseDllIntegration := ReadBool("RTSS", "UseDllIntegration", true)
+    RtssPresetFrameCap := ReadInt("RTSS", "PresetFrameCap", 158, 0, 1000)
+    RtssCustomFrameCap := ReadInt("RTSS", "CustomFrameCap", 158, 10, 1000)
+    RtssRestoreFrameLimitOnStartup := ReadBool("RTSS", "RestoreFrameLimitOnStartup", true)
+    RtssLastFrameCapFps := ReadInt("RTSS", "LastFrameCapFps", 0, 0, 1000)
+}

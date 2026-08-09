@@ -1004,8 +1004,9 @@ LoadSettings() {
     HeartbeatSeconds := ReadInt("Companion", "HeartbeatSeconds", 60, 5, 3600)
     LogRotateMaxKB := ReadInt(MovedSettingSection("Logging", "Companion", "LogRotateMaxKB"), "LogRotateMaxKB", 256, 32, 8192)
     LogRotateBackups := ReadInt(MovedSettingSection("Logging", "Companion", "LogRotateBackups"), "LogRotateBackups", 2, 0, 10)
-    EnableQuickMenu := ReadBool("QuickMenu", "Enable", true)
-    EnableGameDetectionMenu := ReadBool("QuickMenu", "ShowGameDetection", true)
+    ; The keys both products read identically -- same global, reader,
+    ; default and range. See LoadSharedSettings in SteamShell-Shared.ahk.
+    LoadSharedSettings()
     QuickMenuMainOrderRaw := ReadText("QuickMenu", "MainOrder", QuickMenuMainOrderRaw)
     QuickMenuHiddenItemsRaw := ReadText("QuickMenu", "HiddenItems", "")
     QuickMenuMainOrder := ParseQuickMenuMainOrder(QuickMenuMainOrderRaw)
@@ -1015,16 +1016,11 @@ LoadSettings() {
         if (trimmedName != "")
             QuickMenuHiddenItems[trimmedName] := true
     }
-    GameScoreMaxRows := ReadInt("QuickMenu", "GameScoreMaxRows", 8, 1, 20)
-    QuickMenuChordHoldMs := ReadInt("QuickMenu", "ChordHoldMs", 500, 250, 3000)
     ; Resolved through QuickMenuApplyAccent so an unknown preset or malformed hex
     ; falls back to the default instead of reaching the painter.
     QuickMenuApplyAccent(
         ReadText("QuickMenu", "AccentColor", "Purple"),
         ReadText("QuickMenu", "AccentColorCustom", "107C10"))
-    EnableControllerMouseMode := ReadBool("Controller", "EnableControllerMouseMode", true)
-    EnablePersistentMouseMode := ReadBool(
-        "Controller", "EnablePersistentMouseMode", false)
     ; Automatic mouse mode. Both gates must pass: the toggle allows the feature,
     ; the list decides where it applies.
     EnableAutoMouseMode := ReadBool(MovedSettingSection("Features", "Controller", "EnableAutoMouseMode"), "EnableAutoMouseMode", true)
@@ -1038,30 +1034,18 @@ LoadSettings() {
             . "'; using Auto.", "Warning")
         ControllerBackend := "auto"
     }
-    EnableControllerDiagnostics := ReadBool("Controller", "DiagnosticLogging", false)
-    EnableRawInputProbe := ReadBool("Controller", "RawInputProbe", false)
-    RawInputStaleMs := ReadInt("Controller", "RawInputStaleMs", 5000, 500, 60000)
-    ControllerIndex := ReadInt("Controller", "ControllerIndex", 0, 0, 3)
     ControllerPollIntervalMs := ReadInt("Controller", "ControllerPollIntervalMs", 15, 8, 100)
-    ControllerDeadzone := ReadInt("Controller", "ControllerDeadzone", 3000, 0, 32000)
     ; Bounds match standalone's deliberately: this is one setting, and the Quick
     ; Menu row that steps it is shared. A range the row can leave -- or one the
     ; row cannot reach -- makes the row lie, showing a value the next reload
     ; clamps away. Widened rather than narrowed so no configured value is ever
     ; silently reduced.
-    ControllerMouseSpeed := ReadInt("Controller", "ControllerMouseSpeed", 3200, 200, 12000)
     ControllerMouseFastMultiplier := ReadNumber("Controller", "ControllerMouseFastMultiplier", 2.5, 1, 6)
     ControllerScrollIntervalMs := ReadInt("Controller", "ControllerScrollIntervalMs", 80, 20, 500)
-    ControllerScrollStep := ReadInt("Controller", "ControllerScrollStep", 1, 1, 10)
-    ControllerChordHoldMs := ReadInt("Controller", "ControllerChordHoldMs", 500, 100, 3000)
     SteamMenuShortcut := ReadText("Steam", "MenuShortcut", "^1")
     SteamQuickAccessShortcut := ReadText("Steam", "QuickAccessShortcut", "^2")
     SteamOverlayShortcut := ReadText("Steam", "OverlayShortcut", "+{Tab}")
     EnableViewSteamActions := ReadBool("Steam", "EnableViewButtonActions", true)
-    EnableViewTapAction := ReadBool("Steam", "EnableViewTapAction", true)
-    EnableViewHoldAction := ReadBool("Steam", "EnableViewHoldAction", true)
-    ViewHoldMs := ReadInt("Steam", "ViewHoldMs", 500, 200, 5000)
-    ViewHoldInGameMs := ReadInt("Steam", "ViewHoldInGameMs", 1000, 200, 5000)
     EnableStartupPrograms := ReadBool("StartupPrograms", "Enable", true)
     StartupProgramDelayMs := ReadInt("StartupPrograms", "DelayMs", 2000, 0, 600000)
     StartupProgramStaggerMs := ReadInt("StartupPrograms", "StaggerMs", 1200, 0, 30000)
@@ -1083,9 +1067,6 @@ LoadSettings() {
     ; nothing, and no message said why. See NormalizeGameLogMode.
     GameLogMode := NormalizeGameLogMode(ReadText("Logging", "GameLogMode", "OFF"))
     EnableGameScoreLogging := GameLogMode != "OFF"
-    GameLogTopN := ReadInt("Logging", "GameLogTopN", 3, 1, 10)
-    GameLogIntervalMs := ReadInt("Logging", "GameLogIntervalMs", 3000, 250, 60000)
-    GameLogIncludeTitles := ReadBool("Logging", "GameLogIncludeTitles", true)
     AssistScoreFullscreen := ReadInt("Assist", "ScoreFullscreen", 70, 0, 300)
     AssistScoreBorderlessLarge := ReadInt("Assist", "ScoreBorderlessLarge", 45, 0, 300)
     AssistScoreTitleBonus := ReadInt("Assist", "ScoreTitleBonus", 10, 0, 300)
@@ -1130,9 +1111,7 @@ LoadSettings() {
         MouseParkEdge := "right"
     ParkYPercent := ReadNumber(MovedSettingSection("MousePark", "Cursor", "MouseParkYPercent"), "MouseParkYPercent", 0.50, 0.05, 0.95)
     ForegroundPollMs := ReadInt("Cursor", "ForegroundPollMs", 500, 250, 5000)
-    EnableRTSSIntegration := ReadBool("RTSS", "EnableIntegration", true)
     RtssPath := ReadText("RTSS", "Path", "C:\Program Files (x86)\RivaTuner Statistics Server\RTSS.exe")
-    RtssUseDllIntegration := ReadBool("RTSS", "UseDllIntegration", true)
     if !RtssUseDllIntegration
         ShutdownRtssHooksApi()
     RtssOverlayControlMode := StrLower(ReadText("RTSS", "OverlayControlMode", "separate"))
@@ -1140,9 +1119,6 @@ LoadSettings() {
     RtssOverlayOnShortcut := ReadText("RTSS", "OverlayOnShortcut", "^+1")
     RtssOverlayOffShortcut := ReadText("RTSS", "OverlayOffShortcut", "^+2")
     RtssFrameLimiterControlMode := StrLower(ReadText("RTSS", "FrameLimiterControlMode", "separate"))
-    RtssPresetFrameCap := ReadInt("RTSS", "PresetFrameCap", 158, 0, 1000)
-    RtssCustomFrameCap := ReadInt("RTSS", "CustomFrameCap", 158, 10, 1000)
-    RtssRestoreFrameLimitOnStartup := ReadBool("RTSS", "RestoreFrameLimitOnStartup", true)
     ; DEFAULT FALSE, and that default is the feature. XFE is chosen because
     ; nothing about it is elevated; this is the user deciding otherwise for the
     ; one thing that cannot work any other way. See StartElevatedRtssHelper.
@@ -1160,7 +1136,6 @@ LoadSettings() {
     RtssLastFrameCapMode := StrLower(Trim(ReadText("RTSS", "LastFrameCapMode", "")))
     if !RtssFrameCapModeIsKnown(RtssLastFrameCapMode)
         RtssLastFrameCapMode := ""
-    RtssLastFrameCapFps := ReadInt("RTSS", "LastFrameCapFps", 0, 0, 1000)
     RtssCustomFrameCapShortcut := ReadText("RTSS", "CustomFrameCapShortcut", "^+f")
     RtssFrameLimiterOnShortcut := ReadText("RTSS", "FrameLimiterOnShortcut", "^+5")
     RtssFrameLimiterOffShortcut := ReadText("RTSS", "FrameLimiterOffShortcut", "^+6")

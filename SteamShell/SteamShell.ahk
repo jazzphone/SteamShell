@@ -3559,10 +3559,9 @@ LoadSettings() {
     ; Same keys, same defaults and same bounds as the companion, because it is
     ; the same feature reading the same section of the same-shaped file.
     EnableViewSteamActions := ReadBool("Steam", "EnableViewButtonActions", false)
-    EnableViewTapAction := ReadBool("Steam", "EnableViewTapAction", true)
-    EnableViewHoldAction := ReadBool("Steam", "EnableViewHoldAction", true)
-    ViewHoldMs := ReadInt("Steam", "ViewHoldMs", 500, 200, 5000)
-    ViewHoldInGameMs := ReadInt("Steam", "ViewHoldInGameMs", 1000, 200, 5000)
+    ; The keys both products read identically -- same global, reader,
+    ; default and range. See LoadSharedSettings in SteamShell-Shared.ahk.
+    LoadSharedSettings()
 
     EnableElevatedInputHelper := ReadBool("Features", "EnableElevatedInputHelper", true)
     EnableSplashScreen := ReadBool("Features", "EnableSplashScreen", true)
@@ -3673,9 +3672,6 @@ LoadSettings() {
 
     GameLogMode := NormalizeGameLogMode(IniReadS("Logging", "GameLogMode", "OFF"))
     EnableGameScoreLogging := GameLogMode != "OFF"
-    GameLogTopN := ReadInt("Logging", "GameLogTopN", 3, 1, 10)
-    GameLogIntervalMs := ReadInt("Logging", "GameLogIntervalMs", 3000, 250, 60000)
-    GameLogIncludeTitles := ReadBool("Logging", "GameLogIncludeTitles", true)
     GameLogRejectNearCandidates := ReadBool("Logging", "GameLogRejectNearCandidates", true)
     GameLogRejectMinAreaPercent := ReadNumber("Logging", "GameLogRejectMinAreaPercent", 0.85, 0.10, 1.00)
     LogRotateMaxKB := ReadInt("Logging", "LogRotateMaxKB", 256, 32, 8192)
@@ -3720,8 +3716,6 @@ LauncherCleanupAudioPeakThreshold := ReadNumber("LauncherCleanup", "AudioPeakThr
     LauncherCleanupExcludeSet["steamshell.exe"] := true
 
     ; Controller mouse mode (XInput / Xbox)
-    EnableControllerMouseMode := ReadBool("Controller", "EnableControllerMouseMode", true)
-    EnablePersistentMouseMode := ReadBool("Controller", "EnablePersistentMouseMode", false)
     ControllerBackend := StrLower(ReadText("Controller", "Backend", "auto"))
     if (ControllerBackend != "xinput" && ControllerBackend != "rawinput"
         && ControllerBackend != "auto") {
@@ -3729,22 +3723,10 @@ LauncherCleanupAudioPeakThreshold := ReadNumber("LauncherCleanup", "AudioPeakThr
             . "'; using auto.", "Warning")
         ControllerBackend := "auto"
     }
-    EnableRawInputProbe := ReadBool("Controller", "RawInputProbe", false)
-    EnableControllerDiagnostics := ReadBool("Controller", "DiagnosticLogging", false)
-    RawInputStaleMs := ReadInt("Controller", "RawInputStaleMs", 5000, 500, 60000)
-    ControllerIndex := ReadInt("Controller", "ControllerIndex", 0, 0, 3)
     ControllerPollIntervalMs := ReadInt("Controller", "ControllerPollIntervalMs", 15, 5, 200)
-    ControllerDeadzone := ReadInt("Controller", "ControllerDeadzone", 3000, 0, 32000)
-    ControllerMouseSpeed := ReadInt("Controller", "ControllerMouseSpeed", 3200, 200, 12000)
     ControllerMouseFastMultiplier := ReadNumber("Controller", "ControllerMouseFastMultiplier", 2.5, 1.0, 10.0)
     ControllerScrollIntervalMs := ReadInt("Controller", "ControllerScrollIntervalMs", 80, 10, 1000)
-    ControllerScrollStep := ReadInt("Controller", "ControllerScrollStep", 1, 1, 10)
-    ControllerChordHoldMs := ReadInt("Controller", "ControllerChordHoldMs", 500, 100, 3000)
 
-    EnableQuickMenu := ReadBool("QuickMenu", "Enable", true)
-    EnableGameDetectionMenu := ReadBool("QuickMenu", "ShowGameDetection", true)
-    GameScoreMaxRows := ReadInt("QuickMenu", "GameScoreMaxRows", 8, 1, 20)
-    QuickMenuChordHoldMs := ReadInt("QuickMenu", "ChordHoldMs", 500, 250, 3000)
     TaskForceCloseHoldMs := ReadInt("QuickMenu", "TaskForceCloseHoldMs", 1200, 600, 3000)
     QuickMenuMainOrderRaw := IniReadS(
         "QuickMenu", "MainOrder",
@@ -3763,9 +3745,7 @@ LauncherCleanupAudioPeakThreshold := ReadNumber("LauncherCleanup", "AudioPeakThr
             QuickMenuHiddenItems[itemName] := true
     }
 
-    EnableRTSSIntegration := ReadBool("RTSS", "EnableIntegration", true)
     RtssPath := IniReadS("RTSS","Path","C:\Program Files (x86)\RivaTuner Statistics Server\RTSS.exe")
-    RtssUseDllIntegration := ReadBool("RTSS", "UseDllIntegration", true)
     if !RtssUseDllIntegration
         ShutdownRtssHooksApi()
     RtssOverlayControlMode := StrLower(IniReadS("RTSS","OverlayControlMode","Separate"))
@@ -3777,9 +3757,6 @@ LauncherCleanupAudioPeakThreshold := ReadNumber("LauncherCleanup", "AudioPeakThr
     RtssFrameLimiterControlMode := StrLower(IniReadS("RTSS","FrameLimiterControlMode","Separate"))
     if (RtssFrameLimiterControlMode != "toggle" && RtssFrameLimiterControlMode != "separate")
         RtssFrameLimiterControlMode := "separate"
-    RtssPresetFrameCap := ReadInt("RTSS", "PresetFrameCap", 158, 0, 1000)
-    RtssCustomFrameCap := ReadInt("RTSS", "CustomFrameCap", 158, 10, 1000)
-    RtssRestoreFrameLimitOnStartup := ReadBool("RTSS", "RestoreFrameLimitOnStartup", true)
     RtssElevatedFrameCapWrites := ReadBool("RTSS", "EnableElevatedFrameCapWrites", true)
     ; Reloading settings re-arms the frame cap.
     ;
@@ -3794,7 +3771,6 @@ LauncherCleanupAudioPeakThreshold := ReadNumber("LauncherCleanup", "AudioPeakThr
     RtssLastFrameCapMode := StrLower(Trim(IniReadS("RTSS","LastFrameCapMode","")))
     if !RtssFrameCapModeIsKnown(RtssLastFrameCapMode)
         RtssLastFrameCapMode := ""
-    RtssLastFrameCapFps := ReadInt("RTSS", "LastFrameCapFps", 0, 0, 1000)
     RtssCustomFrameCapShortcut := IniReadS("RTSS","CustomFrameCapShortcut","^+f")
     RtssFrameLimiterOnShortcut := IniReadS("RTSS","FrameLimiterOnShortcut","^+5")
     RtssFrameLimiterOffShortcut := IniReadS("RTSS","FrameLimiterOffShortcut","^+6")
