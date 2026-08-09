@@ -1483,6 +1483,59 @@ def _has_inline_body(keyword, rest):
     return False
 
 
+def check_product_surfaces(sources):
+    """Every window a TREE builds must be named in PRODUCT_SURFACES.txt.
+
+    KEPT IN STEP WITH Assert-ProductSurfaces in Validate-Common.ps1.
+
+    An INVENTORY, not a similarity measure, and that is the point. The
+    fingerprint gate needs the same name in both trees, so a surface only one
+    tree has never enters it -- the controller test sat in the shell for its
+    whole life and nothing ever asked whether the companion should have it. The
+    cross-name detector is the backstop for a surface both trees have under
+    different names, and for the mapping editor it does not reach: 0.33 on call
+    sequence with three shared calls is what two hand-written UIs over one data
+    model look like, and the threshold cannot come down that far without
+    drowning the report.
+
+    A Gui built in SteamShell-Shared.ahk needs no entry. Its absence is what
+    says the surface is already shared, so the file shrinks as the products
+    converge instead of growing.
+    """
+    manifest = {}
+    path = ROOT / "PRODUCT_SURFACES.txt"
+    if not path.exists():
+        fail("PRODUCT_SURFACES.txt is missing; every window a tree builds is "
+             "recorded there with the reason it is not built once.")
+        return
+    for index, line in enumerate(read_source("PRODUCT_SURFACES.txt").split("\n"), 1):
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        name, _, reason = line.partition(":")
+        if not reason.strip():
+            fail(f"PRODUCT_SURFACES.txt:{index} lists '{name.strip()}' with no "
+                 "reason. A bare name is the state this file exists to end.")
+            continue
+        manifest[name.strip().lower()] = reason.strip()
+    built = {}
+    for tree in ("SteamShell.ahk", "SteamShell-XFE.ahk"):
+        for name, line, body in function_list(sources[tree]):
+            code = "\n".join(strip_comments(l) for l in body)
+            if re.search(r"(?<![.\w])Gui\(", code):
+                built.setdefault(name.lower(), []).append(f"{tree}:{line}")
+    for name, places in sorted(built.items()):
+        if name not in manifest:
+            fail(f"{places[0]} builds a Gui in {name}(), which PRODUCT_SURFACES.txt "
+                 "does not list. A window one product has and the other does not "
+                 "is a decision -- record why this tree builds its own, or move it "
+                 "to SteamShell-Shared.ahk so both get it.")
+    for name in sorted(set(manifest) - set(built)):
+        fail(f"PRODUCT_SURFACES.txt lists '{name}', which no longer builds a Gui "
+             "in either tree. Remove the entry -- a stale one turns this file "
+             "into a list nobody revisits, which is what it exists to prevent.")
+
+
 def check_local_shadows_call(sources):
     """A local that shadows something callable, per FUNCTION rather than per file.
 
@@ -1917,7 +1970,8 @@ def check_source_encoding():
     found" and means "unreadable".
     """
     for name in ALL_FILES + ["SHARED_FUNCTIONS.txt", "COMMON_FUNCTIONS.txt",
-                             "DIVERGENT_FUNCTIONS.txt", "CROSS_NAME_DUPLICATES.txt"]:
+                             "DIVERGENT_FUNCTIONS.txt", "CROSS_NAME_DUPLICATES.txt",
+                             "PRODUCT_SURFACES.txt"]:
         path = ROOT / name
         if not path.exists():
             continue
@@ -2110,6 +2164,7 @@ def main():
     check_settings_rows_reach_consumers(sources)
     check_ambiguous_deindented_blocks(sources)
     check_local_shadows_call(sources)
+    check_product_surfaces(sources)
     check_quickmenu_rows(sources)
     check_schema_versions()
     check_cross_name_anchors(sources)

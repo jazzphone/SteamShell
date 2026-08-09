@@ -978,6 +978,87 @@ function Assert-QuickMenuRows {
 # checking nothing. So the pattern must stay ANCHORED -- see
 # Get-CountedPatternLiterals below.
 
+# Every window a TREE builds must be named in PRODUCT_SURFACES.txt.
+#
+# KEPT IN STEP WITH check_product_surfaces in Replay-Validation.py.
+#
+# An INVENTORY, not a similarity measure, and that is the point. The fingerprint
+# gate needs the same name in both trees, so a surface only one tree has never
+# enters it -- the controller test sat in the shell for its whole life and
+# nothing ever asked whether the companion should have it. The cross-name
+# detector is the backstop for a surface both trees have under different names,
+# and for the mapping editor it does not reach: 0.33 on call sequence with three
+# shared calls is what two hand-written UIs over one data model look like.
+#
+# A Gui built in SteamShell-Shared.ahk needs no entry. Its absence is what says
+# the surface is already shared, so this file shrinks as the products converge.
+function Assert-ProductSurfaces {
+    param(
+        [Parameter(Mandatory = $true)][string]$ProjectRoot,
+        [switch]$Quiet
+    )
+    $path = Join-Path $ProjectRoot "PRODUCT_SURFACES.txt"
+    if (-not (Test-Path $path)) {
+        Assert-True $false (
+            "PRODUCT_SURFACES.txt is missing; every window a tree builds is " +
+            "recorded there with the reason it is not built once.")
+        return
+    }
+    $manifest = @{}
+    $lineNumber = 0
+    foreach ($line in (Get-SourceText $path) -split "`n") {
+        $lineNumber++
+        $trimmed = $line.Trim()
+        if ($trimmed -eq "" -or $trimmed.StartsWith("#")) { continue }
+        $split = $trimmed.IndexOf(":")
+        if ($split -lt 1 -or $trimmed.Substring($split + 1).Trim() -eq "") {
+            Assert-True $false (
+                "PRODUCT_SURFACES.txt:${lineNumber} lists a surface with no " +
+                "reason. A bare name is the state this file exists to end.")
+            continue
+        }
+        $manifest[$trimmed.Substring(0, $split).Trim().ToLowerInvariant()] = $true
+    }
+    $built = @{}
+    foreach ($tree in @("SteamShell.ahk", "SteamShell-XFE.ahk")) {
+        $text = Get-SourceText (Join-Path $ProjectRoot $tree)
+        foreach ($function in (Get-AhkFunctionMap -Text $text)) {
+            $code = $function.Body -replace '"(?:[^"`]|`.)*"', '""'
+            $code = ($code -split "`n" |
+                ForEach-Object { $_ -replace '(?<!`);.*$', '' }) -join "`n"
+            if ($code -match '(?<![.\w])Gui\(') {
+                $key = $function.Name.ToLowerInvariant()
+                if (-not $built.ContainsKey($key)) {
+                    $built[$key] = "${tree}:$($function.Line)"
+                }
+            }
+        }
+    }
+    foreach ($key in ($built.Keys | Sort-Object)) {
+        if (-not $manifest.ContainsKey($key)) {
+            Assert-True $false (
+                "$($built[$key]) builds a Gui in ${key}(), which " +
+                "PRODUCT_SURFACES.txt does not list. A window one product has " +
+                "and the other does not is a decision -- record why this tree " +
+                "builds its own, or move it to SteamShell-Shared.ahk so both " +
+                "get it.")
+        }
+    }
+    foreach ($key in ($manifest.Keys | Sort-Object)) {
+        if (-not $built.ContainsKey($key)) {
+            Assert-True $false (
+                "PRODUCT_SURFACES.txt lists '${key}', which no longer builds a " +
+                "Gui in either tree. Remove the entry -- a stale one turns this " +
+                "file into a list nobody revisits, which is what it exists to " +
+                "prevent.")
+        }
+    }
+    if (-not $Quiet) {
+        Write-Host ("Product surfaces: $($built.Count) windows built per tree, " +
+            "each recorded with the reason it is not built once.")
+    }
+}
+
 # What a counted pattern needs the subject to still contain.
 #
 # KEPT IN STEP WITH counted_pattern_literals in Replay-Validation.py.
