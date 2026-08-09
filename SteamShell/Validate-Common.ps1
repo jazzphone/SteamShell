@@ -918,6 +918,65 @@ function Assert-QuickMenuRows {
     }
 }
 
+# The two products' score-weight tables must offer the same KEYS.
+#
+# KEPT IN STEP WITH check_game_score_weight_keys in Replay-Validation.py.
+#
+# XfeGameScoreWeights and WindowEngineScoreWeights are correctly two functions:
+# each fills the same shaped Map from its own settings namespace, and passing
+# eleven values across a boundary to rebuild a Map the caller already holds would
+# be longer and no safer.
+#
+# The KEY NAMES are not per-product. GameWindowShapeVerdict and
+# GameWindowCpuVerdict index them by name for both, so a key renamed on one side
+# does not fail to compile and does not throw -- AutoHotkey returns nothing for a
+# missing Map key and the verdict quietly scores against an empty weight. The
+# product that still has the key keeps working, which is what makes it hard to
+# notice. This is the only thing asserting that contract.
+function Assert-GameScoreWeightKeys {
+    param(
+        [Parameter(Mandatory = $true)][string]$ProjectRoot,
+        [switch]$Quiet
+    )
+    $tables = @{}
+    foreach ($pair in @(
+        @{ Tree = "SteamShell.ahk";     Function = "WindowEngineScoreWeights" },
+        @{ Tree = "SteamShell-XFE.ahk"; Function = "XfeGameScoreWeights" })) {
+        $body = Get-AhkFunctionBody `
+            -Source (Get-SourceText (Join-Path $ProjectRoot $pair.Tree)) `
+            -Name $pair.Function
+        Assert-True ($body -ne "") (
+            "$($pair.Tree) defines no $($pair.Function)(); the shared scorers " +
+            "index its keys.")
+        if ($body -eq "") { return }
+        $keys = New-Object System.Collections.Generic.HashSet[string]
+        foreach ($m in [regex]::Matches($body, '"(\w+)"\s*,')) {
+            [void]$keys.Add($m.Groups[1].Value)
+        }
+        Assert-True ($keys.Count -ge 8) (
+            "$($pair.Tree): only $($keys.Count) weight keys were read from " +
+            "$($pair.Function); the scan is not seeing the table.")
+        if ($keys.Count -lt 8) { return }
+        $tables[$pair.Function] = $keys
+    }
+    foreach ($side in @(
+        @{ Has = "WindowEngineScoreWeights"; Missing = "XfeGameScoreWeights"; Product = "companion" },
+        @{ Has = "XfeGameScoreWeights"; Missing = "WindowEngineScoreWeights"; Product = "shell" })) {
+        foreach ($key in @($tables[$side.Has] |
+            Where-Object { -not $tables[$side.Missing].Contains($_) } | Sort-Object)) {
+            Assert-True $false (
+                "$($side.Has) offers the weight '$key' and $($side.Missing) does " +
+                "not. The shared scorers index weights by name for both products, " +
+                "so the $($side.Product) scores against an empty value with " +
+                "nothing thrown.")
+        }
+    }
+    if (-not $Quiet) {
+        Write-Host ("Game score weights: $($tables['WindowEngineScoreWeights'].Count) " +
+            "keys, identical in both products.")
+    }
+}
+
 # Each product's controller-binding table, and the two things it must be.
 #
 # KEPT IN STEP WITH check_binding_label_tables in Replay-Validation.py.

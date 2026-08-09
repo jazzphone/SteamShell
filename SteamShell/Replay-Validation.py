@@ -1362,6 +1362,51 @@ def check_ambiguous_deindented_blocks(sources):
                  "brace the block.")
 
 
+def check_game_score_weight_keys(sources):
+    """The two products' score-weight tables must offer the same KEYS.
+
+    KEPT IN STEP WITH Assert-GameScoreWeightKeys in Validate-Common.ps1.
+
+    XfeGameScoreWeights and WindowEngineScoreWeights are correctly two functions:
+    each fills the same shaped Map from its own settings namespace, Assist* in
+    one and bare names in the other, and passing eleven values across a boundary
+    to rebuild a Map the caller already holds would be longer and no safer.
+
+    What is NOT per-product is the key names. GameWindowShapeVerdict and
+    GameWindowCpuVerdict in this file index them by name for both products, so a
+    key renamed or dropped on one side does not fail to compile and does not
+    throw -- AutoHotkey's Map returns nothing for a missing key and the verdict
+    quietly scores against an empty weight. The product that still has the key
+    keeps working, which is what makes it hard to notice.
+
+    So the keys are the contract, and this is the only thing asserting it.
+    """
+    keys = {}
+    for name, fn in (("SteamShell.ahk", "WindowEngineScoreWeights"),
+                     ("SteamShell-XFE.ahk", "XfeGameScoreWeights")):
+        body = function_body(sources[name], fn)
+        if not body:
+            fail(f"{name} defines no {fn}(); the shared scorers index its keys.")
+            return
+        keys[name] = set(re.findall(r'"(\w+)"\s*,', body))
+        if len(keys[name]) < 8:
+            fail(f"{name}: only {len(keys[name])} weight keys were read from "
+                 f"{fn}; the scan is not seeing the table.")
+            return
+    only_shell = keys["SteamShell.ahk"] - keys["SteamShell-XFE.ahk"]
+    only_xfe = keys["SteamShell-XFE.ahk"] - keys["SteamShell.ahk"]
+    for key in sorted(only_shell):
+        fail(f"WindowEngineScoreWeights offers the weight '{key}' and "
+             f"XfeGameScoreWeights does not. The shared scorers index weights by "
+             "name for both products, so the companion scores against an empty "
+             "value with nothing thrown.")
+    for key in sorted(only_xfe):
+        fail(f"XfeGameScoreWeights offers the weight '{key}' and "
+             f"WindowEngineScoreWeights does not. The shared scorers index "
+             "weights by name for both products, so the shell scores against an "
+             "empty value with nothing thrown.")
+
+
 def check_binding_label_tables(sources):
     """Each product's controller-binding table, and why it must be an ordered
     array of unique labels.
@@ -1637,6 +1682,7 @@ def main():
     check_powershell_scope_colons()
     check_powershell_variable_shapes()
     check_binding_label_tables(sources)
+    check_game_score_weight_keys(sources)
     check_learner_guard(sources)
     check_rtss_limiter_restore(sources)
     check_source_encoding()

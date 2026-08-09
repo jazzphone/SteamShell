@@ -15,6 +15,7 @@ ApplyPrimaryHdrState
 ApplyRoundedCorners
 ApplyStartupWindowModeOnce
 BlendHexColor
+CalculateProcessCpuPercent
 CaptureExecutablePidSet
 CenteredPosition
 ClampFloat
@@ -107,6 +108,10 @@ SharedBindingActionFor
 SharedBindingLabelFor
 SharedBindingLabelList
 SharedDisplayModeText
+SharedLaunchWithStagger
+SharedPrepareStartupProgram
+SharedProcessCpuSample
+SharedPruneCpuSamples
 SharedReportSettingsLayoutAudit
 ShortenText
 SortCandidatesByScoreAreaDesc

@@ -2335,6 +2335,7 @@ Assert-QuickMenuRows -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-SettingsRowsReachConsumers -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-CrossNameAnchors -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-BindingLabelTables -ProjectRoot $projectRoot -Quiet:$Quiet
+Assert-GameScoreWeightKeys -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-NoAmbiguousDeindentedBlocks -ProjectRoot $projectRoot -File "SteamShell-XFE.ahk" -Quiet:$Quiet
 Assert-NoAmbiguousDeindentedBlocks -ProjectRoot $projectRoot -File "SteamShell-Shared.ahk" -Quiet:$Quiet
 Assert-NoAmbiguousDeindentedBlocks -ProjectRoot $projectRoot -File "SteamShell-Common.ahk" -Quiet:$Quiet

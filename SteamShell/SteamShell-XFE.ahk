@@ -2563,31 +2563,14 @@ LaunchStartupProgram(path) {
     global StartupLaunchDeElevated, StartupWindowMode, CompanionDisabled
     if CompanionDisabled
         return false
-    ; Arguments are supported now. The old code treated the whole entry as a
-    ; path, so "app.exe --flag" failed FileExist and was silently skipped -- the
-    ; shell had always handled it.
-    target := "", params := ""
-    if !SplitStartupCommandLine(path, &target, &params) {
-        LogLine("Startup program entry could not be parsed: " path, "Warning")
+    if !SharedPrepareStartupProgram(path, &target, &params, &fileName, &directory)
         return false
-    }
-    target := NormalizeMediaPath(target)
-    if (target = "" || !FileExist(target)) {
-        LogLine("Startup program not found: " target, "Warning")
-        return false
-    }
     path := target
-    SplitPath(path, &fileName, &directory)
-    if (fileName != "" && ProcessExist(fileName)) {
-        LogLine("Startup program already running, skipped: " fileName)
-        return false
-    }
     mode := NormalizeWindowMode(StartupWindowMode)
-    ; Run's own show-state argument. It only reaches the child on the direct
-    ; route: the de-elevated route asks explorer.exe to start the program, and
-    ; explorer decides the show state itself, so the sweep below is what actually
-    ; enforces the mode there.
     runOptions := mode = "hidden" ? "Hide" : (mode = "minimized" ? "Min" : "")
+    ; De-elevated through Explorer, which owns the normal-integrity desktop. The
+    ; companion runs at normal integrity itself, so this only matters when a user
+    ; has started it elevated anyway.
     viaShell := StartupLaunchDeElevated && A_IsAdmin
     try {
         if viaShell
@@ -2635,17 +2618,10 @@ ApplyStartupWindowMode(fileName, mode, startedTick) {
 RunStartupPrograms() {
     global EnableStartupPrograms, StartupPrograms, StartupProgramStaggerMs
     global CompanionDisabled
-    if (CompanionDisabled || !EnableStartupPrograms || StartupPrograms.Length = 0)
+    if (CompanionDisabled || !EnableStartupPrograms)
         return
-    LogLine("Launching " StartupPrograms.Length " startup program(s).")
-    delay := 0
-    for _, path in StartupPrograms {
-        if (delay = 0)
-            LaunchStartupProgram(path)
-        else
-            SetTimer(LaunchStartupProgram.Bind(path), -delay)
-        delay += StartupProgramStaggerMs
-    }
+    SharedLaunchWithStagger(
+        StartupPrograms, StartupProgramStaggerMs, LaunchStartupProgram)
 }
 
 ; ==============================================================================
@@ -2712,60 +2688,16 @@ AssistInventoryGet(maxAgeMs := 1000) {
 ; Rolling CPU usage for one process, as a percentage of one core-equivalent of
 ; the whole machine. Used to answer "is a game actually running" when window
 ; shape alone is not conclusive.
+; No rate limit: the assist tick is already the slower of the two loops, and
+; sampling on every call is what this product has always done.
 AssistProcessCpuSample(pid) {
     global AssistCpuSamples
-    static PROCESS_QUERY_LIMITED_INFORMATION := 0x1000
-    now := A_TickCount
-    unknown := Map("usage", 0.0, "known", false, "lastSeen", now)
-    if !pid
-        return unknown
-    handle := DllCall("OpenProcess", "UInt", PROCESS_QUERY_LIMITED_INFORMATION,
-        "Int", 0, "UInt", pid, "Ptr")
-    if !handle
-        return unknown
-    creation := Buffer(8, 0), exitTime := Buffer(8, 0)
-    kernel := Buffer(8, 0), user := Buffer(8, 0)
-    ok := DllCall("GetProcessTimes", "Ptr", handle, "Ptr", creation, "Ptr", exitTime,
-        "Ptr", kernel, "Ptr", user, "Int")
-    DllCall("CloseHandle", "Ptr", handle)
-    if !ok
-        return unknown
-    ; FILETIME units are 100ns.
-    creationValue := NumGet(creation, 0, "Int64")
-    total := NumGet(kernel, 0, "Int64") + NumGet(user, 0, "Int64")
-    if AssistCpuSamples.Has(pid) {
-        previous := AssistCpuSamples[pid]
-        if (previous["creation"] = creationValue) {
-            elapsed := now - previous["tick"]
-            busy := total - previous["total"]
-            usage := (elapsed > 0 && busy >= 0)
-                ? ClampFloat((busy / (elapsed * 10000.0)) * 100.0, 0, 10000)
-                : previous["usage"]
-            sample := Map(
-                "usage", usage, "known", elapsed > 0,
-                "creation", creationValue, "total", total,
-                "tick", now, "lastSeen", now)
-            AssistCpuSamples[pid] := sample
-            return sample
-        }
-    }
-    sample := Map(
-        "usage", 0.0, "known", false,
-        "creation", creationValue, "total", total,
-        "tick", now, "lastSeen", now)
-    AssistCpuSamples[pid] := sample
-    return sample
+    return SharedProcessCpuSample(pid, AssistCpuSamples)
 }
 
 AssistPruneCpuSamples(inventory) {
     global AssistCpuSamples
-    live := Map()
-    for _, item in inventory
-        live[item["pid"]] := true
-    for pid in AssistCpuSamples.Clone() {
-        if !live.Has(pid)
-            AssistCpuSamples.Delete(pid)
-    }
+    SharedPruneCpuSamples(AssistCpuSamples, inventory)
 }
 
 ; A window is game-like when it belongs to no known shell, launcher or browser

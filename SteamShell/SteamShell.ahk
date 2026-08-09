@@ -7735,16 +7735,7 @@ WindowEngineApplyGeometry(snapshot) {
 
 WindowEngineCleanupCpuSamples(snapshot) {
     global WindowEngineCpuSamples
-    activePids := Map()
-    for _, item in snapshot
-        activePids[item["pid"]] := true
-    stalePids := []
-    for pid, sample in WindowEngineCpuSamples {
-        if !activePids.Has(pid) && A_TickCount - sample["lastSeen"] > 30000
-            stalePids.Push(pid)
-    }
-    for _, pid in stalePids
-        WindowEngineCpuSamples.Delete(pid)
+    SharedPruneCpuSamples(WindowEngineCpuSamples, snapshot)
 }
 
 WindowEngineTick(*) {
@@ -8472,95 +8463,11 @@ RestoreDesktopFromRecovery(*) {
     ExitToDesktop(false)
 }
 
-; ==============================================================================
-; CPU + STEAM FOREGROUND
-; ==============================================================================
-CalculateProcessCpuPercent(cpuDelta100ns, elapsedMs) {
-    if (elapsedMs <= 0 || cpuDelta100ns < 0)
-        return 0.0
-    return ClampFloat(
-        (cpuDelta100ns / (elapsedMs * 10000.0)) * 100.0, 0.0, 10000.0)
-}
 
 GetProcessCpuSample(pid) {
     global WindowEngineCpuSamples, WindowEngineCpuSampleIntervalMs
-    now := A_TickCount
-    unknown := Map("usage", 0.0, "known", false, "lastSeen", now)
-    if (!pid)
-        return unknown
-
-    if WindowEngineCpuSamples.Has(pid) {
-        cached := WindowEngineCpuSamples[pid]
-        cached["lastSeen"] := now
-        if (now - cached["sampleTick"] < WindowEngineCpuSampleIntervalMs)
-            return cached
-    }
-
-    ; PROCESS_QUERY_LIMITED_INFORMATION is sufficient for GetProcessTimes and
-    ; avoids the WMI query that previously ran for every candidate process.
-    hProcess := DllCall(
-        "Kernel32\OpenProcess", "UInt", 0x1000, "Int", false, "UInt", pid, "Ptr")
-    if (!hProcess)
-        return unknown
-
-    creationTime := Buffer(8, 0)
-    exitTime := Buffer(8, 0)
-    kernelTime := Buffer(8, 0)
-    userTime := Buffer(8, 0)
-    ok := false
-    try ok := DllCall(
-        "Kernel32\GetProcessTimes",
-        "Ptr", hProcess,
-        "Ptr", creationTime,
-        "Ptr", exitTime,
-        "Ptr", kernelTime,
-        "Ptr", userTime,
-        "Int")
-    DllCall("Kernel32\CloseHandle", "Ptr", hProcess)
-    if !ok
-        return unknown
-
-    creation := NumGet(creationTime, 0, "Int64")
-    totalCpu100ns := NumGet(kernelTime, 0, "Int64") + NumGet(userTime, 0, "Int64")
-    if WindowEngineCpuSamples.Has(pid) {
-        previous := WindowEngineCpuSamples[pid]
-        if (previous["creation"] = creation) {
-            elapsedMs := now - previous["sampleTick"]
-            cpuDelta := totalCpu100ns - previous["totalCpu100ns"]
-            ; A contradictory reading is not a reading.
-            ;
-            ; GameWindowCpuVerdict is careful that an unknown CPU "is not evidence
-            ; either way and never rejects". A NEGATIVE delta was not getting that
-            ; treatment: usage fell back to previous["usage"] -- 0.0 on the first
-            ; sample of a process -- while known stayed true, because elapsedMs is
-            ; always positive here, the interval check above having already passed.
-            ; With GameAllowZeroCpuAsCandidate off that is a confident report of
-            ; zero CPU, and the live game it describes is rejected CPU_ZERO_STRICT.
-            cpuUsable := elapsedMs > 0 && cpuDelta >= 0
-            usage := cpuUsable
-                ? CalculateProcessCpuPercent(cpuDelta, elapsedMs)
-                : previous["usage"]
-            sample := Map(
-                "usage", usage,
-                "known", cpuUsable,
-                "creation", creation,
-                "totalCpu100ns", totalCpu100ns,
-                "sampleTick", now,
-                "lastSeen", now)
-            WindowEngineCpuSamples[pid] := sample
-            return sample
-        }
-    }
-
-    sample := Map(
-        "usage", 0.0,
-        "known", false,
-        "creation", creation,
-        "totalCpu100ns", totalCpu100ns,
-        "sampleTick", now,
-        "lastSeen", now)
-    WindowEngineCpuSamples[pid] := sample
-    return sample
+    return SharedProcessCpuSample(
+        pid, WindowEngineCpuSamples, WindowEngineCpuSampleIntervalMs)
 }
 
 CaptureLastRealForeground() {
@@ -17186,27 +17093,20 @@ KickUserStartupPrograms() {
 
 StartUserStartupProgramsNow() {
     global SettingsPath
+    ; Once per session. The companion has no equivalent guard; its entry point is
+    ; a single one-shot timer, so it does not need one today, and the asymmetry
+    ; is now visible rather than implicit in two loop bodies.
     static started := false
     if (started)
         return
     started := true
-
     windowMode := NormalizeStartupWindowMode(
         IniReadS("StartupPrograms", "WindowMode", "Hidden"))
     staggerMs := ReadInt("StartupPrograms", "StaggerMs", 1200, 0, 30000)
     programs := ReadStartupProgramList(
         (key) => IniReadS("StartupPrograms", key, ""))
-    if (programs.Length = 0)
-        return
-    LogLine("Launching " programs.Length " startup program(s).")
-    delay := 0
-    for _, entry in programs {
-    if (delay = 0)
-    RunStartupCommandLine(entry, windowMode)
-    else
-        SetTimer(RunStartupCommandLine.Bind(entry, windowMode), -delay)
-    delay += staggerMs
-    }
+    SharedLaunchWithStagger(
+        programs, staggerMs, (entry) => RunStartupCommandLine(entry, windowMode))
 }
 ; LAUNCHER CLEANUP (Optional)
 ; ==============================================================================
@@ -17929,27 +17829,14 @@ GetProcessWriteTransferBytes(pid) {
 }
 
 RunStartupCommandLine(cmdline, windowMode := "Hidden") {
-    target := ""
-    params := ""
-    if !SplitStartupCommandLine(cmdline, &target, &params) {
-        LogLine("Startup program entry could not be parsed: " cmdline, "Warning")
+    if !SharedPrepareStartupProgram(cmdline, &target, &params, &exeName, &directory)
         return false
-    }
-    SplitPath(target, &exeName)
-    ; Do not start a second copy of something already running. The companion has
-    ; always done this; the shell would happily launch a duplicate after a
-    ; reload.
-    if (exeName != "" && ProcessExist(exeName)) {
-        LogLine("Startup program already running, skipped: " exeName)
-        return false
-    }
     mode := NormalizeStartupWindowMode(windowMode)
+    ; Through LaunchInteractiveApp, not Run: this product can be running
+    ; elevated, and a child launched from an elevated shell INHERITS that token.
     pid := 0
-    ; The launch primitive stays per-tree: the shell must de-elevate through its
-    ; verified path, where the companion uses a plain Run.
     launched := LaunchInteractiveApp(
-        target, params, "", mode, &pid,
-        "Startup program: " (target != "" ? target : cmdline))
+        target, params, "", mode, &pid, "Startup program: " target)
     if (launched && mode != "normal" && exeName != "")
         StartupWindowModeSweep(exeName, mode, A_TickCount + 6000)
     return launched

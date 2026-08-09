@@ -276,6 +276,182 @@ QuickMenuMeasuredBottomMargin(measuredStatusHeight) {
         measuredStatusHeight * QuickMenuBottomMargin() / QuickMenuStatusHeight())
 }
 
+; ==============================================================================
+; CPU + STEAM FOREGROUND
+; ==============================================================================
+CalculateProcessCpuPercent(cpuDelta100ns, elapsedMs) {
+    if (elapsedMs <= 0 || cpuDelta100ns < 0)
+        return 0.0
+    return ClampFloat(
+        (cpuDelta100ns / (elapsedMs * 10000.0)) * 100.0, 0.0, 10000.0)
+}
+
+; Rolling CPU usage for one process, as a percentage of one core-equivalent.
+;
+; WRITTEN TWICE AND DRIFTED APART, which is the reason it is here rather than the
+; duplication. Both bodies opened the process, read GetProcessTimes, compared
+; against the previous total for the same creation time and stored the result.
+; The store, the Map key spellings and an optional rate limit differed, and so
+; did one thing that is not cosmetic:
+;
+;   "known" now requires BOTH a positive elapsed time and a NON-NEGATIVE delta.
+;   The companion asked only about elapsed time, so a negative delta -- which
+;   happens when a PID is reused, or a counter resets -- was reported as a KNOWN
+;   sample carrying the previous usage figure, to a detector whose whole question
+;   is whether a game is running. The shell already required both; this is that
+;   fix, ported.
+;
+; The store is a PARAMETER, which is what lets this live in Common: the two
+; products keep their sample Maps in differently-named globals and neither
+; crosses the boundary. minIntervalMs of 0 means sample every call, which is what
+; the companion did.
+SharedProcessCpuSample(pid, store, minIntervalMs := 0) {
+    static PROCESS_QUERY_LIMITED_INFORMATION := 0x1000
+    now := A_TickCount
+    unknown := Map("usage", 0.0, "known", false, "lastSeen", now)
+    if !pid
+        return unknown
+
+    if store.Has(pid) {
+        cached := store[pid]
+        ; lastSeen is refreshed even when the cached value is returned, because
+        ; it is what the prune reads to decide the entry is still wanted.
+        cached["lastSeen"] := now
+        if (minIntervalMs > 0 && now - cached["sampleTick"] < minIntervalMs)
+            return cached
+    }
+
+    handle := DllCall("Kernel32\OpenProcess",
+        "UInt", PROCESS_QUERY_LIMITED_INFORMATION, "Int", false, "UInt", pid, "Ptr")
+    if !handle
+        return unknown
+    creationTime := Buffer(8, 0)
+    exitTime := Buffer(8, 0)
+    kernelTime := Buffer(8, 0)
+    userTime := Buffer(8, 0)
+    ok := false
+    try ok := DllCall("Kernel32\GetProcessTimes",
+        "Ptr", handle, "Ptr", creationTime, "Ptr", exitTime,
+        "Ptr", kernelTime, "Ptr", userTime, "Int")
+    DllCall("Kernel32\CloseHandle", "Ptr", handle)
+    if !ok
+        return unknown
+
+    creation := NumGet(creationTime, 0, "Int64")
+    totalCpu100ns := NumGet(kernelTime, 0, "Int64") + NumGet(userTime, 0, "Int64")
+    if store.Has(pid) {
+        previous := store[pid]
+        ; The creation time is what makes a PID safe to compare against itself.
+        ; Windows reuses PIDs; without this a new process inherits the old one's
+        ; baseline and reports a nonsense delta.
+        if (previous["creation"] = creation) {
+            elapsedMs := now - previous["sampleTick"]
+            cpuDelta := totalCpu100ns - previous["totalCpu100ns"]
+            usable := elapsedMs > 0 && cpuDelta >= 0
+            sample := Map(
+                "usage", usable
+                    ? CalculateProcessCpuPercent(cpuDelta, elapsedMs)
+                    : previous["usage"],
+                "known", usable,
+                "creation", creation,
+                "totalCpu100ns", totalCpu100ns,
+                "sampleTick", now,
+                "lastSeen", now)
+            store[pid] := sample
+            return sample
+        }
+    }
+    ; First sight of this process: a baseline with nothing to compare against, so
+    ; not yet known.
+    sample := Map(
+        "usage", 0.0,
+        "known", false,
+        "creation", creation,
+        "totalCpu100ns", totalCpu100ns,
+        "sampleTick", now,
+        "lastSeen", now)
+    store[pid] := sample
+    return sample
+}
+
+; Forget samples for processes that are no longer around.
+;
+; THE GRACE PERIOD IS THE POINT, and the companion did not have one: it deleted a
+; PID's sample the moment that PID was absent from one pass of the inventory. The
+; inventory is the FILTERED list, so a game that minimises, or whose window is
+; briefly cloaked or tool-window-styled, drops out for a tick, loses its
+; baseline, and comes back as known=false with a usage of zero -- to the detector
+; whose entire question is whether a game is running. Thirty seconds is the
+; shell's figure and long enough to cover any of those.
+SharedPruneCpuSamples(store, liveInventory, graceMs := 30000) {
+    live := Map()
+    for _, item in liveInventory
+        live[item["pid"]] := true
+    stale := []
+    for pid, sample in store {
+        if (!live.Has(pid) && A_TickCount - sample["lastSeen"] > graceMs)
+            stale.Push(pid)
+    }
+    for _, pid in stale
+        store.Delete(pid)
+    return stale.Length
+}
+
+; A startup entry turned into something launchable, or a logged reason it is not.
+;
+; The three checks either side of the split were the same in both products, down
+; to the log wording -- parse the command line, refuse an entry that cannot be
+; parsed, skip one whose executable is already running. What comes AFTER differs
+; for real: the shell launches through LaunchInteractiveApp because it may be
+; running elevated and must not hand its token to a child, the companion runs
+; directly or by way of explorer.exe.
+;
+; THE EXISTENCE CHECK IS THE HALF THE SHELL DID NOT HAVE. The companion
+; normalised the path and rejected a target that is not there by name; the shell
+; passed whatever it read straight to the launcher, so a stale entry failed
+; further in with a message about the launch rather than about the entry. Both
+; get it now, which is the point of the check being in one place.
+SharedPrepareStartupProgram(commandLine, &target, &arguments, &exeName, &directory) {
+    target := "", arguments := "", exeName := "", directory := ""
+    if !SplitStartupCommandLine(commandLine, &target, &arguments) {
+        LogLine("Startup program entry could not be parsed: " commandLine, "Warning")
+        return false
+    }
+    target := NormalizeMediaPath(target)
+    if (target = "" || !FileExist(target)) {
+        LogLine("Startup program not found: " target, "Warning")
+        return false
+    }
+    SplitPath(target, &exeName, &directory)
+    if (exeName != "" && ProcessExist(exeName)) {
+        LogLine("Startup program already running, skipped: " exeName)
+        return false
+    }
+    return true
+}
+
+; Launch a list with a growing delay between entries: the first immediately, the
+; rest on one-shot timers.
+;
+; The stagger exists because a handful of programs starting at once on a handheld
+; makes the first thirty seconds of a session unusable. `launcher` is a callable
+; taking one entry, so each product keeps its own launch path and whatever it
+; needs bound into it.
+SharedLaunchWithStagger(entries, staggerMs, launcher) {
+    if (entries.Length = 0)
+        return 0
+    LogLine("Launching " entries.Length " startup program(s).")
+    delay := 0
+    for _, entry in entries {
+        if (delay = 0)
+            launcher(entry)
+        else
+            SetTimer(launcher.Bind(entry), -delay)
+        delay += staggerMs
+    }
+    return entries.Length
+}
+
 ; Every registered Settings control checked against its page: does it exist, is
 ; it a real rectangle, does it stay inside the content column, does it overlap a
 ; sibling.
