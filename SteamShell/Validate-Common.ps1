@@ -2053,6 +2053,78 @@ function Assert-SettingsWindowPlacement {
     }
 }
 
+# A SETTING A PRODUCT READS MUST BE REACHABLE IN THAT PRODUCT'S SETTINGS.
+#
+# Reported as "why does standalone's Advanced & Logging have way more things
+# than the companion's". Ten rows against three, and the answer was worth
+# having: three of the extras are genuinely shell-only -- zero mentions of
+# GameAssistLogEvenWhenSkipped, SteamStartupGraceMs or SteamExitConfirmMs
+# anywhere in the companion -- but FIVE were settings the companion reads in its
+# own LoadSettings, writes into its own INI defaults, and could not reach from
+# its own Settings window: GameLogMode, GameLogTopN, GameLogIntervalMs,
+# GameLogIncludeTitles and RawInputStaleMs. The companion even normalises
+# GameLogMode through the same NormalizeGameLogMode and feeds the shared
+# LogGameCandidateTable with the result.
+#
+# This project already has the sentence, written about the Steam page: "A
+# setting that can only be changed by hand-editing the INI is not a setting most
+# users have." This is the general form of it, checked rather than remembered.
+#
+# The test is deliberately narrow: a row marked for ONE product, whose key the
+# OTHER product reads through its own INI readers. That is a settings row with
+# the wrong product on it, which is a different thing from a key one product
+# merely mentions in a migration table or a comment.
+function Assert-SettingsRowsReachTheirReaders {
+    param(
+        [Parameter(Mandatory = $true)][string]$ProjectRoot,
+        [switch]$Quiet
+    )
+    $sharedText = Get-SourceText (Join-Path $ProjectRoot "SteamShell-Shared.ahk")
+    $trees = @{
+        "standalone" = Get-SourceText (Join-Path $ProjectRoot "SteamShell-XFE.ahk")
+        "xfe"        = Get-SourceText (Join-Path $ProjectRoot "SteamShell.ahk")
+    }
+    $names = @{ "standalone" = "the companion"; "xfe" = "the shell" }
+    # WHICH PRODUCTS CAN REACH EACH KEY. A key may carry TWO rows, one per
+    # product, with different sections, labels and defaults -- CooldownSec,
+    # HardKill and EnableViewButtonActions all do, deliberately. The first
+    # version of this compared keys alone and reported all three as unreachable
+    # when both products reach them perfectly well.
+    $rows = @()
+    $reachable = @{}
+    foreach ($m in [regex]::Matches($sharedText,
+            '(?s)Map\("product", "(both|standalone|xfe)"(.{0,400}?)"key", "(\w+)"')) {
+        $product = $m.Groups[1].Value
+        $key = $m.Groups[3].Value
+        $rows += [pscustomobject]@{ Product = $product; Key = $key }
+        $targets = if ($product -eq "both") { @("standalone", "xfe") } else { @($product) }
+        foreach ($t in $targets) {
+            if (-not $reachable.ContainsKey($key)) { $reachable[$key] = @{} }
+            $reachable[$key][$t] = $true
+        }
+    }
+    $unreachable = @()
+    foreach ($row in $rows) {
+        if ($row.Product -eq "both") { continue }
+        $missing = if ($row.Product -eq "standalone") { "xfe" } else { "standalone" }
+        if ($reachable[$row.Key].ContainsKey($missing)) { continue }
+        if ($trees[$row.Product] -match
+                ('Read(?:Text|Int|Bool|Number)\([^)]*"' + [regex]::Escape($row.Key) + '"')) {
+            $unreachable += "$($row.Key) (row is $($row.Product)-only, but $($names[$row.Product]) reads it)"
+        }
+    }
+    Assert-True ($unreachable.Count -eq 0) (
+        "Settings rows are marked for one product while the other reads the " +
+        "same key and has no row of its own: " +
+        (($unreachable | Sort-Object -Unique) -join ", ") + ". A setting that " +
+        "can only be changed by hand-editing the INI is not a setting most " +
+        "users have -- mark the row `"both`", give the other product its own " +
+        "row, or stop reading the key.")
+    if (-not $Quiet) {
+        Write-Host "Settings rows: every key a product reads is reachable in that product's Settings."
+    }
+}
+
 # The Live Log window is shared, and its status lines are not.
 #
 # It was the shell's alone, and PRODUCT_SURFACES.txt recorded why in the only

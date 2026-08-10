@@ -1996,6 +1996,54 @@ def check_learner_guard(sources):
                  "word -- that turns every button held at close into a press edge.")
 
 
+def check_settings_rows_reach_their_readers(sources):
+    """A setting a product READS must be reachable in that product's Settings.
+
+    "Why does standalone's Advanced & Logging have way more things than the
+    companion's?" Ten rows against three -- three of the extras are genuinely
+    shell-only, but five were settings the companion reads in its own
+    LoadSettings, writes into its own INI defaults, and could not reach from its
+    own Settings window.
+
+    Narrow on purpose: a row marked for ONE product whose key the OTHER product
+    reads through an INI reader. A key merely mentioned in a migration table or
+    a comment is not this.
+    """
+    shared = sources["SteamShell-Shared.ahk"]
+    other = {"standalone": sources["SteamShell-XFE.ahk"],
+             "xfe": sources["SteamShell.ahk"]}
+    label = {"standalone": "the companion", "xfe": "the shell"}
+    rows = [(m.group(1), m.group(3)) for m in re.finditer(
+        r'Map\("product", "(both|standalone|xfe)"(.{0,400}?)"key", "(\w+)"',
+        shared, re.S)]
+    # WHICH PRODUCTS CAN REACH EACH KEY. A key may carry TWO rows, one per
+    # product, with different sections, labels and defaults -- CooldownSec,
+    # HardKill and EnableViewButtonActions all do, deliberately. The first
+    # version of this check compared keys alone and reported all three as
+    # unreachable when both products can reach them perfectly well.
+    reachable = {}
+    for product, key in rows:
+        targets = ("standalone", "xfe") if product == "both" else (product,)
+        for t in targets:
+            reachable.setdefault(key, set()).add(t)
+    bad = []
+    for product, key in rows:
+        if product == "both":
+            continue
+        missing = "xfe" if product == "standalone" else "standalone"
+        if missing in reachable.get(key, set()):
+            continue
+        if re.search(r'Read(?:Text|Int|Bool|Number)\([^)]*"' + re.escape(key) + '"',
+                     other[product]):
+            bad.append(f"{key} (row is {product}-only, but {label[product]} reads it)")
+    if bad:
+        fail("Settings rows are marked for one product while the other reads the "
+             "same key and has no row of its own: " + ", ".join(sorted(set(bad)))
+             + '. A setting that can only be changed by hand-editing the INI is '
+             'not a setting most users have -- mark the row "both", give the '
+             "other product its own row, or stop reading the key.")
+
+
 def check_live_log_shared(sources):
     """One shared Live Log viewer, each product naming its own status lines.
 
@@ -2459,6 +2507,7 @@ def main():
     check_controller_poll_frame(sources)
     check_learner_guard(sources)
     check_rtss_limiter_restore(sources)
+    check_settings_rows_reach_their_readers(sources)
     check_live_log_shared(sources)
     check_settings_window_placement(sources)
     check_settings_audit_bounds(sources)

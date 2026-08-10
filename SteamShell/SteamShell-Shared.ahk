@@ -7529,20 +7529,30 @@ SettingsCategoryRows(category) {
                 "section", "Companion", "key", "HeartbeatSeconds",
                 "label", "Heartbeat log interval (seconds)",
                 "default", "60", "fieldType", "integer", "min", 5, "max", 3600),
-            Map("product", "standalone", "type", "choice",
+            ; BOTH, and they were marked standalone. The companion reads
+            ; GameLogMode, GameLogTopN, GameLogIntervalMs and
+            ; GameLogIncludeTitles in its own LoadSettings, writes them into its
+            ; own INI defaults, normalises GameLogMode through the same
+            ; NormalizeGameLogMode, and calls the shared LogGameCandidateTable
+            ; with the result. Every one of them was live in the companion and
+            ; reachable only by hand-editing the file -- which this project
+            ; already has a sentence for, written about the Steam page: a
+            ; setting that can only be changed by hand-editing the INI is not a
+            ; setting most users have.
+            Map("product", "both", "type", "choice",
                 "section", "Logging", "key", "GameLogMode",
                 "label", "Game log detail",
                 "choices", ["OFF", "ACTIVATIONS", "TOPN", "DIAGNOSTIC"],
                 "default", "OFF", "dependency", true),
-            Map("product", "standalone", "type", "edit",
+            Map("product", "both", "type", "edit",
                 "section", "Logging", "key", "GameLogTopN",
                 "label", "Candidates recorded in TOPN/DIAGNOSTIC",
                 "default", "3", "fieldType", "integer", "min", 1, "max", 10),
-            Map("product", "standalone", "type", "edit",
+            Map("product", "both", "type", "edit",
                 "section", "Logging", "key", "GameLogIntervalMs",
                 "label", "Diagnostic logging interval (ms)",
                 "default", "3000", "fieldType", "integer", "min", 250, "max", 60000),
-            Map("product", "standalone", "type", "checkbox",
+            Map("product", "both", "type", "checkbox",
                 "section", "Logging", "key", "GameLogIncludeTitles",
                 "label", "Include window titles in diagnostic logs",
                 "default", "true"),
@@ -7559,6 +7569,31 @@ SettingsCategoryRows(category) {
                 "section", "Timing", "key", "SteamExitConfirmMs",
                 "label", "Steam exit confirmation period (ms)",
                 "default", "4000", "fieldType", "integer", "min", 1000, "max", 60000),
+            ; ROTATION, which neither product exposed. Reported: the companion
+            ; "breaks the log file up" and standalone appears not to. Same code
+            ; -- RotateLogIfNeeded is shared and both default to the same cap --
+            ; and the difference is volume: with the diagnostic checkboxes on,
+            ; RawHID lines were 651 of 717 in one sample, 90% of the file, so
+            ; the companion crossed the cap in minutes and standalone, with them
+            ; off, never came close.
+            ;
+            ; The defect underneath was that the cap could only be changed by
+            ; hand-editing the INI, in either product, while being the setting a
+            ; user hits the moment they turn diagnostics on because we asked
+            ; them to.
+            Map("product", "both", "type", "edit",
+                "section", "Logging", "key", "LogRotateMaxKB",
+                "label", "Rotate the log above this size (KB)",
+                "default", "4096", "fieldType", "integer", "min", 32, "max", 8192),
+            ; Zero disables rotation ENTIRELY -- RotateLogIfNeeded returns at the
+            ; top -- so the log then grows without bound, which with RawHID on is
+            ; tens of megabytes an hour. It stays reachable because it is a
+            ; legitimate choice on a machine being actively debugged, and the
+            ; label says what it does rather than leaving it to be discovered.
+            Map("product", "both", "type", "edit",
+                "section", "Logging", "key", "LogRotateBackups",
+                "label", "Rotated copies to keep (0 = never rotate)",
+                "default", "2", "fieldType", "integer", "min", 0, "max", 10),
             ; GameInput is named only in the companion's wording because only the
             ; companion has it to compare against.
             Map("product", "both", "type", "checkbox",
@@ -7570,7 +7605,7 @@ SettingsCategoryRows(category) {
                 "section", "Controller", "key", "RawInputProbe",
                 "label", "Log raw background HID gamepad reports (RawInput probe)",
                 "default", "false"),
-            Map("product", "standalone", "type", "edit",
+            Map("product", "both", "type", "edit",
                 "section", "Controller", "key", "RawInputStaleMs",
                 "label", "Treat RawInput as silent after (ms)",
                 "default", "5000", "fieldType", "integer", "min", 500, "max", 60000)],

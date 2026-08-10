@@ -644,7 +644,7 @@ global GameLogIntervalMs := 3000
 global GameLogIncludeTitles := true
 global GameLogRejectNearCandidates := true
 global GameLogRejectMinAreaPercent := 0.85
-global LogRotateMaxKB := 256
+global LogRotateMaxKB := 4096
 global LogRotateBackups := 2
 
 ; ==============================================================================
@@ -2656,7 +2656,7 @@ GameLogIntervalMs=3000                                      ; Rate limit for TOP
 GameLogIncludeTitles=true                                   ; Include window titles in the log
 GameLogRejectNearCandidates=true                            ; In DIAGNOSTIC, also log near-fullscreen rejects
 GameLogRejectMinAreaPercent=0.85                            ; Only log rejects with >= this % of screen area
-LogRotateMaxKB=256                                          ; Rotate log when it exceeds this many KB
+LogRotateMaxKB=4096                                         ; Rotate log when it exceeds this many KB
 LogRotateBackups=2                                          ; Keep this many rotated backups
 
 [MousePark]
@@ -3627,7 +3627,7 @@ LoadSettings() {
     EnableGameScoreLogging := GameLogMode != "OFF"
     GameLogRejectNearCandidates := ReadBool("Logging", "GameLogRejectNearCandidates", true)
     GameLogRejectMinAreaPercent := ReadNumber("Logging", "GameLogRejectMinAreaPercent", 0.85, 0.10, 1.00)
-    LogRotateMaxKB := ReadInt("Logging", "LogRotateMaxKB", 256, 32, 8192)
+    LogRotateMaxKB := ReadInt("Logging", "LogRotateMaxKB", 4096, 32, 8192)
     LogRotateBackups := ReadInt("Logging", "LogRotateBackups", 2, 0, 10)
 
     MouseParkRightOffsetPx := ReadInt("MousePark", "MouseParkRightOffsetPx", 50, 0, 5000)

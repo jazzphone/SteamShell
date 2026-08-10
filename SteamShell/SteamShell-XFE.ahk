@@ -76,7 +76,7 @@ global ControllerNeedsFreshBaseline := false
 
 ; Runtime configuration.
 global HeartbeatSeconds := 60
-global LogRotateMaxKB := 256
+global LogRotateMaxKB := 4096
 global LogRotateBackups := 2
 global EnableQuickMenu := true
 global QuickMenuChordHoldMs := 500
@@ -648,7 +648,7 @@ DefaultSettings() {
             ; size and count backups of the companion log AND the elevated
             ; helper's log, so neither the "Companion" section nor the "Game"
             ; prefix described them. Both products name them this way now.
-            "LogRotateMaxKB", 256,
+            "LogRotateMaxKB", 4096,
             "LogRotateBackups", 2
         ),
         ; Schema 12. These five carry standalone's own names, so they now carry
@@ -1018,7 +1018,7 @@ LoadSettings() {
     ; the heartbeat is the only proof the process is still alive, and a 60s gap
     ; is long enough to hide a death for the whole test.
     HeartbeatSeconds := ReadInt("Companion", "HeartbeatSeconds", 60, 5, 3600)
-    LogRotateMaxKB := ReadInt(MovedSettingSection("Logging", "Companion", "LogRotateMaxKB"), "LogRotateMaxKB", 256, 32, 8192)
+    LogRotateMaxKB := ReadInt(MovedSettingSection("Logging", "Companion", "LogRotateMaxKB"), "LogRotateMaxKB", 4096, 32, 8192)
     LogRotateBackups := ReadInt(MovedSettingSection("Logging", "Companion", "LogRotateBackups"), "LogRotateBackups", 2, 0, 10)
     ; The keys both products read identically -- same global, reader,
     ; default and range. See LoadSharedSettings in SteamShell-Shared.ahk.
