@@ -1399,9 +1399,13 @@ Assert-True (
     $source -match
         '(?s)"product", "standalone", "type", "checkbox",\s*\r?\n\s*' +
         '"section", "Features", "key", "EnableDesktopAutoMouseMode"' -and
+    # The builder is SteamShell-Shared.ahk's now and takes the window and the
+    # current value; the shell reads that value with its OWN reader, which is
+    # what let the builder move at all.
     $source -match
-        '(?s)SettingsEditorAddExeListField\(\s*category,\s*"Controller",\s*' +
-        '"DesktopAutoMouseExcludeExeList"') (
+        '(?s)SettingsAddExeListField\(SettingsGui,\s*\r?\n\s*category,\s*"Controller",\s*' +
+        '"DesktopAutoMouseExcludeExeList"[\s\S]*?' +
+        'IniReadS\("Controller", "DesktopAutoMouseExcludeExeList", ""\)') (
     "Desktop-wide automatic mouse mode, exclusions, Settings, or tray control are disconnected.")
 
 # The selected-row fill must stay DERIVED from the accent. Storing it separately

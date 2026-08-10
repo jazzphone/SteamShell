@@ -365,6 +365,7 @@ SetElevatedAutoMouseRuntimeEnabled
 SettingsAddButtonRow
 SettingsAddCheckbox
 SettingsAddChoice
+SettingsAddExeListField
 SettingsAddNote
 SettingsAddPathField
 SettingsAddRowsForCategory
@@ -372,6 +373,13 @@ SettingsAddShortcutField
 SettingsAddSliderField
 SettingsAddTextField
 SettingsCategoryRows
+SettingsExeListAddRecent
+SettingsExeListBrowse
+SettingsExeListHeight
+SettingsExeListInsert
+SettingsExeListRemoveSelected
+SettingsExeListValue
+SettingsParseExeList
 SettingsEditorRepaint
 SettingsEditorSetRedraw
 SettingsEditorGetScrollTrackPosition

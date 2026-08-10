@@ -5147,15 +5147,19 @@ ShowSettings(*) {
     ; The rows themselves are defined once, in SteamShell-Shared.ahk, so this
     ; page and the shell's cannot describe the same settings differently.
     SettingsAddRowsForCategory(settings, category, "xfe", &y)
-    SettingsAddTextField(settings, category, "Controller", "AutoMouseExeList",
-        "Automatic mouse applications (pipe-separated)", &y,
-        DefaultAutoMouseExeList())
+    ; The same editor standalone has, rather than the pipe-separated edit control
+    ; this page used to carry. One list per row here, not two side by side, so
+    ; the page cursor advances by the field's own height.
+    layout := SettingsLayout()
+    SettingsAddExeListField(settings, category, "Controller", "AutoMouseExeList",
+        "Automatic mouse applications", layout["contentX"], y,
+        layout["contentWidth"],
+        ReadText("Controller", "AutoMouseExeList", DefaultAutoMouseExeList()))
+    y += SettingsExeListHeight()
     SettingsAddNote(settings, category,
         "The controller acts as a mouse in these applications without holding "
         . "View/Back. Leave Xbox FSE off the list: it is controller-driven and "
         . "a pointer inside it gets in the way.", &y, 40)
-    SettingsAddButtonRow(settings, category, [
-        ["Add Recent Application...", XfeAddRecentAutoMouseApp]], &y)
     SettingsAddButtonRow(settings, category, [
         ["Controller Mappings...", ShowControllerMappingWindow],
         ["Learn Controller...", ShowControllerLearner],
@@ -5682,45 +5686,37 @@ GetFieldText(key, fallback := "") {
     return (text != "") ? text : fallback
 }
 
-SetFieldText(key, value) {
-    global SettingsFields
-    if SettingsFields.Has(key)
-        try SettingsFields[key].Text := value
+; Per-tree seams required by SteamShell-Shared.ahk's exe-list field.
+;
+; THESE REPLACED XfeAppendRecentExeToField, which appended the picker's answer to
+; a pipe-separated edit control because "this tree has no ListView exe editor".
+; That was a description of a gap, not a reason for one -- nothing here prevented
+; the ListView, the shell simply wrote it first -- and the companion's one exe
+; list was a raw string the user had to punctuate by hand. It has the same editor
+; now, so the append is gone and the picker's answer becomes a row.
+;
+; The file dialog and the message box both raise SettingsDialogActive the way
+; SettingsBrowseRtss and CloseSettings already do: the pointer must stand down
+; while a modal this program owns is in front, or the controller drives the
+; window behind it.
+SettingsProductSelectExe(prompt, startDir) {
+    global SettingsGui, SettingsDialogActive
+    SettingsDialogActive := true
+    path := TopmostFileSelect(1, startDir, prompt, "Programs (*.exe)")
+    SettingsDialogActive := false
+    try WinActivate("ahk_id " SettingsGui.Hwnd)
+    return path
 }
 
-; Appends a recently used application to a pipe-separated exe-list field.
-;
-; This tree has no ListView exe editor -- its lists are a single edit control
-; holding "a.exe|b.exe" -- so the shared picker's answer is appended as text
-; rather than added as a row. That is the whole reason ShowApplicationPicker
-; hands the choice to a CALLBACK instead of returning it: the shell inserts a
-; ListView row, this appends to a string, and the picker has to know neither.
-;
-; Reads the CONTROL rather than the saved setting, so choosing twice before
-; saving adds two applications rather than the second replacing the first.
-XfeAppendRecentExeToField(key, exe) {
-    exe := StrLower(Trim(exe))
-    if (exe = "")
-        return
-    current := Trim(GetFieldText(key, ""))
-    ; ProcessNameSetFromList and not the shell's ParseExeListPipe: this is the
-    ; parser this tree uses to build the live set from this very field, so the
-    ; duplicate check answers the same question the product will ask of the value
-    ; after it is saved. The shell's parser also strips inline comments and
-    ; appends a missing ".exe", which are not this field's rules.
-    if ProcessNameSetFromList(current).Has(exe) {
-        SettingsUpdateStatus(exe " is already in that list.")
-        return
-    }
-    SetFieldText(key, current = "" ? exe : current "|" exe)
-    SettingsMarkDirty()
-    SettingsUpdateStatus("Added " exe ". Save to keep it.")
+SettingsProductFieldMessage(message) {
+    global SettingsDialogActive
+    SettingsDialogActive := true
+    TopmostMsgBox(message, "SteamShell XFE Settings", "Icon!")
+    SettingsDialogActive := false
 }
 
-XfeAddRecentAutoMouseApp(*) {
-    ShowApplicationPicker(
-        "Add a recently used application to the automatic mouse list.",
-        XfeAppendRecentExeToField.Bind("Controller.AutoMouseExeList"))
+SettingsProductSetStatus(text) {
+    SettingsUpdateStatus(text)
 }
 
 ; A text field with a Browse button, for a path. Wider than a plain edit row
@@ -5892,8 +5888,12 @@ SettingsCategoryCount() {
 ; gets migrated, and the setting has to keep working where it lies.
 SettingsCompanionFieldSpecs() {
     static specs := [
+        ; exe-list, not edit. The control is a ListView now, and the type is what
+        ; tells the populate to leave it alone and the save to read its ROWS --
+        ; a ListView's .Value is the selected row number, so the generic branch
+        ; would have written "3" over the user's list.
         Map("section", "Controller", "key", "AutoMouseExeList",
-            "type", "edit", "default", DefaultAutoMouseExeList())
+            "type", "exe-list", "default", DefaultAutoMouseExeList())
     ]
     return specs
 }
@@ -5928,7 +5928,12 @@ SettingsPopulateFields() {
             ? MovedSettingSection(row["section"], row["movedFrom"], row["key"])
             : row["section"]
         type := row["type"]
-        if (type = "checkbox") {
+        ; An exe-list SHAPES its control from the stored value -- one row per
+        ; entry -- so it is filled when it is built and there is nothing to
+        ; assign here. The shell's populate skips it for the same reason.
+        if (type = "exe-list") {
+            continue
+        } else if (type = "checkbox") {
             ; Both spellings, because the two sources spell it differently: the
             ; shared table stores "true" as a string, these specs carry the
             ; literal. AutoHotkey compares the string "true" against the number
@@ -6022,8 +6027,16 @@ GetFieldValue(key, fallback := "") {
 ; Quick Menu" into the INI for every checkbox at once, and nothing would fail.
 ;
 ; An Edit answers the same string to either, which is why "edit", "shortcut" and
-; "path" share a branch.
+; "path" share a branch. A ListView answers a row NUMBER to .Value and nothing
+; useful to .Text, which is why exe-list has one of its own and reads the rows.
+;
+; A row that is not a usable filename cannot be entered through the editor --
+; SettingsExeListInsert refuses it -- so the only way to reach the problem branch
+; is a hand-edited INI whose junk survived into the list. Keeping the SAVED value
+; is the safe answer to that: the alternative writes a shorter list than the user
+; has, silently, and this is a save the user did not ask to be edited.
 SettingsFieldPairs() {
+    global SettingsFields
     pairs := []
     for _, row in SettingsAllFieldSpecs() {
         key := row["section"] "." row["key"]
@@ -6032,7 +6045,17 @@ SettingsFieldPairs() {
             value := GetFieldValue(key) ? "true" : "false"
         else if (row["type"] = "choice")
             value := GetFieldText(key, default)
-        else
+        else if (row["type"] = "exe-list") {
+            if !SettingsFields.Has(key)
+                continue
+            value := SettingsExeListValue(SettingsFields[key], &problem)
+            if (problem != "") {
+                LogLine("Settings: " row["key"] " was left unchanged; the list "
+                    . "holds an entry that is not an executable filename: "
+                    . problem, "Warning")
+                continue
+            }
+        } else
             value := GetFieldValue(key, default)
         pairs.Push([row["section"], row["key"], value])
     }

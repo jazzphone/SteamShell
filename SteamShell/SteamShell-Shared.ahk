@@ -10213,6 +10213,225 @@ SettingsAddShortcutField(guiObj, category, section, key, label, &y, defaultValue
 }
 
 
+; A list of executables, edited as rows rather than as a string.
+;
+; THE LAST SHELL-ONLY FIELD BUILDER, and the reason recorded for that was not a
+; reason. XfeAppendRecentExeToField said "this tree has no ListView exe editor --
+; its lists are a single edit control holding a.exe|b.exe", which describes the
+; gap without justifying it. Nothing about the companion prevents the ListView;
+; the shell wrote it first, and only the shell had it. So the companion's one
+; exe list was a raw pipe-separated Edit -- the user typed separators by hand,
+; with no Browse, no Remove, and no validation until Save -- while the shell had
+; five of these.
+;
+; SettingsEditorPopulateField's note that exe-list "reads at creation" and so
+; "cannot be shared" was true of the version that read the INI itself. It does
+; not any more: the CALLER passes the current value, each product reading it with
+; its own reader, and the builder is left doing what the others do. That was the
+; whole of the obstacle.
+;
+; HAND-PLACED, and it takes x/y/width rather than the &y cursor every other
+; builder here takes. That is the shell's geometry and it is deliberate: the
+; shell puts two of these side by side at one y -- shell-mode allowlist beside
+; desktop-mode exclusions, launcher EXEs beside their exclusions -- which a
+; flowing cursor cannot express. A caller with one list per row passes
+; contentX/contentWidth and advances its own cursor by SettingsExeListHeight().
+SettingsAddExeListField(guiObj, category, section, key, label, x, y
+    , width := 335, currentValue := "") {
+    labelCtrl := guiObj.AddText("x" x " y" y " w" width " h22", label)
+    listCtrl := guiObj.AddListView(
+        "x" x " y" (y + 24) " w" width " h132 -Multi", ["Executable"])
+    for _, exe in SettingsParseExeList(currentValue)
+        listCtrl.Add("", exe)
+    listCtrl.ModifyCol(1, width - 24)
+
+    ; Three across the same row, not a third button on a new one. Every one of
+    ; these fields is hand-placed at a literal y, and the two on the shell's
+    ; Controller page sit above the auto-mouse lists -- growing the row downward
+    ; would push into them and SharedAuditSettingsLayout fails overlapping
+    ; controls. Labels are shortened to fit a third of 335px rather than the row
+    ; being widened.
+    buttonGap := 8
+    buttonWidth := Floor((width - (buttonGap * 2)) / 3)
+    addButton := guiObj.AddButton(
+        "x" x " y" (y + 164) " w" buttonWidth " h30", "Browse…")
+    recentButton := guiObj.AddButton(
+        "x" (x + buttonWidth + buttonGap) " y" (y + 164)
+        . " w" buttonWidth " h30", "Recent…")
+    removeButton := guiObj.AddButton(
+        "x" (x + ((buttonWidth + buttonGap) * 2)) " y" (y + 164)
+        . " w" buttonWidth " h30", "Remove")
+
+    field := Map(
+        "category", category, "section", section, "key", key,
+        "label", label, "type", "exe-list", "ctrl", listCtrl,
+        "controls", [labelCtrl, listCtrl, addButton, recentButton, removeButton])
+    addButton.OnEvent("Click", SettingsExeListBrowse.Bind(field))
+    recentButton.OnEvent("Click", SettingsExeListAddRecent.Bind(field))
+    removeButton.OnEvent("Click", SettingsExeListRemoveSelected.Bind(field))
+    SettingsRegisterBuiltField(category, field)
+    return field
+}
+
+
+; What one of these occupies, top of label to bottom of button row, plus the gap
+; a following control needs. STATED ONCE: the shell's Launcher Cleanup page put
+; its preview button at listY + 204 and its second list row at listY + 210, two
+; hand-typed numbers for one measurement, and a caller that flows a cursor past
+; the field needs the same number a third time.
+SettingsExeListHeight() {
+    return 204
+}
+
+
+; Splits a stored list for DISPLAY. The runtime parser lower-cases, because
+; matching a process name is case-insensitive; this one keeps the capitalization
+; the user chose, because it is about to be shown back to them.
+;
+; Was SettingsEditorParseExeList in the shell. Renamed on the way here rather
+; than carrying a name that says "editor" into a file the companion compiles.
+SettingsParseExeList(raw) {
+    list := []
+    seen := Map()
+    raw := Trim(raw)
+    if (raw = "")
+        return list
+
+    ; Match the runtime parser's comment handling while retaining the original
+    ; filename capitalization for a friendlier settings display.
+    commentPos := InStr(raw, ";")
+    if (commentPos)
+        raw := Trim(SubStr(raw, 1, commentPos - 1))
+    commentPos := InStr(raw, "#")
+    if (commentPos)
+        raw := Trim(SubStr(raw, 1, commentPos - 1))
+
+    for _, part in StrSplit(raw, "|") {
+        exe := Trim(part)
+        if (exe = "")
+            continue
+        if !RegExMatch(exe, "i)\.exe$")
+            exe .= ".exe"
+        if !RegExMatch(exe, "i)^[a-z0-9][a-z0-9_. -]*\.exe$")
+            continue
+        normalized := StrLower(exe)
+        if seen.Has(normalized)
+            continue
+        seen[normalized] := true
+        list.Push(exe)
+    }
+    return list
+}
+
+
+; What an exe-list field currently holds, as the pipe-separated string the INI
+; stores. Returns "" and sets `problem` when a row is not a usable filename.
+;
+; Both products' save paths ask this, which is the point: the companion used to
+; write whatever text was in the edit control, so a typo reached the INI and was
+; discovered by the setting quietly not working.
+SettingsExeListValue(ctrl, &problem) {
+    problem := ""
+    executables := []
+    Loop ctrl.GetCount() {
+        exe := Trim(ctrl.GetText(A_Index, 1))
+        if !RegExMatch(exe, "i)^[a-z0-9][a-z0-9_. -]*\.exe$") {
+            ; NEVER the empty string, because "" is how the caller is told there
+            ; was no problem. A blank row is a rejected row like any other, and
+            ; reporting it as "" would have returned an empty list and read as
+            ; success -- which writes an EMPTY setting over the user's list.
+            problem := (exe = "") ? "(blank row)" : exe
+            return ""
+        }
+        executables.Push(exe)
+    }
+    return JoinWith(executables, "|")
+}
+
+
+SettingsExeListBrowse(field, *) {
+    static lastBrowseDirs := Map()
+
+    fieldId := field["section"] "\" field["key"]
+    startDir := lastBrowseDirs.Has(fieldId) ? lastBrowseDirs[fieldId] : A_ProgramFiles
+    selectedPath := SettingsProductSelectExe(
+        "Add an executable to " field["label"], startDir)
+    if (selectedPath = "")
+        return
+
+    exe := ""
+    selectedDir := ""
+    try SplitPath(selectedPath, &exe, &selectedDir)
+    exe := Trim(exe)
+    if (selectedDir != "")
+        lastBrowseDirs[fieldId] := selectedDir
+    SettingsExeListInsert(field, exe)
+}
+
+
+; Adds a recently used application, chosen from the shared picker.
+;
+; The picker offers a HISTORY rather than what is running now, because this is
+; reached from the Settings window -- at which point Settings is the foreground
+; application and "what is in front" names the wrong thing every time.
+SettingsExeListAddRecent(field, *) {
+    ShowApplicationPicker(
+        "Add a recently used application to " field["label"] ".",
+        SettingsExeListInsert.Bind(field))
+}
+
+
+; The half of adding an executable that does not care where the name came from.
+;
+; Split out when the recent-application picker arrived: browsing for a file and
+; choosing from the history disagree about how to NAME an executable and agree
+; about everything after -- validate, reject a duplicate by selecting the row
+; that already holds it, add, mark dirty, say so. Two copies of that would have
+; been two places to fix the next time the status line changed.
+SettingsExeListInsert(field, exe) {
+    exe := Trim(exe)
+    if !RegExMatch(exe, "i)^[a-z0-9][a-z0-9_. -]*\.exe$") {
+        SettingsProductFieldMessage(
+            "The selected file does not have a supported executable filename.")
+        return
+    }
+
+    listCtrl := field["ctrl"]
+    Loop listCtrl.GetCount() {
+        if (StrLower(listCtrl.GetText(A_Index, 1)) = StrLower(exe)) {
+            listCtrl.Modify(A_Index, "Select Focus Vis")
+            SettingsProductSetStatus(exe " is already in " field["label"])
+            return
+        }
+    }
+
+    row := listCtrl.Add("", exe)
+    listCtrl.Modify(row, "Select Focus Vis")
+    SettingsProductMarkDirty()
+    SettingsProductSetStatus("Added " exe " to " field["label"])
+}
+
+
+SettingsExeListRemoveSelected(field, *) {
+    listCtrl := field["ctrl"]
+    row := listCtrl.GetNext(0, "F")
+    if (!row)
+        row := listCtrl.GetNext()
+    if (!row) {
+        SettingsProductSetStatus("Select an executable to remove first")
+        return
+    }
+
+    exe := listCtrl.GetText(row, 1)
+    listCtrl.Delete(row)
+    remainingRows := listCtrl.GetCount()
+    if (remainingRows > 0)
+        listCtrl.Modify(Min(row, remainingRows), "Select Focus Vis")
+    SettingsProductMarkDirty()
+    SettingsProductSetStatus("Removed " exe " from " field["label"])
+}
+
+
 ; Explanatory text under a control, not bound to any setting.
 ;
 ; Registered with its category like every other control, so it shows and hides

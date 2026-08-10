@@ -2360,10 +2360,46 @@ Assert-True (
     # rather than in each tree's copy of the page.
     $source -match
         '(?s)"key", "MouseParkEdge"[\s\S]*?"key", "EnableAutoMouseMode"' -and
+    # The list is standalone's ListView editor now, not a pipe-separated Edit,
+    # and it is the SHARED builder rather than a second one written here.
     $source -match
-        '(?s)SettingsAddRowsForCategory\(settings, category, "xfe", &y\)\s*\r?\n\s*' +
-        'SettingsAddTextField\(settings, category, "Controller", "AutoMouseExeList"') (
+        '(?s)SettingsAddRowsForCategory\(settings, category, "xfe", &y\)[\s\S]{0,400}?' +
+        'SettingsAddExeListField\(settings, category, "Controller", "AutoMouseExeList"') (
     "The automatic mouse controls are not in standalone's position on the Controller page.")
+
+# The companion's exe list is EDITED like standalone's and SAVED like it too.
+#
+# It was a single Edit holding "a.exe|b.exe": the user typed the separators, a
+# typo was found by the setting quietly not working, and there was no Browse and
+# no Remove. The reason recorded for that -- "this tree has no ListView exe
+# editor" -- described the gap instead of justifying it, and nothing here
+# prevented the editor.
+#
+# The save is the half that would break silently. A ListView's .Value is the
+# SELECTED ROW NUMBER, so the generic branch this spec used to take would write
+# "3" over the user's list and nothing would fail.
+Assert-True (
+    $source -match
+        '(?s)"section", "Controller", "key", "AutoMouseExeList",\s*\r?\n\s*' +
+        '"type", "exe-list"' -and
+    $source -match
+        '(?sm)^SettingsFieldPairs\(\)(?:(?!\n\})[\s\S])*?' +
+        'row\["type"\] = "exe-list"(?:(?!\n\})[\s\S])*?SettingsExeListValue\(' -and
+    # Filled when it is BUILT, so the populate must leave it alone -- assigning
+    # a pipe-separated string to a ListView's .Value is the same defect from the
+    # other direction.
+    $source -match
+        '(?sm)^SettingsPopulateFields\(\)(?:(?!\n\})[\s\S])*?' +
+        'type = "exe-list"(?:(?!\n\})[\s\S])*?continue' -and
+    # And the append the Edit needed is gone rather than left behind to rot.
+    #
+    # Scoped to a CALL or a .Bind, not the bare word, because the seam that
+    # replaced it names it in a comment explaining what it replaced -- which is
+    # the same trap the Quick Controls assertion above records, and it caught
+    # this one on the first run.
+    $source -notmatch 'XfeAppendRecentExeToField\s*[\(.]') (
+    "The companion's automatic mouse list must use the shared ListView editor, " +
+    "be skipped by the populate, and be saved from its rows.")
 
 # The RTSS page is one flowing list, like standalone's. Its two side-by-side
 # group boxes are what forced the whole page into hand-placed columns: a group

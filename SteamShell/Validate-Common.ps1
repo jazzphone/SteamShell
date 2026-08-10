@@ -492,6 +492,19 @@ $sharedSeamAllowed = @(
     "SettingsProductBrowsePath", "SettingsProductMarkDirty",
     "SettingsProductRecordShortcut",
     "SettingsRegisterBuiltField",
+    # Widened for the exe-list field, the last shell-only field builder, which
+    # moved here when the reason recorded for the companion not having one
+    # turned out to say only that it did not have one. The companion's single
+    # exe list was a pipe-separated Edit the user punctuated by hand.
+    #
+    # Three, and each is a surface the two products genuinely answer for
+    # themselves: a file dialog (the shell owns its to the Settings window, the
+    # companion promotes it to topmost), a message box (the same difference),
+    # and the status line, which is a CONTROL in the shell and a FUNCTION in the
+    # companion. Everything above them -- validate, de-duplicate, insert,
+    # remove, join for the INI -- is now written once.
+    "SettingsProductSelectExe", "SettingsProductFieldMessage",
+    "SettingsProductSetStatus",
     # Reached the same way, from the Health Check's Export button.
     "ExportDiagnosticBundle",
     "ProductSettingBool",
@@ -512,7 +525,7 @@ $sharedSeamAllowed = @(
 # Restated here, next to the list, and asserted in Assert-SharedParity: changing
 # one without the other fails the build. Update the expectation in the same
 # commit that changes the list, and say in the message why the seam moved.
-$sharedSeamExpectedCount = 49
+$sharedSeamExpectedCount = 52
 
 # Reports same-named functions in both trees whose difference is only naming and
 # formatting -- the drift that a raw similarity score hides.

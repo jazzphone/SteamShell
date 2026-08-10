@@ -9488,8 +9488,17 @@ SettingsEditorMarkDirty(*) {
 ;
 ; mapped-choice and exe-list are NOT here, and cannot be. Both SHAPE the control
 ; from the stored value -- one adds a "Custom (x)" entry when the value matches
-; no preset, the other builds a list item per entry -- so they read at creation
-; and are the two builders this product does not share.
+; no preset, the other builds a list item per entry -- so both are filled when
+; they are built.
+;
+; That used to end "and are the two builders this product does not share", which
+; conflated two different things and was half wrong within one pass. Shaping the
+; control from the value is why they skip this loop; it was never why they could
+; not be shared. The exe-list builder IS shared now: the CALLER reads the value
+; and passes it in, each product with its own reader, and the builder does what
+; the others do. mapped-choice stays here for a reason of its own -- one row uses
+; it, and its key is a shell responsibility the companion's validator forbids by
+; name -- which has nothing to do with when it reads.
 ; One field's control, loaded from the INI.
 ;
 ; Split out of the loop below so a single field can be refreshed on its own --
@@ -9622,168 +9631,24 @@ SettingsProductAddSectionRow(guiObj, category, title, &y) {
     ; The shell has no section-break row; its pages are separated by category.
 }
 
-SettingsEditorParseExeList(raw) {
-    list := []
-    seen := Map()
-    raw := Trim(raw)
-    if (raw = "")
-        return list
-
-    ; Match the runtime parser's comment handling while retaining the original
-    ; filename capitalization for a friendlier settings display.
-    commentPos := InStr(raw, ";")
-    if (commentPos)
-        raw := Trim(SubStr(raw, 1, commentPos - 1))
-    commentPos := InStr(raw, "#")
-    if (commentPos)
-        raw := Trim(SubStr(raw, 1, commentPos - 1))
-
-    for _, part in StrSplit(raw, "|") {
-        exe := Trim(part)
-        if (exe = "")
-            continue
-        if !RegExMatch(exe, "i)\.exe$")
-            exe .= ".exe"
-        if !RegExMatch(exe, "i)^[a-z0-9][a-z0-9_. -]*\.exe$")
-            continue
-        normalized := StrLower(exe)
-        if seen.Has(normalized)
-            continue
-        seen[normalized] := true
-        list.Push(exe)
-    }
-    return list
+; Per-tree seams required by SteamShell-Shared.ahk's exe-list field. All three
+; reach machinery this tree has and the companion answers differently: a file
+; dialog that owns itself to the Settings window, a message box that does the
+; same, and a status line that is a control here and a function there.
+SettingsProductSelectExe(prompt, startDir) {
+    return SettingsEditorFileSelect(1, startDir, prompt, "Programs (*.exe)")
 }
 
-SettingsEditorAddExeListField(category, section, key, label, x, y, width := 335
-    , defaultValue := "") {
-    global SettingsGui, SettingsEditorFields
-
-    labelCtrl := SettingsGui.AddText("x" x " y" y " w" width " h22", label)
-    listCtrl := SettingsGui.AddListView(
-        "x" x " y" (y + 24) " w" width " h132 -Multi", ["Executable"])
-    for _, exe in SettingsEditorParseExeList(IniReadS(section, key, defaultValue))
-        listCtrl.Add("", exe)
-    listCtrl.ModifyCol(1, width - 24)
-
-    ; Three across the same row, not a third button on a new one. Every one of
-    ; these fields is hand-placed at a literal y, and the two on this page sit
-    ; above the auto-mouse lists -- growing the row downward would push into
-    ; them and SharedAuditSettingsLayout fails overlapping controls. Labels are
-    ; shortened to fit a third of 335px rather than the row being widened.
-    buttonGap := 8
-    buttonWidth := Floor((width - (buttonGap * 2)) / 3)
-    addButton := SettingsGui.AddButton(
-        "x" x " y" (y + 164) " w" buttonWidth " h30", "Browse…")
-    recentButton := SettingsGui.AddButton(
-        "x" (x + buttonWidth + buttonGap) " y" (y + 164)
-        " w" buttonWidth " h30", "Recent…")
-    removeButton := SettingsGui.AddButton(
-        "x" (x + ((buttonWidth + buttonGap) * 2)) " y" (y + 164)
-        " w" buttonWidth " h30", "Remove")
-
-    field := Map(
-        "category", category, "section", section, "key", key,
-        "label", label, "type", "exe-list", "ctrl", listCtrl,
-        "controls", [labelCtrl, listCtrl, addButton, recentButton, removeButton])
-    addButton.OnEvent("Click", SettingsEditorBrowseAddExe.Bind(field))
-    recentButton.OnEvent("Click", SettingsEditorAddRecentExe.Bind(field))
-    removeButton.OnEvent("Click", SettingsEditorRemoveSelectedExe.Bind(field))
-
-    SettingsEditorRegisterControl(category, labelCtrl)
-    SettingsEditorRegisterControl(category, listCtrl)
-    SettingsEditorRegisterControl(category, addButton)
-    SettingsEditorRegisterControl(category, recentButton)
-    SettingsEditorRegisterControl(category, removeButton)
-    SettingsEditorFields.Push(field)
-    return field
+SettingsProductFieldMessage(message) {
+    SettingsEditorMsgBox(message, "Icon!")
 }
 
-SettingsEditorBrowseAddExe(field, *) {
+SettingsProductSetStatus(text) {
     global SettingsEditorStatusCtrl
-    static lastBrowseDirs := Map()
-
-    fieldId := field["section"] "\" field["key"]
-    startDir := lastBrowseDirs.Has(fieldId) ? lastBrowseDirs[fieldId] : A_ProgramFiles
-    selectedPath := SettingsEditorFileSelect(
-        1, startDir, "Add an executable to " field["label"], "Programs (*.exe)")
-    if (selectedPath = "")
-        return
-
-    exe := ""
-    selectedDir := ""
-    try SplitPath(selectedPath, &exe, &selectedDir)
-    exe := Trim(exe)
-    if (selectedDir != "")
-        lastBrowseDirs[fieldId] := selectedDir
-    SettingsEditorInsertExe(field, exe)
-}
-
-; Adds a recently used application, chosen from the shared picker.
-;
-; The picker offers a HISTORY rather than what is running now, because this is
-; reached from the Settings window -- at which point Settings is the foreground
-; application and "what is in front" names the wrong thing every time.
-SettingsEditorAddRecentExe(field, *) {
-    ShowApplicationPicker(
-        "Add a recently used application to " field["label"] ".",
-        SettingsEditorInsertExe.Bind(field))
-}
-
-; The half of adding an executable that does not care where the name came from.
-;
-; Split out when the recent-application picker arrived: browsing for a file and
-; choosing from the history disagree about how to NAME an executable and agree
-; about everything after -- validate, reject a duplicate by selecting the row
-; that already holds it, add, mark dirty, say so. Two copies of that would have
-; been two places to fix the next time the status line changed.
-SettingsEditorInsertExe(field, exe) {
-    global SettingsEditorStatusCtrl
-    exe := Trim(exe)
-    if !RegExMatch(exe, "i)^[a-z0-9][a-z0-9_. -]*\.exe$") {
-        SettingsEditorMsgBox(
-            "The selected file does not have a supported executable filename.", "Icon!")
-        return
-    }
-
-    listCtrl := field["ctrl"]
-    Loop listCtrl.GetCount() {
-        if (StrLower(listCtrl.GetText(A_Index, 1)) = StrLower(exe)) {
-            listCtrl.Modify(A_Index, "Select Focus Vis")
-            if IsObject(SettingsEditorStatusCtrl)
-                SettingsEditorStatusCtrl.Text := exe " is already in " field["label"]
-            return
-        }
-    }
-
-    row := listCtrl.Add("", exe)
-    listCtrl.Modify(row, "Select Focus Vis")
-    SettingsEditorMarkDirty()
     if IsObject(SettingsEditorStatusCtrl)
-        SettingsEditorStatusCtrl.Text := "Added " exe " to " field["label"]
+        SettingsEditorStatusCtrl.Text := text
 }
 
-SettingsEditorRemoveSelectedExe(field, *) {
-    global SettingsEditorStatusCtrl
-    listCtrl := field["ctrl"]
-    row := listCtrl.GetNext(0, "F")
-    if (!row)
-        row := listCtrl.GetNext()
-    if (!row) {
-        if IsObject(SettingsEditorStatusCtrl)
-            SettingsEditorStatusCtrl.Text := "Select an executable to remove first"
-        return
-    }
-
-    exe := listCtrl.GetText(row, 1)
-    listCtrl.Delete(row)
-    remainingRows := listCtrl.GetCount()
-    if (remainingRows > 0)
-        listCtrl.Modify(Min(row, remainingRows), "Select Focus Vis")
-    SettingsEditorMarkDirty()
-    if IsObject(SettingsEditorStatusCtrl)
-        SettingsEditorStatusCtrl.Text := "Removed " exe " from " field["label"]
-}
 
 SettingsEditorGetExeListValues(field) {
     values := []
@@ -10720,16 +10585,14 @@ SettingsEditorValidateField(field, &value, &message) {
         return true
     }
     if (fieldType = "exe-list") {
-        executables := []
-        Loop ctrl.GetCount() {
-            exe := Trim(ctrl.GetText(A_Index, 1))
-            if !RegExMatch(exe, "i)^[a-z0-9][a-z0-9_. -]*\.exe$") {
-                message := field["label"] " contains an invalid executable filename: " exe
-                return false
-            }
-            executables.Push(exe)
+        ; Through the shared reader, which the companion's save path also asks.
+        ; Two copies of "what is in this ListView" would be two answers the day
+        ; one of them learned something the other did not.
+        value := SettingsExeListValue(ctrl, &problem)
+        if (problem != "") {
+            message := field["label"] " contains an invalid executable filename: " problem
+            return false
         }
-        value := JoinPipe(executables)
         return true
     }
 
@@ -11460,9 +11323,9 @@ ProductHealthResults() {
     ; RawInput for a pad XInput was reading.
     SharedControllerHealthRows(results, ControllerReadState(&state))
 
-    rawLauncherCount := SettingsEditorParseExeList(LauncherCleanupLauncherExeListRaw).Length
-    rawBackgroundCount := SettingsEditorParseExeList(LauncherCleanupBackgroundExeListRaw).Length
-    rawExcludeCount := SettingsEditorParseExeList(LauncherCleanupExcludeExeListRaw).Length
+    rawLauncherCount := SettingsParseExeList(LauncherCleanupLauncherExeListRaw).Length
+    rawBackgroundCount := SettingsParseExeList(LauncherCleanupBackgroundExeListRaw).Length
+    rawExcludeCount := SettingsParseExeList(LauncherCleanupExcludeExeListRaw).Length
     cleanupStatus := EnableLauncherCleanup && LauncherCleanupHardKill ? "warn" : "pass"
     HealthResult(results, cleanupStatus, "Launcher Cleanup",
         (EnableLauncherCleanup ? "Enabled" : "Disabled")
@@ -13740,12 +13603,17 @@ ShowSettingsEditor(*) {
     SettingsEditorAddActionButton(category, "Delete Learned Profile",
         DeleteControllerProfileForActiveDevice, 725, y + 48, 220)
     autoMouseY := y + 91
-    SettingsEditorAddExeListField(
+    ; The value is read HERE rather than inside the builder, which is what let
+    ; the builder move to SteamShell-Shared.ahk: this tree reads with IniReadS
+    ; and the companion with ReadText, and neither has to be the other's.
+    SettingsAddExeListField(SettingsGui,
         category, "Controller", "AutoMouseExeList",
-        "Shell-mode automatic mouse allowlist", 255, autoMouseY, 335)
-    SettingsEditorAddExeListField(
+        "Shell-mode automatic mouse allowlist", 255, autoMouseY, 335,
+        IniReadS("Controller", "AutoMouseExeList", ""))
+    SettingsAddExeListField(SettingsGui,
         category, "Controller", "DesktopAutoMouseExcludeExeList",
-        "Desktop-mode exclusions (games/apps)", 610, autoMouseY, 335)
+        "Desktop-mode exclusions (games/apps)", 610, autoMouseY, 335,
+        IniReadS("Controller", "DesktopAutoMouseExcludeExeList", ""))
 
     ; Steam
     ;
@@ -13780,9 +13648,10 @@ ShowSettingsEditor(*) {
         ["Responsive (55)", "Balanced (60)", "Conservative (70)"],
         ["55", "60", "70"], &y, "55")
     exclusionY := y + 8
-    SettingsEditorAddExeListField(
+    SettingsAddExeListField(SettingsGui,
         category, "WindowManagement", "ExcludeExeList",
-        "Never center or maximize these EXEs", 255, exclusionY, 690)
+        "Never center or maximize these EXEs", 255, exclusionY, 690,
+        IniReadS("WindowManagement", "ExcludeExeList", ""))
     SettingsEditorAddActionButton(
         category, "Open AlwaysFocus Manager…", ShowAlwaysFocusManager, 255, exclusionY + 204, 260)
 
@@ -13801,14 +13670,17 @@ ShowSettingsEditor(*) {
     y := 150
     SettingsAddRowsForCategory(SettingsGui, category, "standalone", &y)
     listY := y + 8
-    SettingsEditorAddExeListField(
-        category, "LauncherCleanup", "LauncherExeList", "Launcher EXEs to close", 255, listY)
-    SettingsEditorAddExeListField(
-        category, "LauncherCleanup", "ExcludeExeList", "Never close these EXEs", 610, listY)
+    SettingsAddExeListField(SettingsGui,
+        category, "LauncherCleanup", "LauncherExeList", "Launcher EXEs to close",
+        255, listY, 335, IniReadS("LauncherCleanup", "LauncherExeList", ""))
+    SettingsAddExeListField(SettingsGui,
+        category, "LauncherCleanup", "ExcludeExeList", "Never close these EXEs",
+        610, listY, 335, IniReadS("LauncherCleanup", "ExcludeExeList", ""))
     helperListY := listY + 210
-    SettingsEditorAddExeListField(
+    SettingsAddExeListField(SettingsGui,
         category, "LauncherCleanup", "BackgroundExeList",
-        "Background helper EXEs to close", 255, helperListY, 690)
+        "Background helper EXEs to close", 255, helperListY, 690,
+        IniReadS("LauncherCleanup", "BackgroundExeList", ""))
     SettingsEditorAddActionButton(
         category, "Preview Running Cleanup Targets…",
         SettingsEditorPreviewLauncherCleanup, 255, helperListY + 204, 300)
@@ -14837,7 +14709,7 @@ RunSteamShellSelfTests(showResult := true) {
         || normalizedExeList[3] != "steam.exe")
         failures.Push("ParseExeListPipe normalization")
 
-    editorExeList := SettingsEditorParseExeList("One.exe|one.EXE|Two")
+    editorExeList := SettingsParseExeList("One.exe|one.EXE|Two")
     if (editorExeList.Length != 2
         || StrLower(editorExeList[2]) != "two.exe")
         failures.Push("Settings EXE-list de-duplication")
