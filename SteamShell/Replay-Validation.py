@@ -2051,6 +2051,62 @@ def check_settings_category_extraction(sources):
              f"assignment(s) and {cursors} cursor reset(s).")
 
 
+def check_validator_extractors_still_match(sources):
+    """Every `[regex]::Match($source, ...)` in the validators still finds something.
+
+    THREE BUILDS IN A ROW FAILED ON THIS ONE CLASS. A validator does not only
+    assert; it EXTRACTS -- it pulls a category list, a page section or a function
+    body out of the source with a regex and then reasons about what it found. An
+    extractor is anchored to the shape of the code, so moving that code breaks
+    the extractor and the validator reports "could not be located" rather than
+    anything about the change. The assertions themselves are replayed here; the
+    extractors were not, so all three were invisible until Windows ran:
+
+        The Full Settings category list could not be extracted.
+        The companion's Settings category table could not be extracted.
+        The Settings page section could not be located.
+
+    This replays the extraction only -- whether the pattern finds anything. What
+    the validator concludes from what it found is still Windows'. Finding
+    nothing is the failure mode that costs a build, and it is decidable here.
+
+    Deliberately narrow: single-quoted patterns matched against $source, with a
+    leading inline flag group at most. A concatenated pattern is skipped rather
+    than reassembled, because a half-understood pattern reporting a false
+    failure would be worse than not checking it.
+    """
+    shared = (sources["SteamShell-Shared.ahk"] + "\n"
+              + sources["SteamShell-Common.ahk"])
+    effective = {
+        "Validate-SteamShell.ps1": sources["SteamShell.ahk"] + "\n" + shared,
+        "Validate-SteamShell-XFE.ps1": sources["SteamShell-XFE.ahk"] + "\n" + shared,
+    }
+    for validator, source in effective.items():
+        text = (ROOT / validator).read_text(encoding="utf-8", errors="replace")
+        for m in re.finditer(r"\[regex\]::Match\(\s*\$source,\s*'((?:[^']|'')*)'\s*\)",
+                             text):
+            pattern = m.group(1).replace("''", "'")
+            body, flags = pattern, 0
+            for prefix, f in (("(?sm)", re.S | re.M), ("(?s)", re.S),
+                              ("(?m)", re.M)):
+                if body.startswith(prefix):
+                    body, flags = body[len(prefix):], f
+                    break
+            # Python rejects an inline flag group anywhere but the start, and
+            # .NET allows it -- such a pattern is skipped, not guessed at.
+            if "(?s)" in body or "(?m)" in body:
+                continue
+            try:
+                found = re.search(body, source, flags)
+            except re.error:
+                continue
+            if not found:
+                fail(f"{validator} extracts with a pattern that no longer "
+                     f"matches: {pattern[:90]}. The validator will report that "
+                     "it could not locate its subject rather than anything "
+                     "about the change.")
+
+
 def check_shared_seams_exist_in_both_trees(sources):
     """Every Product* name SteamShell-Shared.ahk reaches exists in BOTH trees.
 
@@ -2610,6 +2666,7 @@ def main():
     check_learner_guard(sources)
     check_rtss_limiter_restore(sources)
     check_settings_category_extraction(sources)
+    check_validator_extractors_still_match(sources)
     check_shared_seams_exist_in_both_trees(sources)
     check_settings_rows_reach_their_readers(sources)
     check_live_log_shared(sources)

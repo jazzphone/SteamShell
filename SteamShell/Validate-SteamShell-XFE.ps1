@@ -2301,9 +2301,12 @@ Assert-True ($unsaved.Count -eq 0) (
 # Bounded to the page bodies, which start at the "Pages" banner and end at the
 # footer, so the frame around them -- title, category list, footer, scrollbar --
 # is free to keep the fixed coordinates it must have.
+# The end anchor was `settings.AddText("x24 y616'` -- the status line this
+# window used to build for itself. The footer is SettingsBuildWindowFooter's now,
+# so the pages end where that call begins.
 $settingsPageBody = [regex]::Match(
     $source,
-    '(?s); -+\r?\n\s*; Pages\r?\n(.*?)\r?\n\s*settings\.AddText\("x24 y616')
+    '(?s); -+\r?\n\s*; Pages\r?\n(.*?)\r?\n\s*settingsFooter := SettingsBuildWindowFooter\(')
 Assert-True ($settingsPageBody.Success) (
     "The Settings page section could not be located.")
 $literalCoordinates = [regex]::Matches(
