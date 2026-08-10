@@ -11301,7 +11301,18 @@ ShowControllerMappingWindow(*) {
     ; Initialize editor for first item
     ControllerMapUI_UpdateEditor()
 
-    ControllerMapGui.Show("w680 Center")
+    ; NOT Gui's own "Center", which centres on the PRIMARY monitor rather than
+    ; the one the window it was opened from is on -- so on a second display this
+    ; editor jumped to the first. Every other window Settings opens goes through
+    ; the shared placement, and this was the last one using AutoHotkey's.
+    ;
+    ; The reference monitor is taken BEFORE the show, from whatever is in front:
+    ; afterwards the active window is this one, and asking which monitor it is on
+    ; answers with wherever Windows happened to put it.
+    mapTargetMonitor := 0
+    try mapTargetMonitor := GetMonitorIndexForWindow(WinExist("A"))
+    ControllerMapGui.Show("w680")
+    RecenterVisibleGuiOnMonitorActual(ControllerMapGui, mapTargetMonitor)
     SetTimer(PollController, ControllerPollIntervalMs)
 }
 

@@ -2013,6 +2013,26 @@ function Assert-SettingsWindowPlacement {
             "foreground. A single activation request is one Windows is " +
             "entitled to refuse, so the window opens behind whatever is there.")
     }
+    # AND EVERY WINDOW SETTINGS OPENS IS PLACED THE SAME WAY.
+    #
+    # They are all +AlwaysOnTop, as Settings is, so they stack above it once
+    # activated -- that part was never in doubt. Placement was: the controller
+    # mapping editor used Gui's own "Center", which centres on the PRIMARY
+    # monitor rather than the one Settings is on, and the AlwaysFocus manager
+    # placed itself not at all. Both are reachable from a Settings button.
+    #
+    # Gui "Center" is banned outright rather than fixed case by case. It is the
+    # wrong answer on any multi-monitor machine and it is indistinguishable from
+    # the right one on a single-display test bench, which is how it survived.
+    foreach ($file in @("SteamShell.ahk", "SteamShell-XFE.ahk", "SteamShell-Shared.ahk")) {
+        $text = Get-SourceText (Join-Path $ProjectRoot $file)
+        $code = (($text -split "`n") | Where-Object { $_ -notmatch '^\s*;' }) -join "`n"
+        Assert-True ($code -notmatch '\.Show\("[^"]*\bCenter\b') (
+            "$file places a window with Gui's own Center option, which centres " +
+            "on the primary monitor rather than the one the window was opened " +
+            "from. Use the shared placement helpers.")
+    }
+
     if (-not $Quiet) {
         Write-Host "Settings window: both products size, centre and re-measure the same way."
     }

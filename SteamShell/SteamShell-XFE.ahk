@@ -7082,7 +7082,10 @@ RecordShortcutChord() {
     input.OnKeyDown := RecordShortcutKeyDown
     input.OnKeyUp := RecordShortcutKeyUp
     _ShortcutCap["input"] := input
-    capture.Show("AutoSize Center")
+    captureMonitor := 0
+    try captureMonitor := GetMonitorIndexForWindow(WinExist("A"))
+    capture.Show("AutoSize")
+    RecenterVisibleGuiOnMonitorActual(capture, captureMonitor)
     input.Start()
     while IsObject(_ShortcutCap) && !_ShortcutCap["done"]
         Sleep 30

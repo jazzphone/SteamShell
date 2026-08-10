@@ -7945,7 +7945,10 @@ ShowStartupRecovery(reason) {
     desktopButton.OnEvent("Click", RestoreDesktopFromRecovery)
     StartupRecoveryGui.OnEvent("Close", (*) => 0)
     StartupRecoveryGui.OnEvent("Escape", (*) => 0)
-    StartupRecoveryGui.Show("AutoSize Center")
+    startupRecoveryMonitor := 0
+    try startupRecoveryMonitor := GetMonitorIndexForWindow(WinExist("A"))
+    StartupRecoveryGui.Show("AutoSize")
+    RecenterVisibleGuiOnMonitorActual(StartupRecoveryGui, startupRecoveryMonitor)
     try retryButton.Focus()
     SystemCursor("Show")
     LogLine("Recovery screen shown: " reason)
@@ -7987,7 +7990,10 @@ ShowDesktopRestoreRecovery(reason) {
     ; a shell-less desktop with nothing on screen explaining it.
     DesktopRecoveryGui.OnEvent("Close", (*) => 0)
     DesktopRecoveryGui.OnEvent("Escape", (*) => 0)
-    DesktopRecoveryGui.Show("AutoSize Center")
+    desktopRecoveryMonitor := 0
+    try desktopRecoveryMonitor := GetMonitorIndexForWindow(WinExist("A"))
+    DesktopRecoveryGui.Show("AutoSize")
+    RecenterVisibleGuiOnMonitorActual(DesktopRecoveryGui, desktopRecoveryMonitor)
     try retryButton.Focus()
     SystemCursor("Show")
     LogLine("Desktop recovery screen shown: " reason)
@@ -8894,7 +8900,14 @@ ShowAlwaysFocusManager(*) {
     AlwaysFocusGui.OnEvent("Escape", (*) => AlwaysFocusGui.Hide())
     }
 
+    ; Placed like every other window Settings opens. This one showed wherever
+    ; Windows chose to put it, which is the top-left cascade the Settings window
+    ; itself was doing until an hour ago. Reference monitor from the window in
+    ; front, taken before the show.
+    focusManagerMonitor := 0
+    try focusManagerMonitor := GetMonitorIndexForWindow(WinExist("A"))
     AlwaysFocusGui.Show()
+    RecenterVisibleGuiOnMonitorActual(AlwaysFocusGui, focusManagerMonitor)
     RefreshAlwaysFocusManagerLists()
 }
 
@@ -14052,7 +14065,10 @@ stat8 := ControlGui.AddText("x" x2 " y+2 w" colW " vstat8 +Wrap", "LC Last: -")
 
     ControlGui.Show("w" w " h" h " Center")
     } catch {
-    ControlGui.Show("Center")
+    controlPanelMonitor := 0
+    try controlPanelMonitor := GetMonitorIndexForWindow(WinExist("A"))
+    ControlGui.Show()
+    RecenterVisibleGuiOnMonitorActual(ControlGui, controlPanelMonitor)
     }
 
     EnsureLogRefreshTimer()
@@ -17538,7 +17554,10 @@ RecordShortcutChord() {
     ih.OnKeyUp := RecordShortcutChord_OnKeyUp
     _ShortcutCap["input"] := ih
 
-    cap.Show("AutoSize Center")
+    capMonitor := 0
+    try capMonitor := GetMonitorIndexForWindow(WinExist("A"))
+    cap.Show("AutoSize")
+    RecenterVisibleGuiOnMonitorActual(cap, capMonitor)
     ih.Start()
 
     ; Wait until OK/Cancel

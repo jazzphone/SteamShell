@@ -2030,6 +2030,17 @@ def check_settings_window_placement(sources):
             fail(f"{name}: the Settings window is shown but never made the "
                  "foreground; one activation request is one Windows may refuse.")
 
+    # Gui's own "Center" centres on the PRIMARY monitor, not the one the window
+    # was opened from -- wrong on any multi-monitor machine and identical to the
+    # right answer on a single-display bench, which is how it survived.
+    for name in ("SteamShell.ahk", "SteamShell-XFE.ahk", "SteamShell-Shared.ahk"):
+        code = "\n".join(line for line in sources[name].split("\n")
+                         if not line.lstrip().startswith(";"))
+        if re.search(r'\.Show\("[^"]*\bCenter\b', code):
+            fail(f"{name} places a window with Gui's own Center option. Use the "
+                 "shared placement helpers, which centre on the monitor the "
+                 "window was opened from.")
+
 
 def check_settings_audit_bounds(sources):
     """The layout audit's own bounds must come from the layout.
