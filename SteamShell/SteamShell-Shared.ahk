@@ -9888,6 +9888,36 @@ DeleteControllerProfileForActiveDevice(*) {
 }
 
 
+; Corrects a VISIBLE window's position from its real outer rectangle.
+;
+; Moved here from SteamShell-XFE.ahk, where it was the only piece of the
+; placement chain that was not already shared -- CenterGuiOnMonitorActual,
+; PositionGuiCentered, CenteredPosition, MoveWindowPhysical and
+; GetMonitorIndexForWindow all were. Standalone's Settings window opened in
+; the top-left corner and the companion's did not, and this was the whole of
+; the difference: the companion measured the window again once it was on
+; screen, and the shell trusted an estimate taken before it was.
+;
+; Hidden GUI measurements can omit the scaled non-client frame and title bar.
+; Once a window is visible, measure its real outer rectangle and correct the
+; position from that rather than the earlier estimate.
+RecenterVisibleGuiOnMonitorActual(guiObj, monitorIndex) {
+    monitorIndex := ClampInt(monitorIndex, 1, MonitorGetCount())
+    MonitorGetWorkArea(monitorIndex, &left, &top, &right, &bottom)
+    try {
+        WinGetPos(&visibleX, &visibleY, &visibleW, &visibleH,
+            "ahk_id " guiObj.Hwnd)
+    } catch {
+        return false
+    }
+    if (visibleW <= 0 || visibleH <= 0)
+        return false
+    CenteredPosition(left, top, right, bottom, visibleW, visibleH,
+        &correctedX, &correctedY)
+    return MoveWindowPhysical(guiObj.Hwnd, correctedX, correctedY)
+}
+
+
 CenterGuiOnMonitorActual(guiObj, monitorIndex, width, height, noActivate := false,
         deferShow := false) {
     monitorIndex := ClampInt(monitorIndex, 1, MonitorGetCount())

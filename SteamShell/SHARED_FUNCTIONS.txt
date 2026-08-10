@@ -334,6 +334,7 @@ RearmControllerInput
 ReassertTrayIcon
 RecentAppsAll
 RecentAppsExcluded
+RecenterVisibleGuiOnMonitorActual
 RecentAppsGet
 RecentAppsIntervalMs
 RecentAppsMax

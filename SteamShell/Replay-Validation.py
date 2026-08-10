@@ -1996,6 +1996,38 @@ def check_learner_guard(sources):
                  "word -- that turns every button held at close into a press edge.")
 
 
+def check_settings_window_placement(sources):
+    """Both Settings windows are placed the same way.
+
+    They were not, and it showed from the couch: standalone's opened in the
+    top-left corner while the companion's centred, same machine, same display.
+    Standalone asked Gui.Show for a SIZE and no position -- Windows then chooses,
+    and it chooses the top-left cascade -- then corrected with one WinGetPos and
+    one WinMove. The companion sized and positioned in one shared call and then
+    re-measured the window once VISIBLE.
+
+    RecenterVisibleGuiOnMonitorActual is that correction and every other link in
+    the chain was already shared. It was the one piece that was not.
+    """
+    shared = sources["SteamShell-Shared.ahk"]
+    if not function_body(shared, "RecenterVisibleGuiOnMonitorActual"):
+        fail("RecenterVisibleGuiOnMonitorActual is not in SteamShell-Shared.ahk; "
+             "while it lived in one tree only that product's Settings centred.")
+    for name, fn in (("SteamShell.ahk", "ShowSettingsEditor"),
+                     ("SteamShell-XFE.ahk", "ShowSettings")):
+        body = function_body(sources[name], fn)
+        if not body:
+            fail(f"{name}: {fn} could not be read, so the Settings window's "
+                 "placement is not checked.")
+        if not re.search(r"CenterGuiOnMonitorActual\(", body):
+            fail(f"{name}: the Settings window is not sized and positioned "
+                 "through CenterGuiOnMonitorActual. Gui.Show with a size and no "
+                 "position lets Windows choose, and it chooses the top-left.")
+        if not re.search(r"RecenterVisibleGuiOnMonitorActual\(", body):
+            fail(f"{name}: the Settings window is never re-measured once "
+                 "visible, so its position rests on a hidden-window estimate.")
+
+
 def check_settings_audit_bounds(sources):
     """The layout audit's own bounds must come from the layout.
 
@@ -2370,6 +2402,7 @@ def main():
     check_controller_poll_frame(sources)
     check_learner_guard(sources)
     check_rtss_limiter_restore(sources)
+    check_settings_window_placement(sources)
     check_settings_audit_bounds(sources)
     check_learner_identify_release(sources)
     check_recent_application_picker(sources)

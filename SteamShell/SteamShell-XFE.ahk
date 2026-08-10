@@ -1451,24 +1451,6 @@ PromoteDialogsToTopmost() {
 }
 
 
-; Hidden GUI measurements can omit the scaled non-client frame and title bar.
-; Once a window is visible, measure its real outer rectangle and correct the
-; position from that rather than the earlier estimate.
-RecenterVisibleGuiOnMonitorActual(guiObj, monitorIndex) {
-    monitorIndex := ClampInt(monitorIndex, 1, MonitorGetCount())
-    MonitorGetWorkArea(monitorIndex, &left, &top, &right, &bottom)
-    try {
-        WinGetPos(&visibleX, &visibleY, &visibleW, &visibleH,
-            "ahk_id " guiObj.Hwnd)
-    } catch {
-        return false
-    }
-    if (visibleW <= 0 || visibleH <= 0)
-        return false
-    CenteredPosition(left, top, right, bottom, visibleW, visibleH,
-        &correctedX, &correctedY)
-    return MoveWindowPhysical(guiObj.Hwnd, correctedX, correctedY)
-}
 
 ; Seams for the shared MouseWatch. Nothing stops the pass here -- this product
 ; has no desktop shell to hand the cursor over to, so the only gate is the

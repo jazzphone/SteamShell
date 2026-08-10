@@ -13460,6 +13460,13 @@ ShowSettingsEditor(*) {
     if IsSet(SettingsGui) {
         try {
             SettingsGui.Show()
+            ; Re-opening positioned nothing at all. A window re-shown returns to
+            ; wherever it was, which is fine when that was the right place and
+            ; wrong the moment the first open put it in a corner or the display
+            ; arrangement changed underneath it. The same correction as the first
+            ; open, and it is cheap: one measurement and one SetWindowPos.
+            RecenterVisibleGuiOnMonitorActual(
+                SettingsGui, GetMonitorIndexForWindow(LastRealFgHwnd))
             WinActivate("ahk_id " SettingsGui.Hwnd)
             SetTimer(PollController, ControllerPollIntervalMs)
             return
@@ -13777,8 +13784,37 @@ ShowSettingsEditor(*) {
     SettingsEditorReportLayoutAudit()
     SettingsEditorRefreshDependencies()
     SettingsEditorShowCategory(1)
-    SettingsGui.Show("w980 h" SettingsEditorWindowHeight)
-    CenterGuiOnTargetMonitor(SettingsGui, LastRealFgHwnd)
+    ; THE COMPANION'S PLACEMENT, because the companion's works and this did not.
+    ;
+    ; Reported from hardware: standalone's Settings window opens in the top-left
+    ; corner while every other window in the product centres, and XFE's Settings
+    ; centres correctly. Those two facts together are the whole diagnosis. Every
+    ; window that centres goes through ProductCenterGui with no target; this was
+    ; the one the user opens often that did something else --
+    ;
+    ;     Show("w980 h...")            <- size, but no position, so Windows
+    ;                                     picks one, and its pick is the
+    ;                                     top-left cascade
+    ;     CenterGuiOnTargetMonitor()   <- one WinGetPos, one WinMove
+    ;
+    ; -- while the companion sized AND positioned in one shared call and then
+    ; re-measured the VISIBLE window to correct it in physical pixels.
+    ;
+    ; RecenterVisibleGuiOnMonitorActual carried the reason in its own comment,
+    ; and it described this symptom exactly: a hidden GUI's measurements can omit
+    ; the scaled non-client frame and title bar, so the position computed from
+    ; them is an estimate. It lived in SteamShell-XFE.ahk only. Everything it
+    ; stands on -- CenterGuiOnMonitorActual, PositionGuiCentered,
+    ; CenteredPosition, MoveWindowPhysical, GetMonitorIndexForWindow -- was
+    ; already shared; the correction was the one piece that was not.
+    ;
+    ; The monitor still comes from LastRealFgHwnd, which is this product's own
+    ; intent -- open on the display the user was last looking at -- rather than
+    ; the companion's active window. That was never the broken part.
+    monitorIndex := GetMonitorIndexForWindow(LastRealFgHwnd)
+    CenterGuiOnMonitorActual(SettingsGui, monitorIndex, 980,
+        SettingsEditorWindowHeight)
+    RecenterVisibleGuiOnMonitorActual(SettingsGui, monitorIndex)
     HandleCursorAfterManagedFocus(SettingsGui.Hwnd, false)
     SetTimer(PollController, ControllerPollIntervalMs)
 }

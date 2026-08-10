@@ -1954,6 +1954,61 @@ function Assert-RtssUnreadableIsNotOff {
 # neither can fix or break this on its own. KEPT IN STEP WITH
 # test_identifying_press_never_becomes_the_resting_state in
 # Test-ControllerProfiles.py, which models the same sequence report by report.
+# Both Settings windows are PLACED the same way.
+#
+# They were not, and the difference was visible from the couch: standalone's
+# opened in the top-left corner while the companion's centred, on the same
+# machine and the same display. Standalone asked Gui.Show for a SIZE and no
+# position -- so Windows chose one, and its choice is the top-left cascade --
+# then corrected with a single WinGetPos and WinMove. The companion sized and
+# positioned in one shared call and then re-measured the window once it was
+# VISIBLE, correcting it in physical pixels through SetWindowPos.
+#
+# RecenterVisibleGuiOnMonitorActual is that correction, and its own comment
+# described the symptom before anybody went looking: a hidden GUI's measurements
+# can omit the scaled non-client frame and title bar, so a position computed
+# from them is an estimate. Every other link in the chain was already shared. It
+# was the one piece that was not, so only one product had it.
+#
+# The re-open path is checked too. Standalone's positioned nothing at all on a
+# second open, which is fine right up until the first open put the window
+# somewhere wrong.
+function Assert-SettingsWindowPlacement {
+    param(
+        [Parameter(Mandatory = $true)][string]$ProjectRoot,
+        [switch]$Quiet
+    )
+    $sharedText = Get-SourceText (Join-Path $ProjectRoot "SteamShell-Shared.ahk")
+    Assert-True (
+        (Get-AhkFunctionBody -Source $sharedText `
+            -Name "RecenterVisibleGuiOnMonitorActual") -ne "") (
+        "RecenterVisibleGuiOnMonitorActual is not in SteamShell-Shared.ahk. It " +
+        "corrects a window's position from its REAL outer rectangle once it is " +
+        "visible, and while it lived in one tree only that product's Settings " +
+        "window centred.")
+
+    foreach ($pair in @(
+        @{ File = "SteamShell.ahk";     Name = "ShowSettingsEditor" },
+        @{ File = "SteamShell-XFE.ahk"; Name = "ShowSettings" })) {
+        $text = Get-SourceText (Join-Path $ProjectRoot $pair.File)
+        $body = Get-AhkFunctionBody -Source $text -Name $pair.Name
+        Assert-True ($body -ne "") (
+            "$($pair.File): $($pair.Name) could not be read, so the Settings " +
+            "window's placement is not checked.")
+        Assert-True ($body -match 'CenterGuiOnMonitorActual\(') (
+            "$($pair.File): the Settings window is not sized and positioned " +
+            "through CenterGuiOnMonitorActual. Asking Gui.Show for a size and " +
+            "no position lets Windows choose, and it chooses the top-left.")
+        Assert-True ($body -match 'RecenterVisibleGuiOnMonitorActual\(') (
+            "$($pair.File): the Settings window is never re-measured once " +
+            "visible, so its position rests on an estimate taken while it was " +
+            "hidden.")
+    }
+    if (-not $Quiet) {
+        Write-Host "Settings window: both products size, centre and re-measure the same way."
+    }
+}
+
 # The layout audit's own bounds must come from the layout.
 #
 # The companion's said 286 -- its content column before the pages adopted the
