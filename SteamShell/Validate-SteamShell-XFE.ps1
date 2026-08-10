@@ -2315,12 +2315,19 @@ $pageCategoryAssignments = [regex]::Matches(
 # to be remembered, and adding the Launcher Cleanup page made it wrong; the
 # property is that EVERY page in the table names its category and resets the
 # cursor, whatever the table's length happens to be.
+# FROM THE SHARED DEFINITION. This read `static categories := [...]` out of this
+# tree's own SettingsCategoryTable, which held eight names and descriptions of
+# its own while the shell held nine of its own, seven of them in a different
+# order. SettingsCategoryDefinitions is the one list now, and the pages this
+# product draws are the entries marked for it. $source is the EFFECTIVE source
+# with #Include resolved, so the shared table is in it.
 $categoryTableBody = [regex]::Match(
-    $source, '(?s)static categories := \[(.*?)\n    \]')
+    $source, '(?s)SettingsCategoryDefinitions\(\)\s*\{.*?static definitions := \[(.*?)\n    \]')
 Assert-True $categoryTableBody.Success (
     "The companion's Settings category table could not be extracted.")
 $categoryTableCount = @(
-    [regex]::Matches($categoryTableBody.Groups[1].Value, '(?m)^\s+\["[^"]+",')).Count
+    [regex]::Matches($categoryTableBody.Groups[1].Value,
+        '"name", "[^"]+", "product", "(?:both|xfe)"')).Count
 Assert-True (
     $categoryTableCount -gt 0 -and
     $pageCategoryAssignments.Count -eq $categoryTableCount -and

@@ -1996,6 +1996,61 @@ def check_learner_guard(sources):
                  "word -- that turns every button held at close into a press edge.")
 
 
+def check_settings_category_extraction(sources):
+    """The two validators' category extractors still find what they parse.
+
+    Ported after it cost a build. Both validators pull the page list out of the
+    source with a regex and then compare it against the pages each product
+    actually builds -- a property-subject check this script cannot replay, so
+    when SettingsCategoryDefinitions replaced the two literal lists, the Mac
+    stayed green and Windows failed with "The Full Settings category list could
+    not be extracted."
+
+    The comparison itself is Windows'. What is checked here is the part that
+    broke: that the extractor MATCHES, and that what it extracts agrees with the
+    pages each product draws. Both validators read the EFFECTIVE source with
+    #Include resolved, which is approximated here by concatenation.
+    """
+    table = re.compile(
+        r"(?s)SettingsCategoryDefinitions\(\)\s*\{.*?static definitions := \[(.*?)\n    \]")
+    shared = sources["SteamShell-Shared.ahk"] + "\n" + sources["SteamShell-Common.ahk"]
+
+    shell = sources["SteamShell.ahk"] + "\n" + shared
+    m = table.search(shell)
+    if not m:
+        fail("Validate-SteamShell.ps1 could not extract the Full Settings "
+             "category list; SettingsCategoryDefinitions no longer matches the "
+             "shape it parses.")
+        return
+    declared = re.findall(r'"name", "([^"]+)", "product", "(?:both|standalone)"',
+                          m.group(1))
+    panels = sorted(set(re.findall(r'(?m)^[ \t]*category := "([^"]+)"', shell)))
+    if len(declared) != len(set(declared)):
+        fail("The shared category table lists a standalone page twice.")
+    if sorted(set(declared)) != panels:
+        fail("The Full Settings category list and its constructed panels "
+             f"disagree. Declared: {sorted(set(declared))}. Built: {panels}.")
+
+    xfe = sources["SteamShell-XFE.ahk"] + "\n" + shared
+    m2 = table.search(xfe)
+    if not m2:
+        fail("Validate-SteamShell-XFE.ps1 could not extract the companion's "
+             "Settings category table.")
+        return
+    count = len(re.findall(r'"name", "[^"]+", "product", "(?:both|xfe)"', m2.group(1)))
+    body = re.search(r"(?s)ShowSettings\(\*\)\s*\{(.*?)\n\}", xfe)
+    if not body:
+        fail("ShowSettings could not be read, so the companion's page count is "
+             "not checked.")
+        return
+    assigns = len(re.findall(r'(?m)^\s*category := "', body.group(1)))
+    cursors = len(re.findall(r"y := SettingsFirstRowY\(\)", body.group(1)))
+    if not (count == assigns == cursors):
+        fail("Every companion Settings page must name its category and reset the "
+             f"row cursor. Table lists {count}; found {assigns} category "
+             f"assignment(s) and {cursors} cursor reset(s).")
+
+
 def check_settings_rows_reach_their_readers(sources):
     """A setting a product READS must be reachable in that product's Settings.
 
@@ -2511,6 +2566,7 @@ def main():
     check_controller_poll_frame(sources)
     check_learner_guard(sources)
     check_rtss_limiter_restore(sources)
+    check_settings_category_extraction(sources)
     check_settings_rows_reach_their_readers(sources)
     check_live_log_shared(sources)
     check_settings_window_placement(sources)

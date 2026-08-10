@@ -320,14 +320,19 @@ foreach ($match in $editorFieldMatches) {
         "Settings editor field is absent from the INI schema: " +
         $match.Groups[1].Value + "." + $match.Groups[2].Value)
 }
+# FROM THE SHARED DEFINITION. This read the literal array
+# `SettingsEditorCategories := [...]` out of ShowSettingsEditor, which is where
+# the page list used to live; it comes from SettingsCategoryDefinitions now, so
+# the two products cannot list the same pages in different orders. $source is
+# the EFFECTIVE source with #Include resolved, so the shared table is in it.
 $settingsCategoryListMatch = [regex]::Match(
     $source,
-    '(?s)ShowSettingsEditor\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?' +
-    'SettingsEditorCategories\s*:=\s*\[(.*?)\]')
+    '(?s)SettingsCategoryDefinitions\(\)\s*\{.*?static definitions := \[(.*?)\n    \]')
 Assert-True $settingsCategoryListMatch.Success (
     "The Full Settings category list could not be extracted.")
 $settingsCategoryNames = @(
-    [regex]::Matches($settingsCategoryListMatch.Groups[1].Value, '"([^"]+)"') |
+    [regex]::Matches($settingsCategoryListMatch.Groups[1].Value,
+        '"name", "([^"]+)", "product", "(?:both|standalone)"') |
         ForEach-Object { $_.Groups[1].Value }
 )
 # The declared list and the constructed panels must be the SAME SET.
