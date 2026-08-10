@@ -9442,11 +9442,17 @@ SettingsEditorAuditLayout() {
     global SettingsEditorControlPositions
     ; From the layout, not restated. This was 945 written out, which happened to
     ; be right and would silently stop being right the moment a column moved.
+    ;
+    ; The LEFT bound was still written out -- 245 -- and the companion's copy of
+    ; it is what the warning above was actually describing: its literal said 286,
+    ; the column moved to 255 when the pages adopted the shared builders, and its
+    ; audit reported 86 boundary crossings on a window with nothing wrong. Both
+    ; are derived now, with the same ten pixels of slack.
     layout := SettingsLayout()
     return SharedAuditSettingsLayout(
         SettingsEditorCategories, SettingsEditorCategoryControls,
         SettingsEditorControlPositions,
-        245, layout["contentX"] + layout["contentWidth"])
+        layout["contentX"] - 10, layout["contentX"] + layout["contentWidth"])
 }
 
 SettingsEditorShowLayoutWarning(text) {

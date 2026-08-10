@@ -1954,6 +1954,44 @@ function Assert-RtssUnreadableIsNotOff {
 # neither can fix or break this on its own. KEPT IN STEP WITH
 # test_identifying_press_never_becomes_the_resting_state in
 # Test-ControllerProfiles.py, which models the same sequence report by report.
+# The layout audit's own bounds must come from the layout.
+#
+# The companion's said 286 -- its content column before the pages adopted the
+# shared row builders and started placing themselves at contentX, 255. Every
+# scrollable control on every page was then 31 pixels outside the boundary, so
+# the audit reported 86 crossings on a window with nothing wrong with it. An
+# audit that cries wolf 86 times is one nobody reads, which is worse than not
+# having it: the shell's copy carries a comment warning about exactly this trap,
+# written when its RIGHT edge was a literal, while its left edge stayed one.
+#
+# Both edges of both products are derived now. A literal here is always a number
+# that is right today.
+function Assert-SettingsAuditBoundsDerived {
+    param(
+        [Parameter(Mandatory = $true)][string]$ProjectRoot,
+        [switch]$Quiet
+    )
+    foreach ($pair in @(
+        @{ File = "SteamShell.ahk";     Name = "SettingsEditorAuditLayout" },
+        @{ File = "SteamShell-XFE.ahk"; Name = "SettingsAuditLayout" })) {
+        $text = Get-SourceText (Join-Path $ProjectRoot $pair.File)
+        $body = Get-AhkFunctionBody -Source $text -Name $pair.Name
+        Assert-True ($body -ne "") (
+            "$($pair.File): $($pair.Name) could not be read, so the layout " +
+            "audit's bounds are not checked.")
+        Assert-True ($body -match 'SharedAuditSettingsLayout\((?s).*?layout\["contentX"\]\s*-\s*10') (
+            "$($pair.File): the layout audit's LEFT bound is not derived from " +
+            "the layout. A literal is a number that is right today: the " +
+            "companion's said 286 after its column moved to 255, and every " +
+            "control on every page was reported as crossing the boundary.")
+        Assert-True ($body -notmatch 'SharedAuditSettingsLayout\((?s).*?,\s*\d{3}\s*,') (
+            "$($pair.File): the layout audit is passed a hard-coded bound.")
+    }
+    if (-not $Quiet) {
+        Write-Host "Settings layout audit: both products derive their bounds from the layout."
+    }
+}
+
 function Assert-ControllerLearnerIdentifyRelease {
     param(
         [Parameter(Mandatory = $true)][string]$ProjectRoot,

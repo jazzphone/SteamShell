@@ -5542,10 +5542,22 @@ SettingsMouseWheel(wParam, lParam, msg, hwnd) {
 SettingsAuditLayout() {
     global SettingsCategoryControls, SettingsControlPositions
     layout := SettingsLayout()
+    ; FROM THE LAYOUT, NOT RESTATED -- the trap the shell's copy of this call
+    ; already carries a warning about, sprung here.
+    ;
+    ; This said 286, which was this page's content column before the rows moved
+    ; to the shared builders and started placing themselves at contentX, 255.
+    ; Every scrollable control on every page has been 31 pixels left of the
+    ; boundary ever since, so the audit reported 86 issues on a window with
+    ; nothing wrong with it -- and an audit that cries wolf 86 times is one
+    ; nobody reads, which is the real cost. The right edge stays the scrollbar,
+    ; which is genuinely this product's boundary and is already derived.
+    ;
+    ; The 10 pixels of slack match the shell's 245 against the same contentX.
     return SharedAuditSettingsLayout(
         SettingsCategoryNames(), SettingsCategoryControls,
         SettingsControlPositions,
-        286, layout["scrollBarX"])
+        layout["contentX"] - 10, layout["scrollBarX"])
 }
 
 SettingsShowLayoutWarning(text) {

@@ -9311,10 +9311,26 @@ ControllerLearnStartCapture() {
     ; the requested control returns to neutral.
     ; The scan is a fixed observation window rather than something that can be
     ; "answered", so it runs on a timer of its own.
+    ;
+    ; NAMED, AND SHORTER, at the request of the person doing the testing. They
+    ; were 12/30/8/20 seconds, written out at the four places that used them, and
+    ; the two long ones are what a stalled step actually costs: twenty seconds of
+    ; a wizard apparently ignoring you is indistinguishable from a hang, and this
+    ; wizard has spent this week being exactly that. Ten seconds is long enough
+    ; to press a button you are already looking at.
+    ;
+    ; The axis steps keep twice that. They are the only ones asking for a gesture
+    ; rather than a press -- push it all the way, then let it spring back -- and
+    ; the sticks and triggers are the steps a first-time user has to read the
+    ; prompt twice for.
+    static WIGGLE_MS := 10000
+    static AXIS_MS := 20000
+    static OPTIONAL_MS := 8000
+    static DIGITAL_MS := 10000
     if (step["kind"] = "wiggle") {
-        LearnCaptureUntil := A_TickCount + 12000
+        LearnCaptureUntil := A_TickCount + WIGGLE_MS
     } else if (step["kind"] = "axis") {
-        LearnCaptureUntil := A_TickCount + 30000
+        LearnCaptureUntil := A_TickCount + AXIS_MS
     } else if step.Has("optional") {
         ; A control many pads simply do not have gets a shorter window, so it
         ; cannot stall the steps after it.
@@ -9323,10 +9339,10 @@ ControllerLearnStartCapture() {
         ; been removed -- Windows usually swallows that press, and when it does
         ; not it opens Game Bar over the wizard. The mechanism is kept because it
         ; is four lines and the next control of that kind will want it; without
-        ; it, such a step would silently take the full twenty seconds.
-        LearnCaptureUntil := A_TickCount + 8000
+        ; it, such a step would silently take the full digital window.
+        LearnCaptureUntil := A_TickCount + OPTIONAL_MS
     } else {
-        LearnCaptureUntil := A_TickCount + 20000
+        LearnCaptureUntil := A_TickCount + DIGITAL_MS
     }
     try LearnPromptCtrl.Text := step["prompt"]
     try LearnProgressCtrl.Text := "Step " LearnStepIndex " of " steps.Length

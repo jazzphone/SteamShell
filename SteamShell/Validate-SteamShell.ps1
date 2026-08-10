@@ -4016,6 +4016,7 @@ Assert-RecentApplicationPicker -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-CurrentApplicationTargets -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-QuickMenuPageChangesRebuild -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-ControllerLearnerIdentifyRelease -ProjectRoot $projectRoot -Quiet:$Quiet
+Assert-SettingsAuditBoundsDerived -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-RtssUnreadableIsNotOff -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-RtssFrameLimitHoldIsBounded -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-ElevatedHelperReadsEveryBackend -ProjectRoot $projectRoot -Quiet:$Quiet

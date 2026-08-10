@@ -1996,6 +1996,30 @@ def check_learner_guard(sources):
                  "word -- that turns every button held at close into a press edge.")
 
 
+def check_settings_audit_bounds(sources):
+    """The layout audit's own bounds must come from the layout.
+
+    Ported alongside the other two PowerShell-code checks, and for the same
+    reason: this one had been quietly wrong for a whole convergence pass. The
+    companion's left bound said 286 -- its content column before the pages
+    adopted the shared row builders and moved to contentX, 255 -- so every
+    scrollable control on every page was reported as crossing the boundary, 86
+    of them in one log. An audit that cries wolf 86 times is one nobody reads.
+    """
+    for name, fn in (("SteamShell.ahk", "SettingsEditorAuditLayout"),
+                     ("SteamShell-XFE.ahk", "SettingsAuditLayout")):
+        body = function_body(sources[name], fn)
+        if not body:
+            fail(f"{name}: {fn} could not be read, so the audit bounds are "
+                 "not checked.")
+        if not re.search(r'SharedAuditSettingsLayout\(.*?layout\["contentX"\]\s*-\s*10',
+                         body, re.S):
+            fail(f"{name}: the layout audit's LEFT bound is not derived from the "
+                 "layout. A literal is a number that is right today.")
+        if re.search(r"SharedAuditSettingsLayout\(.*?,\s*\d{3}\s*,", body, re.S):
+            fail(f"{name}: the layout audit is passed a hard-coded bound.")
+
+
 def check_learner_identify_release(sources):
     """The learner's baseline rule, replayed from Assert-ControllerLearnerIdentifyRelease.
 
@@ -2346,6 +2370,7 @@ def main():
     check_controller_poll_frame(sources)
     check_learner_guard(sources)
     check_rtss_limiter_restore(sources)
+    check_settings_audit_bounds(sources)
     check_learner_identify_release(sources)
     check_recent_application_picker(sources)
     check_source_encoding()

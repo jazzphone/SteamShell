@@ -1061,6 +1061,28 @@ Assert-True (
     # than on end-of-line.
     $source -match '(?s)PollController\(\)\s*\{(?:(?!\n\})[\s\S])*?if LearnActive\s*\{.*?ResetControllerHoldState\((?:(?!\)\s)[\s\S])*?\)\s*\r?\n\s*return.*?if !ControllerReadState') (
     "PollController must ignore controller input entirely while the learning wizard is open.")
+# The per-step capture windows are NAMED, and the gesture steps get longer than
+# the press steps.
+#
+# They were 12/30/8/20 seconds written out at the four places that used them.
+# Twenty seconds of a wizard apparently ignoring you is indistinguishable from a
+# hang, which this wizard has spent a week being, so the press steps are ten.
+# The axis steps keep twice that: they are the only ones asking for a gesture --
+# push it all the way, then let it spring back -- rather than a press.
+#
+# The ORDERING is the part worth pinning. A future tidy that levels them all to
+# one number takes the gesture steps down with the press steps.
+Assert-True (
+    $source -match 'static WIGGLE_MS := 10000' -and
+    $source -match 'static AXIS_MS := 20000' -and
+    $source -match 'static DIGITAL_MS := 10000' -and
+    $source -match 'LearnCaptureUntil := A_TickCount \+ AXIS_MS' -and
+    $source -match 'LearnCaptureUntil := A_TickCount \+ DIGITAL_MS' -and
+    $source -notmatch 'LearnCaptureUntil := A_TickCount \+ \d+') (
+    "The learner's capture windows must be named constants, with the axis " +
+    "steps longer than the press steps; a literal at the call site is how the " +
+    "four of them drifted apart in the first place.")
+
 # With the controller inert, Skip is unreachable from the couch, so a digital step
 # that never sees its control has to advance by itself.
 Assert-True (
@@ -2596,6 +2618,7 @@ Assert-RecentApplicationPicker -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-CurrentApplicationTargets -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-QuickMenuPageChangesRebuild -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-ControllerLearnerIdentifyRelease -ProjectRoot $projectRoot -Quiet:$Quiet
+Assert-SettingsAuditBoundsDerived -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-RtssUnreadableIsNotOff -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-RtssFrameLimitHoldIsBounded -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-ElevatedHelperReadsEveryBackend -ProjectRoot $projectRoot -Quiet:$Quiet
