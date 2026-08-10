@@ -9595,6 +9595,21 @@ SettingsProductRecordShortcut(field, *) {
     SettingsEditorRecordShortcut(field)
 }
 
+; Per-tree seam for SteamShell-Shared.ahk's Live Log window: open the log file.
+;
+; NOT Run(). This product is the Windows shell, so anything it starts inherits
+; its token unless it goes through LaunchInteractiveApp, and the assertion list
+; below in Validate-SteamShell.ps1 names this function for that reason. It is
+; the body OpenLogFile had before the Live Log window moved to the shared file.
+ProductOpenLogFile() {
+    global LogPath
+    pid := 0
+    LaunchInteractiveApp(
+        A_WinDir "\System32\notepad.exe",
+        QuoteWindowsCommandLineArg(LogPath),
+        A_WinDir "\System32", "Normal", &pid, "SteamShell log")
+}
+
 ; Per-tree seam for SteamShell-Shared.ahk's Live Log window: the status lines
 ; this product wants above the log tail.
 ;

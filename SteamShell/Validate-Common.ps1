@@ -516,6 +516,14 @@ $sharedSeamAllowed = @(
     # any of them, while Launcher Cleanup it has twenty-eight of. So each product
     # names its own lines and the window counts them.
     "ProductLiveLogStatusLines",
+    # Widened for the same window's Open Log button, and this one is a boundary
+    # rather than a preference. SteamShell IS the Windows shell, so a child it
+    # starts inherits its token unless the launch crosses the standard-user
+    # boundary through LaunchInteractiveApp; the companion is an ordinary user
+    # process with nothing to leak and opens the file with Run. The shared
+    # window must not choose between them, and the assertion list further down
+    # this file names the shell's side of it by function.
+    "ProductOpenLogFile",
     # Reached the same way, from the Health Check's Export button.
     "ExportDiagnosticBundle",
     "ProductSettingBool",
@@ -536,7 +544,7 @@ $sharedSeamAllowed = @(
 # Restated here, next to the list, and asserted in Assert-SharedParity: changing
 # one without the other fails the build. Update the expectation in the same
 # commit that changes the list, and say in the message why the seam moved.
-$sharedSeamExpectedCount = 53
+$sharedSeamExpectedCount = 54
 
 # Reports same-named functions in both trees whose difference is only naming and
 # formatting -- the drift that a raw similarity score hides.

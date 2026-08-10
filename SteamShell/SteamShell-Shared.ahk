@@ -11037,11 +11037,22 @@ LiveLogRefresh(*) {
 }
 
 
+; Opens the log file itself, THROUGH THE PRODUCT.
+;
+; This called Run(LogPath) when the window moved here, and that is a real
+; regression rather than a stylistic one: SteamShell IS the Windows shell, so a
+; child it starts inherits its token unless the launch goes through the
+; standard-user boundary. Validate-SteamShell.ps1 bans a bare Run() inside every
+; function that starts an external application for exactly that reason, and it
+; caught this one on the first Windows run after the move.
+;
+; The companion has no such boundary to cross -- it is an ordinary user process
+; -- so this is genuinely per product, which is what the seam is for.
 LiveLogOpenFile(*) {
     global LogPath
     if !FileExist(LogPath)
         try FileAppend("", LogPath, "UTF-8")
-    try Run(LogPath)
+    ProductOpenLogFile()
 }
 
 

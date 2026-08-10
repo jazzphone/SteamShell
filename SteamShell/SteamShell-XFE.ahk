@@ -5556,6 +5556,17 @@ SettingsReportLayoutAudit() {
 ; moves -- "Cursor.EnableAutoHide" for a setting living at [Features]
 ; EnableAutoHideCursor -- so the row, the populate and the save agreed only
 ; because three hand-written names happened to match.
+; Per-tree seam for SteamShell-Shared.ahk's Live Log window: open the log file.
+;
+; Run() is right HERE and wrong in the shell. This companion is an ordinary user
+; process with no elevation to leak, which is why its own "Open Log" item has
+; always done exactly this; the shell is the Windows shell and has to cross the
+; standard-user boundary explicitly.
+ProductOpenLogFile() {
+    global LogPath
+    try Run(LogPath)
+}
+
 ; Per-tree seam for SteamShell-Shared.ahk's Live Log window: the status lines
 ; this product wants above the log tail.
 ;

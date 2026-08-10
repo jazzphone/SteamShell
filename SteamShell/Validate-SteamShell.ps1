@@ -3798,7 +3798,10 @@ $standardLaunchOnlyFunctions = @(
     "ExitSteamAndRestoreDesktop",
     "OpenOSK",
     "OpenWindowsSettings",
-    "OpenLogFile",
+    # Was OpenLogFile, which moved to SteamShell-Shared.ahk with the Live Log
+    # window and left a bare Run() behind it -- caught here, on the first
+    # Windows run after the move. The shell's half is a seam now.
+    "ProductOpenLogFile",
     "SettingsEditorOpenIni",
     "SettingsEditorOpenRtss"
 )
