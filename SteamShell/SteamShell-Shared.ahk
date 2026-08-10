@@ -8091,10 +8091,11 @@ ControllerLearnByteDriftedAtRest(offset) {
 ; wiggling. A byte doing both is not a button on any controller: it answers to
 ; motion and to nothing else.
 ControllerLearnClassifyAnalog() {
-    global LearnAnalogValues, LearnAnalogBytes, LearnBaseline
+    global LearnAnalogValues, LearnAnalogBytes, LearnBaseline, LearnMotionBytes
     static MIN_DISTINCT_VALUES := 6
     static MIN_RANGE := 32
     LearnAnalogBytes := Map()
+    LearnMotionBytes := Map()
     described := ""
     sensors := ""
     for offset, values in LearnAnalogValues {
@@ -8111,6 +8112,15 @@ ControllerLearnClassifyAnalog() {
         if (!wide && !drifting)
             continue
         LearnAnalogBytes[offset] := true
+        ; SEPARATELY FROM LearnAnalogBytes, because the two sets are consulted by
+        ; different steps and a byte can be in one and not the other. A stick IS
+        ; an analogue byte and the axis steps must be able to pick it; a sensor
+        ; byte must be invisible to them. `drifting` is what tells them apart, so
+        ; it is recorded even when the byte also qualified as wide -- byte 18 on
+        ; the pad that produced this did, and being listed among the wide ones is
+        ; what let it go on triggering axis steps.
+        if drifting
+            LearnMotionBytes[offset] := true
         ; Reported apart from the wide ones, because they are a different
         ; finding: "this is an axis" against "this moves on its own". A run that
         ; lists a dozen of the second is a pad with a live motion sensor, and
@@ -8132,6 +8142,15 @@ ControllerLearnClassifyAnalog() {
             . "to anything pressed. On a pad with a live gyro these are the "
             . "high bytes of its 16-bit axes, and they are what a button step "
             . "binds by mistake when the controller is tilted.")
+    }
+    if (LearnMotionBytes.Count > 0) {
+        motionList := ""
+        for offset, _ in LearnMotionBytes
+            motionList .= (motionList != "" ? "," : "") offset
+        LogLine("Learn: axis steps will also ignore bytes " motionList
+            . " when deciding that a control has moved. A gyro byte crossing "
+            . "zero jumps the full range, which reads as a stick being pushed "
+            . "and released before the user has touched it.")
     }
     return LearnAnalogBytes.Count
 }
@@ -8206,7 +8225,7 @@ ControllerLearnDpadButtons() {
 ControllerLearnExamine(data, base, length) {
     global LearnBaseline, LearnStepIndex, LearnResultButtons, LearnResultAxes
     global LearnHatValues, LearnPeak, LearnDetailCtrl, LearnRestNoise
-    global LearnAnalogBytes, LearnAnalogValues
+    global LearnAnalogBytes, LearnAnalogValues, LearnMotionBytes
     global LearnExcursion, LearnAxisSamples, LearnAxisStarted
     global LearnNoiseBlamed
     step := ControllerLearnSteps()[LearnStepIndex]
@@ -8761,9 +8780,30 @@ ControllerLearnReport(data, base, length, device) {
 ; 8-bit or not-yet-resolved field, clean unclaimed byte movement is safer: an
 ; early low-byte candidate must not look released merely because it wrapped
 ; through its resting value halfway across a 16-bit sweep.
+; Whether the report shows the control the current step asked for being moved.
+;
+; A MOTION BYTE MUST NOT ANSWER THIS QUESTION. Reported from hardware, in the
+; only run where every button and the whole D-pad came out right: the left stick
+; step never completed, four attempts in a row, each one resolving before the
+; stick had been touched.
+;
+; The pad's gyro axes are 16-bit little-endian and one of them was sitting near
+; zero, so its HIGH byte flipped between 0xFF and 0x00 every time the value
+; crossed -- a 255-count jump on a byte whose resting mask was one or two bits,
+; which is neither rest noise nor a small change. This function said "moved",
+; and then said "returned to neutral" on the next crossing, so the gesture
+; completed on gyro alone. The resolver was then handed a window in which the
+; stick had not moved: no candidate outside the free-running bytes, retry with
+; them included, byte 18 wins on excursion, and the rest-at-centre check throws
+; it out with "rests at 100% of range". Four times, then the wizard was closed.
+;
+; LearnMotionBytes is the analogue scan's answer to "which bytes answer to
+; motion rather than to a control", and it is exactly the set that must be
+; deaf here. It is NOT LearnAnalogBytes: a stick is an analogue byte and is
+; precisely what this has to see.
 ControllerLearnReportAxisActive(report, byteThreshold) {
     global LearnBaseline, LearnResultButtons, LearnResultAxes, LearnHatValues
-    global LearnRestNoise, LearnStepIndex, LearnLength
+    global LearnRestNoise, LearnStepIndex, LearnLength, LearnMotionBytes
     step := ControllerLearnSteps()[LearnStepIndex]
     if LearnResultAxes.Has(step["name"]) {
         axis := LearnResultAxes[step["name"]]
@@ -8782,6 +8822,8 @@ ControllerLearnReportAxisActive(report, byteThreshold) {
     Loop LearnLength {
         offset := A_Index - 1
         if claimed.Has(offset)
+            continue
+        if (IsObject(LearnMotionBytes) && LearnMotionBytes.Has(offset))
             continue
         now := NumGet(report, offset, "UChar")
         was := NumGet(LearnBaseline, offset, "UChar")
@@ -8831,7 +8873,10 @@ ControllerLearnResolveAxis(step, allowRestNoisy := false) {
     if !allowRestNoisy {
         Loop LearnLength {
             offset := A_Index - 1
-            if (!claimed.Has(offset) && ControllerLearnByteFreeRunning(offset)) {
+            if (!claimed.Has(offset)
+                && (ControllerLearnByteFreeRunning(offset)
+                    || (IsObject(LearnMotionBytes)
+                        && LearnMotionBytes.Has(offset)))) {
                 claimed[offset] := true
                 excludedNoisy += 1
             }
@@ -9012,8 +9057,9 @@ ControllerLearnRestart() {
     global LearnHatValues, LearnCaptureUntil
     global LearnLastAccepted, LearnLastFriendly
     global LearnIdentifyDevices, LearnIdentifyReady
-    global LearnAnalogBytes, LearnAnalogValues, LearnDpadRetries
+    global LearnAnalogBytes, LearnMotionBytes, LearnAnalogValues, LearnDpadRetries
     LearnAnalogBytes := Map()
+    LearnMotionBytes := Map()
     LearnAnalogValues := Map()
     LearnDpadRetries := 0
     LearnDevice := 0
@@ -9616,7 +9662,7 @@ ShowControllerLearner(*) {
     global LearnLastAccepted, LearnLastFriendly
     global LearnIdentifyDevices, LearnIdentifyReady
     global MouseHidden, SettingsDialogActive
-    global LearnAnalogBytes, LearnAnalogValues, LearnDpadRetries
+    global LearnAnalogBytes, LearnMotionBytes, LearnAnalogValues, LearnDpadRetries
     global LearnCountdownCtrl
     ; An active wizard has a window, and this brings it forward. If it does not
     ; have one, the flag is left over from a build that failed below and there is
@@ -9655,6 +9701,7 @@ ShowControllerLearner(*) {
     LearnRestCount := 0
     LearnStepIndex := 0
     LearnAnalogBytes := Map()
+    LearnMotionBytes := Map()
     LearnAnalogValues := Map()
     LearnDpadRetries := 0
     LearnResultButtons := []

@@ -2047,6 +2047,10 @@ global LearnLastAccepted := ""
 global LearnCountdownCtrl := unset
 global LearnStepReports := 0
 global LearnDpadRetries := 0
+; Bytes that answer to MOTION rather than to a control -- a live gyro's, in
+; practice. Separate from LearnAnalogBytes because a stick is analogue and the
+; axis steps must still see it. See ControllerLearnReportAxisActive.
+global LearnMotionBytes := Map()
 global LearnAnalogBytes := Map()
 global LearnAnalogValues := Map()
 global LearnReleaseOffset := -1

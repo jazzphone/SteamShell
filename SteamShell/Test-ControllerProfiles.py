@@ -559,6 +559,74 @@ def test_analog_scan_protects_stick_click_steps() -> None:
     assert unfiltered[0] == 2
 
 
+def report_axis_active(
+    report: bytes,
+    baseline: bytes,
+    rest_noise: bytes,
+    threshold: int,
+    claimed: set[int],
+    motion: set[int],
+) -> bool:
+    """Mirror of ControllerLearnReportAxisActive."""
+    for offset in range(len(baseline)):
+        if offset in claimed or offset in motion:
+            continue
+        clean = (report[offset] ^ baseline[offset]) & ~rest_noise[offset] & 0xFF
+        if clean and abs(report[offset] - baseline[offset]) >= threshold:
+            return True
+    return False
+
+
+def test_gyro_crossing_zero_is_not_a_stick_gesture() -> None:
+    """The left-stick step that resolved before the stick was touched.
+
+    A 16-bit gyro axis sitting near zero -- bytes (17, 18) held 0xFFC4, which is
+    -60 -- flips its HIGH byte between 0xFF and 0x00 on every crossing. That is a
+    255-count jump on a byte whose resting mask is one or two bits, so it is
+    neither rest noise nor a small change, and the gesture detector read it as
+    the stick being pushed and then released.
+    """
+    length = 34
+    baseline = bytearray(length)
+    baseline[2:6] = bytes([0x7F] * 4)   # sticks centred
+    baseline[14] = 0x64
+    baseline[17], baseline[18] = 0xC4, 0xFF
+    baseline = bytes(baseline)
+
+    # At rest the high byte moved by a bit or two -- enough to be noticed, far
+    # short of ControllerLearnByteFreeRunning's four bits.
+    rest_noise = bytearray(length)
+    rest_noise[18] = 0x01
+    for low in (15, 17, 19, 21, 23, 25):
+        rest_noise[low] = 0xFF
+    rest_noise = bytes(rest_noise)
+
+    crossing = bytearray(baseline)
+    crossing[17], crossing[18] = 0x0E, 0x00   # value crossed zero: -60 -> +14
+    crossing = bytes(crossing)
+
+    claimed = {8, 9, 1}                       # buttons and the hat
+    # The low bytes are free-running and already excluded; byte 18 is not.
+    excluded_today = {15, 17, 19, 21, 23, 25}
+
+    # WITHOUT the motion set, the crossing alone starts the gesture...
+    assert report_axis_active(crossing, baseline, rest_noise, 12,
+                              claimed, excluded_today)
+    # ...and the stick has not moved at all in that report.
+    assert crossing[2] == baseline[2]
+
+    # WITH it, the same report says nothing happened.
+    motion = excluded_today | {16, 18, 20, 22, 26}
+    assert not report_axis_active(crossing, baseline, rest_noise, 12,
+                                  claimed, motion)
+
+    # And a real deflection still registers: byte 2 from 0x7F to 0x01.
+    pushed = bytearray(crossing)
+    pushed[2] = 0x01
+    assert report_axis_active(bytes(pushed), baseline, rest_noise, 12,
+                              claimed, motion)
+
+
 def test_change_only_pad_takes_rest_from_the_last_report() -> None:
     """The XInput-mode hang: same pad, completes in DirectInput, stuck in XInput.
 
@@ -856,6 +924,7 @@ def main() -> None:
     test_axis_peak_survives_release_and_prevents_carryover()
     test_analog_scan_protects_stick_click_steps()
     test_gyro_high_byte_is_not_a_button()
+    test_gyro_crossing_zero_is_not_a_stick_gesture()
     test_change_only_pad_takes_rest_from_the_last_report()
     test_learner_never_guesses_big_endian()
     test_resolve_runs_per_report_without_claiming_its_own_field()

@@ -1110,6 +1110,38 @@ Assert-True (
         'NumGet\(LearnRestNoise, offset, "UChar"\) != 0') (
     "The analogue scan must also claim a byte that drifted at rest AND moved " +
     "during the scan; without it a gyro's high byte is learned as a button.")
+
+# ...and the AXIS steps have to be deaf to that set too, which is a separate
+# question from the button steps and needs a separate set to answer it.
+#
+# LearnAnalogBytes cannot serve: a stick IS an analogue byte and the axis steps
+# exist to find it. LearnMotionBytes is the subset that answers to motion, and
+# it is recorded even when the byte also qualified as "wide" -- byte 18 on the
+# reported pad did, and appearing in the wide list is exactly what let it go on
+# triggering axis steps.
+#
+# The failure it prevents: a 16-bit gyro axis sitting near zero flips its HIGH
+# byte between 0xFF and 0x00 on every crossing. That is a 255-count jump on a
+# byte with a one- or two-bit resting mask, so ControllerLearnReportAxisActive
+# read it as the stick being pushed and then released, and the resolver was
+# handed a window in which the stick had never moved. Four attempts, every one
+# rejected by the rest-at-centre check, on a run where every button and the
+# whole D-pad were correct.
+Assert-True (
+    $source -match
+        '(?sm)^ControllerLearnClassifyAnalog\(\)\s*\{(?:(?!\n\})[\s\S])*?' +
+        'if drifting\s*\r?\n\s*LearnMotionBytes\[offset\] := true' -and
+    $source -match
+        '(?sm)^ControllerLearnReportAxisActive\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?' +
+        'LearnMotionBytes\.Has\(offset\)\)\s*\r?\n\s*continue' -and
+    # The candidate search too, so a motion byte cannot win the resolve either.
+    $source -match
+        '(?sm)^ControllerLearnResolveAxis\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?' +
+        'ControllerLearnByteFreeRunning\(offset\)(?:(?!\n\})[\s\S])*?' +
+        'LearnMotionBytes\.Has\(offset\)') (
+    "The axis steps must ignore bytes the scan identified as answering to " +
+    "motion. A gyro byte crossing zero jumps the full range, which reads as a " +
+    "stick pushed and released before the user has touched it.")
 # The Quick Menu must fit its own content. Computing the height in logical units
 # and trusting AutoHotkey to scale it the same way as the controls failed on a 4K
 # television: the first show came out short and the bottom rows were cut off.

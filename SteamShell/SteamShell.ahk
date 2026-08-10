@@ -191,6 +191,10 @@ global EnableControllerDiagnostics := false
 ; one slot and not another, and it only runs while the diagnostic is on.
 global ControllerDiagnosticIntervalMs := 50
 global LearnActive := false
+; Bytes that answer to MOTION rather than to a control -- a live gyro's, in
+; practice. Separate from LearnAnalogBytes because a stick is analogue and the
+; axis steps must still see it. See ControllerLearnReportAxisActive.
+global LearnMotionBytes := Map()
 global LearnAnalogBytes := Map()
 global LearnAnalogValues := Map()
 global LearnAxisRejection := ""
