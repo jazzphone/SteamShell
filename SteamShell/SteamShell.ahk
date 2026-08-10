@@ -738,8 +738,6 @@ global LastBestCandidateTitle := ""
 ; updating. Declared here so all eight behave identically.
 global CPStat1Ctrl := unset, CPStat2Ctrl := unset, CPStat3Ctrl := unset, CPStat4Ctrl := unset
 global CPStat5Ctrl := unset, CPStat6Ctrl := unset, CPStat7Ctrl := unset, CPStat8Ctrl := unset
-global LLStat1Ctrl := unset, LLStat2Ctrl := unset, LLStat3Ctrl := unset, LLStat4Ctrl := unset
-global LLStat5Ctrl := unset, LLStat6Ctrl := unset, LLStat7Ctrl := unset, LLStat8Ctrl := unset
 global CPCtlSpeedSliderCtrl := unset, CPCtlSpeedTextCtrl := unset
 
 ; Controller mapping editor handles, and the shortcut-capture state used by
@@ -750,8 +748,9 @@ global g_ControllerMapUI := unset
 global _ShortcutCap := ""
 
 ; tail viewer state
+; What UpdateStatusIndicators last built, for the shared Live Log window.
+global SteamShellStatusLines := []
 global PanelLogMaxLines := 200
-global DetachedLogMaxLines := 300
 
 ; controller mouse mode state (XInput)
 global XInputDll := ""
@@ -8982,12 +8981,11 @@ SetLiveLogging(enable) {
 }
 
 UpdateStatusIndicators() {
-    global ControlGui, LiveLogGui
+    global ControlGui, LiveLogGui, SteamShellStatusLines
     global HandsOffUntilTick, LastBestCandidateText, AlwaysFocusList
     global WindowEngineLastWindowCount, WindowEngineLastTickDurationMs
     global WindowEngineLastDecision, WindowEngineGeometryActions, WindowEngineFocusActions
     global CPStat1Ctrl, CPStat2Ctrl, CPStat3Ctrl, CPStat4Ctrl, CPStat5Ctrl, CPStat6Ctrl, CPStat7Ctrl, CPStat8Ctrl
-    global LLStat1Ctrl, LLStat2Ctrl, LLStat3Ctrl, LLStat4Ctrl, LLStat5Ctrl, LLStat6Ctrl, LLStat7Ctrl, LLStat8Ctrl
     global EnableLauncherCleanup, LauncherCleanupDownloadGuard, LauncherCleanupDownloadGuardMode
     global LC_ConfigText, LC_FoundText, LC_GateText, LC_LastDecisionStamp, LC_LastDecisionText
 
@@ -9090,35 +9088,22 @@ UpdateStatusIndicators() {
     try ControlGui["stat8"].Text := lc4
     }
 
-    ; Live Log window
-    if (IsSet(LLStat1Ctrl) && IsObject(LLStat1Ctrl)) {
-    try LLStat1Ctrl.Text := txt1
-    try LLStat2Ctrl.Text := txt2
-    try LLStat3Ctrl.Text := txt3
-    try LLStat4Ctrl.Text := txt4
-    try LLStat5Ctrl.Text := lc1
-    try LLStat6Ctrl.Text := lc2
-    try LLStat7Ctrl.Text := lc3
-    try LLStat8Ctrl.Text := lc4
-    } else if IsSet(LiveLogGui) {
-    try LiveLogGui["stat1"].Text := txt1
-    try LiveLogGui["stat2"].Text := txt2
-    try LiveLogGui["stat3"].Text := txt3
-    try LiveLogGui["stat4"].Text := txt4
-    try LiveLogGui["stat5"].Text := lc1
-    try LiveLogGui["stat6"].Text := lc2
-    try LiveLogGui["stat7"].Text := lc3
-    try LiveLogGui["stat8"].Text := lc4
-    }
+    ; The Live Log window is SteamShell-Shared.ahk's now and reads these through
+    ; ProductLiveLogStatusLines. Recorded rather than pushed, because the shared
+    ; window pulls when it refreshes and does not know or care when this ran.
+    SteamShellStatusLines := [txt1, txt2, txt3, txt4, lc1, lc2, lc3, lc4]
     } catch {
     return
     }
 }
 
+; The CONTROL PANEL's log pane. The Live Log window is SteamShell-Shared.ahk's
+; and refreshes itself on its own timer, so this no longer feeds two surfaces --
+; which is also why it may return early on the Control Panel alone.
 RefreshPanelLog(*) {
-    global ControlGui, LiveLogGui, LogPath, PanelLogMaxLines, DetachedLogMaxLines
+    global ControlGui, LogPath, PanelLogMaxLines
 
-    if !(IsSet(ControlGui) || IsSet(LiveLogGui))
+    if !IsSet(ControlGui)
         return
 
     txt := ""
@@ -9132,37 +9117,12 @@ RefreshPanelLog(*) {
     }
 
     ; Newest entries first
-    outPanel := GetLastLines(txt, PanelLogMaxLines, true)
-    outDet := GetLastLines(txt, DetachedLogMaxLines, true)
-
-    if IsSet(ControlGui) {
-    try ControlGui["logView"].Value := outPanel ; may not exist in newer layouts
-    }
-    if IsSet(LiveLogGui) {
-    try LiveLogGui["detLogView"].Value := outDet
-    }
+    try ControlGui["logView"].Value := GetLastLines(txt, PanelLogMaxLines, true)
 
     UpdateStatusIndicators()
 }
 
-OpenLogFile(*) {
-    global LogPath
-    if !FileExist(LogPath) {
-    try FileAppend("", LogPath, "UTF-8")
-    }
-    pid := 0
-    LaunchInteractiveApp(
-        A_WinDir "\System32\notepad.exe",
-        QuoteWindowsCommandLineArg(LogPath),
-        A_WinDir "\System32", "Normal", &pid, "SteamShell log")
-}
 
-ClearLogFile(*) {
-    global LogPath
-    try FileDelete(LogPath)
-    try FileAppend("", LogPath, "UTF-8")
-    RefreshPanelLog()
-}
 
 StartHandsOffFromGui(*) {
     global ControlGui, HandsOffUntilTick, LastActionText
@@ -9628,6 +9588,20 @@ SettingsProductBrowsePath(field, prompt, filter, *) {
 
 SettingsProductRecordShortcut(field, *) {
     SettingsEditorRecordShortcut(field)
+}
+
+; Per-tree seam for SteamShell-Shared.ahk's Live Log window: the status lines
+; this product wants above the log tail.
+;
+; UpdateStatusIndicators builds them for the Control Panel anyway, so this asks
+; it to run and returns what it recorded. Calling it here rather than trusting a
+; timer is what makes the shared window's refresh authoritative: the lines are as
+; fresh as the moment they are displayed, whether or not the Control Panel is
+; open and whatever the host's own timers are doing.
+ProductLiveLogStatusLines() {
+    global SteamShellStatusLines
+    UpdateStatusIndicators()
+    return IsObject(SteamShellStatusLines) ? SteamShellStatusLines : []
 }
 
 ; Per-tree seam required by SteamShell-Shared.ahk: record a field the shared row
@@ -14063,7 +14037,9 @@ stat8 := ControlGui.AddText("x" x2 " y+2 w" colW " vstat8 +Wrap", "LC Last: -")
     if (h > maxH)
         h := maxH
 
-    ControlGui.Show("w" w " h" h " Center")
+    ControlGui.Show("w" w " h" h)
+    RecenterVisibleGuiOnMonitorActual(ControlGui,
+        GetMonitorIndexForWindow(WinExist("A")))
     } catch {
     controlPanelMonitor := 0
     try controlPanelMonitor := GetMonitorIndexForWindow(WinExist("A"))
@@ -14085,9 +14061,12 @@ HideControlPanel() {
     EnsureStatusRefreshTimer()
 }
 
+; The CONTROL PANEL's timer. It used to be kept alive by the Live Log window as
+; well, back when RefreshPanelLog fed both; the Live Log arms and cancels its own
+; now, so keeping it here would run a 500ms timer for a surface that is not open.
 EnsureLogRefreshTimer() {
-    global ControlGui, LiveLogGui
-    if ((IsSet(ControlGui) && IsGuiVisible(ControlGui)) || (IsSet(LiveLogGui) && IsGuiVisible(LiveLogGui))) {
+    global ControlGui
+    if (IsSet(ControlGui) && IsGuiVisible(ControlGui)) {
     SetTimer(RefreshPanelLog, 500)
     } else {
     SetTimer(RefreshPanelLog, 0)
@@ -14104,103 +14083,6 @@ EnsureStatusRefreshTimer() {
     }
 }
 
-ShowLiveLogWindow(*) {
-    global LiveLogGui, LogPath, DetachedLogMaxLines
-
-    CaptureLastRealForeground()
-
-    if !IsSet(LiveLogGui) {
-    LiveLogGui := Gui("+AlwaysOnTop +ToolWindow +Resize", "SteamShell Live Log")
-    LiveLogGui.SetFont("s10", "Segoe UI")
-    LiveLogGui.MarginX := 12
-    LiveLogGui.MarginY := 12
-
-    LiveLogGui.SetFont("s10 Bold")
-    LiveLogGui.AddText("xm ym", "Live log viewer (newest first)")
-    LiveLogGui.SetFont("s9 Norm")
-    LiveLogGui.AddText("xm y+2 w860 h34 +Wrap", "Source: " LogPath " (auto-refresh)")
-
-    LiveLogGui.SetFont("s10 Norm")
-    ll1 := LiveLogGui.AddText("xm y+10 w860 vstat1", "Steam Foreground: -")
-    ll2 := LiveLogGui.AddText("xm y+2 w860 vstat2", "Hands-Off Remaining: -")
-    ll3 := LiveLogGui.AddText("xm y+2 w860 vstat3", "Best Candidate: -")
-    ll4 := LiveLogGui.AddText("xm y+2 w860 vstat4", "Last Action: -")
-
-    ; Launcher Cleanup status (why launchers are still running / what was detected)
-    ll5 := LiveLogGui.AddText("xm y+8 w860 vstat5 +Wrap", "Launcher Cleanup: -")
-    ll6 := LiveLogGui.AddText("xm y+2 w860 vstat6 +Wrap", "LC Found: -")
-    ll7 := LiveLogGui.AddText("xm y+2 w860 vstat7 +Wrap", "LC Gate: -")
-ll8 := LiveLogGui.AddText("xm y+2 w860 vstat8 +Wrap", "LC Last: -")
-
-    ; Keep direct handles for reliability (no dependence on name lookup)
-    global LLStat1Ctrl, LLStat2Ctrl, LLStat3Ctrl, LLStat4Ctrl
-    global LLStat5Ctrl, LLStat6Ctrl, LLStat7Ctrl, LLStat8Ctrl
-    LLStat1Ctrl := ll1
-    LLStat2Ctrl := ll2
-    LLStat3Ctrl := ll3
-    LLStat4Ctrl := ll4
-    LLStat5Ctrl := ll5
-    LLStat6Ctrl := ll6
-    LLStat7Ctrl := ll7
-    LLStat8Ctrl := ll8
-
-    LiveLogGui.AddEdit("xm y+10 w860 r16 ReadOnly -Wrap vdetLogView", "")
-
-    LiveLogGui.AddButton("xm y+10 w110", "Refresh").OnEvent("Click", RefreshPanelLog)
-    LiveLogGui.AddButton("x+10 yp w110", "Copy").OnEvent("Click", CopyDetachedLog)
-    LiveLogGui.AddButton("x+10 yp w110", "Open Log").OnEvent("Click", OpenLogFile)
-    LiveLogGui.AddButton("x+10 yp w110", "Clear Log").OnEvent("Click", ClearLogFile)
-    LiveLogGui.AddButton("x+10 yp w110", "Close").OnEvent("Click", (*) => HideLiveLogWindow())
-
-    LiveLogGui.OnEvent("Close", (*) => HideLiveLogWindow())
-    LiveLogGui.OnEvent("Escape", (*) => HideLiveLogWindow())
-    }
-
-    ; HEIGHT FROM THE CONTENT, not from a guess about the screen.
-    ;
-    ; This asked for 460, 520 or 600 depending on A_ScreenHeight, and 600 is
-    ; about four pixels more than the controls need at 100% DPI. Reported: on a
-    ; scaled display the window came up with the last log line cut in half and
-    ; NO BUTTONS AT ALL -- Refresh, Copy, Open Log, Clear Log and Close were all
-    ; below the bottom edge. The buttons were not removed; they were off-screen,
-    ; which looks identical from the couch and is worse, because the window
-    ; still works and offers nothing.
-    ;
-    ; Same failure as the companion's Settings width before 39e0070: a hard-coded
-    ; size that happens to fit at 100% DPI and clips everywhere else. AutoSize
-    ; asks AutoHotkey what the controls actually came out as, at whatever scale
-    ; it laid them out, which is the only number that cannot be wrong.
-    ;
-    ; The log view is the elastic part, so if the content does not fit the work
-    ; area that is what gives -- shrinking a scrollable list is a smaller loss
-    ; than clipping the controls under it, and the buttons stay reachable.
-    monitorIndex := GetMonitorIndexForWindow(WinExist("A"))
-    MonitorGetWorkArea(ClampInt(monitorIndex, 1, MonitorGetCount()),
-        &wLeft, &wTop, &wRight, &wBottom)
-    availableHeight := wBottom - wTop
-    try {
-        LiveLogGui.Show("AutoSize Hide")
-        WinGetPos(, , , &naturalHeight, "ahk_id " LiveLogGui.Hwnd)
-        overflow := naturalHeight - availableHeight
-        if (overflow > 0) {
-            logView := LiveLogGui["detLogView"]
-            logView.GetPos(, , , &viewHeight)
-            ; A floor, so a very short screen loses the list rather than the
-            ; window: three visible rows is still a log.
-            logView.Move(, , , Max(60, viewHeight - overflow))
-            LiveLogGui.Show("AutoSize Hide")
-        }
-        LiveLogGui.Show()
-    } catch {
-        LiveLogGui.Show()
-    }
-    RecenterVisibleGuiOnMonitorActual(LiveLogGui, monitorIndex)
-
-    RefreshPanelLog()
-    EnsureLogRefreshTimer()
-    EnsureStatusRefreshTimer()
-    UpdateStatusIndicators()
-}
 
 
 ; ==============================================================================
@@ -14263,21 +14145,7 @@ ControllerBindingPretty(key) {
 
 
 
-HideLiveLogWindow() {
-    global LiveLogGui
-    if IsSet(LiveLogGui) {
-    try LiveLogGui.Hide()
-    }
-    EnsureLogRefreshTimer()
-    EnsureStatusRefreshTimer()
-}
 
-CopyDetachedLog(*) {
-    global LiveLogGui
-    if !IsSet(LiveLogGui)
-        return
-    try A_Clipboard := LiveLogGui["detLogView"].Value
-}
 
 ; ==============================================================================
 ; EXIT / RESTORE SHELL

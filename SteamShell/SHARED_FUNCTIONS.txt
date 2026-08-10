@@ -228,6 +228,7 @@ GetFrameCapLabel
 GetLastLines
 GetMonitorIndexForWindow
 GuiForegroundRetry
+HideLiveLogWindow
 GetMonitorWorkAreaForPoint
 GetPhysicalModsMap
 GetQuickMenuPreviousExe
@@ -250,6 +251,11 @@ IsOurWindow
 IsRtssFrameCapPreset
 IsSteamProcess
 IsUsableProfileExe
+LiveLogClear
+LiveLogCopy
+LiveLogOpenFile
+LiveLogRefresh
+LiveLogRefreshIntervalMs
 LoadControllerMappingsFromIni
 LoadControllerProfile
 LoadSharedSettings
@@ -418,6 +424,7 @@ ShowControllerMappingWindow
 ShowControllerTest
 ShowNotification
 ShowHealthCheck
+ShowLiveLogWindow
 ShowQuickMenuLayoutManager
 ShutdownGdiPlus
 ShutdownRtssHooksApi

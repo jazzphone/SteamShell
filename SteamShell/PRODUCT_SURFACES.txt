@@ -62,7 +62,6 @@ ShowSetupCompletionDialog: what Setup shows when it finishes, so it belongs to S
 ChooseSteamShellProductToRemove: the removal chooser. It offers BOTH products, which is why it lives here and not in the companion: the shell's Setup is what installed them, holds the administrator token and owns the shell registration that has to be handed back. A companion asked to remove the shell could not undo the registration it never made.
 ShowAlwaysFocusManager: the Always Focus list, which is a shell feature; the companion leaves focus to Xbox FSE
 ShowControlPanel: the shell's own status and control window. The companion answers the same need from its tray and its Settings Advanced page rather than a separate window, so this is a shape difference rather than a missing feature.
-ShowLivelogWindow: a live log viewer. NOT examined for portability -- the companion offers Open Log instead, which opens the file in the user's editor, and whether a live view is worth having there has not been asked. Recorded so that it gets asked rather than assumed.
 
 # ------------------------------------------------------------------------------
 # Both trees -- already recorded elsewhere

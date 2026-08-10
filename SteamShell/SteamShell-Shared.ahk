@@ -10766,6 +10766,178 @@ SettingsAddNote(guiObj, category, text, &y, height := 34) {
 
 
 ; ==============================================================================
+; Live log viewer
+; ==============================================================================
+; A live, auto-refreshing view of the log file, with the buttons that go with it.
+;
+; This was the shell's alone, and PRODUCT_SURFACES.txt said why in the only
+; honest way available at the time: "NOT examined for portability -- the
+; companion offers Open Log instead, which opens the file in the user's editor,
+; and whether a live view is worth having there has not been asked. Recorded so
+; that it gets asked rather than assumed." It has now been asked, and the answer
+; was yes.
+;
+; The window splits cleanly and that is what made it portable. The VIEWER --
+; newest-first tail, refresh, copy, open, clear -- is about a log file and
+; nothing else, so both products want the same one. The STATUS BLOCK above it
+; was what looked shell-shaped, and half of it is: Hands-Off, AlwaysFocus and
+; the window engine have no companion counterpart at all, while Launcher Cleanup
+; has twenty-eight. So the lines are a seam and the window is shared, which is
+; the same shape ProductHealthResults already uses for the health check.
+;
+; It owns its own refresh timer rather than borrowing the host's. The shell has
+; EnsureLogRefreshTimer and EnsureStatusRefreshTimer and the companion has
+; neither, and a window that arms and cancels its own timer needs no seam for
+; them and cannot leave one running after it closes.
+LiveLogRefreshIntervalMs() {
+    return 1000
+}
+
+
+ShowLiveLogWindow(*) {
+    global LiveLogGui, LogPath
+    ProductCaptureLastRealForeground()
+
+    if !IsSet(LiveLogGui) {
+        LiveLogGui := Gui("+AlwaysOnTop +ToolWindow +Resize",
+            ProductIdentity()["title"] " Live Log")
+        LiveLogGui.SetFont("s10", "Segoe UI")
+        LiveLogGui.MarginX := 12
+        LiveLogGui.MarginY := 12
+
+        LiveLogGui.SetFont("s10 Bold")
+        LiveLogGui.AddText("xm ym", "Live log viewer (newest first)")
+        LiveLogGui.SetFont("s9 Norm")
+        LiveLogGui.AddText("xm y+2 w860 h34 +Wrap",
+            "Source: " LogPath " (auto-refresh)")
+
+        ; One control per line the product asked for, named by position. The
+        ; count comes from the seam, so a product that reports five lines gets
+        ; five controls and no empty rows -- the shell's eight are not a shape
+        ; the companion has to pad out to.
+        LiveLogGui.SetFont("s10 Norm")
+        lines := ProductLiveLogStatusLines()
+        for index, text in lines {
+            LiveLogGui.AddText("xm " (index = 1 ? "y+10" : "y+2")
+                . " w860 +Wrap vllstat" index, text)
+        }
+
+        LiveLogGui.AddEdit("xm y+10 w860 r16 ReadOnly -Wrap vdetLogView", "")
+
+        LiveLogGui.AddButton("xm y+10 w110", "Refresh").OnEvent("Click", LiveLogRefresh)
+        LiveLogGui.AddButton("x+10 yp w110", "Copy").OnEvent("Click", LiveLogCopy)
+        LiveLogGui.AddButton("x+10 yp w110", "Open Log").OnEvent("Click", LiveLogOpenFile)
+        LiveLogGui.AddButton("x+10 yp w110", "Clear Log").OnEvent("Click", LiveLogClear)
+        LiveLogGui.AddButton("x+10 yp w110", "Close").OnEvent("Click", (*) => HideLiveLogWindow())
+
+        LiveLogGui.OnEvent("Close", (*) => HideLiveLogWindow())
+        LiveLogGui.OnEvent("Escape", (*) => HideLiveLogWindow())
+    }
+
+    ; HEIGHT FROM THE CONTENT, not from a guess about the screen.
+    ;
+    ; This asked for 460, 520 or 600 depending on A_ScreenHeight, and 600 is
+    ; about four pixels more than the controls need at 100% DPI. Reported from
+    ; hardware: on a scaled display the window came up with the last log line cut
+    ; in half and NO BUTTONS AT ALL -- every one of them was below the bottom
+    ; edge. They had not been removed; they were off-screen, which looks the same
+    ; from the couch and is worse, because the window still opens and offers
+    ; nothing.
+    ;
+    ; AutoSize asks AutoHotkey what the controls actually came out as, at
+    ; whatever scale it laid them out, which is the only number that cannot be
+    ; wrong. The log view is the elastic part, so if the content will not fit the
+    ; work area that is what gives: a shorter list beats unreachable buttons.
+    monitorIndex := GetMonitorIndexForWindow(WinExist("A"))
+    MonitorGetWorkArea(ClampInt(monitorIndex, 1, MonitorGetCount()),
+        &wLeft, &wTop, &wRight, &wBottom)
+    availableHeight := wBottom - wTop
+    try {
+        LiveLogGui.Show("AutoSize Hide")
+        WinGetPos(, , , &naturalHeight, "ahk_id " LiveLogGui.Hwnd)
+        overflow := naturalHeight - availableHeight
+        if (overflow > 0) {
+            logView := LiveLogGui["detLogView"]
+            logView.GetPos(, , , &viewHeight)
+            ; A floor, so a very short screen loses the list rather than the
+            ; window: three visible rows is still a log.
+            logView.Move(, , , Max(60, viewHeight - overflow))
+            LiveLogGui.Show("AutoSize Hide")
+        }
+        LiveLogGui.Show()
+    } catch {
+        LiveLogGui.Show()
+    }
+    RecenterVisibleGuiOnMonitorActual(LiveLogGui, monitorIndex)
+    try ForceForegroundWindow(LiveLogGui.Hwnd)
+    GuiForegroundRetry(LiveLogGui, 0, "Live Log")
+
+    LiveLogRefresh()
+    SetTimer(LiveLogRefresh, LiveLogRefreshIntervalMs())
+}
+
+
+HideLiveLogWindow() {
+    global LiveLogGui
+    SetTimer(LiveLogRefresh, 0)
+    if IsSet(LiveLogGui)
+        try LiveLogGui.Hide()
+}
+
+
+; Fills the tail and the status lines. Safe to call when the window is closed --
+; it is also the timer callback, and a timer that outlives its window by one tick
+; is normal rather than a bug to guard against elsewhere.
+LiveLogRefresh(*) {
+    global LiveLogGui, LogPath
+    static MAX_LINES := 300
+    if !IsSet(LiveLogGui)
+        return
+    if !IsGuiVisible(LiveLogGui) {
+        SetTimer(LiveLogRefresh, 0)
+        return
+    }
+    text := ""
+    try {
+        if FileExist(LogPath)
+            text := FileRead(LogPath, "UTF-8")
+        else
+            text := "(log file not found yet)"
+    } catch {
+        text := "(unable to read log)"
+    }
+    try LiveLogGui["detLogView"].Value := GetLastLines(text, MAX_LINES, true)
+    for index, line in ProductLiveLogStatusLines() {
+        try LiveLogGui["llstat" index].Text := line
+    }
+}
+
+
+LiveLogOpenFile(*) {
+    global LogPath
+    if !FileExist(LogPath)
+        try FileAppend("", LogPath, "UTF-8")
+    try Run(LogPath)
+}
+
+
+LiveLogClear(*) {
+    global LogPath
+    try FileDelete(LogPath)
+    try FileAppend("", LogPath, "UTF-8")
+    LiveLogRefresh()
+}
+
+
+LiveLogCopy(*) {
+    global LiveLogGui
+    if !IsSet(LiveLogGui)
+        return
+    try A_Clipboard := LiveLogGui["detLogView"].Value
+}
+
+
+; ==============================================================================
 ; Controller test and calibration
 ; ==============================================================================
 ; A diagnostic window over the controller stack both products already share --

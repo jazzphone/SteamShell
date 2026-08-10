@@ -116,6 +116,8 @@ global ControllerDiagnosticIntervalMs := 50
 ; Logs raw HID gamepad reports received in the background. Diagnostic use only;
 ; it feeds nothing and decodes nothing.
 global EnableRawInputProbe := false
+; The shared Live Log window. See ShowLiveLogWindow in SteamShell-Shared.ahk.
+global LiveLogGui := unset
 global RawInputProbeActive := false
 ; RawInput backend state. Reports arrive as WM_INPUT messages and are decoded
 ; into this XINPUT_STATE-shaped buffer for the poll loop to read.
@@ -5235,6 +5237,7 @@ ShowSettings(*) {
     SettingsAddButtonRow(settings, category, [
         ["Open INI", (*) => Run(IniPath)],
         ["Open Log", (*) => Run(LogPath)],
+        ["Live Log", ShowLiveLogWindow],
         ["Health Check", ShowHealthCheck],
         ["Reload INI", ReloadSettings],
         ["Park Cursor Now", ParkCursor],
@@ -5553,6 +5556,47 @@ SettingsReportLayoutAudit() {
 ; moves -- "Cursor.EnableAutoHide" for a setting living at [Features]
 ; EnableAutoHideCursor -- so the row, the populate and the save agreed only
 ; because three hand-written names happened to match.
+; Per-tree seam for SteamShell-Shared.ahk's Live Log window: the status lines
+; this product wants above the log tail.
+;
+; NOT the shell's eight. Four of those -- Hands-Off, Best Candidate over the
+; AlwaysFocus list, and the window engine -- name subsystems this companion does
+; not have a line of, and padding the window out to a shape borrowed from the
+; other product is exactly what the seam exists to avoid. These are the things
+; this one can actually answer, and they are the questions its log has been read
+; for all week: is Steam in front, is the companion switched on, which backend is
+; live, and is the pad still talking.
+ProductLiveLogStatusLines() {
+    global CompanionDisabled, ActiveInputBackend, ControllerBackend
+    global RawInputLastReportTick, EnableLauncherCleanupLite, AssistLastCleanupTick
+    steamFront := "-"
+    try steamFront := SteamIsInFront() ? "YES" : "NO"
+
+    reportAge := "no reports yet"
+    try {
+        if RawInputLastReportTick
+            reportAge := Round((A_TickCount - RawInputLastReportTick) / 1000)
+                . "s ago"
+    }
+
+    lastCleanup := "never this session"
+    try {
+        if AssistLastCleanupTick
+            lastCleanup := Round((A_TickCount - AssistLastCleanupTick) / 1000)
+                . "s ago"
+    }
+
+    return [
+        "Steam Foreground: " steamFront,
+        "Companion: " (CompanionDisabled ? "DISABLED" : "ENABLED"),
+        "Controller backend: " ActiveInputBackend
+            . " (setting: " ControllerBackend ")",
+        "Last controller report: " reportAge,
+        "Launcher Cleanup: "
+            . (EnableLauncherCleanupLite ? "ON" : "OFF")
+            . "  |  last run: " lastCleanup]
+}
+
 ; Per-tree seams required by SteamShell-Shared.ahk's row builders.
 ;
 ; Registration records the control against the key its spec names, and tracks

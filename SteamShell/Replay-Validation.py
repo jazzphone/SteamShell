@@ -1996,6 +1996,47 @@ def check_learner_guard(sources):
                  "word -- that turns every button held at close into a press edge.")
 
 
+def check_live_log_shared(sources):
+    """One shared Live Log viewer, each product naming its own status lines.
+
+    It was the shell's alone, and PRODUCT_SURFACES.txt said why in the only
+    honest way available: portability "has not been asked". It was asked.
+
+    The SPLIT is what this pins, because collapsing it is the tempting tidy. The
+    viewer is about a log file and both products want the same one; the status
+    block is not -- four of the shell's eight lines name subsystems the
+    companion has zero lines of. Each product must both ANSWER the seam and have
+    a way to OPEN the window: a shared viewer nobody can reach is worse than
+    none, and that is the state the companion was in.
+    """
+    shared = sources["SteamShell-Shared.ahk"]
+    for name in ("ShowLiveLogWindow", "HideLiveLogWindow", "LiveLogRefresh"):
+        if not function_body(shared, name):
+            fail(f"SteamShell-Shared.ahk defines no {name}(); the Live Log "
+                 "window is no longer shared.")
+    show = function_body(shared, "ShowLiveLogWindow")
+    refresh = function_body(shared, "LiveLogRefresh")
+    hide = function_body(shared, "HideLiveLogWindow")
+    if not re.search(r"ProductLiveLogStatusLines\(\)", show):
+        fail("The shared Live Log window does not build its status lines from "
+             "the seam, so one product's set is hard-coded into both.")
+    if not re.search(r"ProductLiveLogStatusLines\(\)", refresh):
+        fail("The shared Live Log window never refreshes its status lines from "
+             "the seam.")
+    if not (re.search(r"SetTimer\(LiveLogRefresh,", show)
+            and re.search(r"SetTimer\(LiveLogRefresh, 0\)", hide)):
+        fail("The Live Log window must arm and cancel its own refresh timer.")
+
+    for name, product in (("SteamShell.ahk", "the shell"),
+                          ("SteamShell-XFE.ahk", "the companion")):
+        if not function_body(sources[name], "ProductLiveLogStatusLines"):
+            fail(f"{name} does not answer ProductLiveLogStatusLines, so the "
+                 f"shared Live Log window has no lines to show in {product}.")
+        code = strip_code_noise(sources[name])
+        if not re.search(r"ShowLiveLogWindow", code):
+            fail(f"{name} offers no way to open the Live Log window.")
+
+
 def check_settings_window_placement(sources):
     """Both Settings windows are placed the same way.
 
@@ -2036,7 +2077,9 @@ def check_settings_window_placement(sources):
     for name in ("SteamShell.ahk", "SteamShell-XFE.ahk", "SteamShell-Shared.ahk"):
         code = "\n".join(line for line in sources[name].split("\n")
                          if not line.lstrip().startswith(";"))
-        if re.search(r'\.Show\("[^"]*\bCenter\b', code):
+        # Bounded by the CALL: the first version read only the leading string
+        # literal and missed .Show("w" w " h" h " Center").
+        if re.search(r'\.Show\([^)]*\bCenter\b', code):
             fail(f"{name} places a window with Gui's own Center option. Use the "
                  "shared placement helpers, which centre on the monitor the "
                  "window was opened from.")
@@ -2416,6 +2459,7 @@ def main():
     check_controller_poll_frame(sources)
     check_learner_guard(sources)
     check_rtss_limiter_restore(sources)
+    check_live_log_shared(sources)
     check_settings_window_placement(sources)
     check_settings_audit_bounds(sources)
     check_learner_identify_release(sources)

@@ -505,6 +505,17 @@ $sharedSeamAllowed = @(
     # remove, join for the INI -- is now written once.
     "SettingsProductSelectExe", "SettingsProductFieldMessage",
     "SettingsProductSetStatus",
+    # Widened for the Live Log window, which moved here when the reason it was
+    # the shell's alone turned out to be, in PRODUCT_SURFACES.txt's own words,
+    # that portability "has not been asked". Asked; the answer was yes.
+    #
+    # ONE seam, and it is the half that is genuinely per product. The viewer is
+    # about a log file and both products want the same one. The status block
+    # above it is not: four of the shell's eight lines name Hands-Off, the
+    # AlwaysFocus list and the window engine, and the companion has zero lines of
+    # any of them, while Launcher Cleanup it has twenty-eight of. So each product
+    # names its own lines and the window counts them.
+    "ProductLiveLogStatusLines",
     # Reached the same way, from the Health Check's Export button.
     "ExportDiagnosticBundle",
     "ProductSettingBool",
@@ -525,7 +536,7 @@ $sharedSeamAllowed = @(
 # Restated here, next to the list, and asserted in Assert-SharedParity: changing
 # one without the other fails the build. Update the expectation in the same
 # commit that changes the list, and say in the message why the seam moved.
-$sharedSeamExpectedCount = 52
+$sharedSeamExpectedCount = 53
 
 # Reports same-named functions in both trees whose difference is only naming and
 # formatting -- the drift that a raw similarity score hides.
@@ -2027,7 +2038,11 @@ function Assert-SettingsWindowPlacement {
     foreach ($file in @("SteamShell.ahk", "SteamShell-XFE.ahk", "SteamShell-Shared.ahk")) {
         $text = Get-SourceText (Join-Path $ProjectRoot $file)
         $code = (($text -split "`n") | Where-Object { $_ -notmatch '^\s*;' }) -join "`n"
-        Assert-True ($code -notmatch '\.Show\("[^"]*\bCenter\b') (
+        # BOUNDED BY THE CALL, not by the first string literal. The first version of
+        # this read .Show(" followed by Center inside that one literal, and
+        # missed .Show("w" w " h" h " Center") -- a live instance, in the
+        # Control Panel, sitting behind the ban that was supposed to catch it.
+        Assert-True ($code -notmatch '\.Show\([^)]*\bCenter\b') (
             "$file places a window with Gui's own Center option, which centres " +
             "on the primary monitor rather than the one the window was opened " +
             "from. Use the shared placement helpers.")
@@ -2035,6 +2050,69 @@ function Assert-SettingsWindowPlacement {
 
     if (-not $Quiet) {
         Write-Host "Settings window: both products size, centre and re-measure the same way."
+    }
+}
+
+# The Live Log window is shared, and its status lines are not.
+#
+# It was the shell's alone, and PRODUCT_SURFACES.txt recorded why in the only
+# honest way available: portability "has not been asked. Recorded so that it
+# gets asked rather than assumed." It was asked. The answer was yes, and the
+# entry is gone because the surface is no longer one-sided.
+#
+# The SPLIT is the part worth pinning, because collapsing it is the tempting
+# tidy. The viewer is about a log file and both products want the same one. The
+# status block is not: four of the shell's eight lines name Hands-Off, the
+# AlwaysFocus list and the window engine, none of which exist in the companion,
+# while Launcher Cleanup exists in both. A future pass that hard-codes eight
+# lines into the shared window, or that pushes the shell's set into the
+# companion, puts back the thing that kept this window in one product.
+#
+# Each product must ANSWER the seam and REACH the window: a shared viewer nobody
+# can open is worse than no viewer, and that is the state the companion was in.
+function Assert-LiveLogShared {
+    param(
+        [Parameter(Mandatory = $true)][string]$ProjectRoot,
+        [switch]$Quiet
+    )
+    $sharedText = Get-SourceText (Join-Path $ProjectRoot "SteamShell-Shared.ahk")
+    foreach ($name in @("ShowLiveLogWindow", "HideLiveLogWindow", "LiveLogRefresh")) {
+        Assert-True ((Get-AhkFunctionBody -Source $sharedText -Name $name) -ne "") (
+            "SteamShell-Shared.ahk defines no $name(); the Live Log window is " +
+            "no longer shared and this check cannot see what replaced it.")
+    }
+    $show = Get-AhkFunctionBody -Source $sharedText -Name "ShowLiveLogWindow"
+    $refresh = Get-AhkFunctionBody -Source $sharedText -Name "LiveLogRefresh"
+    Assert-True ($show -match 'ProductLiveLogStatusLines\(\)') (
+        "The shared Live Log window does not build its status lines from the " +
+        "seam, so one product's set is hard-coded into both.")
+    Assert-True ($refresh -match 'ProductLiveLogStatusLines\(\)') (
+        "The shared Live Log window never refreshes its status lines from the " +
+        "seam, so they show whatever they held when it was built.")
+    # Its own timer, so it needs no seam for the host's -- the shell has two and
+    # the companion has neither.
+    Assert-True ($show -match 'SetTimer\(LiveLogRefresh,' -and
+        (Get-AhkFunctionBody -Source $sharedText -Name "HideLiveLogWindow") -match
+            'SetTimer\(LiveLogRefresh, 0\)') (
+        "The Live Log window must arm and cancel its own refresh timer; " +
+        "borrowing the host's needs a seam neither product should have to grow.")
+
+    foreach ($pair in @(
+        @{ File = "SteamShell.ahk";     Product = "the shell" },
+        @{ File = "SteamShell-XFE.ahk"; Product = "the companion" })) {
+        $text = Get-SourceText (Join-Path $ProjectRoot $pair.File)
+        Assert-True (
+            (Get-AhkFunctionBody -Source $text -Name "ProductLiveLogStatusLines") -ne "") (
+            "$($pair.File) does not answer ProductLiveLogStatusLines, so the " +
+            "shared Live Log window has no lines to show in $($pair.Product).")
+        $code = (($text -split "`n") | Where-Object { $_ -notmatch '^\s*;' }) -join "`n"
+        Assert-True ($code -match 'ShowLiveLogWindow') (
+            "$($pair.File) offers no way to open the Live Log window. A shared " +
+            "viewer nobody can reach is worse than none, and that is exactly " +
+            "the state the companion was in.")
+    }
+    if (-not $Quiet) {
+        Write-Host "Live log: one shared viewer, each product naming its own status lines."
     }
 }
 
