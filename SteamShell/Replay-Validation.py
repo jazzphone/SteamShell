@@ -2015,13 +2015,11 @@ def check_learner_identify_release(sources):
     shared = sources["SteamShell-Shared.ahk"]
     report = function_body(shared, "ControllerLearnReport")
     adopt = function_body(shared, "ControllerLearnAdoptDevice")
-    settled = function_body(shared, "ControllerLearnStaleHoldSettled")
     released = function_body(shared, "ControllerLearnIdentifyReleased")
     timeout = function_body(shared, "ControllerLearnIdentifyHoldTimeout")
     ui = function_body(shared, "ControllerLearnUpdateUi")
     for name, body in (("ControllerLearnReport", report),
                        ("ControllerLearnAdoptDevice", adopt),
-                       ("ControllerLearnStaleHoldSettled", settled),
                        ("ControllerLearnIdentifyReleased", released),
                        ("ControllerLearnIdentifyHoldTimeout", timeout)):
         if not body:
@@ -2049,24 +2047,24 @@ def check_learner_identify_release(sources):
         fail("ControllerLearnReport no longer holds off while the identifying "
              "control is down; rest would be measured with it held.")
 
-    # The stale-hold deferral, and BOTH its exits -- one exit is a hang.
-    # The GUARD, not just the names. Replacing the condition with a constant
-    # leaves every identifier in the body and satisfied the first draft of this.
-    if not (re.search(r"looksLikeRelease\s*:=\s*\(\(NumGet\(baseline, holdOffset,"
-                      r' "UChar"\) & holdMask\)', report)
-            and re.search(r"if\s*\(looksLikeRelease\s*&&\s*!LearnStaleHoldSeen\)", report)
-            and re.search(r"SetTimer\(ControllerLearnStaleHoldSettled, -\d+\)", report)):
-        fail("The learner identifies on a set-to-clear change without waiting to "
-             "see whether it was a control held over from before the wizard "
-             "opened. Opening the wizard by pressing A does exactly that.")
-    if not re.search(r"LearnStaleHoldMask\)\s*=\s*LearnStaleHoldMask.*?"
-                     r"ControllerLearnAdoptDevice\(", report, re.S):
-        fail("The stale-hold deferral has no path for the bits going back up, so "
-             "an active-low pad could never identify at all.")
-    if not (re.search(r'known\["baseline"\]\s*:=', settled)
-            and re.search(r'known\["noise"\]\s*:=\s*Buffer\(', settled)):
-        fail("ControllerLearnStaleHoldSettled must re-take the resting state and "
-             "drop the noise measured against the baseline now known to be wrong.")
+    # THE CHANGE-ONLY PAD, which is where this wizard hangs. A streaming pad
+    # feeds the rest loop and the baseline self-corrects; a change-only pad feeds
+    # it nothing, so the pre-press report -- usually containing the A press that
+    # OPENED the wizard -- stays, and the identifying control's bit then shadows
+    # every later step until nothing can be learned at all.
+    begin = function_body(shared, "ControllerLearnBeginSteps")
+    if not begin:
+        fail("ControllerLearnBeginSteps could not be read.")
+    if not re.search(r"if\s*\(LearnRestCount = 0\).*?"
+                     r"LearnBaseline\s*:=\s*ControllerLearnCopyReport\(\s*\n?\s*LearnIdleSample",
+                     begin, re.S):
+        fail("ControllerLearnBeginSteps no longer adopts the last report seen "
+             "when rest sampling received nothing. On a pad that reports only on "
+             "change that is the only rest sample there is.")
+    if not re.search(r"if \(LearnIdentifyHoldOffset >= 0\).*?LearnIdleSampleSeen := true",
+                     report, re.S):
+        fail("ControllerLearnReport no longer records the last report seen while "
+             "the identifying control settles.")
 
     # One entry point to rest measurement, and a bound on the wait.
     if not (re.search(r"LearnRestSampling\s*:=\s*true", released)

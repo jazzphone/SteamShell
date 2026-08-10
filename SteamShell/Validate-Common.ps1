@@ -1999,40 +1999,37 @@ function Assert-ControllerLearnerIdentifyRelease {
         "The learner no longer records which control identified the device, so " +
         "it cannot wait for that control to be released before measuring rest.")
 
-    # THE WIZARD IS USUALLY OPENED BY PRESSING A, and that press is still down
-    # while the idle baseline is being taken. Reported from hardware twice: the
-    # baseline came out with A's bit set, A was then learned "active-low" on an
-    # active-high pad -- which is only possible from such a baseline -- and no
-    # button after A could be learned at all, because every later press carried
-    # A's bit in its changed mask, lost the lowest-set-bit tie-break to it, and
-    # was rejected as already claimed.
+    # THE PAD THAT REPORTS ONLY ON CHANGE IS WHERE THIS WIZARD HANGS.
     #
-    # A set-to-clear first change is either that, or a press on an active-low
-    # pad. The two are indistinguishable in the report, so the wizard must not
-    # guess: it waits to see which state the pad settles in. Both outcomes are
-    # pinned, because a deferral with only one exit is a hang.
-    # The GUARD, not just the names: replacing the condition with a constant
-    # leaves every identifier in the body, and satisfied the first draft of this.
-    Assert-True (
-        $report -match 'looksLikeRelease\s*:=\s*\(\(NumGet\(baseline, holdOffset, "UChar"\) & holdMask\)' -and
-        $report -match 'if\s*\(looksLikeRelease\s*&&\s*!LearnStaleHoldSeen\)' -and
-        $report -match 'SetTimer\(ControllerLearnStaleHoldSettled, -\d+\)') (
-        "The learner identifies on a set-to-clear change without waiting to see " +
-        "whether it was a control held over from before the wizard opened. " +
-        "Opening the wizard by pressing A does exactly that, and the run is " +
-        "unrecoverable from the first step.")
-    Assert-True ($report -match '(?s)LearnStaleHoldMask\)\s*=\s*LearnStaleHoldMask(?s).*?ControllerLearnAdoptDevice\(') (
-        "The stale-hold deferral has no path for the bits going back UP. That " +
-        "is a press on an active-low pad, and without it such a pad could never " +
-        "identify at all.")
-    $settled = Get-AhkFunctionBody -Source $sharedText `
-        -Name "ControllerLearnStaleHoldSettled"
-    Assert-True ($settled -ne "" -and
-        $settled -match 'known\["baseline"\]\s*:=' -and
-        $settled -match 'known\["noise"\]\s*:=\s*Buffer\(') (
-        "ControllerLearnStaleHoldSettled must re-take the resting state from " +
-        "the report where the control let go, and drop the noise measured " +
-        "against the baseline now known to be wrong.")
+    # Found by the user, not the code: the same pad completes the run in
+    # DirectInput mode and hangs during the button steps in XInput mode. The
+    # discriminator is not the gyro and not the mode -- it is whether rest
+    # sampling receives anything. A streaming pad feeds the rest loop, which
+    # rewrites LearnBaseline from every rest report, so a control held when the
+    # window opened is corrected away. A change-only pad feeds it nothing, and
+    # whatever the baseline holds stays.
+    #
+    # What it holds is the pre-press report, and the wizard is opened by pressing
+    # A, so that press is usually still down in it. The identifying control then
+    # reads as permanently pressed: learned inverted, and thereafter its bit is
+    # in the changed mask of every report, wins the lowest-set-bit tie-break, and
+    # is rejected as already claimed -- so every later step is dead. Two logs,
+    # two pads, stuck immediately after the control that had identified it.
+    #
+    # For a change-only pad, no report means nothing moved, so the last report
+    # seen IS the resting state. Keeping an older one is indefensible on any pad.
+    $begin = Get-AhkFunctionBody -Source $sharedText -Name "ControllerLearnBeginSteps"
+    Assert-True ($begin -ne "" -and
+        $begin -match '(?s)if\s*\(LearnRestCount = 0\)(?:(?!\n\})[\s\S])*?' +
+            'LearnBaseline\s*:=\s*ControllerLearnCopyReport\(\s*\r?\n?\s*LearnIdleSample') (
+        "ControllerLearnBeginSteps no longer adopts the last report seen when " +
+        "rest sampling received nothing. On a pad that reports only on change " +
+        "that is the only rest sample there is, and without it the identifying " +
+        "control stays pressed in the baseline and every step after it is dead.")
+    Assert-True ($report -match '(?s)if \(LearnIdentifyHoldOffset >= 0\)(?:(?!\n\})[\s\S])*?LearnIdleSampleSeen := true') (
+        "ControllerLearnReport no longer records the last report seen while the " +
+        "identifying control settles, so ControllerLearnBeginSteps has nothing " +
+        "to fall back on when the pad says nothing at rest.")
     Assert-True ($report -match '(?s)if\s*\(LearnIdentifyHoldOffset\s*>=\s*0\)') (
         "ControllerLearnReport no longer holds off while the identifying " +
         "control is down. Rest would be measured from reports in which it is " +

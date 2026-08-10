@@ -162,7 +162,6 @@ ControllerLearnRestart
 ControllerLearnSave
 ControllerLearnSkip
 ControllerLearnStartCapture
-ControllerLearnStaleHoldSettled
 ControllerLearnSteps
 ControllerLearnTick
 ControllerLearnUpdateUi

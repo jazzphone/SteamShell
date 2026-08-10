@@ -559,6 +559,70 @@ def test_analog_scan_protects_stick_click_steps() -> None:
     assert unfiltered[0] == 2
 
 
+def test_change_only_pad_takes_rest_from_the_last_report() -> None:
+    """The XInput-mode hang: same pad, completes in DirectInput, stuck in XInput.
+
+    The discriminator is not the gyro and not the mode. A streaming pad feeds the
+    rest loop, which rewrites the baseline from every rest report, so a control
+    held when the window opened is corrected away. A change-only pad feeds it
+    nothing, and the pre-press report stays -- and because the wizard is opened
+    by pressing A, that report usually has A down.
+
+    Byte 11 is the button byte on the 15-byte report: 0x01 A, 0x02 B, 0x04 X.
+    """
+    idle = bytes([0, 0, 0x80, 0xFF, 0x7F, 0, 0x80, 0xFF, 0x7F, 0, 0x80, 0x00, 0, 0, 0])
+    a_held = bytearray(idle)
+    a_held[11] = 0x01
+    a_held = bytes(a_held)
+
+    # The pre-press baseline, taken while A was still down from opening the
+    # window. This is what the wizard had, and it is wrong.
+    stale = a_held
+    # The last report seen while waiting for the identifying control to settle:
+    # A let go, and on a change-only pad nothing has been said since.
+    last_seen = idle
+
+    def learn(baseline: bytes, pressed_byte: int) -> tuple[int, str] | None:
+        """The button matcher, reduced: lowest changed bit outside rest noise."""
+        report = bytearray(idle)
+        report[11] = pressed_byte
+        changed = report[11] ^ baseline[11]
+        if not changed:
+            return None
+        mask = changed & -changed
+        polarity = "active-high" if report[11] & mask else "active-low"
+        return mask, polarity
+
+    # WITH THE STALE BASELINE, pressing A is invisible -- the baseline already
+    # says A is down, so the report matches it and nothing changed.
+    assert learn(stale, 0x01) is None
+    # It is the RELEASE that gets learned, inverted. That is the "A = byte 11
+    # bit 0x01 active-low" in the log, on a pad that reports A as 0x00 -> 0x01.
+    assert learn(stale, 0x00) == (0x01, "active-low")
+    # And then it shadows every later step: pressing B changes bit 0x01 too, the
+    # lowest-set-bit tie-break hands it to A's bit, and the step is rejected as
+    # already claimed. That is the hang, and no press can clear it.
+    claimed = {0x01}
+    for pressed in (0x02, 0x04, 0x08, 0x10):
+        mask, _ = learn(stale, pressed)
+        assert mask in claimed, (pressed, mask)
+
+    # WITH THE LAST REPORT ADOPTED AS REST every button is itself.
+    assert learn(last_seen, 0x01) == (0x01, "active-high")
+    assert learn(last_seen, 0x02) == (0x02, "active-high")
+    assert learn(last_seen, 0x04) == (0x04, "active-high")
+
+    # And the rule that picks it: silence from a change-only pad means nothing
+    # moved, so the last report seen is the current state.
+    rest_reports: list[bytes] = []
+    baseline = last_seen if not rest_reports else rest_reports[-1]
+    assert baseline == idle
+    # A streaming pad needs none of this -- the rest loop already rewrote it.
+    rest_reports = [idle] * 400
+    baseline = last_seen if not rest_reports else rest_reports[-1]
+    assert baseline == idle
+
+
 def make_8bitdo(buttons: int = 0, gyro: tuple[int, ...] | None = None) -> bytes:
     """The 8BitDo Ultimate 2 report from the spoiled run, to scale.
 
@@ -792,6 +856,7 @@ def main() -> None:
     test_axis_peak_survives_release_and_prevents_carryover()
     test_analog_scan_protects_stick_click_steps()
     test_gyro_high_byte_is_not_a_button()
+    test_change_only_pad_takes_rest_from_the_last_report()
     test_learner_never_guesses_big_endian()
     test_resolve_runs_per_report_without_claiming_its_own_field()
     print("Controller profile simulation passed.")
