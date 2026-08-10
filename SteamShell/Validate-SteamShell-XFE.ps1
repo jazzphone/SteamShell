@@ -1198,8 +1198,14 @@ Assert-True (
     $source -match 'Hotkey\("\^!\+d", DeleteControllerProfileForActiveDevice\)') (
     "A saved controller profile must be rest-checked and removable by hotkey.")
 # Inside Xbox FSE the first foreground grab loses to FSE re-asserting its window.
+#
+# SettingsForegroundRetry became the shared GuiForegroundRetry when standalone
+# turned out to need it too: its Settings window opened BEHIND whatever was in
+# front, from all three entry points, and had to be clicked. The retry takes the
+# window rather than reading a global, which is what let it move -- the
+# companion tracks SettingsVisible and the shell does not.
 Assert-True (
-    $source -match 'SettingsForegroundRetry\(') (
+    $source -match 'GuiForegroundRetry\(settings, 0, "Settings"\)') (
     "The Settings window must retry taking the foreground.")
 # The Quick Menu value column is right-aligned, so overlong text is clipped from
 # the LEFT. Anything that must survive has to come last. The volume used to be

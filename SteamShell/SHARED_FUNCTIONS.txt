@@ -227,6 +227,7 @@ GetDisplayApplyValue
 GetFrameCapLabel
 GetLastLines
 GetMonitorIndexForWindow
+GuiForegroundRetry
 GetMonitorWorkAreaForPoint
 GetPhysicalModsMap
 GetQuickMenuPreviousExe

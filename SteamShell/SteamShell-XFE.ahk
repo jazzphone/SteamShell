@@ -5307,35 +5307,10 @@ ShowSettings(*) {
     ; time worked -- by then the contest was over. The retries are bounded and
     ; stop as soon as the window is actually in front.
     try ForceForegroundWindow(settings.Hwnd)
-    SettingsForegroundRetry(0)
+    GuiForegroundRetry(settings, 0, "Settings")
 }
 
 ; Bounded retry of the foreground grab for the Settings window.
-SettingsForegroundRetry(attempt) {
-    global SettingsGui, SettingsVisible
-    static DELAYS := [120, 300, 700]
-    if (!IsSet(SettingsGui) || !SettingsVisible)
-        return
-    hwnd := 0
-    try hwnd := SettingsGui.Hwnd
-    if !hwnd
-        return
-    active := false
-    try active := WinActive("ahk_id " hwnd) != 0
-    if active {
-        if attempt
-            LogLine("Settings: came to the front after " attempt " retry"
-                . (attempt = 1 ? "" : "s") ".")
-        return
-    }
-    if (attempt >= DELAYS.Length) {
-        LogLine("Settings: could not take the foreground after "
-            . DELAYS.Length " retries; use the task switcher.", "Warning")
-        return
-    }
-    try ForceForegroundWindow(hwnd)
-    SetTimer(() => SettingsForegroundRetry(attempt + 1), -DELAYS[attempt + 1])
-}
 
 ; ==============================================================================
 ; SETTINGS LAYOUT AND SCROLLING

@@ -2003,6 +2003,15 @@ function Assert-SettingsWindowPlacement {
             "$($pair.File): the Settings window is never re-measured once " +
             "visible, so its position rests on an estimate taken while it was " +
             "hidden.")
+        # SHOWN IS NOT IN FRONT. Windows refuses a foreground change from a
+        # process that does not already own the foreground, and something else
+        # can re-assert itself in the moment after ours appears. Standalone had
+        # no retry and its Settings window opened behind whatever was there,
+        # from all three entry points, needing a mouse click to reach.
+        Assert-True ($body -match 'GuiForegroundRetry\(') (
+            "$($pair.File): the Settings window is shown but never made the " +
+            "foreground. A single activation request is one Windows is " +
+            "entitled to refuse, so the window opens behind whatever is there.")
     }
     if (-not $Quiet) {
         Write-Host "Settings window: both products size, centre and re-measure the same way."

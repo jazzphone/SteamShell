@@ -13494,7 +13494,12 @@ ShowSettingsEditor(*) {
             ; open, and it is cheap: one measurement and one SetWindowPos.
             RecenterVisibleGuiOnMonitorActual(
                 SettingsGui, GetMonitorIndexForWindow(LastRealFgHwnd))
-            WinActivate("ahk_id " SettingsGui.Hwnd)
+            ; WinActivate alone is the request Windows is entitled to refuse,
+            ; and re-opening is the path most likely to be refused: something
+            ; else owns the foreground by definition, or Settings would already
+            ; be in front.
+            try ForceForegroundWindow(SettingsGui.Hwnd)
+            GuiForegroundRetry(SettingsGui, 0, "Settings")
             SetTimer(PollController, ControllerPollIntervalMs)
             return
         }
@@ -13842,6 +13847,15 @@ ShowSettingsEditor(*) {
     CenterGuiOnMonitorActual(SettingsGui, monitorIndex, 980,
         SettingsEditorWindowHeight)
     RecenterVisibleGuiOnMonitorActual(SettingsGui, monitorIndex)
+    ; SHOWN IS NOT IN FRONT. Reported for all three entry points -- the Quick
+    ; Menu item, the keyboard shortcut and the controller chord -- which is the
+    ; signature of a window that is never activated rather than of any one
+    ; caller: the window appeared behind whatever was there and had to be
+    ; clicked. Windows refuses a foreground change from a process that does not
+    ; already own it, so one call is not enough and the companion has retried
+    ; here for as long as it has had this window.
+    try ForceForegroundWindow(SettingsGui.Hwnd)
+    GuiForegroundRetry(SettingsGui, 0, "Settings")
     HandleCursorAfterManagedFocus(SettingsGui.Hwnd, false)
     SetTimer(PollController, ControllerPollIntervalMs)
 }
@@ -14126,12 +14140,45 @@ ll8 := LiveLogGui.AddText("xm y+2 w860 vstat8 +Wrap", "LC Last: -")
     LiveLogGui.OnEvent("Escape", (*) => HideLiveLogWindow())
     }
 
+    ; HEIGHT FROM THE CONTENT, not from a guess about the screen.
+    ;
+    ; This asked for 460, 520 or 600 depending on A_ScreenHeight, and 600 is
+    ; about four pixels more than the controls need at 100% DPI. Reported: on a
+    ; scaled display the window came up with the last log line cut in half and
+    ; NO BUTTONS AT ALL -- Refresh, Copy, Open Log, Clear Log and Close were all
+    ; below the bottom edge. The buttons were not removed; they were off-screen,
+    ; which looks identical from the couch and is worse, because the window
+    ; still works and offers nothing.
+    ;
+    ; Same failure as the companion's Settings width before 39e0070: a hard-coded
+    ; size that happens to fit at 100% DPI and clips everywhere else. AutoSize
+    ; asks AutoHotkey what the controls actually came out as, at whatever scale
+    ; it laid them out, which is the only number that cannot be wrong.
+    ;
+    ; The log view is the elastic part, so if the content does not fit the work
+    ; area that is what gives -- shrinking a scrollable list is a smaller loss
+    ; than clipping the controls under it, and the buttons stay reachable.
+    monitorIndex := GetMonitorIndexForWindow(WinExist("A"))
+    MonitorGetWorkArea(ClampInt(monitorIndex, 1, MonitorGetCount()),
+        &wLeft, &wTop, &wRight, &wBottom)
+    availableHeight := wBottom - wTop
     try {
-    h := (A_ScreenHeight < 800) ? 460 : (A_ScreenHeight < 900) ? 520 : 600
-    LiveLogGui.Show("w900 h" h)
+        LiveLogGui.Show("AutoSize Hide")
+        WinGetPos(, , , &naturalHeight, "ahk_id " LiveLogGui.Hwnd)
+        overflow := naturalHeight - availableHeight
+        if (overflow > 0) {
+            logView := LiveLogGui["detLogView"]
+            logView.GetPos(, , , &viewHeight)
+            ; A floor, so a very short screen loses the list rather than the
+            ; window: three visible rows is still a log.
+            logView.Move(, , , Max(60, viewHeight - overflow))
+            LiveLogGui.Show("AutoSize Hide")
+        }
+        LiveLogGui.Show()
     } catch {
-    LiveLogGui.Show()
+        LiveLogGui.Show()
     }
+    RecenterVisibleGuiOnMonitorActual(LiveLogGui, monitorIndex)
 
     RefreshPanelLog()
     EnsureLogRefreshTimer()

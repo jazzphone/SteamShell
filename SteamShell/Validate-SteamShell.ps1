@@ -1408,6 +1408,30 @@ Assert-True (
         'IniReadS\("Controller", "DesktopAutoMouseExcludeExeList", ""\)') (
     "Desktop-wide automatic mouse mode, exclusions, Settings, or tray control are disconnected.")
 
+# THE LIVE LOG WINDOW SIZES ITSELF FROM ITS CONTENT.
+#
+# It asked for 460, 520 or 600 depending on A_ScreenHeight, and 600 is about
+# four pixels more than its controls need at 100% DPI. Reported from hardware:
+# on a scaled display the window came up with the last log line cut in half and
+# NO BUTTONS AT ALL -- Refresh, Copy, Open Log, Clear Log and Close were every
+# one of them below the bottom edge. They had not been removed; they were
+# off-screen, which looks the same from the couch and is worse, because the
+# window still opens and offers nothing.
+#
+# Same shape as the companion's Settings width before 39e0070: a hard-coded size
+# that happens to fit at one scale. AutoSize asks AutoHotkey what the controls
+# actually came out as, which is the only number that cannot be wrong -- and the
+# log view is what shrinks if the work area cannot take the whole thing, because
+# a shorter list beats unreachable buttons.
+Assert-True (
+    $source -notmatch 'LiveLogGui\.Show\("w900 h"' -and
+    $source -match '(?s)LiveLogGui\.Show\("AutoSize Hide"\).*?' +
+        'WinGetPos\(, , , &naturalHeight' -and
+    $source -match '(?s)overflow := naturalHeight - availableHeight.*?' +
+        'logView\.Move\(') (
+    "The Live Log window must size itself from its controls. A fixed height " +
+    "fits at one DPI and puts its whole button row off-screen at another.")
+
 # INSTALLING STANDALONE MUST REGISTER THE SHELL, or say out loud that it will not.
 #
 # Reported: installing standalone over a Shell value of explorer.exe left the

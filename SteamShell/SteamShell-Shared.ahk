@@ -9918,6 +9918,53 @@ RecenterVisibleGuiOnMonitorActual(guiObj, monitorIndex) {
 }
 
 
+; Keeps asking for the foreground until the window actually has it.
+;
+; A window that is Show()n is not necessarily in FRONT. Windows refuses a
+; foreground change from a process that does not already own it, and something
+; else can re-assert itself in the moment after ours appears -- Xbox FSE does
+; exactly that, which is why opening Settings a second time used to work: by
+; then the contest was over.
+;
+; This was SettingsForegroundRetry in SteamShell-XFE.ahk and the shell had no
+; equivalent, so standalone's Settings window opened BEHIND whatever was in
+; front and had to be clicked. Reported for all three of its entry points --
+; the Quick Menu item, the keyboard shortcut and the controller chord -- which
+; is the signature of a window that is shown and never activated rather than of
+; any one caller.
+;
+; It takes the WINDOW rather than reading a global, which is what lets it be
+; shared: the companion tracks SettingsVisible and the shell does not, and a
+; shared function may only name a global both trees declare. Visibility is the
+; honest stop condition anyway -- a window that has been closed mid-retry is no
+; longer visible, whoever was tracking it.
+GuiForegroundRetry(guiObj, attempt := 0, label := "Window") {
+    static DELAYS := [120, 300, 700]
+    hwnd := 0
+    try hwnd := guiObj.Hwnd
+    if (!hwnd || !DllCall("IsWindow", "Ptr", hwnd))
+        return
+    if !IsGuiVisible(guiObj)
+        return
+    active := false
+    try active := WinActive("ahk_id " hwnd) != 0
+    if active {
+        if attempt
+            LogLine(label ": came to the front after " attempt " retry"
+                . (attempt = 1 ? "" : "s") ".")
+        return
+    }
+    if (attempt >= DELAYS.Length) {
+        LogLine(label ": could not take the foreground after "
+            . DELAYS.Length " retries; use the task switcher.", "Warning")
+        return
+    }
+    try ForceForegroundWindow(hwnd)
+    SetTimer(() => GuiForegroundRetry(guiObj, attempt + 1, label),
+        -DELAYS[attempt + 1])
+}
+
+
 CenterGuiOnMonitorActual(guiObj, monitorIndex, width, height, noActivate := false,
         deferShow := false) {
     monitorIndex := ClampInt(monitorIndex, 1, MonitorGetCount())

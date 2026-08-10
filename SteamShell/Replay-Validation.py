@@ -2026,6 +2026,9 @@ def check_settings_window_placement(sources):
         if not re.search(r"RecenterVisibleGuiOnMonitorActual\(", body):
             fail(f"{name}: the Settings window is never re-measured once "
                  "visible, so its position rests on a hidden-window estimate.")
+        if not re.search(r"GuiForegroundRetry\(", body):
+            fail(f"{name}: the Settings window is shown but never made the "
+                 "foreground; one activation request is one Windows may refuse.")
 
 
 def check_settings_audit_bounds(sources):
