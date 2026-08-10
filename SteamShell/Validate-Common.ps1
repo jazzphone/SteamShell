@@ -2030,6 +2030,25 @@ function Assert-ControllerLearnerIdentifyRelease {
         "ControllerLearnReport no longer records the last report seen while the " +
         "identifying control settles, so ControllerLearnBeginSteps has nothing " +
         "to fall back on when the pad says nothing at rest.")
+    # A BUTTON CHANGES A BIT; AN ANALOGUE BYTE CHANGES MOST OF THEM. Reported
+    # from hardware: in DirectInput mode the identification step completed
+    # without the user touching anything, and the log named byte 18 bit 0xF8 --
+    # the high byte of a gyro axis parked at -60, flipping 0xFF to 0x00 on every
+    # zero crossing, eight bits at once against a resting mask of 0x07.
+    #
+    # A longer noise window cannot fix it: an axis parked near zero may not cross
+    # while it is being measured. The shape of the change can, on the first
+    # report. The scan must also CONTINUE past a candidate it rejects -- stopping
+    # at the first changed byte is what let a stick nudged during the press win
+    # over the button, since byte 2 comes long before byte 8.
+    Assert-True (
+        $report -match 'allowed := \(A_Index = 1\) \? 1 : MAX_IDENTIFY_BITS' -and
+        $report -match 'if \(bits > allowed\)\s*\r?\n\s*continue' -and
+        $report -match '(?s)if !changed\s*\r?\n\s*continue(?:(?!\n\})[\s\S])*?identified := true') (
+        "Identification accepts a change of any shape, so an analogue byte " +
+        "crossing a boundary answers the prompt before the user touches " +
+        "anything -- and it stops at the first byte that moved, so a nudged " +
+        "stick outranks the button being pressed.")
     Assert-True ($report -match '(?s)if\s*\(LearnIdentifyHoldOffset\s*>=\s*0\)') (
         "ControllerLearnReport no longer holds off while the identifying " +
         "control is down. Rest would be measured from reports in which it is " +

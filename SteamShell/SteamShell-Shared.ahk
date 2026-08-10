@@ -8698,17 +8698,61 @@ ControllerLearnReport(data, base, length, device) {
         identified := false
         holdOffset := -1
         holdMask := 0
-        Loop length {
-            offset := A_Index - 1
-            now := NumGet(data, base + offset, "UChar")
-            was := NumGet(baseline, offset, "UChar")
-            changed := (now ^ was) & ~NumGet(noise, offset, "UChar") & 0xFF
-            if changed {
+        ; A BUTTON CHANGES A BIT; AN ANALOGUE BYTE CHANGES MOST OF THEM.
+        ;
+        ; Reported from hardware: in DirectInput mode this step "goes through
+        ; really fast without me even touching anything". It did. The log names
+        ; the culprit -- "waiting for byte 18 bit 0xF8 to be released" -- and
+        ; byte 18 is the high byte of a 16-bit gyro axis sitting at 0xFFC4, which
+        ; is -60. Every time that value crosses zero the byte flips 0xFF to 0x00,
+        ; all eight bits at once, and the resting mask measured before the prompt
+        ; was only 0x07, so 0xF8 survived as a "clean change" and answered a
+        ; prompt nobody had touched.
+        ;
+        ; The pre-prompt noise window cannot fix this on its own: a sensor axis
+        ; parked near zero may not cross at all while it is being measured, so
+        ; the mask stays small no matter how long the window is. What separates
+        ; them is the SHAPE of the change, and it is available on the first
+        ; report. A button press moves exactly one bit. A hat moves a few -- this
+        ; pad's rests at 0x0F and reads 0x00 up, which is four. A byte carrying a
+        ; number that has just crossed a boundary moves five, six, eight.
+        ;
+        ; Four is the line, and it is drawn to keep the D-pad usable as an
+        ; identifying control rather than at the tightest value that would work.
+        ;
+        ; TWO PASSES, AND THE FIRST ONE ONLY ACCEPTS A SINGLE BIT. The old loop
+        ; stopped at the first byte that had changed at all, so a stick brushed
+        ; while pressing A selected the stick -- byte 2 comes long before byte 8.
+        ; A bit-count ceiling alone does not fix that, and the test written for
+        ; it said so on the first run: nudging a stick from 0x7F to 0x6A changes
+        ; three bits, which is under any ceiling that still admits a hat. A
+        ; button is ONE bit, always, so looking for one of those first beats the
+        ; nudge outright; the second pass exists for the D-pad, whose four bits
+        ; are a legitimate answer when nothing cleaner is on offer.
+        static MAX_IDENTIFY_BITS := 4
+        Loop 2 {
+            allowed := (A_Index = 1) ? 1 : MAX_IDENTIFY_BITS
+            Loop length {
+                offset := A_Index - 1
+                now := NumGet(data, base + offset, "UChar")
+                was := NumGet(baseline, offset, "UChar")
+                changed := (now ^ was) & ~NumGet(noise, offset, "UChar") & 0xFF
+                if !changed
+                    continue
+                bits := 0
+                Loop 8 {
+                    if (changed & (1 << (A_Index - 1)))
+                        bits += 1
+                }
+                if (bits > allowed)
+                    continue
                 identified := true
                 holdOffset := offset
                 holdMask := changed
                 break
             }
+            if identified
+                break
         }
         ; Some controllers publish only on state changes: one press report, then
         ; silence while the button remains held. Idle noise was measured before

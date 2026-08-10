@@ -2043,6 +2043,19 @@ def check_learner_identify_release(sources):
     if not re.search(r"LearnIdentifyHoldOffset\s*:=\s*holdOffset", adopt):
         fail("The learner no longer records which control identified the device, "
              "so it cannot wait for it to be released before measuring rest.")
+    # A button changes a bit; an analogue byte changes most of them. In
+    # DirectInput the identification step completed untouched, on byte 18 bit
+    # 0xF8 -- a gyro axis parked at -60 flipping 0xFF to 0x00 on every crossing.
+    # The scan must also continue past a rejected candidate, or a stick nudged
+    # during the press outranks the button: byte 2 comes long before byte 8.
+    if not (re.search(r"allowed := \(A_Index = 1\) \? 1 : MAX_IDENTIFY_BITS", report)
+            and re.search(r"if \(bits > allowed\)\s*\n\s*continue", report)):
+        fail("Identification accepts a change of any shape, so an analogue byte "
+             "crossing a boundary answers the prompt before the user touches "
+             "anything.")
+    if not re.search(r"if !changed\s*\n\s*continue.*?identified := true", report, re.S):
+        fail("Identification stops at the first byte that moved, so a nudged "
+             "stick outranks the button being pressed.")
     if not re.search(r"if\s*\(LearnIdentifyHoldOffset\s*>=\s*0\)", report, re.S):
         fail("ControllerLearnReport no longer holds off while the identifying "
              "control is down; rest would be measured with it held.")

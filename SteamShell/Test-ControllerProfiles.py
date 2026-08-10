@@ -559,6 +559,66 @@ def test_analog_scan_protects_stick_click_steps() -> None:
     assert unfiltered[0] == 2
 
 
+def identify_candidate(
+    report: bytes, baseline: bytes, noise: bytes, max_bits: int = 4
+) -> tuple[int, int] | None:
+    """Mirror of the identification scan in ControllerLearnReport."""
+    for allowed in (1, max_bits):
+        for offset in range(len(baseline)):
+            changed = (report[offset] ^ baseline[offset]) & ~noise[offset] & 0xFF
+            if not changed:
+                continue
+            if bin(changed).count("1") > allowed:
+                continue
+            return offset, changed
+    return None
+
+
+def test_gyro_crossing_zero_does_not_identify_the_pad() -> None:
+    """"It goes through that really fast without me even touching anything."
+
+    The log named it: "waiting for byte 18 bit 0xF8 to be released". A gyro axis
+    parked at 0xFFC4 flips its high byte 0xFF -> 0x00 on every zero crossing --
+    eight bits against a resting mask of 0x07, so 0xF8 survived as a clean
+    change and answered the prompt.
+    """
+    length = 34
+    baseline = bytearray(length)
+    baseline[1] = 0x0F                       # hat at rest
+    baseline[2:6] = bytes([0x7F] * 4)
+    baseline[17], baseline[18] = 0xC4, 0xFF
+    baseline = bytes(baseline)
+
+    noise = bytearray(length)
+    noise[18] = 0x07                         # what the pre-prompt window saw
+    for low in (15, 17, 19, 21, 23, 25):
+        noise[low] = 0xFF
+    noise = bytes(noise)
+
+    crossing = bytearray(baseline)
+    crossing[17], crossing[18] = 0x0E, 0x00
+    crossing = bytes(crossing)
+
+    # Unfiltered, the crossing IS the identification -- byte 18, mask 0xF8.
+    assert identify_candidate(crossing, baseline, noise, max_bits=8) == (18, 0xF8)
+    # Filtered on shape, it is not a candidate at all.
+    assert identify_candidate(crossing, baseline, noise) is None
+
+    # A real press still identifies, even in the same report as the crossing,
+    # and even though the crossing byte is scanned... after it. Byte 8 is the
+    # button byte here, so put a stick nudge in front of it to prove the scan
+    # does not stop at the first byte that merely moved.
+    press = bytearray(crossing)
+    press[2] = 0x6A                          # stick brushed: 0x7F -> 0x6A
+    press[8] = 0x01                          # A pressed
+    assert identify_candidate(bytes(press), baseline, noise) == (8, 0x01)
+
+    # A D-pad direction stays usable: 0x0F -> 0x00 is four bits, on the line.
+    hat = bytearray(baseline)
+    hat[1] = 0x00
+    assert identify_candidate(bytes(hat), baseline, noise) == (1, 0x0F)
+
+
 def report_axis_active(
     report: bytes,
     baseline: bytes,
@@ -924,6 +984,7 @@ def main() -> None:
     test_axis_peak_survives_release_and_prevents_carryover()
     test_analog_scan_protects_stick_click_steps()
     test_gyro_high_byte_is_not_a_button()
+    test_gyro_crossing_zero_does_not_identify_the_pad()
     test_gyro_crossing_zero_is_not_a_stick_gesture()
     test_change_only_pad_takes_rest_from_the_last_report()
     test_learner_never_guesses_big_endian()
