@@ -524,6 +524,11 @@ $sharedSeamAllowed = @(
     # window must not choose between them, and the assertion list further down
     # this file names the shell's side of it by function.
     "ProductOpenLogFile",
+    # Widened for the shared Settings chrome. The hint under the title names
+    # the CONTROLS, and the two products do not bind the same ones -- RB is a
+    # pointer action in the shell and a click in the companion, and only the
+    # companion offers the on-screen keyboard here.
+    "ProductSettingsHintLine",
     # Reached the same way, from the Health Check's Export button.
     "ExportDiagnosticBundle",
     "ProductSettingBool",
@@ -544,7 +549,7 @@ $sharedSeamAllowed = @(
 # Restated here, next to the list, and asserted in Assert-SharedParity: changing
 # one without the other fails the build. Update the expectation in the same
 # commit that changes the list, and say in the message why the seam moved.
-$sharedSeamExpectedCount = 54
+$sharedSeamExpectedCount = 55
 
 # Reports same-named functions in both trees whose difference is only naming and
 # formatting -- the drift that a raw similarity score hides.
@@ -2072,6 +2077,56 @@ function Assert-SettingsWindowPlacement {
 
     if (-not $Quiet) {
         Write-Host "Settings window: both products size, centre and re-measure the same way."
+    }
+}
+
+# Every Product* name SteamShell-Shared.ahk reaches must exist in BOTH trees.
+#
+# The leak scan above asks whether a name the shared file reaches is on the seam
+# allowlist, but it only considers names that are DEFINED somewhere in a tree --
+# a name defined nowhere is filtered out before it is judged. So a seam that was
+# invented and never written slipped through every static check and surfaced as
+# an AutoHotkey load-time warning on the build machine:
+#
+#     Warning: This local variable appears to never be assigned a value.
+#     Specifically: ProductSettingsHintLine
+#
+# AutoHotkey reads an undefined function call as an unassigned variable, which is
+# why it presents as a variable warning rather than a missing function. It cost a
+# build, and the rule that would have caught it is one line of convention this
+# project already follows: Product* is the seam prefix, and a seam has two sides.
+function Assert-SharedSeamsExistInBothTrees {
+    param(
+        [Parameter(Mandatory = $true)][string]$ProjectRoot,
+        [switch]$Quiet
+    )
+    $sharedText = Get-SourceText (Join-Path $ProjectRoot "SteamShell-Shared.ahk")
+    $sharedCode = (($sharedText -split "`n") |
+        Where-Object { $_ -notmatch '^\s*;' }) -join "`n"
+    $shell = Get-SourceText (Join-Path $ProjectRoot "SteamShell.ahk")
+    $companion = Get-SourceText (Join-Path $ProjectRoot "SteamShell-XFE.ahk")
+    $names = @([regex]::Matches($sharedCode, '\b(Product[A-Za-z0-9_]*)\s*[\(.]') |
+        ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique)
+    $orphans = @()
+    foreach ($name in $names) {
+        $pattern = '(?m)^' + [regex]::Escape($name) + '\('
+        $inShell = $shell -match $pattern
+        $inCompanion = $companion -match $pattern
+        if (-not ($inShell -and $inCompanion)) {
+            $where = if ($inShell) { "the shell only" }
+                elseif ($inCompanion) { "the companion only" }
+                else { "NEITHER tree" }
+            $orphans += "$name (defined in $where)"
+        }
+    }
+    Assert-True ($orphans.Count -eq 0) (
+        "SteamShell-Shared.ahk reaches seam names that are not defined in both " +
+        "trees: " + ($orphans -join ", ") + ". A seam has two sides; one that " +
+        "exists nowhere is an AutoHotkey load-time warning on the build machine " +
+        "and nothing here.")
+    if (-not $Quiet) {
+        Write-Host ("Shared seams: " + $names.Count +
+            " Product* names, every one answered by both trees.")
     }
 }
 

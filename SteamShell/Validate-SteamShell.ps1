@@ -4127,6 +4127,7 @@ Assert-SettingsAuditBoundsDerived -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-SettingsWindowPlacement -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-LiveLogShared -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-SettingsRowsReachTheirReaders -ProjectRoot $projectRoot -Quiet:$Quiet
+Assert-SharedSeamsExistInBothTrees -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-RtssUnreadableIsNotOff -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-RtssFrameLimitHoldIsBounded -ProjectRoot $projectRoot -Quiet:$Quiet
 Assert-ElevatedHelperReadsEveryBackend -ProjectRoot $projectRoot -Quiet:$Quiet

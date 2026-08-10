@@ -5516,6 +5516,13 @@ SettingsReportLayoutAudit() {
 ; moves -- "Cursor.EnableAutoHide" for a setting living at [Features]
 ; EnableAutoHideCursor -- so the row, the populate and the save agreed only
 ; because three hand-written names happened to match.
+; Per-tree seam for SteamShell-Shared.ahk's Settings chrome: the controller
+; hint under the title. RB clicks here and X opens the on-screen keyboard,
+; neither of which is what the shell binds, so the line is per product.
+ProductSettingsHintLine() {
+    return "Right stick pointer • RB click • D-pad navigate • LT/RT categories • X keyboard • Y save"
+}
+
 ; Per-tree seam for SteamShell-Shared.ahk's Live Log window: open the log file.
 ;
 ; Run() is right HERE and wrong in the shell. This companion is an ordinary user

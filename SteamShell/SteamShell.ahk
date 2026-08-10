@@ -9556,6 +9556,14 @@ SettingsProductRecordShortcut(field, *) {
     SettingsEditorRecordShortcut(field)
 }
 
+; Per-tree seam for SteamShell-Shared.ahk's Settings chrome: the controller
+; hint under the title. The two products do not offer the same controls --
+; this one has a pointer action on RB and no on-screen keyboard binding here
+; -- so the line is theirs and the frame around it is shared.
+ProductSettingsHintLine() {
+    return "D-pad navigate • A activate • LT/RT categories • Right stick mouse • RB pointer action • Y save"
+}
+
 ; Per-tree seam for SteamShell-Shared.ahk's Live Log window: open the log file.
 ;
 ; NOT Run(). This product is the Windows shell, so anything it starts inherits

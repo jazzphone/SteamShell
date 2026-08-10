@@ -2051,6 +2051,41 @@ def check_settings_category_extraction(sources):
              f"assignment(s) and {cursors} cursor reset(s).")
 
 
+def check_shared_seams_exist_in_both_trees(sources):
+    """Every Product* name SteamShell-Shared.ahk reaches exists in BOTH trees.
+
+    The leak scan asks whether a name the shared file reaches is on the seam
+    allowlist, but it only considers names DEFINED somewhere in a tree -- one
+    defined nowhere is filtered out before it is judged. So a seam that was
+    invented and never written passed every static check and surfaced as an
+    AutoHotkey load-time warning on the build machine:
+
+        Warning: This local variable appears to never be assigned a value.
+        Specifically: ProductSettingsHintLine
+
+    AutoHotkey reads an undefined function call as an unassigned variable, which
+    is why it presents as a variable warning rather than a missing function. It
+    cost a build. Product* is this project's seam prefix, and a seam has two
+    sides.
+    """
+    shared = "\n".join(line for line in sources["SteamShell-Shared.ahk"].split("\n")
+                       if not line.lstrip().startswith(";"))
+    trees = {"the shell": sources["SteamShell.ahk"],
+             "the companion": sources["SteamShell-XFE.ahk"]}
+    names = sorted(set(re.findall(r"\b(Product[A-Za-z0-9_]*)\s*[\(.]", shared)))
+    orphans = []
+    for name in names:
+        where = [label for label, text in trees.items()
+                 if re.search(r"(?m)^" + re.escape(name) + r"\(", text)]
+        if len(where) != 2:
+            orphans.append(f"{name} (defined in {' and '.join(where) or 'NEITHER tree'})")
+    if orphans:
+        fail("SteamShell-Shared.ahk reaches seam names not defined in both "
+             "trees: " + ", ".join(orphans) + ". A seam has two sides; one that "
+             "exists nowhere is a load-time warning on the build machine and "
+             "nothing here.")
+
+
 def check_settings_rows_reach_their_readers(sources):
     """A setting a product READS must be reachable in that product's Settings.
 
@@ -2575,6 +2610,7 @@ def main():
     check_learner_guard(sources)
     check_rtss_limiter_restore(sources)
     check_settings_category_extraction(sources)
+    check_shared_seams_exist_in_both_trees(sources)
     check_settings_rows_reach_their_readers(sources)
     check_live_log_shared(sources)
     check_settings_window_placement(sources)
