@@ -10886,6 +10886,163 @@ SharedApplySettingsCategoryLayout(controlsByCategory, positions, offsets,
 
 
 ; ==============================================================================
+; Settings window chrome
+; ==============================================================================
+; The frame both Settings windows are drawn in: how tall it may be, the header,
+; the category list, the divider, the page heading and the footer.
+;
+; Stage 4 of matching the two windows, and the decision behind it was the user's:
+; the companion adopts the shell's window. That follows this project's own rule
+; -- moved, not merged, the mature implementation wins -- which is how the row
+; builders, the exe-list editor and the placement helpers all went. The shell's
+; is the more capable frame: it is resizable, it SIZES ITSELF TO THE WORK AREA
+; rather than assuming 660 logical pixels fit, and it carries a third footer
+; button.
+;
+; What visibly changes in the companion: the window resizes, its height follows
+; the display instead of being fixed, its category list moves to the shell's
+; column, and it gains Reload INI in the footer.
+;
+; THE HEIGHT IS COMPUTED, and that is the part worth keeping. A Chromium or Steam
+; foreground window can report 96 DPI while this GUI is being scaled for a 4K
+; television, so the process/native DPI is the floor -- trusting Steam's
+; virtualised figure made an 800-logical-pixel window exceed the physical work
+; area at 300% scaling. The companion had no equivalent and would simply have
+; been too tall on such a display.
+; The work area of the monitor a given window is on, falling back to the
+; primary. Moved here from SteamShell.ahk when SettingsWindowGeometry needed
+; it: the companion compiles that function and would have failed at LOAD time
+; on a name defined only in the other tree. It reads no globals.
+GetTargetMonitorWorkArea(targetHwnd, &left, &top, &right, &bottom) {
+    ; Choose the monitor containing the center of the window that was active
+    ; before the menu opened. This handles secondary TVs and negative coordinates.
+    if (targetHwnd && DllCall("IsWindow", "Ptr", targetHwnd)) {
+        try {
+            WinGetPos(&wx, &wy, &ww, &wh, "ahk_id " targetHwnd)
+            centerX := wx + (ww / 2)
+            centerY := wy + (wh / 2)
+            Loop MonitorGetCount() {
+                MonitorGet(A_Index, &ml, &mt, &mr, &mb)
+                if (centerX >= ml && centerX < mr && centerY >= mt && centerY < mb) {
+                    MonitorGetWorkArea(A_Index, &left, &top, &right, &bottom)
+                    return
+                }
+            }
+        }
+    }
+
+    try {
+        primaryMonitor := MonitorGetPrimary()
+        MonitorGetWorkArea(primaryMonitor, &left, &top, &right, &bottom)
+    } catch {
+        left := 0
+        top := 0
+        right := A_ScreenWidth
+        bottom := A_ScreenHeight
+    }
+}
+
+
+SettingsWindowGeometry(guiObj, targetHwnd := 0) {
+    GetTargetMonitorWorkArea(targetHwnd, &workLeft, &workTop, &workRight, &workBottom)
+    windowDpi := Max(96, A_ScreenDPI)
+    try windowDpi := Max(
+        windowDpi, DllCall("User32\GetDpiForWindow", "Ptr", guiObj.Hwnd, "UInt"))
+    if (windowDpi <= 0)
+        windowDpi := 96
+    availableLogicalHeight := Floor(((workBottom - workTop) - 64) * 96 / windowDpi)
+    height := ClampInt(availableLogicalHeight, 450, 660)
+    dividerY := height - 90
+    return Map(
+        "height", height,
+        "dividerY", dividerY,
+        "buttonY", dividerY + 15,
+        "contentTop", 145,
+        "contentBottom", dividerY - 8,
+        "listHeight", dividerY - 98)
+}
+
+
+; The header, the category list and the page heading.
+;
+; The heading is ONE pair updated when the category changes, which was the
+; companion's mechanism; the shell built a pair per category and showed and hid
+; them with the page. Both look identical and the single pair is a dozen fewer
+; controls to track, position and audit -- so the shell adopts that half while
+; the companion adopts the geometry around it.
+SettingsBuildWindowChrome(guiObj, categories, geometry, onCategoryChange) {
+    guiObj.SetFont("s18 Bold", "Segoe UI")
+    titleCtrl := guiObj.AddText("x20 y16 w940 h34",
+        ProductIdentity()["title"] " Settings")
+    guiObj.SetFont("s9 Norm", "Segoe UI")
+    guiObj.AddText("x22 y49 w930 h22", ProductSettingsHintLine())
+    guiObj.SetFont("s10 Norm", "Segoe UI")
+
+    list := guiObj.AddListBox(
+        "x20 y82 w205 h" geometry["listHeight"] " Choose1 vsettingsCategoryList",
+        categories)
+    list.OnEvent("Change", onCategoryChange)
+
+    guiObj.SetFont("s15 Bold", "Segoe UI")
+    guiObj.AddText("x245 y78 w710 h28 vsettingsPageTitle", "")
+    guiObj.SetFont("s9 Norm", "Segoe UI")
+    guiObj.AddText("x245 y108 w710 h34 +Wrap vsettingsPageDescription", "")
+    guiObj.SetFont("s10 Norm", "Segoe UI")
+    return list
+}
+
+
+; The page heading, for whichever page is showing.
+SettingsSetPageHeading(guiObj, category, product) {
+    try guiObj["settingsPageTitle"].Text := GuiLiteralText(category)
+    try guiObj["settingsPageDescription"].Text :=
+        GuiLiteralText(SettingsCategoryDescriptionFor(category, product))
+}
+
+
+; The divider, the status line, the footer buttons and the scrollbar.
+;
+; `buttons` is an array of [label, callback] because the two products do not
+; offer the same three: Reload INI is the shell's, and the companion reaches the
+; same action from its Advanced page. The LAYOUT is shared; which buttons appear
+; is the product's.
+SettingsBuildWindowFooter(guiObj, geometry, buttons) {
+    layout := SettingsLayout()
+    divider := guiObj.AddText("x20 y" geometry["dividerY"] " w925 h1 +0x10")
+    status := guiObj.AddText("x20 y" (geometry["height"] - 32) " w925 h24"
+        . " vsettingsStatus", "No unsaved changes")
+
+    ; Right-aligned against the content edge, so the primary action sits where it
+    ; sits in every other window this project draws.
+    right := 945
+    x := right
+    placed := []
+    index := buttons.Length
+    while (index >= 1) {
+        entry := buttons[index]
+        width := (index = 1) ? 145 : 125
+        x -= width
+        button := guiObj.AddButton(
+            "x" x " y" geometry["buttonY"] " w" width " h34"
+            . ((index = 1) ? " Default" : ""), entry[1])
+        button.OnEvent("Click", entry[2])
+        placed.InsertAt(1, button)
+        x -= 10
+        index -= 1
+    }
+
+    ; Added last, so it sits above the page content in z-order, and sized to the
+    ; viewport rather than the window: it scrolls the page, not the frame.
+    scrollBar := guiObj.Add("Custom",
+        "ClassScrollBar x" layout["scrollBarX"] " y" geometry["contentTop"]
+        . " w" layout["scrollBarWidth"]
+        . " h" (geometry["contentBottom"] - geometry["contentTop"]) " 0x1")
+    return Map("divider", divider, "status", status,
+        "buttons", placed, "scrollBar", scrollBar)
+}
+
+
+; ==============================================================================
 ; Settings categories
 ; ==============================================================================
 ; The pages, their ORDER, and what each one says about itself -- for both

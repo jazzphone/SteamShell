@@ -2170,6 +2170,14 @@ def check_settings_window_placement(sources):
         if not re.search(r"RecenterVisibleGuiOnMonitorActual\(", body):
             fail(f"{name}: the Settings window is never re-measured once "
                  "visible, so its position rests on a hidden-window estimate.")
+        # One window, built from one place: geometry, chrome and footer. Without
+        # this a product can quietly go back to building its own frame.
+        for builder in ("SettingsWindowGeometry", "SettingsBuildWindowChrome",
+                        "SettingsBuildWindowFooter"):
+            if not re.search(builder + r"\(", body):
+                fail(f"{name}: the Settings window does not build its frame "
+                     f"through {builder}; a hand-built frame is how the two "
+                     "products drifted apart.")
         if not re.search(r"GuiForegroundRetry\(", body):
             fail(f"{name}: the Settings window is shown but never made the "
                  "foreground; one activation request is one Windows may refuse.")

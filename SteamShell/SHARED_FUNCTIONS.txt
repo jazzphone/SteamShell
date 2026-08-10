@@ -227,6 +227,7 @@ GetDisplayApplyValue
 GetFrameCapLabel
 GetLastLines
 GetMonitorIndexForWindow
+GetTargetMonitorWorkArea
 GuiForegroundRetry
 HideLiveLogWindow
 GetMonitorWorkAreaForPoint
@@ -382,6 +383,8 @@ SettingsAddRowsForCategory
 SettingsAddShortcutField
 SettingsAddSliderField
 SettingsAddTextField
+SettingsBuildWindowChrome
+SettingsBuildWindowFooter
 SettingsCategoryDefinitions
 SettingsCategoryDescriptionFor
 SettingsCategoryNamesFor
@@ -392,6 +395,8 @@ SettingsExeListHeight
 SettingsExeListInsert
 SettingsExeListRemoveSelected
 SettingsExeListValue
+SettingsSetPageHeading
+SettingsWindowGeometry
 SettingsParseExeList
 SettingsEditorRepaint
 SettingsEditorSetRedraw

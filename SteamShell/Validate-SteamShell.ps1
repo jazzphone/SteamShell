@@ -915,8 +915,17 @@ Assert-True (
         'AttachThreadInput(?:(?!\n\})[\s\S])*?SetForegroundWindow(?:(?!\n\})[\s\S])*?AttachThreadInput') (
     "Quick Menu no longer guarantees foreground ownership over Steam.")
 Assert-True (
+    # The height computation is SettingsWindowGeometry's now and BOTH products
+    # use it, so the ordered match that walked from the Gui options into the DPI
+    # arithmetic no longer holds -- the two live in different files. Each fact is
+    # asserted on its own instead: the window still declares its bounds, and the
+    # shared geometry still trusts the native DPI as the floor. Ordering was
+    # never the property; a Chromium foreground window reporting 96 DPI while
+    # this GUI is scaled for a 4K television is.
+    $source -match '\+MaxSize980x660' -and
     $source -match
-        '(?s)\+MaxSize980x660.*?windowDpi\s*:=\s*Max\(96,\s*A_ScreenDPI\).*?' +
+        '(?sm)^SettingsWindowGeometry\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?' +
+        'windowDpi\s*:=\s*Max\(96,\s*A_ScreenDPI\)(?:(?!\n\})[\s\S])*?' +
         'ClampInt\(availableLogicalHeight,\s*450,\s*660\)' -and
     # The Advanced actions go through the shared row builder, which DERIVES its
     # column positions and width from SettingsLayout. This used to pin the
@@ -1427,7 +1436,12 @@ Assert-True (
 Assert-True (
     $source -notmatch 'SettingsEditorAddActionButton' -and
     $source -match '(?s)category := "Controller & Cursor"[\s\S]{0,1600}?SettingsAddButtonRow\(SettingsGui' -and
-    $source -notmatch 'SettingsEditorAddHeading\(category, "[^"]+"\s*\r?\n\s*,') (
+    # SettingsEditorAddHeading is gone entirely -- the heading is one shared pair
+    # updated on category change -- so forbidding an inline description would be
+    # a clause that can no longer fail. What replaces it is the positive: this
+    # product's headings go through the shared pair and the shared table.
+    $source -match 'SettingsSetPageHeading\(SettingsGui' -and
+    $source -notmatch 'SettingsEditorAddHeading\(') (
     "The shell's Settings pages must place their buttons with the shared " +
     "SettingsAddButtonRow and take their page descriptions from the shared " +
     "category table; hand-placed coordinates and inline descriptions are how " +
@@ -1632,7 +1646,15 @@ foreach ($file in @("SteamShell.ahk", "SteamShell-Shared.ahk", "SteamShell-Commo
 }
 Assert-True ($trailingWhitespaceFiles.Count -eq 0) (
     "Trailing whitespace in: " + ($trailingWhitespaceFiles -join ", ") + ".")
-Assert-True ($source -match 'GuiLiteralText\(title\)') (
+# The heading is ONE pair updated on category change now, not a pair built per
+# page, so the parameter it renders is the category name rather than `title`.
+# An ampersand in a page name is still an ampersand and not an accelerator --
+# "RTSS & Performance" and "Startup & Splash" both have one.
+Assert-True (
+    $source -match
+        '(?sm)^SettingsSetPageHeading\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?' +
+        'GuiLiteralText\(category\)(?:(?!\n\})[\s\S])*?' +
+        'GuiLiteralText\(SettingsCategoryDescriptionFor\(') (
     "Settings headings are not using literal-ampersand rendering.")
 
 # Make sure each static Quick Menu row remains connected to its value display

@@ -503,11 +503,14 @@ global SettingsCategoryControls := Map()
 global SettingsControlPositions := Map()
 global SettingsCategoryOffsets := Map()
 global SettingsScrollBar := 0
+; The viewport, from SettingsWindowGeometry when the window is built. It was
+; SettingsLayout's fixed 190/600 while the frame was a fixed 660 tall; the
+; frame sizes itself to the work area now, so the bounds move with it.
+global SettingsContentTop := 145
+global SettingsContentBottom := 562
 global StartupProgramsList := unset
 global LogonTaskStatusCtrl := unset
 global SettingsCategoryList := 0
-global SettingsCategoryTitleCtrl := 0
-global SettingsCategoryDescriptionCtrl := 0
 global SettingsCurrentCategory := 1
 ; The controller mapping editor is in SteamShell-Shared.ahk now, and keeps
 ; its state in ControllerMapGui and g_ControllerMapUI like the shell's copy
@@ -5031,7 +5034,7 @@ SettingsUpdateStatus(message := "") {
     if !IsSet(SettingsGui)
         return
     text := message != "" ? message : (SettingsDirty ? "Unsaved changes" : "All changes saved")
-    try SettingsGui["SettingsStatus"].Text := text
+    try SettingsGui["settingsStatus"].Text := text
 }
 
 ShowSettingsCategory(categoryName) {
@@ -5045,9 +5048,9 @@ ShowSettingsCategory(categoryName) {
 }
 
 ShowSettings(*) {
+    global SettingsContentTop, SettingsContentBottom
     global SettingsGui, SettingsVisible, SettingsFields, SettingsDirty
     global SettingsCategoryControls, SettingsCategoryList
-    global SettingsCategoryTitleCtrl, SettingsCategoryDescriptionCtrl
     global SettingsCurrentCategory, MouseHidden, IniPath, LogPath
     global StartupProgramsList, LogonTaskStatusCtrl
     global SettingsControlPositions, SettingsCategoryOffsets, SettingsScrollBar
@@ -5079,27 +5082,28 @@ ShowSettings(*) {
     ; was focused but invisible, and only the task switcher revealed it. The Quick
     ; Menu never had this problem because it has always been always-on-top. No
     ; amount of retrying SetForegroundWindow fixes a z-order problem.
-    settings := Gui("-Resize +AlwaysOnTop +MinSize980x600",
-        "SteamShell XFE Settings")
+    ; THE SHELL'S WINDOW, adopted whole. It is resizable, it sizes itself to the
+    ; work area instead of assuming 660 logical pixels fit, and its footer
+    ; carries a third button -- the "moved, not merged" rule this project uses
+    ; everywhere else, with the more capable frame winning.
+    ;
+    ; What changed here, visibly: the window resizes, its height follows the
+    ; display, the category list sits in the shell's column, and Reload INI joins
+    ; the footer. The height computation is the part that matters most -- this
+    ; product had none, so on a 4K television scaled to 300% it asked for a
+    ; window taller than the work area and simply got one.
+    settings := Gui(
+        "+AlwaysOnTop -Resize +MinimizeBox -MaximizeBox +MinSize980x450 +MaxSize980x660",
+        ProductIdentity()["title"] " Settings")
     settings.Opt("+OwnDialogs")
-    settings.MarginX := 24
+    settings.MarginX := 18
     settings.MarginY := 16
-    settings.SetFont("s18 Bold", "Segoe UI")
-    settings.AddText("x24 y16 w940 h34", "SteamShell XFE Settings")
-    settings.SetFont("s9 Norm", "Segoe UI")
-    settings.AddText("x24 y52 w950 h24",
-        "Right stick pointer • RB click • D-pad navigate • LT/RT categories • X keyboard • Y save")
-    SettingsCategoryList := settings.AddListBox(
-        "x24 y96 w225 h500 Choose1",
-        SettingsCategoryNames())
-    SettingsCategoryList.OnEvent("Change", SettingsCategoryChanged)
-    settings.AddText("x245 y96 w1 h504 +0x10")
-    settings.SetFont("s16 Bold", "Segoe UI")
-    SettingsCategoryTitleCtrl := settings.AddText("x255 y96 w690 h32", "General")
-    settings.SetFont("s9 Norm", "Segoe UI")
-    SettingsCategoryDescriptionCtrl := settings.AddText(
-        "x255 y132 w690 h42 +Wrap",
-        "Quick Menu, heartbeat, and the controls shown in the living-room interface.")
+
+    settingsGeometry := SettingsWindowGeometry(settings, WinExist("A"))
+    SettingsCategoryList := SettingsBuildWindowChrome(settings,
+        SettingsCategoryNames(), settingsGeometry, SettingsCategoryChanged)
+    SettingsContentTop := settingsGeometry["contentTop"]
+    SettingsContentBottom := settingsGeometry["contentBottom"]
 
     ; --------------------------------------------------------------------------
     ; Pages
@@ -5259,21 +5263,18 @@ ShowSettings(*) {
         . "against GameInput and records the foreground process, which reveals a "
         . "virtualised pad forwarding only some buttons.", &y, 60)
 
-    settings.AddText("x24 y616 w430 h26 vSettingsStatus", "All changes saved")
-    saveButton := settings.AddButton("x700 y610 w135 h34 Default", "Save && Apply")
-    saveButton.OnEvent("Click", SaveSettings)
-    closeButton := settings.AddButton("x850 y610 w110 h34", "Close")
-    closeButton.OnEvent("Click", CloseSettings)
+    ; The shell's footer, from the shared builder: divider, status line, buttons
+    ; right-aligned to the content edge, and the scrollbar last so it sits above
+    ; the page in z-order. Reload INI joins the two this product already had --
+    ; the action existed on its Advanced page and now sits where standalone
+    ; keeps it as well.
+    settingsFooter := SettingsBuildWindowFooter(settings, settingsGeometry, [
+        ["Save && Apply", SaveSettings],
+        ["Reload INI", ReloadSettings],
+        ["Close", CloseSettings]])
+    SettingsScrollBar := settingsFooter["scrollBar"]
     settings.OnEvent("Close", CloseSettings)
     settings.OnEvent("Escape", CloseSettings)
-
-    ; Added last, so it sits above the page content in z-order, and sized to the
-    ; viewport rather than the window: it scrolls the page, not the frame.
-    layout := SettingsLayout()
-    SettingsScrollBar := settings.Add("Custom",
-        "ClassScrollBar x" layout["scrollBarX"] " y" layout["contentTop"]
-        . " w" layout["scrollBarWidth"]
-        . " h" (layout["contentBottom"] - layout["contentTop"]) " 0x1")
     ; Re-registering the same callback is a no-op, so this is safe on every open.
     OnMessage(0x020A, SettingsMouseWheel) ; WM_MOUSEWHEEL
     OnMessage(0x0115, SettingsVerticalScroll) ; WM_VSCROLL
@@ -5325,7 +5326,8 @@ ShowSettings(*) {
 ; A page may be taller than that; what does not fit scrolls.
 
 SettingsFirstRowY() {
-    return SettingsLayout()["contentTop"]
+    global SettingsContentTop
+    return SettingsContentTop
 }
 
 ; Records the control against its category AND its original geometry.
@@ -5336,6 +5338,7 @@ SettingsFirstRowY() {
 ; forget. "scrollable" separates page content from the fixed frame
 ; (title, description, category list, footer), which must never move.
 SettingsTrackControl(category, control) {
+    global SettingsContentTop
     global SettingsCategoryControls, SettingsControlPositions
     global SettingsCategoryOffsets
     SettingsCategoryControls[category].Push(control)
@@ -5346,7 +5349,7 @@ SettingsTrackControl(category, control) {
         SettingsControlPositions[control.Hwnd] := Map(
             "category", category,
             "x", ctrlX, "y", ctrlY, "w", ctrlW, "h", ctrlH,
-            "scrollable", ctrlY >= SettingsLayout()["contentTop"])
+            "scrollable", ctrlY >= SettingsContentTop)
     }
     return control
 }
@@ -5354,9 +5357,10 @@ SettingsTrackControl(category, control) {
 ; How far this category can scroll, measured from what it actually built rather
 ; than from a number someone has to remember to update.
 SettingsGetMaxScroll(category) {
+    global SettingsContentBottom
     global SettingsCategoryControls, SettingsControlPositions
     return SharedSettingsMaxScroll(SettingsCategoryControls,
-        SettingsControlPositions, category, SettingsLayout()["contentBottom"])
+        SettingsControlPositions, category, SettingsContentBottom)
 }
 
 ; Shows one category at its current scroll offset and hides every other.
@@ -5368,11 +5372,12 @@ SettingsGetMaxScroll(category) {
 ; This tree's state, handed to the shared pass. Its content bounds are fixed in
 ; SettingsLayout; the shell's move with its resizable window.
 SettingsApplyCategoryLayout(activeCategory) {
+    global SettingsContentTop, SettingsContentBottom
     global SettingsCategoryControls, SettingsControlPositions, SettingsCategoryOffsets
     layout := SettingsLayout()
     SharedApplySettingsCategoryLayout(SettingsCategoryControls,
         SettingsControlPositions, SettingsCategoryOffsets,
-        activeCategory, layout["contentTop"], layout["contentBottom"])
+        activeCategory, SettingsContentTop, SettingsContentBottom)
 }
 
 SettingsActiveCategoryName() {
@@ -5394,6 +5399,7 @@ SettingsScroll(direction, *) {
 }
 
 SettingsVerticalScroll(wParam, lParam, msg, hwnd) {
+    global SettingsContentTop, SettingsContentBottom
     global SettingsGui, SettingsScrollBar, SettingsCategoryOffsets, SettingsVisible
     if (!IsSet(SettingsGui) || !SettingsVisible || !IsObject(SettingsScrollBar))
         return
@@ -5406,7 +5412,7 @@ SettingsVerticalScroll(wParam, lParam, msg, hwnd) {
     maxOffset := SettingsGetMaxScroll(category)
     scrollCode := wParam & 0xFFFF
     lineStep := 34
-    pageStep := Max(68, layout["contentBottom"] - layout["contentTop"] - 34)
+    pageStep := Max(68, SettingsContentBottom - SettingsContentTop - 34)
     switch scrollCode {
         case 0: ; SB_LINEUP
             newOffset := current - lineStep
@@ -5821,13 +5827,13 @@ SettingsCategoryChanged(control, *) {
 
 SettingsShowCategory(index) {
     global SettingsCategoryControls, SettingsCategoryList
-    global SettingsCategoryTitleCtrl, SettingsCategoryDescriptionCtrl
-    global SettingsCurrentCategory
+    global SettingsCurrentCategory, SettingsGui
     meta := SettingsCategoryMeta(index)
     SettingsCurrentCategory := index
     try SettingsCategoryList.Choose(index)
-    SettingsCategoryTitleCtrl.Text := GuiLiteralText(meta[1])
-    SettingsCategoryDescriptionCtrl.Text := GuiLiteralText(meta[2])
+    ; The shared heading pair, in the shell's position, filled from the shared
+    ; category table -- this product no longer keeps controls of its own for it.
+    SettingsSetPageHeading(SettingsGui, meta[1], "xfe")
     ; Shows the page at its own remembered scroll position and hides every other,
     ; which is the only place control visibility is decided now that pages can be
     ; taller than the viewport.
@@ -6986,7 +6992,7 @@ ProductSettingsScrollBar() {
 
 ProductSettingsViewportHeight() {
     layout := SettingsLayout()
-    return Max(1, layout["contentBottom"] - layout["contentTop"])
+    return Max(1, SettingsContentBottom - SettingsContentTop)
 }
 
 RunViaDesktopShell(filePath, arguments := "", directory := "", show := 1) {

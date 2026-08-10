@@ -1229,8 +1229,15 @@ Assert-True (
 # Pinned on the OPTION, not on the whole string. It used to name the minimum
 # size too, so widening the window to the shell's 980 failed a rule that has
 # nothing to say about width.
+#
+# Pinned on the OPTION AND NOTHING ELSE this time. It said it was, and then named
+# -Resize and the minimum size as well, so adopting the shell's window options
+# failed a rule that has nothing to say about either. What must be true is that
+# THIS window is always-on-top; the order of the other flags is not the rule.
 Assert-True (
-    $source -match 'Gui\("-Resize \+AlwaysOnTop \+MinSize\d+x\d+"') (
+    $source -match
+        '(?sm)^ShowSettings\(\*\)\s*\{(?:(?!\n\})[\s\S])*?' +
+        'settings := Gui\(\s*\r?\n?\s*"[^"]*\+AlwaysOnTop') (
     "The Settings window must be always-on-top or it renders behind Xbox FSE.")
 # The columns are the shell's, so the window has to be wide enough for them:
 # content starts at 255 and runs 690 wide, and the scrollbar sits at 954.

@@ -5510,34 +5510,6 @@ QuickMenuEnsureContentFits() {
         workLeft, workTop, workRight, workBottom, true)
 }
 
-GetTargetMonitorWorkArea(targetHwnd, &left, &top, &right, &bottom) {
-    ; Choose the monitor containing the center of the window that was active
-    ; before the menu opened. This handles secondary TVs and negative coordinates.
-    if (targetHwnd && DllCall("IsWindow", "Ptr", targetHwnd)) {
-        try {
-            WinGetPos(&wx, &wy, &ww, &wh, "ahk_id " targetHwnd)
-            centerX := wx + (ww / 2)
-            centerY := wy + (wh / 2)
-            Loop MonitorGetCount() {
-                MonitorGet(A_Index, &ml, &mt, &mr, &mb)
-                if (centerX >= ml && centerX < mr && centerY >= mt && centerY < mb) {
-                    MonitorGetWorkArea(A_Index, &left, &top, &right, &bottom)
-                    return
-                }
-            }
-        }
-    }
-
-    try {
-        primaryMonitor := MonitorGetPrimary()
-        MonitorGetWorkArea(primaryMonitor, &left, &top, &right, &bottom)
-    } catch {
-        left := 0
-        top := 0
-        right := A_ScreenWidth
-        bottom := A_ScreenHeight
-    }
-}
 
 GetSafeTargetWindowDpi(targetHwnd := 0, fallbackHwnd := 0) {
     ; Take the highest credible DPI report. Undersizing a scrollable assistant is
@@ -9442,17 +9414,6 @@ SettingsEditorReportLayoutAudit() {
 ; The description comes from the shared category table, not from the call site.
 ; Nine of these carried their text inline, which is how the two products came to
 ; describe the same page differently without anyone deciding to.
-SettingsEditorAddHeading(category, title, description := "") {
-    global SettingsGui
-    if (description = "")
-        description := SettingsCategoryDescriptionFor(title, "standalone")
-    titleCtrl := SettingsGui.AddText("x245 y78 w710 h28", GuiLiteralText(title))
-    titleCtrl.SetFont("s15 Bold", "Segoe UI")
-    descCtrl := SettingsGui.AddText("x245 y108 w710 h34 +Wrap", GuiLiteralText(description))
-    descCtrl.SetFont("s9 Norm", "Segoe UI")
-    SettingsEditorRegisterControl(category, titleCtrl)
-    SettingsEditorRegisterControl(category, descCtrl)
-}
 
 SettingsEditorMarkDirty(*) {
     global SettingsEditorDirty, SettingsEditorUpdating, SettingsEditorStatusCtrl
@@ -9864,6 +9825,9 @@ SettingsEditorShowCategory(categoryIndex) {
     categoryIndex := ClampInt(categoryIndex, 1, SettingsEditorCategories.Length)
     activeCategory := SettingsEditorCategories[categoryIndex]
     try SettingsGui["settingsCategoryList"].Choose(categoryIndex)
+    ; ONE heading pair, updated -- it was a pair per category, shown and hidden
+    ; with the page. Identical on screen, a dozen fewer controls to track.
+    SettingsSetPageHeading(SettingsGui, activeCategory, "standalone")
     SettingsEditorApplyCategoryLayout(activeCategory)
 }
 
@@ -9884,9 +9848,18 @@ SettingsEditorResized(guiObj, minMax, newWidth, newHeight) {
 
     try SettingsGui["settingsCategoryList"].Move(20, 82, 205, Max(100, dividerY - 98))
     try SettingsEditorDividerCtrl.Move(20, dividerY, 925, 1)
-    try SettingsEditorFooterControls[1].Move(540, buttonY, 145, 34)
-    try SettingsEditorFooterControls[2].Move(695, buttonY, 125, 34)
-    try SettingsEditorFooterControls[3].Move(830, buttonY, 115, 34)
+    ; Y ONLY. These used to be moved back to 540/695/830 with widths of
+    ; 145/125/115 -- the coordinates this handler was written against, and no
+    ; longer the ones SettingsBuildWindowFooter lays them out at. The window's
+    ; width is pinned by MinSize980 and MaxSize980, so a resize never moves a
+    ; button sideways; re-stating x and width here only meant two places had to
+    ; agree, and they had already stopped.
+    for _, footerButton in SettingsEditorFooterControls {
+        try {
+            footerButton.GetPos(&footerX, , &footerW)
+            footerButton.Move(footerX, buttonY, footerW, 34)
+        }
+    }
     try SettingsEditorStatusCtrl.Move(20, newHeight - 32, 925, 24)
     try SettingsEditorScrollBar.Move(
         954, SettingsEditorContentTop, 18, Max(40, SettingsEditorContentBottom - SettingsEditorContentTop))
@@ -13485,36 +13458,22 @@ ShowSettingsEditor(*) {
     SettingsGui.OnEvent("Close", SettingsEditorClose)
     SettingsGui.OnEvent("Size", SettingsEditorResized)
 
-    GetTargetMonitorWorkArea(LastRealFgHwnd, &workLeft, &workTop, &workRight, &workBottom)
-    ; A Chromium/Steam foreground window can report 96 DPI even while the native
-    ; AutoHotkey GUI is being scaled for a 4K television. Trust the process/native
-    ; GUI DPI as the safe floor; using Steam's virtualized DPI made an 800-logical-
-    ; pixel Settings window exceed the physical work area at 300% scaling.
-    windowDpi := Max(96, A_ScreenDPI)
-    try windowDpi := Max(
-        windowDpi,
-        DllCall("User32\GetDpiForWindow", "Ptr", SettingsGui.Hwnd, "UInt"))
-    if (windowDpi <= 0)
-        windowDpi := 96
-    availableLogicalHeight := Floor(((workBottom - workTop) - 64) * 96 / windowDpi)
-    SettingsEditorWindowHeight := ClampInt(availableLogicalHeight, 450, 660)
-    dividerY := SettingsEditorWindowHeight - 90
-    buttonY := dividerY + 15
-    SettingsEditorContentTop := 145
-    SettingsEditorContentBottom := dividerY - 8
+    ; Geometry and chrome are SteamShell-Shared.ahk's now, and the companion
+    ; draws the same frame from the same code. The height computation moved with
+    ; them: it is what keeps this window inside the work area of a 4K television,
+    ; and the companion had no equivalent.
+    geometry := SettingsWindowGeometry(SettingsGui, LastRealFgHwnd)
+    SettingsEditorWindowHeight := geometry["height"]
+    dividerY := geometry["dividerY"]
+    buttonY := geometry["buttonY"]
+    SettingsEditorContentTop := geometry["contentTop"]
+    SettingsEditorContentBottom := geometry["contentBottom"]
 
-    titleCtrl := SettingsGui.AddText("x20 y16 w940 h34", "SteamShell Settings")
-    titleCtrl.SetFont("s18 Bold", "Segoe UI")
-    SettingsGui.AddText("x22 y49 w930 h22"
-        , "D-pad navigate • A activate • LT/RT categories • Right stick mouse • RB pointer action • Y save")
-
-    categoryList := SettingsGui.AddListBox(
-        "x20 y82 w205 h" (dividerY - 98) " vsettingsCategoryList", SettingsEditorCategories)
-    categoryList.OnEvent("Change", SettingsEditorCategoryChanged)
+    categoryList := SettingsBuildWindowChrome(SettingsGui, SettingsEditorCategories,
+        geometry, SettingsEditorCategoryChanged)
 
     ; General
     category := "General"
-    SettingsEditorAddHeading(category, "General")
     y := 150
     ; Audio and Display row visibility is NOT edited here. "Customize Quick
     ; Menu..." at the bottom of this page owns which MAIN rows appear, and it
@@ -13538,13 +13497,11 @@ ShowSettingsEditor(*) {
 
     ; Startup and splash
     category := "Startup & Splash"
-    SettingsEditorAddHeading(category, "Startup & Splash")
     y := 150
     SettingsAddRowsForCategory(SettingsGui, category, "standalone", &y)
 
     ; Startup programs
     category := "Startup Programs"
-    SettingsEditorAddHeading(category, "Startup Programs")
     y := 150
     SettingsAddRowsForCategory(SettingsGui, category, "standalone", &y)
     startupListY := y + 6
@@ -13580,7 +13537,6 @@ ShowSettingsEditor(*) {
 
     ; Controller and cursor
     category := "Controller & Cursor"
-    SettingsEditorAddHeading(category, "Controller & Cursor")
     y := 150
     ; The rows themselves are defined once, in SteamShell-Shared.ahk, so this
     ; page and the companion's cannot describe the same settings differently.
@@ -13632,13 +13588,11 @@ ShowSettingsEditor(*) {
     ; that can only be changed by hand-editing the INI is not a setting most
     ; users have.
     category := "Steam"
-    SettingsEditorAddHeading(category, "Steam")
     y := 150
     SettingsAddRowsForCategory(SettingsGui, category, "standalone", &y)
 
     ; Focus
     category := "Focus & Windows"
-    SettingsEditorAddHeading(category, "Focus & Windows")
     y := 150
     SettingsAddRowsForCategory(SettingsGui, category, "standalone", &y)
     ; Hand-placed, and the only settings row that is. The companion compiles
@@ -13664,7 +13618,6 @@ ShowSettingsEditor(*) {
 
     ; RTSS
     category := "RTSS & Performance"
-    SettingsEditorAddHeading(category, "RTSS & Performance")
     y := 150
     SettingsAddRowsForCategory(SettingsGui, category, "standalone", &y)
     SettingsAddButtonRow(SettingsGui, category, [
@@ -13672,7 +13625,6 @@ ShowSettingsEditor(*) {
 
     ; Launcher cleanup
     category := "Launcher Cleanup"
-    SettingsEditorAddHeading(category, "Launcher Cleanup")
     y := 150
     SettingsAddRowsForCategory(SettingsGui, category, "standalone", &y)
     listY := y + 8
@@ -13694,7 +13646,6 @@ ShowSettingsEditor(*) {
 
     ; Advanced and logging
     category := "Advanced & Logging"
-    SettingsEditorAddHeading(category, "Advanced & Logging")
     y := 150
     SettingsAddRowsForCategory(SettingsGui, category, "standalone", &y)
     actionY := y + 12
@@ -13744,19 +13695,18 @@ ShowSettingsEditor(*) {
         ["Setup Assistant…", ShowSetupAssistant]], &actionY, 2)
 
     ; Common bottom controls
-    SettingsEditorDividerCtrl := SettingsGui.AddText("x20 y" dividerY " w925 h1 0x10")
-    saveButton := SettingsGui.AddButton("x540 y" buttonY " w145 h34 Default", "Save && Apply")
-    saveButton.OnEvent("Click", SettingsEditorSave)
-    reloadButton := SettingsGui.AddButton("x695 y" buttonY " w125 h34", "Reload INI")
-    reloadButton.OnEvent("Click", SettingsEditorReloadFromIni)
-    closeButton := SettingsGui.AddButton("x830 y" buttonY " w115 h34", "Close")
-    closeButton.OnEvent("Click", SettingsEditorClose)
-    SettingsEditorFooterControls := [saveButton, reloadButton, closeButton]
-    SettingsEditorStatusCtrl := SettingsGui.AddText(
-        "x20 y" (SettingsEditorWindowHeight - 32) " w925 h24", "No unsaved changes")
-    scrollBarHeight := SettingsEditorContentBottom - SettingsEditorContentTop
-    SettingsEditorScrollBar := SettingsGui.Add(
-        "Custom", "ClassScrollBar x954 y" SettingsEditorContentTop " w18 h" scrollBarHeight " 0x1")
+    ; The shared footer, which the companion now draws from too. The buttons are
+    ; a parameter because the two products do not offer the same three -- that
+    ; is content; the divider, the status line, the right-alignment and the
+    ; scrollbar are layout, and layout is what was drifting.
+    settingsFooter := SettingsBuildWindowFooter(SettingsGui, geometry, [
+        ["Save && Apply", SettingsEditorSave],
+        ["Reload INI", SettingsEditorReloadFromIni],
+        ["Close", SettingsEditorClose]])
+    SettingsEditorFooterControls := settingsFooter["buttons"]
+    SettingsEditorStatusCtrl := settingsFooter["status"]
+    SettingsEditorDividerCtrl := settingsFooter["divider"]
+    SettingsEditorScrollBar := settingsFooter["scrollBar"]
     OnMessage(0x020A, SettingsEditorMouseWheel)
     OnMessage(0x0115, SettingsEditorVerticalScroll)
 

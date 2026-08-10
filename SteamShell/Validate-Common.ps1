@@ -2027,6 +2027,20 @@ function Assert-SettingsWindowPlacement {
         # can re-assert itself in the moment after ours appears. Standalone had
         # no retry and its Settings window opened behind whatever was there,
         # from all three entry points, needing a mouse click to reach.
+        # ONE WINDOW, BUILT FROM ONE PLACE. The frame -- how tall it may be, the
+        # header, the category list, the page heading, the divider, the status
+        # line, the footer buttons and the scrollbar -- is shared, and the
+        # companion adopted the shell's. Without this a product can quietly go
+        # back to building its own and the two drift again, which is exactly how
+        # they came to differ in six visible ways.
+        foreach ($builder in @(
+            "SettingsWindowGeometry", "SettingsBuildWindowChrome",
+            "SettingsBuildWindowFooter")) {
+            Assert-True ($body -match ($builder + '\(')) (
+                "$($pair.File): the Settings window does not build its frame " +
+                "through $builder. Both products draw the same window from the " +
+                "same code; a hand-built frame is how they drifted apart.")
+        }
         Assert-True ($body -match 'GuiForegroundRetry\(') (
             "$($pair.File): the Settings window is shown but never made the " +
             "foreground. A single activation request is one Windows is " +
