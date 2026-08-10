@@ -11908,12 +11908,39 @@ SetupAssistantPreselectExistingInstallation() {
     try SetupAssistantGui["SetupProductXfe"].Value := isXfe ? 1 : 0
     SetupAssistantRefreshProductMode()
 
+    ; XFE ONLY, and the missing "else" is the point.
+    ;
+    ; This had a matching else that preset the shell box from registeredAsShell --
+    ; whether SteamShell is the registered Windows shell RIGHT NOW -- and it
+    ; silently produced an install that did not install. Reported: installing
+    ; standalone over a Shell value of explorer.exe left the value untouched.
+    ;
+    ; SetupAssistantRefreshProductMode, called just above, has already set the box
+    ; from the selected PRODUCT: on for shell mode, off for XFE. This line then
+    ; overwrote that with the current state of the machine, so the one situation
+    ; where registration is most needed -- a previous install whose shell value
+    ; has been handed back to Explorer, which is exactly what a permanent desktop
+    ; restore leaves behind -- came up unticked. Apply then skipped the whole
+    ; `if registerShell` block and Setup reported success. Only the log said what
+    ; happened, as "shell=unchanged".
+    ;
+    ; A clean machine never saw it: this function early-returns when no previous
+    ; installation is detected, so the box kept the product default. It needed a
+    ; prior install AND a shell value pointing elsewhere, which is the state a
+    ; developer testing installs is in all day.
+    ;
+    ; The XFE line is kept because for XFE it is answering a real question.
+    ; "Does it start at sign-in" is a preference a user may have turned off and
+    ; should not have turned back on behind them. "Is standalone the registered
+    ; shell" is not a preference -- registering as the shell is what installing
+    ; standalone MEANS -- and the modes where declining is reasonable, Portable
+    ; and Custom, already ask about it explicitly in DeploySteamShell.
+    ;
     ; Braced deliberately: AutoHotkey v2 cannot parse a bare "try" as an if-body
-    ; when an else follows it.
+    ; when an else follows it. There is no else now, and the braces stay anyway
+    ; so that adding one back cannot reintroduce that parse error quietly.
     if isXfe {
         try SetupAssistantGui["SetupRegisterXfeStartup"].Value := xfeStartsAtLogon ? 1 : 0
-    } else {
-        try SetupAssistantGui["SetupRegisterShell"].Value := registeredAsShell ? 1 : 0
     }
 
     if (directory != "") {
@@ -15203,6 +15230,37 @@ DeploySteamShell(targetDirectory, portableMode := false, registerShell := true, 
             . "Continue with Custom shell registration?",
             "YesNo Icon!")
         if (customWarning != "Yes")
+            return false
+    }
+
+    ; THE OTHER DIRECTION, and the one that shipped silently.
+    ;
+    ; Its three siblings above all ask "you are about to register the shell from
+    ; somewhere risky -- are you sure?". None of them asked the opposite, so an
+    ; install that was NOT going to register anything just proceeded, reported
+    ; success, and left the machine booting to whatever it booted to before.
+    ;
+    ; Only worth asking when it would actually change something: the box is off
+    ; AND SteamShell is not already the shell. Unticking it on a machine where
+    ; SteamShell is registered is a repair that deliberately leaves registration
+    ; alone, which is a real thing to want and gets no dialog.
+    if (!registerShell && !SteamShellIsRegisteredWindowsShell()) {
+        currentShell := "explorer.exe"
+        try currentShell := RegRead(ShellRegKey, "Shell")
+        if (Trim(currentShell) = "")
+            currentShell := "explorer.exe"
+        unregisteredWarning := SetupAssistantMsgBox(
+            "SteamShell will be installed but NOT registered as the Windows "
+            . "shell, and it is not registered now either.`n`n"
+            . "Windows will keep starting:`n" currentShell
+            . "`n`nSo this machine will sign in to the Windows desktop as it "
+            . "does today, and SteamShell will only run when you launch it. "
+            . "That is a valid way to install it -- but if you meant to take "
+            . "over the shell, tick `"Register SteamShell as the Windows shell`" "
+            . "and apply again.`n`n"
+            . "Install without registering the shell?",
+            "YesNo Icon!")
+        if (unregisteredWarning != "Yes")
             return false
     }
 

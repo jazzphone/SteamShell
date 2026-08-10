@@ -1408,6 +1408,39 @@ Assert-True (
         'IniReadS\("Controller", "DesktopAutoMouseExcludeExeList", ""\)') (
     "Desktop-wide automatic mouse mode, exclusions, Settings, or tray control are disconnected.")
 
+# INSTALLING STANDALONE MUST REGISTER THE SHELL, or say out loud that it will not.
+#
+# Reported: installing standalone over a Shell value of explorer.exe left the
+# value untouched, and Setup reported success. The write itself was never at
+# fault -- it writes, reads back, and throws on mismatch. It was never asked to
+# run, because the Setup Assistant preset the checkbox from registeredAsShell:
+# whether SteamShell is the registered shell RIGHT NOW. A previous install whose
+# shell value had been handed back to Explorer -- exactly what a permanent
+# desktop restore leaves behind -- came up unticked, and Apply then skipped the
+# whole registration block.
+#
+# A clean machine never saw it. The preset lives in a function that early-returns
+# unless a previous installation is detected, so it needed a prior install AND a
+# shell value pointing elsewhere.
+#
+# The default now comes from the selected PRODUCT, through
+# SetupAssistantRefreshProductMode, and a deliberate untick is confirmed rather
+# than acted on silently. Both halves are pinned, because without the second one
+# restoring the preset would fail only the first.
+Assert-True (
+    $source -notmatch '"SetupRegisterShell"\]\.Value\s*:=\s*registeredAsShell' -and
+    $source -match
+        '(?sm)^DeploySteamShell\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?' +
+        'if \(!registerShell && !SteamShellIsRegisteredWindowsShell\(\)\)(?:(?!\n\})[\s\S])*?' +
+        'SetupAssistantMsgBox\((?:(?!\n\})[\s\S])*?"YesNo Icon!"\)' -and
+    $source -match
+        '(?sm)^DeploySteamShell\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?' +
+        'if \(unregisteredWarning != "Yes"\)\s*\r?\n\s*return false') (
+    "Setup may not decide shell registration from whether SteamShell is " +
+    "currently the shell, and an install that registers nothing must be " +
+    "confirmed. Installing without registering silently leaves a machine that " +
+    "signs in to Explorer while Setup reports success.")
+
 # The selected-row fill must stay DERIVED from the accent. Storing it separately
 # is what would let a green accent sit on a blue-grey fill, which is the exact
 # mismatch the derivation exists to prevent.
