@@ -9897,64 +9897,22 @@ SettingsEditorResized(guiObj, minMax, newWidth, newHeight) {
 }
 
 SettingsEditorGetMaxScroll(category) {
-    global SettingsEditorCategoryControls, SettingsEditorControlPositions, SettingsEditorContentBottom
-    maxBottom := SettingsEditorContentBottom
-    if !SettingsEditorCategoryControls.Has(category)
-        return 0
-    for _, ctrl in SettingsEditorCategoryControls[category] {
-        if !SettingsEditorControlPositions.Has(ctrl.Hwnd)
-            continue
-        pos := SettingsEditorControlPositions[ctrl.Hwnd]
-        if (pos["scrollable"])
-            maxBottom := Max(maxBottom, pos["y"] + pos["h"])
-    }
-    return Max(0, maxBottom - SettingsEditorContentBottom)
+    global SettingsEditorCategoryControls, SettingsEditorControlPositions
+    global SettingsEditorContentBottom
+    return SharedSettingsMaxScroll(SettingsEditorCategoryControls,
+        SettingsEditorControlPositions, category, SettingsEditorContentBottom)
 }
 
+; This tree's state, handed to the shared pass. Its content bottom MOVES with
+; the window, which is resizable here and fixed in the companion -- the one real
+; difference between what were two copies of this algorithm.
 SettingsEditorApplyCategoryLayout(activeCategory) {
     global SettingsEditorCategoryControls, SettingsEditorControlPositions
-    global SettingsEditorCategoryOffsets, SettingsEditorContentTop, SettingsEditorContentBottom
-
-    ; Batch all control movement while redraw is disabled. Without this, Windows can
-    ; repaint controls between Move and Visible changes during thumb tracking,
-    ; leaving trails or partially drawn controls in the settings viewport.
-    SettingsEditorSetRedraw(false)
-    try {
-        offset := SettingsEditorCategoryOffsets.Has(activeCategory) ? SettingsEditorCategoryOffsets[activeCategory] : 0
-        maxOffset := SettingsEditorGetMaxScroll(activeCategory)
-        offset := ClampInt(offset, 0, maxOffset)
-        SettingsEditorCategoryOffsets[activeCategory] := offset
-
-        for category, controls in SettingsEditorCategoryControls {
-            isActive := category = activeCategory
-            for _, ctrl in controls {
-                if !isActive {
-                    try ctrl.Visible := false
-                    continue
-                }
-                if !SettingsEditorControlPositions.Has(ctrl.Hwnd) {
-                    try ctrl.Visible := true
-                    continue
-                }
-                pos := SettingsEditorControlPositions[ctrl.Hwnd]
-                if (!pos["scrollable"]) {
-                    try ctrl.Move(pos["x"], pos["y"], pos["w"], pos["h"])
-                    try ctrl.Visible := true
-                    continue
-                }
-                newY := pos["y"] - offset
-                isInside := newY >= SettingsEditorContentTop
-                    && newY + pos["h"] <= SettingsEditorContentBottom
-                try ctrl.Move(pos["x"], newY, pos["w"], pos["h"])
-                try ctrl.Visible := isInside
-            }
-        }
-
-        SettingsUpdateScrollBar(offset, maxOffset)
-    } finally {
-        SettingsEditorSetRedraw(true)
-        SettingsEditorRepaint()
-    }
+    global SettingsEditorCategoryOffsets
+    global SettingsEditorContentTop, SettingsEditorContentBottom
+    SharedApplySettingsCategoryLayout(SettingsEditorCategoryControls,
+        SettingsEditorControlPositions, SettingsEditorCategoryOffsets,
+        activeCategory, SettingsEditorContentTop, SettingsEditorContentBottom)
 }
 
 SettingsEditorVerticalScroll(wParam, lParam, msg, hwnd) {

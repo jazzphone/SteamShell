@@ -413,10 +413,12 @@ SettingsSelectChoiceByText
 SettingsSliderReadoutRegistry
 SettingsUpdateScrollBar
 SharedAppendExeToListSetting
+SharedApplySettingsCategoryLayout
 SharedControllerHealthRows
 SharedExeListContains
 SharedNotify
 SharedScoreGameCandidates
+SharedSettingsMaxScroll
 SharedTaskSwitcherWindows
 SharedWindowInventoryBuild
 SharedWindowInventoryGet

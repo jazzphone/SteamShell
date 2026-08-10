@@ -2367,9 +2367,15 @@ Assert-True (
         '(?sm)^SettingsTrackControl\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?' +
         'control\.GetPos\(&ctrlX, &ctrlY, &ctrlW, &ctrlH\)(?:(?!\n\})[\s\S])*?' +
         'SettingsControlPositions\[control\.Hwnd\]' -and
-    # The scroll extent is measured from what the page actually built.
+    # The scroll extent is measured from what the page actually built. The
+    # measuring is SharedSettingsMaxScroll's now -- it was the same loop in both
+    # products over differently-named globals -- so this asks that this tree
+    # hands it THIS tree's state, and the loop itself is checked once, there.
     $source -match
         '(?sm)^SettingsGetMaxScroll\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?' +
+        'SharedSettingsMaxScroll\(SettingsCategoryControls' -and
+    $source -match
+        '(?sm)^SharedSettingsMaxScroll\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?' +
         'pos\["y"\] \+ pos\["h"\]' -and
     # Showing a category goes through the scrolling layout, not a bare loop.
     $source -match
@@ -2384,9 +2390,14 @@ Assert-True (
 # Redraw must be suspended across the whole move-and-hide pass. Without it
 # Windows repaints between Move and Visible during thumb tracking and leaves
 # trails and half-drawn controls.
+# The pass is SharedApplySettingsCategoryLayout's now, so the rule is checked
+# where the pass lives -- and this tree must still hand it this tree's state.
 Assert-True (
     $source -match
         '(?sm)^SettingsApplyCategoryLayout\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?' +
+        'SharedApplySettingsCategoryLayout\(SettingsCategoryControls' -and
+    $source -match
+        '(?sm)^SharedApplySettingsCategoryLayout\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?' +
         'SettingsEditorSetRedraw\(false\)(?:(?!\n\})[\s\S])*?' +
         'finally \{(?:(?!\n\})[\s\S])*?SettingsEditorSetRedraw\(true\)') (
     "Settings scrolling no longer batches its control movement behind WM_SETREDRAW.")

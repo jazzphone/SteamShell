@@ -10800,6 +10800,91 @@ SettingsAddNote(guiObj, category, text, &y, height := 34) {
 }
 
 
+; How far a page can scroll, and the pass that shows one page at its offset.
+;
+; Stage 4 of matching the two Settings windows, and the same move
+; SharedAuditSettingsLayout already made: the state comes in as PARAMETERS
+; rather than being read from six globals, which is the entire reason these
+; could not be one function before. Both products kept their categories, their
+; per-category control lists, their recorded positions and their per-category
+; offsets in differently-named globals, and that -- plus where contentBottom
+; comes from -- was the whole difference between two copies of one algorithm.
+;
+; The shell's content bottom MOVES, because its window is resizable and its
+; footer follows the height; the companion's is fixed in SettingsLayout. That is
+; a number, so it is an argument.
+;
+; Maps are objects, so writing the clamped offset back through `offsets` updates
+; the caller's own Map. That is deliberate: the clamp belongs with the scroll
+; arithmetic, not repeated either side of it.
+SharedSettingsMaxScroll(controlsByCategory, positions, category, contentBottom) {
+    maxBottom := contentBottom
+    if !controlsByCategory.Has(category)
+        return 0
+    for _, control in controlsByCategory[category] {
+        if !positions.Has(control.Hwnd)
+            continue
+        pos := positions[control.Hwnd]
+        if pos["scrollable"]
+            maxBottom := Max(maxBottom, pos["y"] + pos["h"])
+    }
+    return Max(0, maxBottom - contentBottom)
+}
+
+
+; Shows one category at its current scroll offset and hides every other.
+;
+; Redraw is suspended for the whole pass. Without it Windows repaints between the
+; Move and the Visible change during thumb tracking, which leaves trails and
+; half-drawn controls -- the same reason the Quick Menu composes its pages with
+; redraw suspended.
+;
+; A control is hidden rather than clipped when it does not fit the viewport,
+; because one moved above the content top would otherwise draw over the page
+; title and the category list.
+SharedApplySettingsCategoryLayout(controlsByCategory, positions, offsets,
+        activeCategory, contentTop, contentBottom) {
+    SettingsEditorSetRedraw(false)
+    try {
+        offset := offsets.Has(activeCategory) ? offsets[activeCategory] : 0
+        maxOffset := SharedSettingsMaxScroll(
+            controlsByCategory, positions, activeCategory, contentBottom)
+        offset := ClampInt(offset, 0, maxOffset)
+        offsets[activeCategory] := offset
+
+        for category, controls in controlsByCategory {
+            isActive := category = activeCategory
+            for _, control in controls {
+                if !isActive {
+                    try control.Visible := false
+                    continue
+                }
+                if !positions.Has(control.Hwnd) {
+                    try control.Visible := true
+                    continue
+                }
+                pos := positions[control.Hwnd]
+                if !pos["scrollable"] {
+                    try control.Move(pos["x"], pos["y"], pos["w"], pos["h"])
+                    try control.Visible := true
+                    continue
+                }
+                newY := pos["y"] - offset
+                inside := newY >= contentTop
+                    && newY + pos["h"] <= contentBottom
+                try control.Move(pos["x"], newY, pos["w"], pos["h"])
+                try control.Visible := inside
+            }
+        }
+
+        SettingsUpdateScrollBar(offset, maxOffset)
+    } finally {
+        SettingsEditorSetRedraw(true)
+        SettingsEditorRepaint()
+    }
+}
+
+
 ; ==============================================================================
 ; Settings categories
 ; ==============================================================================

@@ -5355,18 +5355,8 @@ SettingsTrackControl(category, control) {
 ; than from a number someone has to remember to update.
 SettingsGetMaxScroll(category) {
     global SettingsCategoryControls, SettingsControlPositions
-    bottom := SettingsLayout()["contentBottom"]
-    maxBottom := bottom
-    if !SettingsCategoryControls.Has(category)
-        return 0
-    for _, control in SettingsCategoryControls[category] {
-        if !SettingsControlPositions.Has(control.Hwnd)
-            continue
-        pos := SettingsControlPositions[control.Hwnd]
-        if pos["scrollable"]
-            maxBottom := Max(maxBottom, pos["y"] + pos["h"])
-    }
-    return Max(0, maxBottom - bottom)
+    return SharedSettingsMaxScroll(SettingsCategoryControls,
+        SettingsControlPositions, category, SettingsLayout()["contentBottom"])
 }
 
 ; Shows one category at its current scroll offset and hides every other.
@@ -5375,50 +5365,14 @@ SettingsGetMaxScroll(category) {
 ; Move and the Visible change during thumb tracking, which leaves trails and
 ; half-drawn controls -- the same reason the Quick Menu composes its pages with
 ; redraw suspended.
+; This tree's state, handed to the shared pass. Its content bounds are fixed in
+; SettingsLayout; the shell's move with its resizable window.
 SettingsApplyCategoryLayout(activeCategory) {
-    global SettingsCategoryControls, SettingsControlPositions
-    global SettingsCategoryOffsets
+    global SettingsCategoryControls, SettingsControlPositions, SettingsCategoryOffsets
     layout := SettingsLayout()
-    contentTop := layout["contentTop"]
-    contentBottom := layout["contentBottom"]
-    SettingsEditorSetRedraw(false)
-    try {
-        offset := SettingsCategoryOffsets.Has(activeCategory)
-            ? SettingsCategoryOffsets[activeCategory] : 0
-        maxOffset := SettingsGetMaxScroll(activeCategory)
-        offset := ClampInt(offset, 0, maxOffset)
-        SettingsCategoryOffsets[activeCategory] := offset
-        for category, controls in SettingsCategoryControls {
-            isActive := category = activeCategory
-            for _, control in controls {
-                if !isActive {
-                    try control.Visible := false
-                    continue
-                }
-                if !SettingsControlPositions.Has(control.Hwnd) {
-                    try control.Visible := true
-                    continue
-                }
-                pos := SettingsControlPositions[control.Hwnd]
-                if !pos["scrollable"] {
-                    try control.Move(pos["x"], pos["y"], pos["w"], pos["h"])
-                    try control.Visible := true
-                    continue
-                }
-                newY := pos["y"] - offset
-                ; Hidden rather than clipped, because a control moved above the
-                ; viewport would otherwise draw over the page title and the
-                ; category list.
-                inside := newY >= contentTop && newY + pos["h"] <= contentBottom
-                try control.Move(pos["x"], newY, pos["w"], pos["h"])
-                try control.Visible := inside
-            }
-        }
-        SettingsUpdateScrollBar(offset, maxOffset)
-    } finally {
-        SettingsEditorSetRedraw(true)
-        SettingsEditorRepaint()
-    }
+    SharedApplySettingsCategoryLayout(SettingsCategoryControls,
+        SettingsControlPositions, SettingsCategoryOffsets,
+        activeCategory, layout["contentTop"], layout["contentBottom"])
 }
 
 SettingsActiveCategoryName() {
