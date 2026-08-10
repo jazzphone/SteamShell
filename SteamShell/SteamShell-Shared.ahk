@@ -7805,6 +7805,7 @@ ControllerLearnConsumesReport(data, base, length, device) {
 
 CloseControllerLearner(*) {
     global LearnActive, LearnGui, SettingsDialogActive
+    global LearnStaleHoldOffset, LearnStaleHoldMask, LearnStaleHoldReport
     LearnActive := false
     SettingsDialogActive := false
     SetTimer(ControllerLearnTick, 0)
@@ -7813,6 +7814,10 @@ CloseControllerLearner(*) {
     SetTimer(ControllerLearnStartCapture, 0)
     SetTimer(ControllerLearnIdentificationReady, 0)
     SetTimer(ControllerLearnIdentifyHoldTimeout, 0)
+    SetTimer(ControllerLearnStaleHoldSettled, 0)
+    LearnStaleHoldOffset := -1
+    LearnStaleHoldMask := 0
+    LearnStaleHoldReport := 0
     if IsSet(LearnGui) {
         try LearnGui.Destroy()
         LearnGui := unset
@@ -8538,6 +8543,95 @@ ControllerLearnReleaseCheck(data, base, length) {
 }
 
 
+; Locks the wizard to one controller and takes its resting state.
+;
+; Extracted when the stale-hold deferral below gained a second way to arrive
+; here: the deferral watches a set-to-clear change for a second, and either it
+; settles clear -- the control was held over from before the wizard opened, and
+; the wizard goes back to waiting for a real press -- or it goes back up, which
+; makes it an active-low press that has to identify on the ORIGINAL baseline.
+; Two callers, one body; before this there was one caller and no way to reach it
+; from the second without duplicating fifteen lines of state.
+;
+; `idleReport` is the report this device was publishing BEFORE the change, and it
+; is a parameter rather than being read here for the reason the long comment
+; inside spells out.
+ControllerLearnAdoptDevice(device, length, idleReport, holdOffset, holdMask) {
+    global LearnDevice, LearnDeviceKey, LearnLength, LearnBaseline
+    global LearnRestNoise, LearnIdentifyHoldOffset, LearnIdentifyHoldMask
+    LearnDevice := device
+    LearnDeviceKey := RawInputDeviceKey(device)
+    LearnLength := length
+    ; THE IDLE REPORT, not the one that completed identification.
+    ;
+    ; Identification fires on the report where something CHANGED, and for almost
+    ; every pad that is the button going DOWN. Copying that report made "the
+    ; identifying button held" the resting state: it then differed from rest in
+    ; every later report, so it read as permanently pressed for the rest of the
+    ; wizard, was saved into the profile's neutral, and the controller came out
+    ; of the wizard with a button stuck down. On a pad that does report at rest
+    ; the release instead landed in LearnRestNoise, which is quieter and just as
+    ; wrong -- that bit is then skipped by every later step, silently.
+    ;
+    ; The caller passes the idle report this device was publishing before the
+    ; press. It stopped being updated the moment LearnIdentifyReady was set, so
+    ; it is exactly the pre-press state, and it was already being kept for the
+    ; noise measurement. It was there the whole time; it was simply thrown away
+    ; in favour of the report that happened to arrive last.
+    LearnBaseline := ControllerLearnCopyReport(idleReport, 0, length)
+    LearnRestNoise := Buffer(length, 0)
+    ; And nothing is measured until that control comes back up. The step captures
+    ; have always done this -- see LearnReleaseOffset, "a held button cannot
+    ; answer the next prompt" -- and identification is the one place the same
+    ; rule was never applied, even though it is the only prompt whose answer the
+    ; user is still holding when the next one appears.
+    LearnIdentifyHoldOffset := holdOffset
+    LearnIdentifyHoldMask := holdMask
+    SetTimer(ControllerLearnIdentifyHoldTimeout, -4000)
+    LogLine("Learn: capturing from device 0x" Format("{:X}", device)
+        . " key=" (LearnDeviceKey != "" ? LearnDeviceKey : "unknown")
+        . " reportLength=" length "; waiting for byte " holdOffset
+        . " bit 0x" Format("{:02X}", holdMask) " to be released.")
+    ControllerLearnUpdateUi()
+}
+
+
+; The deferral expired with the bits still clear, so that WAS a control held over
+; from before the wizard opened -- almost always the A press that opened it.
+;
+; The report captured at the moment it cleared is the pad with nothing held, so
+; it becomes this device's idle baseline and the accumulated noise is dropped:
+; every bit of that mask was measured against a baseline now known to be wrong.
+; The wizard goes back to waiting for a press, which is the state it should have
+; been in all along.
+ControllerLearnStaleHoldSettled() {
+    global LearnActive, LearnDevice, LearnIdentifyDevices
+    global LearnStaleHoldDevice, LearnStaleHoldOffset, LearnStaleHoldMask
+    global LearnStaleHoldReport
+    if (!LearnActive || LearnDevice || LearnStaleHoldOffset < 0) {
+        LearnStaleHoldOffset := -1
+        LearnStaleHoldMask := 0
+        LearnStaleHoldReport := 0
+        return
+    }
+    offset := LearnStaleHoldOffset
+    LearnStaleHoldOffset := -1
+    LearnStaleHoldMask := 0
+    if LearnIdentifyDevices.Has(LearnStaleHoldDevice) {
+        known := LearnIdentifyDevices[LearnStaleHoldDevice]
+        length := known["length"]
+        known["baseline"] := ControllerLearnCopyReport(
+            LearnStaleHoldReport, 0, length)
+        known["noise"] := Buffer(length, 0)
+    }
+    LearnStaleHoldReport := 0
+    LogLine("Learn: byte " offset " stayed clear, so it was held over from "
+        . "before the wizard opened rather than pressed. Re-taking the resting "
+        . "state from the report where it let go, and still waiting for a "
+        . "button. Nothing is lost -- press one now.")
+}
+
+
 ; Feeds one report to the learner. Called from the WM_INPUT handler ahead of the
 ; normal decode, and only while the wizard is open.
 ControllerLearnReport(data, base, length, device) {
@@ -8547,6 +8641,8 @@ ControllerLearnReport(data, base, length, device) {
     global LearnIdentifyDevices, LearnIdentifyReady
     global LearnIdentifyHoldOffset, LearnIdentifyHoldMask
     global LearnReleaseOffset, LearnStepReports
+    global LearnStaleHoldSeen, LearnStaleHoldDevice
+    global LearnStaleHoldOffset, LearnStaleHoldMask, LearnStaleHoldReport
     if !LearnActive
         return
     ; Select the controller that the user actually operates. RawInput gamepads
@@ -8570,6 +8666,29 @@ ControllerLearnReport(data, base, length, device) {
         }
         baseline := known["baseline"]
         noise := known["noise"]
+        ; A deferral is pending and the bits it is watching have gone back UP.
+        ; That makes the first change a press on an active-low pad rather than a
+        ; control held over from before the wizard opened, so it identifies now
+        ; -- on the baseline the deferral deliberately left alone, which is the
+        ; pre-press state that change was measured against.
+        if (LearnStaleHoldOffset >= 0 && device = LearnStaleHoldDevice
+            && LearnStaleHoldOffset < length) {
+            if ((NumGet(data, base + LearnStaleHoldOffset, "UChar")
+                & LearnStaleHoldMask) = LearnStaleHoldMask) {
+                SetTimer(ControllerLearnStaleHoldSettled, 0)
+                heldOffset := LearnStaleHoldOffset
+                heldMask := LearnStaleHoldMask
+                LearnStaleHoldOffset := -1
+                LearnStaleHoldMask := 0
+                LearnStaleHoldReport := 0
+                LogLine("Learn: byte " heldOffset " went back up, so that was a "
+                    . "press on an active-low pad and not a control held over "
+                    . "from before the wizard opened. Identifying on it.")
+                ControllerLearnAdoptDevice(device, length, baseline,
+                    heldOffset, heldMask)
+                return
+            }
+        }
         if !LearnIdentifyReady {
             ; First learn which bits move while every controller is idle. This
             ; prevents 16-bit stick low-byte jitter from selecting the first pad
@@ -8604,42 +8723,52 @@ ControllerLearnReport(data, base, length, device) {
         ; the prompt, so the first clean change is the only reliable selector.
         if !identified
             return
-        LearnDevice := device
-        LearnDeviceKey := RawInputDeviceKey(device)
-        LearnLength := length
-        ; THE IDLE REPORT, not the one that completed identification.
+        ; THE WIZARD IS USUALLY OPENED BY PRESSING A, and that press is still
+        ; down when the idle baseline is taken.
         ;
-        ; Identification fires on the report where something CHANGED, and for
-        ; almost every pad that is the button going DOWN. Copying that report
-        ; made "the identifying button held" the resting state: it then differed
-        ; from rest in every later report, so it read as permanently pressed for
-        ; the rest of the wizard, was saved into the profile's neutral, and the
-        ; controller came out of the wizard with a button stuck down. On a pad
-        ; that does report at rest the release instead landed in LearnRestNoise,
-        ; which is quieter and just as wrong -- that bit is then skipped by every
-        ; later step, silently.
+        ; This is the normal way to reach the button from a couch, so it is not
+        ; an edge case: navigate Settings with the D-pad, press A on "Learn
+        ; Controller...", and the pre-prompt window that measures "idle" measures
+        ; a report with A HELD. The baseline then says A-down is the resting
+        ; state, and everything after it is wrong in the same direction --
+        ; identification fires on the RELEASE, the hold-release wait can never be
+        ; satisfied because it is waiting for a return to a state that means
+        ; pressed, and every later step sees A's bit in its changed mask, takes
+        ; it as the lowest set bit, and is rejected as already claimed. Observed:
+        ; a run where A came out "byte 11 bit 0x01 active-low" on an active-high
+        ; pad -- which is only possible from a baseline with that bit set -- and
+        ; no button after A could be learned at all.
         ;
-        ; `baseline` is the idle report this device was publishing before the
-        ; press. It stopped being updated the moment LearnIdentifyReady was set,
-        ; so it is exactly the pre-press state, and it was already being kept for
-        ; the noise measurement. It was there the whole time; it was simply
-        ; thrown away in favour of the report that happened to arrive last.
-        LearnBaseline := ControllerLearnCopyReport(baseline, 0, length)
-        LearnRestNoise := Buffer(length, 0)
-        ; And nothing is measured until that control comes back up. The step
-        ; captures have always done this -- see LearnReleaseOffset, "a held
-        ; button cannot answer the next prompt" -- and identification is the one
-        ; place the same rule was never applied, even though it is the only
-        ; prompt whose answer the user is still holding when the next one
-        ; appears.
-        LearnIdentifyHoldOffset := holdOffset
-        LearnIdentifyHoldMask := holdMask
-        SetTimer(ControllerLearnIdentifyHoldTimeout, -4000)
-        LogLine("Learn: capturing from device 0x" Format("{:X}", device)
-            . " key=" (LearnDeviceKey != "" ? LearnDeviceKey : "unknown")
-            . " reportLength=" length "; waiting for byte " holdOffset
-            . " bit 0x" Format("{:02X}", holdMask) " to be released.")
-        ControllerLearnUpdateUi()
+        ; A change where every changed bit was SET before and is CLEAR now is
+        ; either that release or a press on an active-low pad. Those are not
+        ; distinguishable in the report, so this does not guess: it waits to see
+        ; which state the pad SETTLES in. A release is followed by the bits
+        ; staying clear; an active-low press is followed by them going back up
+        ; when the user lets go. One second decides it, against a path that
+        ; currently waits four and then proceeds on the wrong baseline.
+        ;
+        ; Once only, tracked per session. If it happens a second time the pad is
+        ; active-low and the first change was a genuine press, so the deferral
+        ; must not repeat or that pad could never identify at all.
+        looksLikeRelease := ((NumGet(baseline, holdOffset, "UChar") & holdMask)
+            = holdMask)
+        if (looksLikeRelease && !LearnStaleHoldSeen) {
+            LearnStaleHoldSeen := true
+            LearnStaleHoldDevice := device
+            LearnStaleHoldOffset := holdOffset
+            LearnStaleHoldMask := holdMask
+            LearnStaleHoldReport := ControllerLearnCopyReport(data, base, length)
+            SetTimer(ControllerLearnStaleHoldSettled, -1000)
+            LogLine("Learn: byte " holdOffset " bit 0x"
+                . Format("{:02X}", holdMask) " went from set to clear before "
+                . "anything was pressed. That is either a control that was "
+                . "already held when the wizard opened -- pressing A to open it "
+                . "does exactly this -- or a press on an active-low pad. Waiting "
+                . "a second to see which state it settles in.")
+            return
+        }
+        ControllerLearnAdoptDevice(device, length, baseline,
+            holdOffset, holdMask)
         return
     }
     if (device != LearnDevice || length != LearnLength)
@@ -8945,6 +9074,8 @@ ControllerLearnRestart() {
     global LearnHatValues, LearnCaptureUntil
     global LearnLastAccepted, LearnLastFriendly
     global LearnIdentifyDevices, LearnIdentifyReady
+    global LearnStaleHoldSeen, LearnStaleHoldDevice
+    global LearnStaleHoldOffset, LearnStaleHoldMask, LearnStaleHoldReport
     global LearnAnalogBytes, LearnAnalogValues, LearnDpadRetries
     LearnAnalogBytes := Map()
     LearnAnalogValues := Map()
@@ -8967,6 +9098,14 @@ ControllerLearnRestart() {
     LearnIdentifyReady := false
     LearnIdentifyHoldOffset := -1
     LearnIdentifyHoldMask := 0
+    ; Once per SESSION, so Start Over is a genuine fresh start: a run that used
+    ; its one deferral and then restarted must be able to use it again.
+    SetTimer(ControllerLearnStaleHoldSettled, 0)
+    LearnStaleHoldSeen := false
+    LearnStaleHoldDevice := 0
+    LearnStaleHoldOffset := -1
+    LearnStaleHoldMask := 0
+    LearnStaleHoldReport := 0
     SetTimer(ControllerLearnTick, 0)
     SetTimer(ControllerLearnBeginSteps, 0)
     SetTimer(ControllerLearnNextStep, 0)
@@ -9548,6 +9687,8 @@ ShowControllerLearner(*) {
     global LearnPromptCtrl, LearnDetailCtrl, LearnProgressCtrl, LearnCaptureUntil
     global LearnLastAccepted, LearnLastFriendly
     global LearnIdentifyDevices, LearnIdentifyReady
+    global LearnStaleHoldSeen, LearnStaleHoldDevice
+    global LearnStaleHoldOffset, LearnStaleHoldMask, LearnStaleHoldReport
     global MouseHidden, SettingsDialogActive
     global LearnAnalogBytes, LearnAnalogValues, LearnDpadRetries
     global LearnCountdownCtrl
@@ -9600,6 +9741,14 @@ ShowControllerLearner(*) {
     LearnIdentifyReady := false
     LearnIdentifyHoldOffset := -1
     LearnIdentifyHoldMask := 0
+    ; Once per SESSION, so Start Over is a genuine fresh start: a run that used
+    ; its one deferral and then restarted must be able to use it again.
+    SetTimer(ControllerLearnStaleHoldSettled, 0)
+    LearnStaleHoldSeen := false
+    LearnStaleHoldDevice := 0
+    LearnStaleHoldOffset := -1
+    LearnStaleHoldMask := 0
+    LearnStaleHoldReport := 0
     ; The pointer is needed for the buttons on this window.
     if MouseHidden {
         SystemCursor("Show")

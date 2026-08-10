@@ -1964,19 +1964,75 @@ function Assert-ControllerLearnerIdentifyRelease {
     Assert-True ($report -ne "") (
         "ControllerLearnReport could not be read, so nothing below it is checked.")
 
-    Assert-True ($report -match 'LearnBaseline\s*:=\s*ControllerLearnCopyReport\(\s*baseline\s*,') (
-        "The learner no longer takes its resting baseline from the pre-press " +
-        "idle report. Identification fires on the button going DOWN, so any " +
-        "other report saves that button as the resting state: it reads as held " +
-        "for the rest of the wizard and stays held in the saved profile.")
-    Assert-True ($report -notmatch 'LearnBaseline\s*:=\s*ControllerLearnCopyReport\(\s*data\s*,') (
+    # THE RULE NOW SPANS TWO FUNCTIONS, so the check follows it rather than
+    # staying pinned to the body it was written against.
+    #
+    # ControllerLearnAdoptDevice was extracted when the stale-hold deferral gave
+    # identification a second arrival path, and it took the baseline copy and the
+    # hold record with it. Bounding this to ControllerLearnReport alone would
+    # have failed a correct refactor -- and, worse, a later edit that put the
+    # copy back inside ControllerLearnReport reading `data` would have satisfied
+    # the old -match while reintroducing the exact bug it exists to prevent.
+    #
+    # So: the CALLER passes the pre-press idle report, the CALLEE copies its
+    # parameter, and neither may copy the live one.
+    $adopt = Get-AhkFunctionBody -Source $sharedText -Name "ControllerLearnAdoptDevice"
+    Assert-True ($adopt -ne "") (
+        "ControllerLearnAdoptDevice could not be read; the learner's baseline " +
+        "rule is checked across it and ControllerLearnReport.")
+    Assert-True ($report -match 'ControllerLearnAdoptDevice\((?s).*?baseline,') (
+        "ControllerLearnReport no longer hands the pre-press idle report to " +
+        "ControllerLearnAdoptDevice. Identification fires on the button going " +
+        "DOWN, so any other report saves that button as the resting state: it " +
+        "reads as held for the rest of the wizard and stays held in the saved " +
+        "profile.")
+    Assert-True ($adopt -match 'LearnBaseline\s*:=\s*ControllerLearnCopyReport\(\s*idleReport\s*,') (
+        "ControllerLearnAdoptDevice no longer takes its resting baseline from " +
+        "the idle report its caller passed.")
+    Assert-True (
+        $report -notmatch 'LearnBaseline\s*:=\s*ControllerLearnCopyReport\(\s*data\s*,' -and
+        $adopt -notmatch 'LearnBaseline\s*:=\s*ControllerLearnCopyReport\(\s*data\s*,') (
         "The learner copies the live report into LearnBaseline at " +
         "identification. That report is the identifying PRESS, which is exactly " +
         "the state that must not become rest.")
-    Assert-True ($report -match 'LearnIdentifyHoldOffset\s*:=\s*holdOffset') (
-        "ControllerLearnReport no longer records which control identified the " +
-        "device, so it cannot wait for that control to be released before " +
-        "measuring rest.")
+    Assert-True ($adopt -match 'LearnIdentifyHoldOffset\s*:=\s*holdOffset') (
+        "The learner no longer records which control identified the device, so " +
+        "it cannot wait for that control to be released before measuring rest.")
+
+    # THE WIZARD IS USUALLY OPENED BY PRESSING A, and that press is still down
+    # while the idle baseline is being taken. Reported from hardware twice: the
+    # baseline came out with A's bit set, A was then learned "active-low" on an
+    # active-high pad -- which is only possible from such a baseline -- and no
+    # button after A could be learned at all, because every later press carried
+    # A's bit in its changed mask, lost the lowest-set-bit tie-break to it, and
+    # was rejected as already claimed.
+    #
+    # A set-to-clear first change is either that, or a press on an active-low
+    # pad. The two are indistinguishable in the report, so the wizard must not
+    # guess: it waits to see which state the pad settles in. Both outcomes are
+    # pinned, because a deferral with only one exit is a hang.
+    # The GUARD, not just the names: replacing the condition with a constant
+    # leaves every identifier in the body, and satisfied the first draft of this.
+    Assert-True (
+        $report -match 'looksLikeRelease\s*:=\s*\(\(NumGet\(baseline, holdOffset, "UChar"\) & holdMask\)' -and
+        $report -match 'if\s*\(looksLikeRelease\s*&&\s*!LearnStaleHoldSeen\)' -and
+        $report -match 'SetTimer\(ControllerLearnStaleHoldSettled, -\d+\)') (
+        "The learner identifies on a set-to-clear change without waiting to see " +
+        "whether it was a control held over from before the wizard opened. " +
+        "Opening the wizard by pressing A does exactly that, and the run is " +
+        "unrecoverable from the first step.")
+    Assert-True ($report -match '(?s)LearnStaleHoldMask\)\s*=\s*LearnStaleHoldMask(?s).*?ControllerLearnAdoptDevice\(') (
+        "The stale-hold deferral has no path for the bits going back UP. That " +
+        "is a press on an active-low pad, and without it such a pad could never " +
+        "identify at all.")
+    $settled = Get-AhkFunctionBody -Source $sharedText `
+        -Name "ControllerLearnStaleHoldSettled"
+    Assert-True ($settled -ne "" -and
+        $settled -match 'known\["baseline"\]\s*:=' -and
+        $settled -match 'known\["noise"\]\s*:=\s*Buffer\(') (
+        "ControllerLearnStaleHoldSettled must re-take the resting state from " +
+        "the report where the control let go, and drop the noise measured " +
+        "against the baseline now known to be wrong.")
     Assert-True ($report -match '(?s)if\s*\(LearnIdentifyHoldOffset\s*>=\s*0\)') (
         "ControllerLearnReport no longer holds off while the identifying " +
         "control is down. Rest would be measured from reports in which it is " +

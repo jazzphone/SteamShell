@@ -134,6 +134,7 @@ ControllerLearnAccept
 ControllerLearnAxisStats
 ControllerLearnBeginSteps
 ControllerLearnBufferAxisRaw
+ControllerLearnAdoptDevice
 ControllerLearnByteDriftedAtRest
 ControllerLearnByteFreeRunning
 ControllerLearnClassifyAnalog
@@ -161,6 +162,7 @@ ControllerLearnRestart
 ControllerLearnSave
 ControllerLearnSkip
 ControllerLearnStartCapture
+ControllerLearnStaleHoldSettled
 ControllerLearnSteps
 ControllerLearnTick
 ControllerLearnUpdateUi

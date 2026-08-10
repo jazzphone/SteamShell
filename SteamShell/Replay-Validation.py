@@ -1996,6 +1996,91 @@ def check_learner_guard(sources):
                  "word -- that turns every button held at close into a press edge.")
 
 
+def check_learner_identify_release(sources):
+    """The learner's baseline rule, replayed from Assert-ControllerLearnerIdentifyRelease.
+
+    Ported for the same reason as the picker below, and after the same kind of
+    miss: that check lives in PowerShell code rather than in the Assert-True
+    table, so the Mac cannot see it, and a refactor that moved the baseline copy
+    into ControllerLearnAdoptDevice sailed through here while breaking two of its
+    assertions. Eight rules that only Windows could run is eight rules nobody
+    edits with confidence.
+
+    The rule itself: identification fires on the report where a bit CHANGED,
+    which for almost every pad is the button going DOWN. The resting baseline
+    must therefore come from the pre-press idle report the identification loop
+    already keeps -- never from the live one -- and rest must not be measured
+    until the identifying control comes back up.
+    """
+    shared = sources["SteamShell-Shared.ahk"]
+    report = function_body(shared, "ControllerLearnReport")
+    adopt = function_body(shared, "ControllerLearnAdoptDevice")
+    settled = function_body(shared, "ControllerLearnStaleHoldSettled")
+    released = function_body(shared, "ControllerLearnIdentifyReleased")
+    timeout = function_body(shared, "ControllerLearnIdentifyHoldTimeout")
+    ui = function_body(shared, "ControllerLearnUpdateUi")
+    for name, body in (("ControllerLearnReport", report),
+                       ("ControllerLearnAdoptDevice", adopt),
+                       ("ControllerLearnStaleHoldSettled", settled),
+                       ("ControllerLearnIdentifyReleased", released),
+                       ("ControllerLearnIdentifyHoldTimeout", timeout)):
+        if not body:
+            fail(f"{name} could not be read, so the learner's baseline rule is "
+                 "not checked.")
+
+    # The chain: caller passes the idle report, callee copies its parameter,
+    # neither copies the live one.
+    if not re.search(r"ControllerLearnAdoptDevice\(.*?baseline,", report, re.S):
+        fail("ControllerLearnReport no longer hands the pre-press idle report to "
+             "ControllerLearnAdoptDevice; the identifying press would become rest.")
+    if not re.search(r"LearnBaseline\s*:=\s*ControllerLearnCopyReport\(\s*idleReport\s*,",
+                     adopt):
+        fail("ControllerLearnAdoptDevice no longer takes its resting baseline "
+             "from the idle report its caller passed.")
+    for name, body in (("ControllerLearnReport", report),
+                       ("ControllerLearnAdoptDevice", adopt)):
+        if re.search(r"LearnBaseline\s*:=\s*ControllerLearnCopyReport\(\s*data\s*,", body):
+            fail(f"{name} copies the live report into LearnBaseline. That report "
+                 "is the identifying PRESS, the one state that must not be rest.")
+    if not re.search(r"LearnIdentifyHoldOffset\s*:=\s*holdOffset", adopt):
+        fail("The learner no longer records which control identified the device, "
+             "so it cannot wait for it to be released before measuring rest.")
+    if not re.search(r"if\s*\(LearnIdentifyHoldOffset\s*>=\s*0\)", report, re.S):
+        fail("ControllerLearnReport no longer holds off while the identifying "
+             "control is down; rest would be measured with it held.")
+
+    # The stale-hold deferral, and BOTH its exits -- one exit is a hang.
+    # The GUARD, not just the names. Replacing the condition with a constant
+    # leaves every identifier in the body and satisfied the first draft of this.
+    if not (re.search(r"looksLikeRelease\s*:=\s*\(\(NumGet\(baseline, holdOffset,"
+                      r' "UChar"\) & holdMask\)', report)
+            and re.search(r"if\s*\(looksLikeRelease\s*&&\s*!LearnStaleHoldSeen\)", report)
+            and re.search(r"SetTimer\(ControllerLearnStaleHoldSettled, -\d+\)", report)):
+        fail("The learner identifies on a set-to-clear change without waiting to "
+             "see whether it was a control held over from before the wizard "
+             "opened. Opening the wizard by pressing A does exactly that.")
+    if not re.search(r"LearnStaleHoldMask\)\s*=\s*LearnStaleHoldMask.*?"
+                     r"ControllerLearnAdoptDevice\(", report, re.S):
+        fail("The stale-hold deferral has no path for the bits going back up, so "
+             "an active-low pad could never identify at all.")
+    if not (re.search(r'known\["baseline"\]\s*:=', settled)
+            and re.search(r'known\["noise"\]\s*:=\s*Buffer\(', settled)):
+        fail("ControllerLearnStaleHoldSettled must re-take the resting state and "
+             "drop the noise measured against the baseline now known to be wrong.")
+
+    # One entry point to rest measurement, and a bound on the wait.
+    if not (re.search(r"LearnRestSampling\s*:=\s*true", released)
+            and re.search(r"ControllerLearnBeginSteps", released)):
+        fail("ControllerLearnIdentifyReleased no longer starts the rest phase; it "
+             "is the single entry point to rest measurement.")
+    if not re.search(r"ControllerLearnIdentifyReleased", timeout):
+        fail("The identify hold has no timeout. A pad whose release report is "
+             "lost would leave the wizard waiting forever.")
+    if re.search(r"LearnRestSampling\s*:=\s*true", ui):
+        fail("ControllerLearnUpdateUi starts rest sampling. It runs the moment "
+             "the device is identified, which is the moment the button went down.")
+
+
 def check_recent_application_picker(sources):
     """The recent-application picker is on a button in BOTH products.
 
@@ -2250,6 +2335,7 @@ def main():
     check_controller_poll_frame(sources)
     check_learner_guard(sources)
     check_rtss_limiter_restore(sources)
+    check_learner_identify_release(sources)
     check_recent_application_picker(sources)
     check_source_encoding()
     check_settings_row_placement(sources)

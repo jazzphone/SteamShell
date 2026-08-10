@@ -2054,6 +2054,14 @@ global LearnReleaseMask := 0
 global LearnReleaseUntil := 0
 ; The control that chose the device, held until it is let go. Rest cannot be
 ; measured while it is down, because "rest" would then include it.
+; The stale-hold deferral. The wizard is usually opened by pressing A, and that
+; press is still down when the idle baseline is taken -- see
+; ControllerLearnStaleHoldSettled.
+global LearnStaleHoldSeen := false
+global LearnStaleHoldDevice := 0
+global LearnStaleHoldOffset := -1
+global LearnStaleHoldMask := 0
+global LearnStaleHoldReport := 0
 global LearnIdentifyHoldOffset := -1
 global LearnIdentifyHoldMask := 0
 global LearnCaptureUntil := 0

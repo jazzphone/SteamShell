@@ -1330,8 +1330,14 @@ Assert-True ($source -notmatch 'LearnCandidate') (
 # IdentifyRelease in Validate-Common.ps1 now owns this rule for both products,
 # bounded to ControllerLearnReport's body rather than matched against the whole
 # file.
+#
+# The copy moved into ControllerLearnAdoptDevice with the extraction, and its
+# parameter is named for what it is. Assert-ControllerLearnerIdentifyRelease
+# checks the CHAIN -- caller passes the idle report, callee copies its parameter,
+# neither copies the live one -- which is the part that can rot; this one keeps
+# the product-level statement that the rule exists.
 Assert-True (
-    $source -match 'LearnBaseline := ControllerLearnCopyReport\(baseline, 0, length\)' -and
+    $source -match 'LearnBaseline := ControllerLearnCopyReport\(idleReport, 0, length\)' -and
     $source -match 'LearnIdentifyHoldOffset') (
     "Rest must be measured from the pre-press idle report, and only once the identifying control has been released.")
 # Visible confirmation after every detection, in words -- and the byte, mask and
