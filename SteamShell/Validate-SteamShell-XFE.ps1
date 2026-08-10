@@ -1077,6 +1077,39 @@ Assert-True (
     $source -match '(?s)if \(kind = "button"\).*?if \(LearnAnalogBytes\.Has\(offset\)\)' -and
     $source -match '(?s)if \(kind = "dpad"\).*?if \(LearnAnalogBytes\.Has\(offset\)\)') (
     "Button and D-pad detection must ignore bytes the analogue scan identified.")
+
+# ...and the scan has to be able to SEE a 16-bit sensor's high byte, which
+# neither of its two original tests could.
+#
+# On an 8BitDo Ultimate 2 with a live gyro, twelve bytes are six 16-bit
+# little-endian pairs. The low bytes sweep 0-255 and the range test claims them.
+# The high bytes drift two or three bits at rest -- under
+# ControllerLearnByteFreeRunning's four -- and stay inside a handful of counts
+# during the scan -- under MIN_RANGE -- so they reached the button steps looking
+# exactly like a button byte. One run bound A, View, R3, L3 and all four D-pad
+# directions to the gyro, and the D-pad then failed validation because its four
+# directions were four gyro readings.
+#
+# BOTH HALVES OF THE SECOND RULE ARE PINNED, because either alone is wrong in a
+# way no test would show: rest drift alone throws away a real button byte when a
+# button was held through the countdown, and scan movement alone throws away a
+# button byte the user brushed while wiggling.
+Assert-True (
+    $source -match
+        '(?sm)^ControllerLearnClassifyAnalog\(\)\s*\{(?:(?!\n\})[\s\S])*?' +
+        'drifting := \(values\.Count >= 2(?:(?!\n\})[\s\S])*?' +
+        'ControllerLearnByteDriftedAtRest\(offset\)\)' -and
+    $source -match
+        '(?sm)^ControllerLearnClassifyAnalog\(\)\s*\{(?:(?!\n\})[\s\S])*?' +
+        'if \(!wide && !drifting\)\s*\r?\n\s*continue' -and
+    # The weak form reads the mask; the strong form counts bits and belongs to
+    # the axis resolver. Keeping them separate is the point -- a four-bit
+    # threshold here would miss the byte this rule exists for.
+    $source -match
+        '(?sm)^ControllerLearnByteDriftedAtRest\(offset\)\s*\{(?:(?!\n\})[\s\S])*?' +
+        'NumGet\(LearnRestNoise, offset, "UChar"\) != 0') (
+    "The analogue scan must also claim a byte that drifted at rest AND moved " +
+    "during the scan; without it a gyro's high byte is learned as a button.")
 # The Quick Menu must fit its own content. Computing the height in logical units
 # and trusting AutoHotkey to scale it the same way as the controls failed on a 4K
 # television: the first show came out short and the bottom rows were cut off.

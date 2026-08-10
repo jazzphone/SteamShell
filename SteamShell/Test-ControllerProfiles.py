@@ -459,22 +459,55 @@ MIN_DISTINCT_VALUES = 6
 MIN_RANGE = 32
 
 
-def classify_analog(samples: list[bytes], length: int) -> set[int]:
+def rest_noise_mask(rest: list[bytes], length: int) -> bytes:
+    """Mirror of the LearnRestSampling branch of ControllerLearnReport.
+
+    The FIRST rest report refreshes the baseline and contributes no noise; only
+    rest-to-rest changes after it are noise, accumulated per bit against a
+    baseline that follows the latest report.
+    """
+    noise = bytearray(length)
+    baseline = bytearray(rest[0][:length]) if rest else bytearray(length)
+    for count, report in enumerate(rest, start=1):
+        for offset in range(length):
+            if count > 1:
+                noise[offset] |= report[offset] ^ baseline[offset]
+            baseline[offset] = report[offset]
+    return bytes(noise)
+
+
+def classify_analog(
+    samples: list[bytes], length: int, rest_noise: bytes | None = None
+) -> set[int]:
     """Mirror of ControllerLearnClassifyAnalog.
 
     A button byte takes two values; an axis byte swept through its range takes
     dozens. Both a wide range and many distinct values are required, so neither a
     two-mask button byte nor a monotonic counter is mistaken for an axis.
+
+    SECOND WAY TO QUALIFY, and it is what the high byte of a 16-bit sensor axis
+    needs: a byte that drifted at rest AND moved during the scan answers to
+    motion rather than to anything pressed. Both halves are required -- see the
+    function's comment in SteamShell-Shared.ahk -- and rest_noise is optional
+    here only so the callers that predate the rule keep testing the first one on
+    its own.
     """
     values: dict[int, set[int]] = {}
     for report in samples:
         for offset in range(length):
             values.setdefault(offset, set()).add(report[offset])
-    return {
-        offset
-        for offset, seen in values.items()
-        if len(seen) >= MIN_DISTINCT_VALUES and (max(seen) - min(seen)) >= MIN_RANGE
-    }
+    analog: set[int] = set()
+    for offset, seen in values.items():
+        wide = len(seen) >= MIN_DISTINCT_VALUES and (max(seen) - min(seen)) >= MIN_RANGE
+        drifting = (
+            len(seen) >= 2
+            and rest_noise is not None
+            and offset < len(rest_noise)
+            and rest_noise[offset] != 0
+        )
+        if wide or drifting:
+            analog.add(offset)
+    return analog
 
 
 def test_analog_scan_protects_stick_click_steps() -> None:
@@ -524,6 +557,99 @@ def test_analog_scan_protects_stick_click_steps() -> None:
         offset for offset in range(16) if nudged[offset] != baseline[offset]
     ]
     assert unfiltered[0] == 2
+
+
+def make_8bitdo(buttons: int = 0, gyro: tuple[int, ...] | None = None) -> bytes:
+    """The 8BitDo Ultimate 2 report from the spoiled run, to scale.
+
+    34 bytes: report id, hat, four stick axes at 0x7F, two triggers, two button
+    bytes at 8 and 9, a constant at 14, then SIX 16-BIT LITTLE-ENDIAN SENSOR AXES
+    filling bytes 15 to 26. The pairing is what matters: the low byte of each
+    sweeps the full range, the high byte moves a couple of counts.
+    """
+    report = bytearray(34)
+    report[0] = 0x01
+    report[1] = 0x0F
+    report[2:6] = bytes([0x7F] * 4)
+    report[8] = buttons & 0xFF
+    report[14] = 0x32
+    axes = gyro if gyro is not None else (0x02F5, 0xFDDB, 0x02F5, 0xFDDB, 0x02F5, 0xFDDB)
+    for index, value in enumerate(axes):
+        report[15 + index * 2] = value & 0xFF
+        report[16 + index * 2] = (value >> 8) & 0xFF
+    return bytes(report)
+
+
+def test_gyro_high_byte_is_not_a_button() -> None:
+    """The 8BitDo Ultimate 2 run in which A, View, R3, L3 and the whole D-pad
+    were bound to the gyro.
+
+    Twelve sensor bytes, six 16-bit little-endian pairs. The LOW bytes sweep
+    0-255 and the range test claims them. The HIGH bytes are the defect: at rest
+    they drift two or three bits, which is under ControllerLearnByteFreeRunning's
+    four; during the analogue scan they stay inside a handful of counts, which is
+    under MIN_RANGE. What is left looks exactly like a button byte, so tilting
+    the pad while pressing A binds a gyro bit and wins the step.
+    """
+    # At rest the pad is still: the low bytes wander, the high bytes move by one.
+    rest = [
+        make_8bitdo(gyro=(0x02F5 + (n % 0x120), 0xFDDB + (n % 0x100),
+                          0x02F5, 0xFDDB, 0x02F5, 0xFDDB))
+        for n in range(400)
+    ]
+    noise = rest_noise_mask(rest, 34)
+
+    # The high bytes drift, but across too few bits for the free-running test.
+    assert noise[16] != 0 and bin(noise[16]).count("1") < 4, hex(noise[16])
+    assert noise[18] != 0 and bin(noise[18]).count("1") < 4, hex(noise[18])
+    # The button bytes do not move at rest at all. That is the whole difference.
+    assert noise[8] == 0 and noise[9] == 0
+
+    # The analogue scan: sticks and triggers worked, pad held roughly still, so
+    # the sensor keeps drifting by the same small amount and nothing is pressed.
+    scan = [
+        make_8bitdo(gyro=(0x02F5 + (n % 0x120), 0xFDDB + (n % 0x100),
+                          0x02F5, 0xFDDB, 0x02F5, 0xFDDB))
+        for n in range(400)
+    ]
+    for step in range(60):
+        moved = bytearray(scan[step])
+        moved[2] = int(0x7F + 0x7F * step / 59)
+        moved[6] = int(0xFF * step / 59)
+        scan[step] = bytes(moved)
+
+    old = classify_analog(scan, 34)
+    new = classify_analog(scan, 34, noise)
+
+    # THE OLD RULE MISSES THEM, which is the bug reproduced rather than asserted.
+    assert 16 not in old and 18 not in old, sorted(old)
+    # The low bytes were never the problem.
+    assert {15, 17} <= old
+    # The new rule claims the high bytes, and does not touch the button bytes.
+    assert {15, 16, 17, 18} <= new, sorted(new)
+    assert not new & {8, 9}, sorted(new)
+
+    # Press A -- byte 8 bit 0x02 -- while tilting the pad enough to flip a higher
+    # bit of the gyro high byte. Byte 18 goes 0xFD -> 0xF4, which is bits the rest
+    # mask never saw, so it reads as a clean button edge.
+    baseline = rest[-1]
+    pressed = make_8bitdo(buttons=0x02, gyro=(0x02F5, 0xF4DB,
+                                              0x02F5, 0xFDDB,
+                                              0x02F5, 0xFDDB))
+
+    def candidates(analog: set[int]) -> list[int]:
+        return [
+            offset
+            for offset in range(34)
+            if offset not in analog
+            and (pressed[offset] ^ baseline[offset]) & ~noise[offset] & 0xFF
+        ]
+
+    # Under the old rule the gyro high byte is a live candidate alongside the
+    # real button -- and in the spoiled run it is the one that won.
+    assert 18 in candidates(old), candidates(old)
+    # Under the new rule the only thing that changed is the button.
+    assert candidates(new) == [8], candidates(new)
 
 
 def test_learner_never_guesses_big_endian() -> None:
@@ -665,6 +791,7 @@ def main() -> None:
     test_identifying_press_never_becomes_the_resting_state()
     test_axis_peak_survives_release_and_prevents_carryover()
     test_analog_scan_protects_stick_click_steps()
+    test_gyro_high_byte_is_not_a_button()
     test_learner_never_guesses_big_endian()
     test_resolve_runs_per_report_without_claiming_its_own_field()
     print("Controller profile simulation passed.")

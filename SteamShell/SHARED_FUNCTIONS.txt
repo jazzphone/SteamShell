@@ -134,6 +134,7 @@ ControllerLearnAccept
 ControllerLearnAxisStats
 ControllerLearnBeginSteps
 ControllerLearnBufferAxisRaw
+ControllerLearnByteDriftedAtRest
 ControllerLearnByteFreeRunning
 ControllerLearnClassifyAnalog
 ControllerLearnCompleteAxis

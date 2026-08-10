@@ -8005,6 +8005,22 @@ ControllerLearnByteFreeRunning(offset) {
 }
 
 
+; True when a byte moved at all while the user was holding nothing.
+;
+; ControllerLearnByteFreeRunning asks a stronger question -- four or more bits
+; noisy at rest -- because it decides whether to hand a byte to an AXIS, where a
+; wrong answer binds a trigger to a gyro. This one is the weak form, and it is
+; only ever used in conjunction with the analogue scan below.
+ControllerLearnByteDriftedAtRest(offset) {
+    global LearnRestNoise
+    if !IsObject(LearnRestNoise)
+        return false
+    if (offset >= LearnRestNoise.Size)
+        return false
+    return NumGet(LearnRestNoise, offset, "UChar") != 0
+}
+
+
 ; Turns the value census into the set of analogue bytes.
 ;
 ; Two conditions, both needed. A wide spread alone would also match a byte that
@@ -8012,30 +8028,79 @@ ControllerLearnByteFreeRunning(offset) {
 ; match a counter or timestamp field, which some reports carry. Requiring a byte
 ; to take many different values ACROSS a wide range is what isolates a real
 ; analogue control.
+;
+; THE HIGH BYTE OF A 16-BIT SENSOR AXIS PASSES NEITHER TEST, and it is why a
+; whole run on an 8BitDo Ultimate 2 came back with A, View, R3, L3 and all four
+; D-pad directions bound to the gyro. Its twelve sensor bytes are six 16-bit
+; little-endian pairs. The LOW bytes sweep 0-255 and are caught here easily; the
+; HIGH bytes are the ones that get through:
+;
+;   - At rest they drift across two or three bits only, so
+;     ControllerLearnByteFreeRunning's four-bit threshold does not claim them.
+;   - During the analogue scan they stay inside a handful of counts -- byte 16
+;     never left 0x02-0x03 -- so MIN_RANGE of 32 does not claim them either.
+;
+; What is left is a byte that looks exactly like a button byte, minus the two or
+; three bits seen drifting at rest. Tilt the pad while pressing A and a higher
+; bit of that byte flips, and it wins the step. Every wrong binding in that run
+; is one of those, and the D-pad then failed validation because its four
+; "directions" were four gyro readings.
+;
+; So there is a SECOND way to qualify, and it needs both halves for the same
+; reason the first one does:
+;
+;   - Drifted at rest, so the byte moves when nothing is being touched.
+;   - Took more than one value during the scan, when the user is working the
+;     sticks and triggers and pressing nothing.
+;
+; Rest drift ALONE would throw away a real button byte whenever a button was held
+; through the countdown, which is a real case and has its own warning below.
+; Scan movement ALONE would throw away a button byte the user brushed while
+; wiggling. A byte doing both is not a button on any controller: it answers to
+; motion and to nothing else.
 ControllerLearnClassifyAnalog() {
     global LearnAnalogValues, LearnAnalogBytes, LearnBaseline
     static MIN_DISTINCT_VALUES := 6
     static MIN_RANGE := 32
     LearnAnalogBytes := Map()
     described := ""
+    sensors := ""
     for offset, values in LearnAnalogValues {
-        if (values.Count < MIN_DISTINCT_VALUES)
-            continue
         low := 255
         high := 0
         for value in values {
             low := Min(low, value)
             high := Max(high, value)
         }
-        if (high - low < MIN_RANGE)
+        wide := (values.Count >= MIN_DISTINCT_VALUES
+            && high - low >= MIN_RANGE)
+        drifting := (values.Count >= 2
+            && ControllerLearnByteDriftedAtRest(offset))
+        if (!wide && !drifting)
             continue
         LearnAnalogBytes[offset] := true
-        described .= (described != "" ? ", " : "") offset
-            . " (" values.Count " values, " low "-" high ")"
+        ; Reported apart from the wide ones, because they are a different
+        ; finding: "this is an axis" against "this moves on its own". A run that
+        ; lists a dozen of the second is a pad with a live motion sensor, and
+        ; that is worth being able to read off the log directly.
+        if wide {
+            described .= (described != "" ? ", " : "") offset
+                . " (" values.Count " values, " low "-" high ")"
+        } else {
+            sensors .= (sensors != "" ? ", " : "") offset
+                . " (" values.Count " values, " low "-" high ")"
+        }
     }
     LogLine("Learn: analogue bytes = "
         . (described != "" ? described : "none detected")
         . ". Button steps will ignore them.")
+    if (sensors != "") {
+        LogLine("Learn: also ignoring " sensors " -- these moved at rest AND "
+            . "during the analogue scan, so they answer to motion rather than "
+            . "to anything pressed. On a pad with a live gyro these are the "
+            . "high bytes of its 16-bit axes, and they are what a button step "
+            . "binds by mistake when the controller is tilted.")
+    }
     return LearnAnalogBytes.Count
 }
 
