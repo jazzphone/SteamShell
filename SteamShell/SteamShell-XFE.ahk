@@ -203,8 +203,8 @@ global AssistCooldownSec := 300
 global AssistGracefulCloseMs := 4000
 global AssistHardKill := true
 global AssistRequireNoGame := true
-global AssistLauncherProcesses := "UbisoftConnect.exe|upc.exe|EpicGamesLauncher.exe|EADesktop.exe|EALauncher.exe|Origin.exe|Battle.net.exe|RockstarGamesLauncher.exe|GalaxyClient.exe|RiotClientServices.exe|RiotClientUx.exe|wgc.exe|Heroic.exe|UbisoftConnectService.exe|UplayWebCore.exe|UplayService.exe|EpicWebHelper.exe|EABackgroundService.exe|BlizzardUpdateAgent.exe|Agent.exe|RockstarService.exe|SocialClubHelper.exe|GalaxyClientService.exe|GalaxyCommunication.exe|RiotClientUxRender.exe|legendary.exe|gogdl.exe|nile.exe"
-global AssistProtectedProcesses := "explorer.exe|steam.exe|steamwebhelper.exe|AnyFSE.exe|SteamShell-XFE.exe|dwm.exe|csrss.exe|winlogon.exe"
+global AssistLauncherProcesses := DefaultLauncherProcesses()
+global AssistProtectedProcesses := DefaultProtectedProcesses()
 global AssistIgnoreForegroundProcesses := "explorer.exe|ApplicationFrameHost.exe|ShellHost.exe|GameBar.exe|XboxGameBarWidgets.exe|SearchHost.exe|StartMenuExperienceHost.exe|ShellExperienceHost.exe"
 ; Shell overlays -- the Xbox FSE task/application switcher and friends.
 ;
@@ -508,7 +508,15 @@ global SettingsScrollBar := 0
 ; frame sizes itself to the work area now, so the bounds move with it.
 global SettingsContentTop := 145
 global SettingsContentBottom := 562
-global StartupProgramsList := unset
+; The startup-programs editor's controls, named as SteamShell-Shared.ahk names
+; them because the editor is shared. StartupProgramsList -- a list box holding
+; paths and nothing else -- went with the two-button version of the page.
+global SettingsStartupListView := 0
+global SettingsStartupCommandEdit := 0
+global SettingsStartupSelectedSlot := 1
+; Suppresses the command edit's Change event while the shared editor assigns it,
+; so moving between slots is not by itself an unsaved change.
+global SettingsStartupQuiet := false
 global LogonTaskStatusCtrl := unset
 global SettingsCategoryList := 0
 global SettingsCurrentCategory := 1
@@ -596,7 +604,7 @@ DefaultSettings() {
             "TickIntervalMs", 2000,
             "CpuThresholdPercent", 12,
             "ForegroundStableSec", 30,
-            "ProtectedProcesses", "explorer.exe|steam.exe|steamwebhelper.exe|AnyFSE.exe|SteamShell-XFE.exe|dwm.exe|csrss.exe|winlogon.exe",
+            "ProtectedProcesses", DefaultProtectedProcesses(),
             "IgnoreForegroundProcesses", "explorer.exe|ApplicationFrameHost.exe|ShellHost.exe|GameBar.exe|XboxGameBarWidgets.exe|SearchHost.exe|StartMenuExperienceHost.exe|ShellExperienceHost.exe",
             "SuspendOnShellOverlay", "true",
             "ShellOverlayProcesses", "class:XamlExplorerHostIslandWindow|class:MultitaskingViewFrame|class:Windows.UI.Core.CoreWindow|XboxPcApp.exe|GameBar.exe|XboxGameBarWidgets.exe|ShellHost.exe",
@@ -664,7 +672,7 @@ DefaultSettings() {
             "GracefulCloseMs", 4000,
             "HardKill", "true",
             "RequireNoGame", "true",
-            "LauncherProcesses", "UbisoftConnect.exe|upc.exe|EpicGamesLauncher.exe|EADesktop.exe|EALauncher.exe|Origin.exe|Battle.net.exe|RockstarGamesLauncher.exe|GalaxyClient.exe|RiotClientServices.exe|RiotClientUx.exe|wgc.exe|Heroic.exe|UbisoftConnectService.exe|UplayWebCore.exe|UplayService.exe|EpicWebHelper.exe|EABackgroundService.exe|BlizzardUpdateAgent.exe|Agent.exe|RockstarService.exe|SocialClubHelper.exe|GalaxyClientService.exe|GalaxyCommunication.exe|RiotClientUxRender.exe|legendary.exe|gogdl.exe|nile.exe"
+            "LauncherProcesses", DefaultLauncherProcesses()
         ),
         "Cursor", Map(
             "ParkOnGameStart", "true",
@@ -2539,14 +2547,17 @@ WindowModeLabel(mode) {
 ; A child inherits the parent's elevation. Starting through the shell instead
 ; gives the child the desktop's token, which keeps an elevated companion from
 ; silently elevating Steam and everything Steam then launches.
-LaunchStartupProgram(path) {
+; modeOverride is the Settings window's Test Launch, which wants to SEE the
+; program it just started whatever the configured mode is.
+LaunchStartupProgram(path, modeOverride := "") {
     global StartupLaunchDeElevated, StartupWindowMode, CompanionDisabled
     if CompanionDisabled
         return false
     if !SharedPrepareStartupProgram(path, &target, &params, &fileName, &directory)
         return false
     path := target
-    mode := NormalizeWindowMode(StartupWindowMode)
+    mode := NormalizeWindowMode(
+        modeOverride != "" ? modeOverride : StartupWindowMode)
     runOptions := mode = "hidden" ? "Hide" : (mode = "minimized" ? "Min" : "")
     ; De-elevated through Explorer, which owns the normal-integrity desktop. The
     ; companion runs at normal integrity itself, so this only matters when a user
@@ -2616,6 +2627,33 @@ RunStartupPrograms() {
 ; owns the foreground, so it can never fight the Quick Menu, Settings, the
 ; mapping editor, a shortcut capture, a file dialog or a message box.
 ; ------------------------------------------------------------------------------
+; The two lists Launcher Cleanup is built out of: what may be closed, and what
+; must never be.
+;
+; STATED ONCE EACH. Both were written out three times -- the global's initialiser,
+; the INI defaults table, and now the Settings field spec that restores them --
+; and three copies of a twenty-eight-entry pipe-separated string is three chances
+; for the defaults to disagree with themselves. DefaultAutoMouseExeList already
+; had this shape for the same reason.
+DefaultLauncherProcesses() {
+    return "UbisoftConnect.exe|upc.exe|EpicGamesLauncher.exe|EADesktop.exe"
+        . "|EALauncher.exe|Origin.exe|Battle.net.exe|RockstarGamesLauncher.exe"
+        . "|GalaxyClient.exe|RiotClientServices.exe|RiotClientUx.exe|wgc.exe"
+        . "|Heroic.exe|UbisoftConnectService.exe|UplayWebCore.exe"
+        . "|UplayService.exe|EpicWebHelper.exe|EABackgroundService.exe"
+        . "|BlizzardUpdateAgent.exe|Agent.exe|RockstarService.exe"
+        . "|SocialClubHelper.exe|GalaxyClientService.exe"
+        . "|GalaxyCommunication.exe|RiotClientUxRender.exe|legendary.exe"
+        . "|gogdl.exe|nile.exe"
+}
+
+; This companion and the surfaces it depends on. AnyFSE.exe is Xbox FSE itself,
+; and closing it is closing the thing the companion exists to sit beside.
+DefaultProtectedProcesses() {
+    return "explorer.exe|steam.exe|steamwebhelper.exe|AnyFSE.exe"
+        . "|SteamShell-XFE.exe|dwm.exe|csrss.exe|winlogon.exe"
+}
+
 ProcessNameSetFromList(list) {
     set := Map()
     for _, name in StrSplit(list, "|") {
@@ -5052,8 +5090,15 @@ ShowSettings(*) {
     global SettingsGui, SettingsVisible, SettingsFields, SettingsDirty
     global SettingsCategoryControls, SettingsCategoryList
     global SettingsCurrentCategory, MouseHidden, IniPath, LogPath
-    global StartupProgramsList, LogonTaskStatusCtrl
+    global StartupPrograms, LogonTaskStatusCtrl
+    global SettingsStartupListView, SettingsStartupCommandEdit
+    global SettingsStartupSelectedSlot
     global SettingsControlPositions, SettingsCategoryOffsets, SettingsScrollBar
+    ; The Launcher Cleanup lists are built from what this product currently
+    ; holds, not from a second read of the INI: LoadSettings has already applied
+    ; the moved-section rule to LauncherProcesses, and re-reading here would have
+    ; to repeat it to get the same answer.
+    global AssistLauncherProcesses, AssistProtectedProcesses
     LogLine("Settings window requested.")
     if SettingsVisible {
         try SettingsGui.Show()
@@ -5188,14 +5233,19 @@ ShowSettings(*) {
     category := "Startup Programs"
     y := SettingsFirstRowY()
     SettingsAddRowsForCategory(settings, category, "xfe", &y)
-    StartupProgramsList := settings.AddListBox(
-        "x" SettingsLayout()["contentX"] " y" y
-        . " w" SettingsLayout()["contentWidth"] " h180")
-    SettingsTrackControl(category, StartupProgramsList)
-    y += 190
-    SettingsAddButtonRow(settings, category, [
-        ["Add Program...", SettingsAddStartupProgram],
-        ["Remove Selected", SettingsRemoveStartupProgram]], &y)
+    ; THE SHELL'S EDITOR, which is now the shared one.
+    ;
+    ; This was a list box and two buttons: add a program, remove a program. A
+    ; startup entry is a COMMAND LINE -- most usefully an executable and its
+    ; switches -- and there was no way to see one, edit one, reorder the list, or
+    ; try an entry without restarting the companion. Standalone has had all of
+    ; that on the same page for as long as the page has existed.
+    ;
+    ; Forty slots, because that is what this product stores and reads. They are
+    ; handed over as rows and come back as rows; how they are written to the INI
+    ; is still this product's own business, in SaveStartupPrograms.
+    SettingsAddStartupProgramsEditor(settings, category, &y,
+        SettingsStartupSlotValues())
     SettingsAddNote(settings, category,
         "Hidden suits background helpers that should never draw over Xbox FSE.",
         &y)
@@ -5226,10 +5276,33 @@ ShowSettings(*) {
     category := "Launcher Cleanup"
     y := SettingsFirstRowY()
     SettingsAddRowsForCategory(settings, category, "xfe", &y)
-    SettingsAddNote(settings, category,
-        "The launcher list itself is edited in the INI under [LauncherCleanup] "
-        . "LauncherProcesses, alongside the protected-process list under "
-        . "[Assist] ProtectedProcesses.", &y, 40)
+    ; THE TWO LISTS THIS PAGE IS ABOUT, side by side, as on the shell's page.
+    ;
+    ; The note that stood here sent the user to the INI -- "the launcher list
+    ; itself is edited in the INI under [LauncherCleanup] LauncherProcesses" --
+    ; for the two settings that decide everything this page does: what gets
+    ; closed, and what must never be. Both are read on every load, both are the
+    ; same pipe-separated shape the shell edits with a ListView, and the editor
+    ; is shared. There was nothing to send anybody to Notepad for.
+    ;
+    ; Same geometry as standalone's pair, derived rather than typed: two columns
+    ; out of the content width with a gap between them, which is where the
+    ; shell's hand-typed 255/610/335 lands.
+    layout := SettingsLayout()
+    columnGap := 20
+    columnWidth := (layout["contentWidth"] - columnGap) // 2
+    listY := y + 8
+    SettingsAddExeListField(settings, category,
+        "LauncherCleanup", "LauncherProcesses", "Launcher EXEs to close",
+        layout["contentX"], listY, columnWidth, AssistLauncherProcesses)
+    SettingsAddExeListField(settings, category,
+        "Assist", "ProtectedProcesses", "Never close these EXEs",
+        layout["contentX"] + columnWidth + columnGap, listY, columnWidth,
+        AssistProtectedProcesses)
+    y := listY + SettingsExeListHeight()
+    SettingsAddButtonRow(settings, category, [
+        ["Preview Running Cleanup Targets…", SettingsPreviewLauncherCleanup]],
+        &y)
 
     ; Advanced
     category := "Advanced & Logging"
@@ -5238,9 +5311,22 @@ ShowSettings(*) {
         "This companion contains no shell registration, Explorer control, taskbar "
         . "hiding, or window sizing. Xbox FSE keeps control of presentation.",
         &y, 40)
+    ; SETTINGS FIRST, ACTIONS LAST, as on the shell's page. This built the button
+    ; block above the rows, so the page opened on a wall of thirteen buttons and
+    ; the settings the page is named for were below them -- the reverse of
+    ; standalone's Advanced page, which puts its rows at the top and its
+    ; nineteen buttons underneath. Same page, same product family, opposite
+    ; reading order, and nothing chose it: the buttons were simply written first.
+    SettingsAddRowsForCategory(settings, category, "xfe", &y)
+    SettingsAddNote(settings, category,
+        "The heartbeat log proves whether the companion remains responsive while "
+        . "Xbox FSE is active. Diagnostic logging compares every controller slot "
+        . "against GameInput and records the foreground process, which reveals a "
+        . "virtualised pad forwarding only some buttons.", &y, 60)
+    y += 12
     SettingsAddButtonRow(settings, category, [
         ["Open INI", (*) => Run(IniPath)],
-        ["Open Log", (*) => Run(LogPath)],
+        ["Open Log", ProductOpenLogFile],
         ["Live Log", ShowLiveLogWindow],
         ["Health Check", ShowHealthCheck],
         ["Reload INI", ReloadSettings],
@@ -5252,16 +5338,11 @@ ShowSettings(*) {
         ["Probe Screen", SettingsProbeScreen],
         ["Check Logon Task", SettingsCheckLogonTask],
         ["Re-arm Controller", RearmControllerInput]], &y)
+    ; Under the button that fills it, which is where it was and where it belongs.
     LogonTaskStatusCtrl := settings.AddText("x" SettingsLayout()["contentX"]
         . " y" y " w" SettingsLayout()["contentWidth"] " h20 +Wrap", "")
     SettingsTrackControl(category, LogonTaskStatusCtrl)
     y += 28
-    SettingsAddRowsForCategory(settings, category, "xfe", &y)
-    SettingsAddNote(settings, category,
-        "The heartbeat log proves whether the companion remains responsive while "
-        . "Xbox FSE is active. Diagnostic logging compares every controller slot "
-        . "against GameInput and records the foreground process, which reveals a "
-        . "virtualised pad forwarding only some buttons.", &y, 60)
 
     ; The shell's footer, from the shared builder: divider, status line, buttons
     ; right-aligned to the content edge, and the scrollbar last so it sits above
@@ -5724,6 +5805,54 @@ SettingsProductSetStatus(text) {
 ; Up to three buttons on one flowing line. entries is an array of
 ; [label, callback] pairs; more than three wraps onto the next line.
 
+; What Launcher Cleanup would act on RIGHT NOW, read-only, as standalone's page
+; offers. The lists are what the user has in front of them -- the ListView rows,
+; not the saved INI -- so an edit can be checked before it is saved.
+;
+; The protected list is applied here the way the cleanup itself applies it, so a
+; launcher the user has protected is reported as protected rather than as a
+; target. That is the question this button is pressed to answer.
+SettingsPreviewLauncherCleanup(*) {
+    global EnableLauncherCleanupLite, AssistHardKill, AssistRequireNoGame
+    global AssistCooldownSec, AssistGracefulCloseMs
+    SettingsShowLauncherCleanupPreview(
+        SettingsPreviewExeList("LauncherCleanup.LauncherProcesses"), [],
+        SettingsPreviewExeList("Assist.ProtectedProcesses"), [
+        "Launcher Cleanup Lite is "
+            . (EnableLauncherCleanupLite ? "on" : "off")
+            . ", force close is " (AssistHardKill ? "on" : "off")
+            . ", game check is " (AssistRequireNoGame ? "on" : "off"),
+        "Waits " AssistGracefulCloseMs " ms for a polite close, and at least "
+            . AssistCooldownSec " s between runs."],
+        (text, title) => SettingsShowPreviewDialog(text, title))
+}
+
+; An informational dialog from the Settings window: topmost, and with the
+; controller pointer stood down while it is up, as every other modal this window
+; raises already is.
+SettingsShowPreviewDialog(text, title) {
+    global SettingsDialogActive
+    SettingsDialogActive := true
+    TopmostMsgBox(text, title, "OK Iconi")
+    SettingsDialogActive := false
+}
+
+; The rows of one exe-list field, as executable names. Empty for a field that
+; does not exist, which is what a page that has not been built yet looks like.
+SettingsPreviewExeList(fieldKey) {
+    global SettingsFields
+    names := []
+    if !SettingsFields.Has(fieldKey)
+        return names
+    ctrl := SettingsFields[fieldKey]
+    Loop ctrl.GetCount() {
+        exe := Trim(ctrl.GetText(A_Index, 1))
+        if (exe != "")
+            names.Push(exe)
+    }
+    return names
+}
+
 ; Runs the screen probe from the Settings window. Settings itself is hidden for
 ; the duration: the probe exists to identify some other surface, and leaving our
 ; own window in front is the one guaranteed way to capture nothing useful.
@@ -5780,52 +5909,48 @@ SettingsCategoryNames() {
     return names
 }
 
-SettingsRefreshStartupProgramsList() {
-    global StartupProgramsList, StartupPrograms
-    if !IsSet(StartupProgramsList)
-        return
-    try StartupProgramsList.Delete()
-    for _, path in StartupPrograms
-        try StartupProgramsList.Add([path])
+; The in-memory list as editor rows: what this product has, padded to the forty
+; slots it can store. The pad is what gives the user somewhere to add to.
+SettingsStartupSlotValues() {
+    global StartupPrograms
+    slots := []
+    Loop 40
+        slots.Push(A_Index <= StartupPrograms.Length
+            ? StartupPrograms[A_Index] : "")
+    return slots
 }
 
-SettingsAddStartupProgram(*) {
-    global StartupPrograms, SettingsDialogActive
-    SettingsDialogActive := true
-    selected := TopmostFileSelect(3, , "Select a program to start",
-        "Programs (*.exe)")
-    SettingsDialogActive := false
-    selected := NormalizePath(selected)
-    if (selected = "")
+; The in-memory list, taken from what the editor is showing.
+;
+; SettingsAddStartupProgram and SettingsRemoveStartupProgram edited this array
+; directly and refreshed a list box from it, which is why they are gone: the
+; shared editor edits ROWS, and the array is rebuilt from them here, once, on the
+; way to the save. Blank slots are dropped rather than stored, because this
+; product packs its entries -- LoadStartupPrograms skips empties, so a hole has
+; never survived a reload anyway.
+SettingsCollectStartupPrograms() {
+    global StartupPrograms
+    commands := SettingsStartupSlotCommands()
+    ; NO ROWS AT ALL means no editor, not an empty list. Forty blank rows are an
+    ; emptied list and are collected as one; nothing to read from is a save that
+    ; must leave what was loaded alone.
+    if (commands.Length = 0)
         return
-    for _, existing in StartupPrograms {
-        if (StrLower(existing) = StrLower(selected)) {
-            ShowNotification("That program is already in the list", "Warning")
-            return
-        }
+    collected := []
+    for _, commandLine in commands {
+        commandLine := Trim(commandLine)
+        if (commandLine != "")
+            collected.Push(commandLine)
     }
-    if (StartupPrograms.Length >= 40) {
-        ShowNotification("Startup program list is full", "Warning")
-        return
-    }
-    StartupPrograms.Push(selected)
-    SettingsRefreshStartupProgramsList()
-    SettingsMarkDirty()
+    StartupPrograms := collected
 }
 
-SettingsRemoveStartupProgram(*) {
-    global StartupProgramsList, StartupPrograms
-    if !IsSet(StartupProgramsList)
-        return
-    index := 0
-    try index := StartupProgramsList.Value
-    if (index < 1 || index > StartupPrograms.Length) {
-        ShowNotification("Select a program to remove first", "Warning")
-        return
-    }
-    StartupPrograms.RemoveAt(index)
-    SettingsRefreshStartupProgramsList()
-    SettingsMarkDirty()
+; Per-tree seam for SteamShell-Shared.ahk's startup-programs editor: Test Launch.
+;
+; Normal window mode, not the configured one: the button exists to show whether
+; the entry works, and testing an entry set to Hidden would show nothing.
+ProductTestStartupCommand(commandLine) {
+    return LaunchStartupProgram(commandLine, "normal")
 }
 
 SettingsCategoryChanged(control, *) {
@@ -5884,7 +6009,19 @@ SettingsCompanionFieldSpecs() {
         ; a ListView's .Value is the selected row number, so the generic branch
         ; would have written "3" over the user's list.
         Map("section", "Controller", "key", "AutoMouseExeList",
-            "type", "exe-list", "default", DefaultAutoMouseExeList())
+            "type", "exe-list", "default", DefaultAutoMouseExeList()),
+        ; The Launcher Cleanup pair. Both are hand-placed side by side on their
+        ; page rather than flowed by the shared row table, which is why they are
+        ; here and not there -- and being here is what makes them SAVED: a field
+        ; the save pass cannot see is an editor that quietly discards its edits.
+        ;
+        ; movedFrom, because this one was read from [Assist] before it had a page
+        ; of its own and a portable INI is never migrated.
+        Map("section", "LauncherCleanup", "key", "LauncherProcesses",
+            "movedFrom", "Assist", "type", "exe-list",
+            "default", DefaultLauncherProcesses()),
+        Map("section", "Assist", "key", "ProtectedProcesses",
+            "type", "exe-list", "default", DefaultProtectedProcesses())
     ]
     return specs
 }
@@ -5964,8 +6101,11 @@ SettingsPopulate() {
     ; driver, leaving the first view of the window showing rows the saved mode
     ; already ignores.
     SettingsRefreshDependencies()
-    ; Not fields: a list and a status line, filled from elsewhere.
-    SettingsRefreshStartupProgramsList()
+    ; Not fields: the startup rows and a status line, filled from elsewhere. The
+    ; rows are re-handed to the shared editor rather than refreshed inside it,
+    ; because how many slots there are and where they come from is this product's
+    ; own answer.
+    SettingsStartupSetSlots(SettingsStartupSlotValues())
     SettingsRefreshLogonTaskStatus()
     SettingsDirty := false
     SettingsUpdateStatus()
@@ -6062,6 +6202,10 @@ SaveSettings(*) {
         ; The startup list is variable length, so it is written separately and
         ; before the reload -- LoadSettings would otherwise overwrite the edited
         ; in-memory list with what is still on disk.
+        ;
+        ; Collected from the editor first. Its rows are the working copy now, and
+        ; the array they are collected into is what SaveStartupPrograms writes.
+        SettingsCollectStartupPrograms()
         SaveStartupPrograms()
         SettingsDirty := false
         LoadSettings()

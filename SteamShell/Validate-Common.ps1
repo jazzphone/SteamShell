@@ -529,6 +529,18 @@ $sharedSeamAllowed = @(
     # pointer action in the shell and a click in the companion, and only the
     # companion offers the on-screen keyboard here.
     "ProductSettingsHintLine",
+    # Widened for the startup-programs editor, which moved here when the
+    # companion's version turned out to be a list box and two buttons -- add and
+    # remove, with no way to see or correct the command line of an entry already
+    # in the list, reorder it, or try it.
+    #
+    # ONE seam, and it is the same boundary ProductOpenLogFile is. Test Launch
+    # starts a program the user chose: the shell must cross the standard-user
+    # boundary because it may BE the Windows shell, the companion runs it
+    # directly or by way of Explorer. Everything else the button does -- parse
+    # the entry, refuse one whose executable is missing, report the outcome --
+    # is written once.
+    "ProductTestStartupCommand",
     # Reached the same way, from the Health Check's Export button.
     "ExportDiagnosticBundle",
     "ProductSettingBool",
@@ -549,7 +561,7 @@ $sharedSeamAllowed = @(
 # Restated here, next to the list, and asserted in Assert-SharedParity: changing
 # one without the other fails the build. Update the expectation in the same
 # commit that changes the list, and say in the message why the seam moved.
-$sharedSeamExpectedCount = 55
+$sharedSeamExpectedCount = 56
 
 # Reports same-named functions in both trees whose difference is only naming and
 # formatting -- the drift that a raw similarity score hides.

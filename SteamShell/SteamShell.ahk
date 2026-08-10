@@ -394,6 +394,10 @@ global SettingsDialogActive := false
 global SettingsStartupListView := 0
 global SettingsStartupCommandEdit := 0
 global SettingsStartupSelectedSlot := 1
+; Suppresses the command edit's Change event while the shared editor assigns it.
+; This product has SettingsEditorUpdating for the same job; the shared editor
+; cannot name it, because the companion has no such flag.
+global SettingsStartupQuiet := false
 global HealthCheckGui := unset
 global HealthCheckResults := []
 global SetupAssistantGui := unset
@@ -9640,6 +9644,16 @@ SettingsProductSetStatus(text) {
         SettingsEditorStatusCtrl.Text := text
 }
 
+; Per-tree seam for SteamShell-Shared.ahk's startup-programs editor: Test Launch.
+;
+; NOT Run(), for the reason ProductOpenLogFile gives: this product may be the
+; Windows shell, and a child it starts directly inherits its token. The window
+; mode is Normal rather than the configured one because the point of the button
+; is to SEE whether the entry works.
+ProductTestStartupCommand(commandLine) {
+    return RunStartupCommandLine(commandLine, "Normal")
+}
+
 
 SettingsEditorGetExeListValues(field) {
     values := []
@@ -9656,31 +9670,19 @@ SettingsEditorGetExeListValues(field) {
     return values
 }
 
+; The lists this product names, handed to the shared report. The exclusion list
+; is passed as the protected one, which is the list the cleanup itself honours.
 SettingsEditorPreviewLauncherCleanup(*) {
     global LC_GateText, LC_ConfigText
-    launcherField := SettingsEditorFindField("LauncherCleanup", "LauncherExeList")
-    helperField := SettingsEditorFindField("LauncherCleanup", "BackgroundExeList")
-    launchers := SettingsEditorGetExeListValues(launcherField)
-    helpers := SettingsEditorGetExeListValues(helperField)
-    runningLaunchers := []
-    runningHelpers := []
-    for _, exe in launchers {
-        if ProcessExist(exe)
-            runningLaunchers.Push(exe)
-    }
-    for _, exe in helpers {
-        if ProcessExist(exe)
-            runningHelpers.Push(exe)
-    }
-    report := "This is a read-only preview. No process will be closed.`n`n"
-        . "Running launcher targets:`n"
-        . (runningLaunchers.Length ? "  " JoinWith(runningLaunchers, "`n  ") : "  None")
-        . "`n`nRunning background-helper targets:`n"
-        . (runningHelpers.Length ? "  " JoinWith(runningHelpers, "`n  ") : "  None")
-        . "`n`nCurrent cleanup status:`n  "
-        . (LC_ConfigText != "" ? LC_ConfigText : "-")
-        . "`n  " (LC_GateText != "" ? LC_GateText : "-")
-    SettingsEditorMsgBox(report, "OK Iconi", "Launcher Cleanup Preview")
+    SettingsShowLauncherCleanupPreview(
+        SettingsEditorGetExeListValues(
+            SettingsEditorFindField("LauncherCleanup", "LauncherExeList")),
+        SettingsEditorGetExeListValues(
+            SettingsEditorFindField("LauncherCleanup", "BackgroundExeList")),
+        SettingsEditorGetExeListValues(
+            SettingsEditorFindField("LauncherCleanup", "ExcludeExeList")),
+        [LC_ConfigText, LC_GateText],
+        (text, title) => SettingsEditorMsgBox(text, "OK Iconi", title))
 }
 
 
@@ -10345,174 +10347,10 @@ SettingsEditorFindField(section, key) {
     return 0
 }
 
-SettingsEditorStartupSelectionChanged(listView, rowNumber, selected) {
-    global SettingsStartupSelectedSlot, SettingsStartupCommandEdit, SettingsEditorUpdating
-    if (!selected || rowNumber < 1)
-        return
-
-    if (SettingsStartupSelectedSlot >= 1 && IsObject(SettingsStartupCommandEdit)) {
-        currentEdit := Trim(SettingsStartupCommandEdit.Value)
-        currentStored := listView.GetText(SettingsStartupSelectedSlot, 2)
-        if (currentEdit != currentStored) {
-            listView.Modify(SettingsStartupSelectedSlot, "", SettingsStartupSelectedSlot, currentEdit)
-            SettingsEditorMarkDirty()
-        }
-    }
-
-    SettingsStartupSelectedSlot := rowNumber
-    if IsObject(SettingsStartupCommandEdit) {
-        SettingsEditorUpdating := true
-        SettingsStartupCommandEdit.Value := listView.GetText(rowNumber, 2)
-        SettingsEditorUpdating := false
-    }
-}
-
-SettingsEditorSetStartupCommand(*) {
-    global SettingsStartupListView, SettingsStartupCommandEdit, SettingsStartupSelectedSlot
-    if (!IsObject(SettingsStartupListView) || !IsObject(SettingsStartupCommandEdit))
-        return
-    commandLine := Trim(SettingsStartupCommandEdit.Value)
-    if (SettingsStartupListView.GetText(SettingsStartupSelectedSlot, 2) = commandLine)
-        return
-    SettingsStartupListView.Modify(SettingsStartupSelectedSlot, "", SettingsStartupSelectedSlot, commandLine)
-    SettingsEditorMarkDirty()
-}
-
-SettingsEditorClearStartupCommand(*) {
-    global SettingsStartupCommandEdit, SettingsEditorStatusCtrl, SettingsStartupSelectedSlot
-    if IsObject(SettingsStartupCommandEdit)
-        SettingsStartupCommandEdit.Value := ""
-    SettingsEditorSetStartupCommand()
-    if IsObject(SettingsEditorStatusCtrl)
-        SettingsEditorStatusCtrl.Text := "Removed startup program from slot " SettingsStartupSelectedSlot
-}
-
-SettingsEditorAddStartupProgram(*) {
-    global SettingsStartupListView, SettingsStartupCommandEdit, SettingsStartupSelectedSlot
-    global SettingsEditorUpdating, SettingsEditorStatusCtrl
-    if (!IsObject(SettingsStartupListView) || !IsObject(SettingsStartupCommandEdit))
-        return
-
-    startDir := A_ScriptDir
-    currentCommand := SettingsStartupListView.GetText(SettingsStartupSelectedSlot, 2)
-    currentTarget := ""
-    currentParams := ""
-    SplitTargetAndParams(currentCommand, &currentTarget, &currentParams)
-    if (currentTarget != "") {
-        fileName := ""
-        candidateDir := ""
-        try SplitPath(currentTarget, &fileName, &candidateDir)
-        if (candidateDir != "" && DirExist(candidateDir))
-            startDir := candidateDir
-    }
-
-    selectedPath := SettingsEditorFileSelect(
-        1, startDir, "Add a startup program", "Programs (*.exe)")
-    if (selectedPath = "")
-        return
-
-    targetSlot := 0
-    if (Trim(SettingsStartupListView.GetText(SettingsStartupSelectedSlot, 2)) = "")
-        targetSlot := SettingsStartupSelectedSlot
-    else {
-        Loop SettingsStartupListView.GetCount() {
-            if (Trim(SettingsStartupListView.GetText(A_Index, 2)) = "") {
-                targetSlot := A_Index
-                break
-            }
-        }
-    }
-    if (!targetSlot) {
-        SettingsEditorMsgBox(
-            "All 20 startup-program slots are already in use. Remove a program before adding another.", "Icon!")
-        return
-    }
-
-    commandLine := '"' selectedPath '"'
-    SettingsStartupListView.Modify(targetSlot, "", targetSlot, commandLine)
-    SettingsStartupSelectedSlot := targetSlot
-    SettingsEditorUpdating := true
-    SettingsStartupCommandEdit.Value := commandLine
-    SettingsEditorUpdating := false
-    SettingsStartupListView.Modify(targetSlot, "Select Focus Vis")
-    SettingsEditorMarkDirty()
-    if IsObject(SettingsEditorStatusCtrl)
-        SettingsEditorStatusCtrl.Text := "Added startup program to slot " targetSlot
-}
-
-SettingsEditorBrowseStartupProgram(*) {
-    global SettingsStartupCommandEdit, SettingsEditorStatusCtrl, SettingsStartupSelectedSlot
-    currentCommand := SettingsStartupCommandEdit.Value
-    currentTarget := ""
-    currentParams := ""
-    SplitTargetAndParams(currentCommand, &currentTarget, &currentParams)
-
-    startDir := A_ScriptDir
-    if (currentTarget != "") {
-        fileName := ""
-        candidateDir := ""
-        try SplitPath(currentTarget, &fileName, &candidateDir)
-        if (candidateDir != "" && DirExist(candidateDir))
-            startDir := candidateDir
-    }
-
-    selectedPath := SettingsEditorFileSelect(
-        1, startDir, "Select a startup program", "Programs (*.exe)")
-    if (selectedPath = "")
-        return
-    commandLine := '"' selectedPath '"'
-    if (currentParams != "")
-        commandLine .= " " currentParams
-    SettingsStartupCommandEdit.Value := commandLine
-    SettingsEditorSetStartupCommand()
-    if IsObject(SettingsEditorStatusCtrl)
-        SettingsEditorStatusCtrl.Text := "Updated startup program in slot " SettingsStartupSelectedSlot
-}
-
-SettingsEditorMoveStartupProgram(direction, *) {
-    global SettingsStartupListView, SettingsStartupCommandEdit, SettingsStartupSelectedSlot
-    global SettingsEditorUpdating, SettingsEditorStatusCtrl
-    SettingsEditorSetStartupCommand()
-    if !IsObject(SettingsStartupListView)
-        return
-    targetSlot := SettingsStartupSelectedSlot + direction
-    if (targetSlot < 1 || targetSlot > SettingsStartupListView.GetCount())
-        return
-    currentCommand := SettingsStartupListView.GetText(SettingsStartupSelectedSlot, 2)
-    targetCommand := SettingsStartupListView.GetText(targetSlot, 2)
-    SettingsStartupListView.Modify(
-        SettingsStartupSelectedSlot, "", SettingsStartupSelectedSlot, targetCommand)
-    SettingsStartupListView.Modify(targetSlot, "Select Focus Vis", targetSlot, currentCommand)
-    SettingsStartupSelectedSlot := targetSlot
-    SettingsEditorUpdating := true
-    SettingsStartupCommandEdit.Value := currentCommand
-    SettingsEditorUpdating := false
-    SettingsEditorMarkDirty()
-    if IsObject(SettingsEditorStatusCtrl)
-        SettingsEditorStatusCtrl.Text := "Moved startup command to slot " targetSlot
-}
-
-SettingsEditorTestStartupProgram(*) {
-    global SettingsStartupListView, SettingsStartupSelectedSlot, SettingsEditorStatusCtrl
-    SettingsEditorSetStartupCommand()
-    if !IsObject(SettingsStartupListView)
-        return
-    commandLine := Trim(SettingsStartupListView.GetText(SettingsStartupSelectedSlot, 2))
-    if (commandLine = "") {
-        if IsObject(SettingsEditorStatusCtrl)
-            SettingsEditorStatusCtrl.Text := "The selected startup slot is empty"
-        return
-    }
-    SplitTargetAndParams(commandLine, &target, &params)
-    if (target = "" || !FileExist(target)) {
-        SettingsEditorMsgBox("The selected startup executable could not be found.", "Icon!")
-        return
-    }
-    if RunStartupCommandLine(commandLine, "Normal")
-        SettingsEditorStatusCtrl.Text := "Test-launched startup slot " SettingsStartupSelectedSlot
-    else
-        SettingsEditorMsgBox("Windows could not test-launch the selected startup command.", "Iconx")
-}
+; The startup-programs editor and its seven handlers moved to
+; SteamShell-Shared.ahk, where the companion's page now builds the same editor.
+; The one thing this product still answers for itself is the test launch, which
+; is the ProductTestStartupCommand seam below.
 
 SettingsEditorValidateField(field, &value, &message) {
     ctrl := field["ctrl"]
@@ -10603,8 +10441,10 @@ SettingsEditorValidateField(field, &value, &message) {
 
 SettingsEditorSave(*) {
     global SettingsPath, ScriptPid, SettingsEditorFields, SettingsEditorCategories
-    global SettingsEditorDirty, SettingsEditorStatusCtrl, SettingsStartupListView
-    SettingsEditorSetStartupCommand()
+    global SettingsEditorDirty, SettingsEditorStatusCtrl
+    ; What is in the command edit belongs to the selected slot, whether or not
+    ; Apply Command was pressed.
+    SettingsStartupApplyCommand()
     pendingWrites := []
     for _, field in SettingsEditorFields {
         if !SettingsEditorValidateField(field, &value, &message) {
@@ -10630,12 +10470,10 @@ SettingsEditorSave(*) {
         FileCopy(SettingsPath, workPath, true)
         for _, item in pendingWrites
             IniWrite(item["value"], workPath, item["section"], item["key"])
-        if IsObject(SettingsStartupListView) {
-            Loop 20 {
-                commandLine := SettingsStartupListView.GetText(A_Index, 2)
-                IniWrite(commandLine, workPath, "StartupPrograms", "Program" A_Index)
-            }
-        }
+        ; Every slot, blanks included: a slot the user emptied has to be written
+        ; empty or the previous command survives the save.
+        for slot, commandLine in SettingsStartupSlotCommands()
+            IniWrite(commandLine, workPath, "StartupPrograms", "Program" slot)
         FileMove(workPath, SettingsPath, true)
     } catch as err {
         try {
@@ -10851,7 +10689,7 @@ SettingsEditorImportSettings(*) {
 }
 
 SettingsEditorResetCategory(*) {
-    global SettingsEditorFields, SettingsStartupListView
+    global SettingsEditorFields
     category := SettingsEditorGetActiveCategory()
     if (category = "")
         return
@@ -13512,36 +13350,13 @@ ShowSettingsEditor(*) {
     category := "Startup Programs"
     y := 150
     SettingsAddRowsForCategory(SettingsGui, category, "standalone", &y)
-    startupListY := y + 6
-    SettingsStartupListView := SettingsGui.AddListView(
-        "x255 y" startupListY " w690 h150 -Multi", ["Slot", "Command"])
-    SettingsStartupListView.ModifyCol(1, 55)
-    SettingsStartupListView.ModifyCol(2, 610)
+    ; The editor itself is shared. Twenty slots, read here because this product
+    ; stores them at twenty fixed keys and writes every one of them back, holes
+    ; included; the companion reads its own and hands over what it has.
+    startupSlots := []
     Loop 20
-        SettingsStartupListView.Add("", A_Index, IniReadS("StartupPrograms", "Program" A_Index, ""))
-    SettingsStartupListView.OnEvent("ItemSelect", SettingsEditorStartupSelectionChanged)
-    SettingsEditorRegisterControl(category, SettingsStartupListView)
-    startupCommandLabel := SettingsGui.AddText(
-        "x255 y" (startupListY + 158) " w690 h20", "Selected command and optional arguments")
-    SettingsEditorRegisterControl(category, startupCommandLabel)
-    SettingsStartupCommandEdit := SettingsGui.AddEdit(
-        "x255 y" (startupListY + 180) " w690", IniReadS("StartupPrograms", "Program1", ""))
-    SettingsStartupCommandEdit.OnEvent("Change", SettingsEditorMarkDirty)
-    SettingsEditorRegisterControl(category, SettingsStartupCommandEdit)
-    ; On the grid, not by hand. These were 155, 175, 155 and 175 wide on the
-    ; first line and three of 155 on the second, from columns that did not line
-    ; up with each other -- the second line also stopped 205 pixels short of the
-    ; right edge. Seven buttons over three derived columns instead.
-    startupButtonY := startupListY + 220
-    SettingsAddButtonRow(SettingsGui, category, [
-        ["Add Program…", SettingsEditorAddStartupProgram],
-        ["Browse Selected…", SettingsEditorBrowseStartupProgram],
-        ["Apply Command", SettingsEditorSetStartupCommand],
-        ["Remove Selected", SettingsEditorClearStartupCommand],
-        ["Test Launch", SettingsEditorTestStartupProgram],
-        ["Move Up", SettingsEditorMoveStartupProgram.Bind(-1)],
-        ["Move Down", SettingsEditorMoveStartupProgram.Bind(1)]], &startupButtonY)
-    SettingsStartupListView.Modify(1, "Select Focus Vis")
+        startupSlots.Push(IniReadS("StartupPrograms", "Program" A_Index, ""))
+    SettingsAddStartupProgramsEditor(SettingsGui, category, &y, startupSlots)
 
     ; Controller and cursor
     category := "Controller & Cursor"

@@ -10783,6 +10783,379 @@ SettingsExeListRemoveSelected(field, *) {
 }
 
 
+; What Launcher Cleanup would act on right now, as text for a message box.
+;
+; ONE REPORT, TWO PAGES. Both products offer this button and both wrote the same
+; paragraph -- the same heading, the same "  None", the same read-only warning --
+; over lists they name differently: the shell has launcher EXEs and background
+; helpers, the companion one combined list, and each has its own name for the
+; list that must never be closed. Those are the arguments; the paragraph is not.
+;
+; THE PROTECTED LIST IS APPLIED HERE, which the shell's version did not do. Its
+; report listed every running entry of the launcher list as a target, including
+; any the exclusion list protects -- so the one question the button is pressed to
+; answer, "what happens if I let this run", was answered wrongly for exactly the
+; processes the user had gone out of their way to protect.
+;
+; The whole button, so that nothing about the report is written twice: the
+; wording, the headings and the window title all live here, and the product
+; passes its lists, whatever it can say about its own state, and how it puts a
+; message box on screen. The last of those is the only genuine difference -- the
+; shell owns its dialogs to the Settings window, the companion promotes them to
+; topmost and stands the controller pointer down while one is up.
+SettingsShowLauncherCleanupPreview(launcherNames, helperNames, protectedNames,
+        statusLines, showCallback) {
+    showCallback(SettingsLauncherCleanupPreviewReport(
+        launcherNames, helperNames, protectedNames, statusLines),
+        "Launcher Cleanup Preview")
+}
+
+
+; helperNames is empty for a product that keeps one combined list, and the
+; section is then absent rather than empty: "Running background-helper targets:
+; None" in a product that has no such list is an answer to a question it cannot
+; be asked.
+SettingsLauncherCleanupPreviewReport(launcherNames, helperNames, protectedNames,
+        statusLines) {
+    groups := [Map("heading", "Running launcher targets",
+        "names", launcherNames)]
+    if (helperNames.Length > 0) {
+        groups.Push(Map("heading", "Running background-helper targets",
+            "names", helperNames))
+    }
+    protectedSet := Map()
+    for _, exe in protectedNames
+        protectedSet[StrLower(Trim(exe))] := true
+
+    report := "This is a read-only preview. No process will be closed."
+    heldBack := []
+    for _, group in groups {
+        running := []
+        for _, exe in group["names"] {
+            if !ProcessExist(exe)
+                continue
+            if protectedSet.Has(StrLower(Trim(exe)))
+                heldBack.Push(exe)
+            else
+                running.Push(exe)
+        }
+        report .= "`n`n" group["heading"] ":`n"
+            . (running.Length ? "  " JoinWith(running, "`n  ") : "  None")
+    }
+    report .= "`n`nRunning but protected:`n"
+        . (heldBack.Length ? "  " JoinWith(heldBack, "`n  ") : "  None")
+    report .= "`n`nCurrent cleanup status:"
+    for _, line in statusLines
+        report .= "`n  " ((Trim(line) != "") ? line : "-")
+    return report
+}
+
+
+; ==============================================================================
+; Startup-programs editor
+; ==============================================================================
+; The list of programs a product starts for the user, and everything that edits
+; one: pick a slot, see its command line, browse for an executable, reorder it,
+; test it, remove it.
+;
+; THE COMPANION'S VERSION WAS A LIST BOX AND TWO BUTTONS. It could add a program
+; and remove a program, and nothing else -- no arguments, no ordering, no test
+; launch, and no way to see or correct the command line of an entry already in
+; the list. The shell has had all of that for as long as the page has existed.
+; Nothing was recorded as the reason, because there is not one: the two pages
+; were written at different times by different hands, and the smaller one was
+; never revisited.
+;
+; SLOT COUNT IS THE CALLER'S, and that is a real difference rather than a
+; layout one. The shell keeps twenty fixed slots and writes every one of them,
+; holes included; the companion reads up to forty and stores them packed. The
+; editor does not care -- it shows the rows it is handed -- so neither product
+; has to change how it stores anything to share the editor that edits it.
+SettingsAddStartupProgramsEditor(guiObj, category, &y, slotValues) {
+    global SettingsStartupListView, SettingsStartupCommandEdit
+    global SettingsStartupSelectedSlot
+    layout := SettingsLayout()
+    listY := y + 6
+    SettingsStartupListView := guiObj.AddListView(
+        "x" layout["contentX"] " y" listY
+        . " w" layout["contentWidth"] " h150 -Multi", ["Slot", "Command"])
+    SettingsStartupListView.ModifyCol(1, 55)
+    SettingsStartupListView.ModifyCol(2, layout["contentWidth"] - 80)
+    for index, value in slotValues
+        SettingsStartupListView.Add("", index, value)
+    SettingsStartupListView.OnEvent("ItemSelect", SettingsStartupSelectionChanged)
+    SettingsProductTrackControl(category, SettingsStartupListView)
+
+    commandLabel := guiObj.AddText("x" layout["contentX"]
+        . " y" (listY + 158) " w" layout["contentWidth"] " h20",
+        "Selected command and optional arguments")
+    SettingsProductTrackControl(category, commandLabel)
+    SettingsStartupCommandEdit := guiObj.AddEdit(
+        "x" layout["contentX"] " y" (listY + 180) " w" layout["contentWidth"],
+        slotValues.Length ? slotValues[1] : "")
+    SettingsStartupCommandEdit.OnEvent("Change", SettingsStartupMarkDirty)
+    SettingsProductTrackControl(category, SettingsStartupCommandEdit)
+    SettingsStartupSelectedSlot := 1
+
+    y := listY + 220
+    SettingsAddButtonRow(guiObj, category, [
+        ["Add Program…", SettingsStartupAddProgram],
+        ["Browse Selected…", SettingsStartupBrowseProgram],
+        ["Apply Command", SettingsStartupApplyCommand],
+        ["Remove Selected", SettingsStartupClearCommand],
+        ["Test Launch", SettingsStartupTestProgram],
+        ["Move Up", SettingsStartupMoveProgram.Bind(-1)],
+        ["Move Down", SettingsStartupMoveProgram.Bind(1)]], &y)
+    if SettingsStartupListView.GetCount()
+        SettingsStartupListView.Modify(1, "Select Focus Vis")
+    return SettingsStartupListView
+}
+
+
+; Refills an editor that is already built, for a product that re-reads the INI
+; without rebuilding its Settings window.
+;
+; The shell destroys and rebuilds on Reload INI, so it never needs this; the
+; companion re-populates in place, and a startup list that kept showing the rows
+; from before the reload would be the one control on the page still displaying
+; the old file.
+SettingsStartupSetSlots(slotValues) {
+    global SettingsStartupListView, SettingsStartupSelectedSlot
+    if !IsObject(SettingsStartupListView)
+        return
+    SettingsStartupListView.Delete()
+    for index, value in slotValues
+        SettingsStartupListView.Add("", index, value)
+    SettingsStartupSelectedSlot := 1
+    SettingsStartupSetCommandText(slotValues.Length ? slotValues[1] : "")
+    if SettingsStartupListView.GetCount()
+        SettingsStartupListView.Modify(1, "Select Focus Vis")
+}
+
+
+; The command line held by every slot, in order, ready for a product to write.
+;
+; Blank slots are INCLUDED, because the shell writes holes and the companion
+; packs them; deciding that here would decide it for both.
+SettingsStartupSlotCommands() {
+    global SettingsStartupListView
+    commands := []
+    if !IsObject(SettingsStartupListView)
+        return commands
+    ; A destroyed window leaves the global holding a control object that answers
+    ; nothing, and a save that ran against it would throw halfway. Empty is the
+    ; answer both callers already treat as "there is no editor to read".
+    try {
+        Loop SettingsStartupListView.GetCount()
+            commands.Push(SettingsStartupListView.GetText(A_Index, 2))
+    } catch {
+        return []
+    }
+    return commands
+}
+
+
+; The edit control is filled programmatically whenever the selection moves, and
+; an Edit fires Change when it is assigned as readily as when it is typed into.
+; Without this the window is "modified" the moment a row is clicked, and the
+; shell's own flag for that -- SettingsEditorUpdating -- is a shell global the
+; companion has no equivalent of.
+SettingsStartupSetCommandText(value) {
+    global SettingsStartupCommandEdit, SettingsStartupQuiet
+    if !IsObject(SettingsStartupCommandEdit)
+        return
+    SettingsStartupQuiet := true
+    try SettingsStartupCommandEdit.Value := value
+    SettingsStartupQuiet := false
+}
+
+
+SettingsStartupMarkDirty(*) {
+    global SettingsStartupQuiet
+    if SettingsStartupQuiet
+        return
+    SettingsProductMarkDirty()
+}
+
+
+; Moving off a row keeps what was typed for it. The edit is the working copy of
+; one slot, so leaving without applying would silently discard the edit.
+SettingsStartupSelectionChanged(listView, rowNumber, selected) {
+    global SettingsStartupSelectedSlot, SettingsStartupCommandEdit
+    if (!selected || rowNumber < 1)
+        return
+
+    if (SettingsStartupSelectedSlot >= 1 && IsObject(SettingsStartupCommandEdit)) {
+        currentEdit := Trim(SettingsStartupCommandEdit.Value)
+        currentStored := listView.GetText(SettingsStartupSelectedSlot, 2)
+        if (currentEdit != currentStored) {
+            listView.Modify(SettingsStartupSelectedSlot, "",
+                SettingsStartupSelectedSlot, currentEdit)
+            SettingsProductMarkDirty()
+        }
+    }
+
+    SettingsStartupSelectedSlot := rowNumber
+    SettingsStartupSetCommandText(listView.GetText(rowNumber, 2))
+}
+
+
+SettingsStartupApplyCommand(*) {
+    global SettingsStartupListView, SettingsStartupCommandEdit
+    global SettingsStartupSelectedSlot
+    if (!IsObject(SettingsStartupListView) || !IsObject(SettingsStartupCommandEdit))
+        return
+    commandLine := Trim(SettingsStartupCommandEdit.Value)
+    if (SettingsStartupListView.GetText(SettingsStartupSelectedSlot, 2) = commandLine)
+        return
+    SettingsStartupListView.Modify(SettingsStartupSelectedSlot, "",
+        SettingsStartupSelectedSlot, commandLine)
+    SettingsProductMarkDirty()
+}
+
+
+SettingsStartupClearCommand(*) {
+    global SettingsStartupCommandEdit, SettingsStartupSelectedSlot
+    if IsObject(SettingsStartupCommandEdit)
+        SettingsStartupCommandEdit.Value := ""
+    SettingsStartupApplyCommand()
+    SettingsProductSetStatus(
+        "Removed startup program from slot " SettingsStartupSelectedSlot)
+}
+
+
+SettingsStartupAddProgram(*) {
+    global SettingsStartupListView, SettingsStartupCommandEdit
+    global SettingsStartupSelectedSlot
+    if (!IsObject(SettingsStartupListView) || !IsObject(SettingsStartupCommandEdit))
+        return
+
+    startDir := SettingsStartupStartDirectory(
+        SettingsStartupListView.GetText(SettingsStartupSelectedSlot, 2))
+    selectedPath := SettingsProductSelectExe("Add a startup program", startDir)
+    if (selectedPath = "")
+        return
+
+    ; The selected slot when it is empty, otherwise the first empty one. Adding
+    ; must never overwrite an entry the user can see.
+    targetSlot := 0
+    if (Trim(SettingsStartupListView.GetText(SettingsStartupSelectedSlot, 2)) = "")
+        targetSlot := SettingsStartupSelectedSlot
+    else {
+        Loop SettingsStartupListView.GetCount() {
+            if (Trim(SettingsStartupListView.GetText(A_Index, 2)) = "") {
+                targetSlot := A_Index
+                break
+            }
+        }
+    }
+    if (!targetSlot) {
+        SettingsProductFieldMessage("All "
+            . SettingsStartupListView.GetCount() " startup-program slots are "
+            . "already in use. Remove a program before adding another.")
+        return
+    }
+
+    commandLine := '"' selectedPath '"'
+    SettingsStartupListView.Modify(targetSlot, "", targetSlot, commandLine)
+    SettingsStartupSelectedSlot := targetSlot
+    SettingsStartupSetCommandText(commandLine)
+    SettingsStartupListView.Modify(targetSlot, "Select Focus Vis")
+    SettingsProductMarkDirty()
+    SettingsProductSetStatus("Added startup program to slot " targetSlot)
+}
+
+
+SettingsStartupBrowseProgram(*) {
+    global SettingsStartupCommandEdit, SettingsStartupSelectedSlot
+    if !IsObject(SettingsStartupCommandEdit)
+        return
+    currentCommand := SettingsStartupCommandEdit.Value
+    currentTarget := ""
+    currentParams := ""
+    SplitStartupCommandLine(currentCommand, &currentTarget, &currentParams)
+
+    selectedPath := SettingsProductSelectExe("Select a startup program",
+        SettingsStartupStartDirectory(currentCommand))
+    if (selectedPath = "")
+        return
+    ; ARGUMENTS SURVIVE THE BROWSE. Replacing the executable of an entry that
+    ; carries switches is the common reason to press this.
+    commandLine := '"' selectedPath '"'
+    if (currentParams != "")
+        commandLine .= " " currentParams
+    SettingsStartupCommandEdit.Value := commandLine
+    SettingsStartupApplyCommand()
+    SettingsProductSetStatus(
+        "Updated startup program in slot " SettingsStartupSelectedSlot)
+}
+
+
+SettingsStartupMoveProgram(direction, *) {
+    global SettingsStartupListView, SettingsStartupSelectedSlot
+    SettingsStartupApplyCommand()
+    if !IsObject(SettingsStartupListView)
+        return
+    targetSlot := SettingsStartupSelectedSlot + direction
+    if (targetSlot < 1 || targetSlot > SettingsStartupListView.GetCount())
+        return
+    currentCommand := SettingsStartupListView.GetText(SettingsStartupSelectedSlot, 2)
+    targetCommand := SettingsStartupListView.GetText(targetSlot, 2)
+    SettingsStartupListView.Modify(SettingsStartupSelectedSlot, "",
+        SettingsStartupSelectedSlot, targetCommand)
+    SettingsStartupListView.Modify(targetSlot, "Select Focus Vis",
+        targetSlot, currentCommand)
+    SettingsStartupSelectedSlot := targetSlot
+    SettingsStartupSetCommandText(currentCommand)
+    SettingsProductMarkDirty()
+    SettingsProductSetStatus("Moved startup command to slot " targetSlot)
+}
+
+
+SettingsStartupTestProgram(*) {
+    global SettingsStartupListView, SettingsStartupSelectedSlot
+    SettingsStartupApplyCommand()
+    if !IsObject(SettingsStartupListView)
+        return
+    commandLine := Trim(
+        SettingsStartupListView.GetText(SettingsStartupSelectedSlot, 2))
+    if (commandLine = "") {
+        SettingsProductSetStatus("The selected startup slot is empty")
+        return
+    }
+    target := ""
+    params := ""
+    SplitStartupCommandLine(commandLine, &target, &params)
+    if (target = "" || !FileExist(target)) {
+        SettingsProductFieldMessage(
+            "The selected startup executable could not be found.")
+        return
+    }
+    if ProductTestStartupCommand(commandLine)
+        SettingsProductSetStatus(
+            "Test-launched startup slot " SettingsStartupSelectedSlot)
+    else
+        SettingsProductFieldMessage(
+            "Windows could not test-launch the selected startup command.")
+}
+
+
+; Where a file dialog for this entry should open: beside the executable it names,
+; or beside the program itself when the entry is empty or unparseable.
+SettingsStartupStartDirectory(commandLine) {
+    target := ""
+    params := ""
+    SplitStartupCommandLine(commandLine, &target, &params)
+    if (target = "")
+        return A_ScriptDir
+    fileName := ""
+    candidateDir := ""
+    try SplitPath(target, &fileName, &candidateDir)
+    return (candidateDir != "" && DirExist(candidateDir))
+        ? candidateDir : A_ScriptDir
+}
+
+
 ; Explanatory text under a control, not bound to any setting.
 ;
 ; Registered with its category like every other control, so it shows and hides

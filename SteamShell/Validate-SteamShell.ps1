@@ -3824,6 +3824,11 @@ $standardLaunchOnlyFunctions = @(
     # window and left a bare Run() behind it -- caught here, on the first
     # Windows run after the move. The shell's half is a seam now.
     "ProductOpenLogFile",
+    # The startup editor's Test Launch, which is the same boundary one step
+    # removed: the editor moved to SteamShell-Shared.ahk and this is the seam it
+    # asks. It must stay a call to RunStartupCommandLine -- a Run() written here
+    # would hand this product's token to whatever the user typed into a slot.
+    "ProductTestStartupCommand",
     "SettingsEditorOpenIni",
     "SettingsEditorOpenRtss"
 )
