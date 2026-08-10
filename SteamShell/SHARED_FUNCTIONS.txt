@@ -382,6 +382,9 @@ SettingsAddRowsForCategory
 SettingsAddShortcutField
 SettingsAddSliderField
 SettingsAddTextField
+SettingsCategoryDefinitions
+SettingsCategoryDescriptionFor
+SettingsCategoryNamesFor
 SettingsCategoryRows
 SettingsExeListAddRecent
 SettingsExeListBrowse

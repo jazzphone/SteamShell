@@ -9439,8 +9439,13 @@ SettingsEditorReportLayoutAudit() {
         SettingsEditorAuditLayout(), SettingsEditorShowLayoutWarning)
 }
 
-SettingsEditorAddHeading(category, title, description) {
+; The description comes from the shared category table, not from the call site.
+; Nine of these carried their text inline, which is how the two products came to
+; describe the same page differently without anyone deciding to.
+SettingsEditorAddHeading(category, title, description := "") {
     global SettingsGui
+    if (description = "")
+        description := SettingsCategoryDescriptionFor(title, "standalone")
     titleCtrl := SettingsGui.AddText("x245 y78 w710 h28", GuiLiteralText(title))
     titleCtrl.SetFont("s15 Bold", "Segoe UI")
     descCtrl := SettingsGui.AddText("x245 y108 w710 h34 +Wrap", GuiLiteralText(description))
@@ -13497,17 +13502,10 @@ ShowSettingsEditor(*) {
     SettingsEditorControlPositions := Map()
     SettingsEditorCategoryOffsets := Map()
     SettingsEditorFooterControls := []
-    SettingsEditorCategories := [
-        "General",
-        "Startup & Splash",
-        "Startup Programs",
-        "Controller & Cursor",
-        "Steam",
-        "Focus & Windows",
-        "RTSS & Performance",
-        "Launcher Cleanup",
-        "Advanced & Logging"
-    ]
+    ; From the shared definition, so the two products cannot list the same pages
+    ; in different orders again. This array was that list written out, and the
+    ; companion had its own; seven names appeared in both, in a different order.
+    SettingsEditorCategories := SettingsCategoryNamesFor("standalone")
     SettingsEditorDirty := false
     SettingsEditorUpdating := false
     SettingsStartupSelectedSlot := 1

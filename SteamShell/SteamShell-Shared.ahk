@@ -10801,6 +10801,95 @@ SettingsAddNote(guiObj, category, text, &y, height := 34) {
 
 
 ; ==============================================================================
+; Settings categories
+; ==============================================================================
+; The pages, their ORDER, and what each one says about itself -- for both
+; products, in one list.
+;
+; They were two lists. The shell's was a hard-coded array of nine names with its
+; descriptions written inline at each SettingsEditorAddHeading call; the
+; companion's was a table of eight names and descriptions of its own. Seven
+; names appeared in both and in a DIFFERENT ORDER, so the same product opened on
+; a page in one position and the other product opened on it in another, for no
+; reason anybody had chosen -- the two lists were simply written at different
+; times.
+;
+; The order here is the SHELL'S, unchanged, with the companion's one exclusive
+; page slotted beside the standalone page it corresponds to: Assist is the
+; companion's lightweight answer to Focus & Windows, so it sits where Focus &
+; Windows sits. That is the "moved, not merged" rule applied to an ordering --
+; the more complete list wins and the other product moves, rather than inventing
+; a third order neither product has been using.
+;
+; Three pages are genuinely one-product. Startup & Splash and Focus & Windows
+; need a splash screen and a window engine, neither of which the companion has;
+; Assist needs the companion's lite helpers, which the shell does not have
+; because it has the full engine instead. Those will differ however closely
+; everything else matches, and the "product" field is how they say so.
+;
+; DESCRIPTIONS MAY DIFFER PER PRODUCT, through xfeDescription, for the same
+; reason row labels may differ through xfeLabel: standalone's Controller page
+; talks about desktop mode, which the companion does not have. Where a page
+; means the same thing in both, it says it the same way.
+SettingsCategoryDefinitions() {
+    static definitions := [
+        Map("name", "General", "product", "both",
+            "description", "Core shell behavior and which modules appear in the living-room Quick Menu.",
+            "xfeDescription", "Quick Menu, heartbeat, and the controls shown in the living-room interface."),
+        Map("name", "Startup & Splash", "product", "standalone",
+            "description", "SteamShell stays at normal integrity. The optional helper provides controller input and window geometry for administrator windows."),
+        Map("name", "Startup Programs", "product", "both",
+            "description", "Add up to 20 standard-user programs. Select a row to edit its command or optional arguments.",
+            "xfeDescription", "Applications launched shortly after the companion starts."),
+        Map("name", "Controller & Cursor", "product", "both",
+            "description", "Shell mode uses an allowlist; Windows desktop mode can cover every app except your exclusions.",
+            "xfeDescription", "View/Back mappings, controller pointer behavior, cursor hiding, and parking."),
+        Map("name", "Steam", "product", "both",
+            "description", "What the View/Back button does on a press that was not used to reach a mapping.",
+            "xfeDescription", "Steam shortcuts, and which View button actions are enabled."),
+        Map("name", "Focus & Windows", "product", "standalone",
+            "description", "One coordinated engine inventories windows, applies bounded geometry corrections, and selects one focus winner."),
+        Map("name", "Assist", "product", "xfe",
+            "description", "Optional automatic help: game focus, Steam return, and when to stay out of the way."),
+        Map("name", "RTSS & Performance", "product", "both",
+            "description", "Live RTSS state is used when available; configured shortcuts remain the compatibility fallback.",
+            "xfeDescription", "RTSS executable, DLL live-state mode, shortcut fallback, and cap controls."),
+        Map("name", "Launcher Cleanup", "product", "both",
+            "description", "Optional cleanup after returning to Steam. EXE lists are saved automatically in the required pipe-separated format.",
+            "xfeDescription", "Closing game launchers that keep running after the game has exited."),
+        Map("name", "Advanced & Logging", "product", "both",
+            "description", "Common diagnostics are available here. Open the Diagnostics Panel for timed overrides and detailed status.",
+            "xfeDescription", "Portable files, diagnostics, cursor test, reload, and companion lifecycle.")
+    ]
+    return definitions
+}
+
+
+; The page names this product shows, in order.
+SettingsCategoryNamesFor(product) {
+    names := []
+    for _, definition in SettingsCategoryDefinitions() {
+        if (definition["product"] = "both" || definition["product"] = product)
+            names.Push(definition["name"])
+    }
+    return names
+}
+
+
+; What a page says about itself in this product, or "" for a page it does not have.
+SettingsCategoryDescriptionFor(name, product) {
+    for _, definition in SettingsCategoryDefinitions() {
+        if (definition["name"] != name)
+            continue
+        if (product = "xfe" && definition.Has("xfeDescription"))
+            return definition["xfeDescription"]
+        return definition["description"]
+    }
+    return ""
+}
+
+
+; ==============================================================================
 ; Live log viewer
 ; ==============================================================================
 ; A live, auto-refreshing view of the log file, with the buttons that go with it.

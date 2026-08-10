@@ -3727,8 +3727,13 @@ function Assert-SharedParity {
     # working.
     $shellText = Get-SourceText (
         Join-Path $projectRoot "SteamShell.ahk")
+    # The page list is SettingsCategoryDefinitions now, not an array written out
+    # in the shell, so the first half asks the shared table whether standalone
+    # gets a Steam page and the second still asks the shell whether it draws it.
+    $sharedCategoryText = Get-SourceText (
+        Join-Path $projectRoot "SteamShell-Shared.ahk")
     Assert-True (
-        $shellText -match '(?s)SettingsEditorCategories := \[(?:(?!\]).)*?"Steam"' -and
+        $sharedCategoryText -match '"name", "Steam", "product", "(both|standalone)"' -and
         $shellText -match
             '(?s)category := "Steam"[\s\S]{0,400}?' +
             'SettingsAddRowsForCategory\(SettingsGui, category, "standalone"') (

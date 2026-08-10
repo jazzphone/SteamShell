@@ -5771,30 +5771,21 @@ SettingsRestoreAfterProbe() {
 ; The one definition of the Settings categories. The list box, the page titles,
 ; the descriptions and LT/RT wrapping all read from here, so adding a category
 ; cannot leave one of them behind.
+; This product's pages, from the shared definition.
+;
+; It was a table of eight names and descriptions written here, while the shell
+; had its own array of nine. Seven names were in both and in a DIFFERENT ORDER,
+; so the same page sat in a different position depending on which product you
+; opened -- not a decision anyone made, just two lists written at different
+; times. SettingsCategoryDefinitions is the one list now, and this shapes it
+; into the [name, description] pairs the rest of this window already expects.
 SettingsCategoryTable() {
-    static categories := [
-        ["General",
-            "Quick Menu, heartbeat, and the controls shown in the living-room interface."],
-        ["Controller & Cursor",
-            "View/Back mappings, controller pointer behavior, cursor hiding, and parking."],
-        ["Steam",
-            "Steam shortcuts, and which View button actions are enabled."],
-        ["RTSS & Performance",
-            "RTSS executable, DLL live-state mode, shortcut fallback, and cap controls."],
-        ["Startup Programs",
-            "Applications launched shortly after the companion starts."],
-        ["Assist",
-            "Optional automatic help: game focus, Steam return, and when to stay "
-            . "out of the way."],
-        ["Launcher Cleanup",
-            "Closing game launchers that keep running after the game has exited."],
-        ; "Advanced & Logging", matching the shell. It was "Advanced" here, which
-        ; meant the shared row table had to be asked for one name while the page
-        ; was drawn under another -- the tableKey argument existed for this single
-        ; case. Same rows, same page, same name now, and the argument is gone.
-        ["Advanced & Logging",
-            "Portable files, diagnostics, cursor test, reload, and companion lifecycle."]
-    ]
+    static categories := unset
+    if IsSet(categories)
+        return categories
+    categories := []
+    for _, name in SettingsCategoryNamesFor("xfe")
+        categories.Push([name, SettingsCategoryDescriptionFor(name, "xfe")])
     return categories
 }
 

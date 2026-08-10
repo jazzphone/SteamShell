@@ -2431,7 +2431,11 @@ def check_view_button_actions(sources):
     # DRAW a Steam page or they are unreachable however they are tagged. That is
     # how they shipped invisible the first time.
     shell = sources["SteamShell.ahk"]
-    if not (re.search(r"(?s)SettingsEditorCategories := \[(?:(?!\]).)*?\"Steam\"", shell)
+    shared = sources["SteamShell-Shared.ahk"]
+    # The page list is SettingsCategoryDefinitions now, not an array written out
+    # in the shell -- so the first half asks the shared table whether standalone
+    # gets a Steam page, and the second still asks the shell whether it draws it.
+    if not (re.search(r'"name", "Steam", "product", "(both|standalone)"', shared)
             and re.search(r'(?s)category := "Steam"[\s\S]{0,400}?'
                           r'SettingsAddRowsForCategory\(SettingsGui, category, "standalone"', shell)):
         fail("SteamShell.ahk defines Steam settings rows but does not draw a Steam "
