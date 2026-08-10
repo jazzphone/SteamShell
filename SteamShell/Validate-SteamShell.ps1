@@ -1408,6 +1408,26 @@ Assert-True (
         'IniReadS\("Controller", "DesktopAutoMouseExcludeExeList", ""\)') (
     "Desktop-wide automatic mouse mode, exclusions, Settings, or tray control are disconnected.")
 
+# The shell's Settings pages lay out through the SHARED builders, not by hand.
+#
+# Every action button was placed at a literal x, y and width, which is how the
+# two products came to draw the same page differently -- and how a fourth button
+# once ended up hanging off the window before somebody split the row by hand.
+# SettingsAddButtonRow derives its columns from the content width, so it cannot.
+#
+# The page headings carried their description as a literal at each call site
+# while the companion kept its own table of descriptions, so the same page could
+# describe itself differently in each product without anyone deciding to. They
+# come from SettingsCategoryDescriptionFor now.
+Assert-True (
+    $source -notmatch 'SettingsEditorAddActionButton' -and
+    $source -match '(?s)category := "Controller & Cursor"[\s\S]{0,1600}?SettingsAddButtonRow\(SettingsGui' -and
+    $source -notmatch 'SettingsEditorAddHeading\(category, "[^"]+"\s*\r?\n\s*,') (
+    "The shell's Settings pages must place their buttons with the shared " +
+    "SettingsAddButtonRow and take their page descriptions from the shared " +
+    "category table; hand-placed coordinates and inline descriptions are how " +
+    "the two products' pages drifted apart.")
+
 # THE LIVE LOG WINDOW SIZES ITSELF FROM ITS CONTENT.
 #
 # It asked for 460, 520 or 600 depending on A_ScreenHeight, and 600 is about

@@ -9823,14 +9823,6 @@ SettingsEditorRecordShortcut(field, *) {
         SettingsEditorStatusCtrl.Text := "Recorded " result["display"] " for " field["label"]
 }
 
-SettingsEditorAddActionButton(category, label, callback, x, y, width := 210) {
-    global SettingsGui
-    ctrl := SettingsGui.AddButton("x" x " y" y " w" width " h30", label)
-    ctrl.OnEvent("Click", callback)
-    SettingsEditorRegisterControl(category, ctrl)
-    return ctrl
-}
-
 SettingsEditorBrowsePath(field, prompt, filter, *) {
     currentPath := NormalizeMediaPath(field["ctrl"].Value)
     startDir := A_ScriptDir
@@ -13549,8 +13541,7 @@ ShowSettingsEditor(*) {
 
     ; General
     category := "General"
-    SettingsEditorAddHeading(category, "General"
-        , "Core shell behavior and which modules appear in the living-room Quick Menu.")
+    SettingsEditorAddHeading(category, "General")
     y := 150
     ; Audio and Display row visibility is NOT edited here. "Customize Quick
     ; Menu..." at the bottom of this page owns which MAIN rows appear, and it
@@ -13564,19 +13555,23 @@ ShowSettingsEditor(*) {
     ; ShowGameDetection above stays, because the layout manager covers MAIN rows
     ; and that row lives under System.
     SettingsAddRowsForCategory(SettingsGui, category, "standalone", &y)
-    SettingsEditorAddActionButton(category, "Customize Quick Menu…", ShowQuickMenuLayoutManager, 255, y + 6, 240)
+    ; The SHARED button row, which the companion has always used. These were
+    ; hand-placed at a literal x, y and width per button, which is how the two
+    ; products came to lay the same page out differently -- and how a fourth
+    ; button once ended up hanging off the window. The row derives its columns
+    ; from the content width, so it cannot.
+    SettingsAddButtonRow(SettingsGui, category, [
+        ["Customize Quick Menu…", ShowQuickMenuLayoutManager]], &y)
 
     ; Startup and splash
     category := "Startup & Splash"
-    SettingsEditorAddHeading(category, "Startup & Splash"
-        , "SteamShell stays at normal integrity. The optional helper provides controller input and window geometry for administrator windows.")
+    SettingsEditorAddHeading(category, "Startup & Splash")
     y := 150
     SettingsAddRowsForCategory(SettingsGui, category, "standalone", &y)
 
     ; Startup programs
     category := "Startup Programs"
-    SettingsEditorAddHeading(category, "Startup Programs"
-        , "Add up to 20 standard-user programs. Select a row to edit its command or optional arguments.")
+    SettingsEditorAddHeading(category, "Startup Programs")
     y := 150
     SettingsAddRowsForCategory(SettingsGui, category, "standalone", &y)
     startupListY := y + 6
@@ -13612,39 +13607,39 @@ ShowSettingsEditor(*) {
 
     ; Controller and cursor
     category := "Controller & Cursor"
-    SettingsEditorAddHeading(category, "Controller & Cursor"
-        , "Shell mode uses an allowlist; Windows desktop mode can cover every app except your exclusions.")
+    SettingsEditorAddHeading(category, "Controller & Cursor")
     y := 150
     ; The rows themselves are defined once, in SteamShell-Shared.ahk, so this
     ; page and the companion's cannot describe the same settings differently.
     SettingsAddRowsForCategory(SettingsGui, category, "standalone", &y)
-    ; Three across the content width, not two-plus-one hanging off the edge.
-    ; 255 + 690 is where the content ends, so 260-wide buttons at 255, 525 and
-    ; 795 put the third one 75 pixels past the window.
-    SettingsEditorAddActionButton(category, "Open Controller Mapping…", ShowControllerMappingWindow, 255, y + 5, 220)
-    SettingsEditorAddActionButton(category, "Test / Calibrate Controller…", ShowControllerTest, 490, y + 5, 220)
-    SettingsEditorAddActionButton(category, "Learn Controller…", ShowControllerLearner, 725, y + 5, 220)
-    ; A second row rather than a fourth button on the first. The three above are
-    ; 220 wide at 255, 490 and 725, which ends at 945 -- exactly the content
-    ; right edge -- so there is no fourth slot, and SharedAuditSettingsLayout
-    ; fails a control that crosses that boundary rather than letting it hang off
-    ; the window the way the two-plus-one layout used to.
+    ; THE SAME BUTTONS, IN THE SAME ORDER, AS THE COMPANION'S PAGE. These were
+    ; four hand-placed calls at literal coordinates, grouped three-then-one with
+    ; Delete Learned Profile deliberately under Learn Controller; the companion
+    ; grouped the same four as mappings/learn/delete then test. Two products,
+    ; one page, two groupings and two sets of labels -- neither of which anybody
+    ; chose against the other.
     ;
-    ; 43 px below the row above, the same gap that row keeps from the fields
-    ; below it, so a 30 px button clears both by 13.
-    ;
-    ; It sits under Learn Controller because it undoes exactly what Learn
-    ; Controller does. This product offers the learner in two places and offered
-    ; no way to undo it: a mis-learned axis reads as permanently deflected, the
-    ; pointer runs across the screen, and this is the Windows shell, so there is
-    ; no desktop to fall back to while you fix it. Also on Ctrl+Alt+Shift+D, for
-    ; the case where the pointer is exactly what you have lost.
-    SettingsEditorAddActionButton(category, "Delete Learned Profile",
-        DeleteControllerProfileForActiveDevice, 725, y + 48, 220)
-    autoMouseY := y + 91
+    ; The shared row derives its columns from the content width, which is how
+    ; the hand-placed version came to have a fourth button hanging off the
+    ; window before it was split into two lines by hand.
+    SettingsAddButtonRow(SettingsGui, category, [
+        ["Controller Mappings…", ShowControllerMappingWindow],
+        ["Learn Controller…", ShowControllerLearner],
+        ["Delete Learned Profile", DeleteControllerProfileForActiveDevice]], &y)
+    ; Second row, as the companion has it. Delete Learned Profile sits beside
+    ; Learn Controller rather than under it now -- it undoes exactly what that
+    ; button does, and adjacency says so as well as verticality did.
+    SettingsAddButtonRow(SettingsGui, category, [
+        ["Test / Calibrate Controller…", ShowControllerTest]], &y)
     ; The value is read HERE rather than inside the builder, which is what let
     ; the builder move to SteamShell-Shared.ahk: this tree reads with IniReadS
     ; and the companion with ReadText, and neither has to be the other's.
+    ;
+    ; Two lists side by side because this page has two RELATED lists -- an
+    ; allowlist and its exclusions -- and stacking them puts a scroll between a
+    ; pair meant to be compared. The cursor advances by the shared height rather
+    ; than a hand-typed offset, which is the part that was drifting.
+    autoMouseY := y
     SettingsAddExeListField(SettingsGui,
         category, "Controller", "AutoMouseExeList",
         "Shell-mode automatic mouse allowlist", 255, autoMouseY, 335,
@@ -13653,6 +13648,7 @@ ShowSettingsEditor(*) {
         category, "Controller", "DesktopAutoMouseExcludeExeList",
         "Desktop-mode exclusions (games/apps)", 610, autoMouseY, 335,
         IniReadS("Controller", "DesktopAutoMouseExcludeExeList", ""))
+    y += SettingsExeListHeight()
 
     ; Steam
     ;
@@ -13663,15 +13659,13 @@ ShowSettingsEditor(*) {
     ; that can only be changed by hand-editing the INI is not a setting most
     ; users have.
     category := "Steam"
-    SettingsEditorAddHeading(category, "Steam"
-        , "What the View/Back button does on a press that was not used to reach a mapping.")
+    SettingsEditorAddHeading(category, "Steam")
     y := 150
     SettingsAddRowsForCategory(SettingsGui, category, "standalone", &y)
 
     ; Focus
     category := "Focus & Windows"
-    SettingsEditorAddHeading(category, "Focus & Windows"
-        , "One coordinated engine inventories windows, applies bounded geometry corrections, and selects one focus winner.")
+    SettingsEditorAddHeading(category, "Focus & Windows")
     y := 150
     SettingsAddRowsForCategory(SettingsGui, category, "standalone", &y)
     ; Hand-placed, and the only settings row that is. The companion compiles
@@ -13691,21 +13685,21 @@ ShowSettingsEditor(*) {
         category, "WindowManagement", "ExcludeExeList",
         "Never center or maximize these EXEs", 255, exclusionY, 690,
         IniReadS("WindowManagement", "ExcludeExeList", ""))
-    SettingsEditorAddActionButton(
-        category, "Open AlwaysFocus Manager…", ShowAlwaysFocusManager, 255, exclusionY + 204, 260)
+    y := exclusionY + SettingsExeListHeight()
+    SettingsAddButtonRow(SettingsGui, category, [
+        ["Open AlwaysFocus Manager…", ShowAlwaysFocusManager]], &y)
 
     ; RTSS
     category := "RTSS & Performance"
-    SettingsEditorAddHeading(category, "RTSS & Performance"
-        , "Live RTSS state is used when available; configured shortcuts remain the compatibility fallback.")
+    SettingsEditorAddHeading(category, "RTSS & Performance")
     y := 150
     SettingsAddRowsForCategory(SettingsGui, category, "standalone", &y)
-    SettingsEditorAddActionButton(category, "Launch Selected RTSS", SettingsEditorOpenRtss, 255, y + 4, 220)
+    SettingsAddButtonRow(SettingsGui, category, [
+        ["Launch Selected RTSS", SettingsEditorOpenRtss]], &y)
 
     ; Launcher cleanup
     category := "Launcher Cleanup"
-    SettingsEditorAddHeading(category, "Launcher Cleanup"
-        , "Optional cleanup after returning to Steam. EXE lists are saved automatically in the required pipe-separated format.")
+    SettingsEditorAddHeading(category, "Launcher Cleanup")
     y := 150
     SettingsAddRowsForCategory(SettingsGui, category, "standalone", &y)
     listY := y + 8
@@ -13720,15 +13714,14 @@ ShowSettingsEditor(*) {
         category, "LauncherCleanup", "BackgroundExeList",
         "Background helper EXEs to close", 255, helperListY, 690,
         IniReadS("LauncherCleanup", "BackgroundExeList", ""))
-    SettingsEditorAddActionButton(
-        category, "Preview Running Cleanup Targets…",
-        SettingsEditorPreviewLauncherCleanup, 255, helperListY + 204, 300)
+    y := helperListY + SettingsExeListHeight()
+    SettingsAddButtonRow(SettingsGui, category, [
+        ["Preview Running Cleanup Targets…", SettingsEditorPreviewLauncherCleanup]], &y)
     y := helperListY + 242
 
     ; Advanced and logging
     category := "Advanced & Logging"
-    SettingsEditorAddHeading(category, "Advanced & Logging"
-        , "Common diagnostics are available here. Open the Diagnostics Panel for timed overrides and detailed status.")
+    SettingsEditorAddHeading(category, "Advanced & Logging")
     y := 150
     SettingsAddRowsForCategory(SettingsGui, category, "standalone", &y)
     actionY := y + 12
