@@ -2056,6 +2056,26 @@ function Assert-RecentApplicationPicker {
         "picker would offer one entry that stands for all of them and write it " +
         "into an exe list as if it named a single application.")
 
+    # THE SECOND ROUTE TO THE PICKER, which is now the companion's only one.
+    #
+    # This check used to require the tree's OWN file to name ShowApplicationPicker,
+    # which was right while each tree wired its own Recent… button. The exe-list
+    # field moved to SteamShell-Shared.ahk and took the button with it, so the
+    # companion reaches the picker by BUILDING A FIELD -- and the check read that
+    # as the picker being dead, when it is on a button in both products.
+    #
+    # Reachable still means WIRED, so the whole chain is verified here rather than
+    # the field's name being accepted as a promise: the builder puts
+    # SettingsExeListAddRecent on a button, and that function opens the picker. A
+    # tree that builds one of these fields has the picker on a button by
+    # construction. Break any link and this route stops counting, which is what
+    # keeps it from being a hole in the check.
+    $exeListBuilder = Get-AhkFunctionBody -Source $sharedText -Name "SettingsAddExeListField"
+    $exeListRecent = Get-AhkFunctionBody -Source $sharedText -Name "SettingsExeListAddRecent"
+    $sharedFieldRoute =
+        ($exeListBuilder -match 'OnEvent\("Click",\s*SettingsExeListAddRecent\.Bind\(') -and
+        ($exeListRecent -match 'ShowApplicationPicker\(')
+
     foreach ($pair in @(
         @{ Name = "SteamShell.ahk";     Product = "the shell" },
         @{ Name = "SteamShell-XFE.ahk"; Product = "the companion" })) {
@@ -2078,9 +2098,12 @@ function Assert-RecentApplicationPicker {
         # Reachable means WIRED. Comments naming it are not a route to it.
         $code = (((Get-SourceLines (Join-Path $ProjectRoot $pair.Name)) |
             ForEach-Object { $_ -replace '(?<!`);.*$', '' }) -join "`n")
-        Assert-True ($code -match 'ShowApplicationPicker\(') (
-            "$($pair.Name) never opens ShowApplicationPicker. It is compiled " +
-            "into $($pair.Product) from the shared file and would be dead: the " +
+        Assert-True (
+            ($code -match 'ShowApplicationPicker\(') -or
+            ($sharedFieldRoute -and $code -match 'SettingsAddExeListField\(')) (
+            "$($pair.Name) never opens ShowApplicationPicker, directly or by " +
+            "building a shared exe-list field. It is compiled into " +
+            "$($pair.Product) from the shared file and would be dead: the " +
             "history would be recorded and never offered to anybody.")
     }
     if (-not $Quiet) {

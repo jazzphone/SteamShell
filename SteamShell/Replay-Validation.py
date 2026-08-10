@@ -1996,6 +1996,58 @@ def check_learner_guard(sources):
                  "word -- that turns every button held at close into a press edge.")
 
 
+def check_recent_application_picker(sources):
+    """The recent-application picker is on a button in BOTH products.
+
+    Replays Assert-RecentApplicationPicker's reachability half from
+    Validate-Common.ps1. Ported after it caught a regression on Windows that
+    this harness sat green through: the companion's only opener was deleted when
+    the exe-list field moved to SteamShell-Shared.ahk, and nothing here noticed.
+    The whole point of this script is that the Windows box is not the first
+    place to find out, and a check living in PowerShell code rather than in the
+    Assert-True table is exactly the kind this script has to restate.
+
+    TWO ROUTES, because the button moved into the shared file. A tree may open
+    the picker itself, or build a shared exe-list field -- whose Recent… button
+    opens it. The second route verifies the CHAIN rather than accepting the
+    field's name as a promise: the builder wires SettingsExeListAddRecent to a
+    button, and that function opens the picker. Break a link and the route stops
+    counting.
+
+    Comments are stripped first. A function named in the sentence explaining why
+    it is not called is not a call to it.
+    """
+    # Comment LINES dropped, string bodies kept. strip_code_noise blanks string
+    # literals too, which is right for the call scan below and wrong here: the
+    # wiring this looks for is OnEvent("Click", ...), and a blanked literal makes
+    # the chain unmatchable and the route silently unavailable. That is how the
+    # first draft of this check reported the companion as unreachable when it
+    # was not. Whole-line drop is what the PowerShell leak scan does, and it
+    # still keeps a commented-out wiring from answering for real code.
+    shared = "\n".join(line for line in sources["SteamShell-Shared.ahk"].split("\n")
+                       if not line.lstrip().startswith(";"))
+    if not function_body(shared, "ShowApplicationPicker"):
+        fail("SteamShell-Shared.ahk defines no ShowApplicationPicker(); the "
+             "recent-application picker is no longer shared and this check "
+             "cannot see what replaced it.")
+    builder = function_body(shared, "SettingsAddExeListField")
+    recent = function_body(shared, "SettingsExeListAddRecent")
+    field_route = bool(
+        re.search(r'OnEvent\("Click",\s*SettingsExeListAddRecent\.Bind\(', builder)
+        and re.search(r"ShowApplicationPicker\(", recent))
+
+    for name, product in (("SteamShell.ahk", "the shell"),
+                          ("SteamShell-XFE.ahk", "the companion")):
+        code = strip_code_noise(sources[name])
+        direct = bool(re.search(r"ShowApplicationPicker\(", code))
+        viaField = field_route and bool(re.search(r"SettingsAddExeListField\(", code))
+        if not (direct or viaField):
+            fail(f"{name} never opens ShowApplicationPicker, directly or by "
+                 f"building a shared exe-list field. It is compiled into "
+                 f"{product} from the shared file and would be dead: the "
+                 "history would be recorded and never offered to anybody.")
+
+
 def check_source_encoding():
     """Every source must still decode as UTF-8.
 
@@ -2198,6 +2250,7 @@ def main():
     check_controller_poll_frame(sources)
     check_learner_guard(sources)
     check_rtss_limiter_restore(sources)
+    check_recent_application_picker(sources)
     check_source_encoding()
     check_settings_row_placement(sources)
     check_view_button_actions(sources)
