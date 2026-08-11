@@ -5350,7 +5350,14 @@ ShowSettings(*) {
     y += 12
     SettingsAddButtonRow(settings, category, [
         ["Open INI", (*) => Run(IniPath)],
-        ["Open Log", ProductOpenLogFile],
+        ; LiveLogOpenFile, not ProductOpenLogFile. The seam is written to be
+        ; CALLED -- it takes no parameters -- and a Click handler is passed the
+        ; control and the event info, so registering it here threw "Invalid
+        ; callback function" the moment this page was opened. LiveLogOpenFile is
+        ; the shared (*) wrapper the Live Log window's own button already uses,
+        ; and it creates the log first, so this button also works on a companion
+        ; that has not written one yet.
+        ["Open Log", LiveLogOpenFile],
         ["Live Log", ShowLiveLogWindow],
         ["Health Check", ShowHealthCheck],
         ["Reload INI", ReloadSettings],
@@ -5634,6 +5641,11 @@ ProductSettingsHintLine() {
 ; process with no elevation to leak, which is why its own "Open Log" item has
 ; always done exactly this; the shell is the Windows shell and has to cross the
 ; standard-user boundary explicitly.
+;
+; CALLED, NEVER REGISTERED. It takes no parameters, so handing it to OnEvent
+; throws "Invalid callback function" -- which is what the Settings page did, and
+; it reached a Windows build because the name, the seam list and every assertion
+; about it were all correct. Buttons go through LiveLogOpenFile(*) instead.
 ProductOpenLogFile() {
     global LogPath
     try Run(LogPath)

@@ -2653,6 +2653,70 @@ def check_rtss_limiter_restore(sources):
              "not survive a reboot whenever RTSS holds a different frame cap.")
 
 
+def _callback_parameter_list(text, name):
+    """The parameter list of a top-level definition, or None if it is not one.
+
+    Deliberately only recognises the single-line header shape. A wrapped header
+    returns None and the caller SKIPS the name: this check may only fail on a
+    violation it positively identified, never on one it could not parse.
+    """
+    m = re.search(r"(?mi)^" + re.escape(name) + r"\(([^)\n]*)\)\s*\{", text)
+    if not m:
+        return None
+    return [p.strip() for p in m.group(1).split(",") if p.strip()]
+
+
+def check_event_callback_arity(sources):
+    """A function registered as an event handler must be able to accept the
+    values AutoHotkey passes it.
+
+    THIS IS THE ONE THAT PASSED A FULL WINDOWS BUILD AND CRASHED ON OPEN.
+    ProductOpenLogFile is a seam written to be CALLED -- ProductOpenLogFile(),
+    no parameters -- and the companion's Advanced & Logging page registered it
+    directly as a button's Click handler. AutoHotkey calls a Click handler with
+    the control and the event info, so OnEvent rejected it with "Invalid
+    callback function" the instant the page was drawn. Nothing static caught it:
+    the name exists, it is a real function, it is in the seam list, and every
+    assertion about it passed. Only the ARITY was wrong, and arity is not
+    something any of the other checks here look at.
+
+    The rule is deliberately weaker than AutoHotkey's own so that it cannot
+    produce a false build failure: a handler must be variadic OR declare at
+    least two parameters. Every event used in this project passes at least the
+    control and one more value, so nothing correct is rejected -- and a
+    zero-parameter seam wired to a button, which is the whole defect, cannot get
+    past it. Names that cannot be resolved to a single-line definition in the
+    tree being checked are skipped rather than guessed at.
+
+    Resolved per TREE, against the include-expanded source, because that is what
+    AutoHotkey compiles. ReloadSettings is the case that makes this matter: the
+    companion's is ReloadSettings(*) and the shell's is ReloadSettings(), and
+    only the companion registers it as a handler.
+    """
+    for tree in ("SteamShell.ahk", "SteamShell-XFE.ahk"):
+        text = _effective_source(tree)
+        references = set()
+        for m in re.finditer(r'OnEvent\(\s*"[^"]+"\s*,\s*([A-Za-z_]\w*)\s*[,)]', text):
+            references.add((m.group(1), 'registered with OnEvent'))
+        # The button-row tables: ["Label", Handler] pairs that
+        # SettingsAddButtonRow hands straight to button.OnEvent("Click", ...).
+        for m in re.finditer(r'\[\s*"[^"]*"\s*,\s*([A-Za-z_]\w*)\s*\]', text):
+            references.add((m.group(1), 'used as a button-row action'))
+        for name, kind in sorted(references):
+            params = _callback_parameter_list(text, name)
+            if params is None:
+                continue
+            if params and params[-1].startswith("*"):
+                continue
+            if len(params) >= 2:
+                continue
+            fail(f"{tree}: {name} is {kind} but is defined as "
+                 f"{name}({', '.join(params)}) -- AutoHotkey passes an event "
+                 "handler the control and the event info, so this throws "
+                 "\"Invalid callback function\" the moment the control is "
+                 "created. Define it (*) or call it from a (*) wrapper.")
+
+
 def main():
     sources = {name: read_source(name) for name in ALL_FILES}
     maps = {name: function_map(text) for name, text in sources.items()}
@@ -2665,6 +2729,7 @@ def main():
     check_controller_poll_frame(sources)
     check_learner_guard(sources)
     check_rtss_limiter_restore(sources)
+    check_event_callback_arity(sources)
     check_settings_category_extraction(sources)
     check_validator_extractors_still_match(sources)
     check_shared_seams_exist_in_both_trees(sources)

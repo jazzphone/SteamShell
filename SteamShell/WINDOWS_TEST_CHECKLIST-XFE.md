@@ -1543,6 +1543,13 @@ setting than the one shown, silently.
 - Confirm a save that succeeds but fails to re-apply now says "Saved, but
   applying it failed" rather than reporting a save failure for a change that is
   already on disk.
+- **Open Settings from the Quick Menu at all.** The Advanced & Logging page threw
+  `Error: Invalid callback function` on `button.OnEvent("Click", entry[2])` and
+  the window never drew — `ProductOpenLogFile` is a seam that takes no
+  parameters and it had been wired straight to the Open Log button. Confirm the
+  page opens, then press **Open Log** and confirm Notepad opens the companion's
+  log. Delete the log first and press it again: it must create the file rather
+  than fail.
 - Confirm no `.tmp` staging file is left beside `<ini>-Controllers.ini` after
   learning a controller profile, and that one left by a killed run is swept on
   the next start — the profile file stages through the same commit as the

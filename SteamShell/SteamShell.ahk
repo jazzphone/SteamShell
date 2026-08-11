@@ -9581,6 +9581,10 @@ ProductSettingsHintLine() {
 ; its token unless it goes through LaunchInteractiveApp, and the assertion list
 ; below in Validate-SteamShell.ps1 names this function for that reason. It is
 ; the body OpenLogFile had before the Live Log window moved to the shared file.
+;
+; CALLED, NEVER REGISTERED -- it takes no parameters, so handing it to OnEvent
+; throws "Invalid callback function". LiveLogOpenFile(*) is the wrapper any
+; control should be wired to; the companion learned this the expensive way.
 ProductOpenLogFile() {
     global LogPath
     pid := 0
