@@ -1,0 +1,87 @@
+# Every window a TREE builds for itself, and why it is not built once.
+#
+# Why this file exists
+# --------------------
+# DIVERGENT_FUNCTIONS.txt records functions defined in BOTH trees under the SAME
+# name. CROSS_NAME_DUPLICATES.txt records pairs the anchor detector recognised
+# under different names. Between them sits a gap that neither can see, and two
+# real defects have already fallen into it:
+#
+#   - A SURFACE ONLY ONE TREE HAS never enters the fingerprint comparison at all,
+#     because that comparison needs a function of the same name in both. The
+#     controller test window sat in the shell alone for its whole life. Nothing
+#     was wrong with it; nothing ever ASKED whether the companion should have it,
+#     and the answer when finally asked was yes, in one commit, with no
+#     product-specific code in it.
+#
+#   - A SURFACE BOTH TREES HAVE UNDER DIFFERENT NAMES is invisible to the same
+#     comparison, and the cross-name detector is the backstop that should catch
+#     it. For the mapping editor it does not: ShowControllerMappingWindow and
+#     ShowMappingEditor score 0.33 on call sequence and share three calls, which
+#     is what two hand-written UIs over the same data look like. Below any
+#     threshold, and the threshold cannot be lowered to reach it without drowning
+#     the report.
+#
+# So the gate here is not a similarity measure. It is an INVENTORY: every Gui a
+# tree file creates must be named here with a reason. Unlisted fails, and an
+# entry whose function is gone fails too, so the file cannot rot into a list
+# nobody revisits.
+#
+# A window built in SteamShell-Shared.ahk needs no entry. That is the goal state,
+# and the absence of an entry is what says so.
+#
+# Format
+# ------
+#   FunctionName: the reason this tree builds its own
+#
+# ONE ENTRY IS ONE LINE, however long the reason runs -- the same rule
+# DIVERGENT_FUNCTIONS.txt states, for the same reason: blank lines and comments
+# separate sections, not entries.
+#
+# An entry with no reason fails. "Shell-only" is not a reason; WHY it is
+# shell-only is. Where the honest answer is that nobody has looked, the entry
+# says that, because a recorded unknown is worth more than an invented
+# architecture -- the same point OpenWindowsSettings makes in
+# DIVERGENT_FUNCTIONS.txt: absence from a file is not evidence of consideration.
+
+# ------------------------------------------------------------------------------
+# SteamShell.ahk -- the shell owns presentation
+# ------------------------------------------------------------------------------
+# Xbox FSE owns the screen for the companion. Every window in this section exists
+# because the shell replaces Explorer and has to draw what Explorer drew, or has
+# to recover when replacing it went wrong. None of them has a companion meaning.
+
+ShowSplash: the boot curtain the shell draws over a bare desktop while it starts; the companion starts inside Xbox FSE, which is already drawing something
+CreateSplashFadeOverlay: the splash's fade layer, and it exists only for as long as the splash does
+EnsureDesktopBackdrop: the shell replaces Explorer's desktop and must put something behind the icons it removed; there is no desktop under the companion to back
+ShowStartupRecovery: the way out when starting AS THE SHELL failed, which is a state only the program registered as the shell can reach
+ShowDesktopRestoreRecovery: the same family -- restoring Explorer after the shell has taken it over, which the companion never does
+ShowSetupAssistant: shell registration, auto-logon and the takeover flow; the companion is an ordinary application and never becomes the shell
+SetupAssistantConfigureAutologon: the Setup Assistant's auto-logon page, and it goes wherever its parent goes
+ShowSetupCompletionDialog: what Setup shows when it finishes, so it belongs to Setup and is shell-only for the same reason
+ChooseSteamShellProductToRemove: the removal chooser. It offers BOTH products, which is why it lives here and not in the companion: the shell's Setup is what installed them, holds the administrator token and owns the shell registration that has to be handed back. A companion asked to remove the shell could not undo the registration it never made.
+ShowAlwaysFocusManager: the Always Focus list, which is a shell feature; the companion leaves focus to Xbox FSE
+ShowControlPanel: the shell's own status and control window. The companion answers the same need from its tray and its Settings Advanced page rather than a separate window, so this is a shape difference rather than a missing feature.
+
+# ------------------------------------------------------------------------------
+# Both trees -- already recorded elsewhere
+# ------------------------------------------------------------------------------
+# These are genuinely per-product and the reason lives in another file; the entry
+# here exists so the inventory is complete and points at it.
+
+QuickMenuBuildGui: both products build their own Quick Menu window, and it is a named seam -- $sharedSeamAllowed in Validate-Common.ps1 carries it, with the rows themselves shared through QUICKMENU_ROWS.txt so the two windows cannot describe different menus
+RecordShortcutChord: recorded in DIVERGENT_FUNCTIONS.txt -- each tree's capture window writes back through its own Settings field registry, and the two registries are shaped differently
+ShowSettingsEditor: the shell's Settings implementation, one of the two ProductSettingsScrollBar records; the two windows are separate implementations and merge when they do
+ShowSettings: the companion's Settings implementation, the other half of the pair above
+
+# ------------------------------------------------------------------------------
+# QUEUED -- known duplication, decision pending
+# ------------------------------------------------------------------------------
+# An entry here is a reason to act, not a reason to stay. It fails nothing today
+# and is meant to stop being true.
+#
+# EMPTY, and it did stop being true. The mapping editor was the pair recorded
+# here -- ShowControllerMappingWindow against ShowMappingEditor, 299 lines
+# against 145, the same editor over the same data written twice and invisible to
+# both similarity gates. It is one window in SteamShell-Shared.ahk now, so it
+# needs no entry at all, which is what this file's absence of an entry means.

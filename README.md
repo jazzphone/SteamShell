@@ -244,8 +244,8 @@ One executable installs both products. It embeds the elevated helper and the XFE
 and deploys whichever you choose through its Setup Assistant.
 
 Verify it if you like — the same binary is committed at
-`releases/2.0.1/current/SteamShell.exe`, and its SHA-256 is in
-[`releases/2.0.1/RELEASE.md`](releases/2.0.1/RELEASE.md) alongside the exact source that
+`releases/2.0.2/current/SteamShell.exe`, and its SHA-256 is in
+[`releases/2.0.2/RELEASE.md`](releases/2.0.2/RELEASE.md) alongside the exact source that
 produced it.
 
 ## Getting started
