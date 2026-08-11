@@ -2491,29 +2491,41 @@ SettingsRefreshLogonTaskStatus() {
 ; ==============================================================================
 ; Startup programs
 ; ==============================================================================
+; One startup entry as stored, normalised. NormalizePath is this product's own
+; step -- it accepts a path the user may have typed with a trailing space or a
+; stray quote -- and it is why the read is a callback rather than a loop here.
+StartupProgramIniValue(key) {
+    global IniPath
+    value := ""
+    try value := IniRead(IniPath, "StartupPrograms", key, "")
+    return NormalizePath(value)
+}
+
+; THE LOOP MOVED TO SteamShell-Common.ahk. This was a hand-written copy of
+; ReadStartupProgramList -- same ceiling, same skip-the-blanks rule -- that
+; neither manifest could see, because a loop with no string literal and no
+; DllCall gives the duplicate check nothing to anchor on.
 LoadStartupPrograms() {
-    global IniPath, StartupPrograms
-    StartupPrograms := []
-    index := 1
-    while (index <= 40) {
-        value := ""
-        try value := IniRead(IniPath, "StartupPrograms", "Program" index, "")
-        value := NormalizePath(value)
-        if (value != "")
-            StartupPrograms.Push(value)
-        index += 1
-    }
+    global StartupPrograms
+    StartupPrograms := ReadStartupProgramList(StartupProgramIniValue)
+    ; Reported once per load, at Warning, because this build reaches twenty slots
+    ; and an older settings file may hold more. Nothing is deleted; the report
+    ; itself is in SteamShell-Common.ahk, so both products say it once.
+    ReportStartupProgramsBeyondSlotCount(StartupProgramIniValue)
 }
 
 SaveStartupPrograms() {
     global IniPath, StartupPrograms
     index := 1
     for _, path in StartupPrograms {
+        if (index > StartupProgramSlotCount())
+            break
         IniWrite(path, IniPath, "StartupPrograms", "Program" index)
         index += 1
     }
-    ; Clear any entries left over from a longer previous list.
-    while (index <= 40) {
+    ; Clear any entries left over from a longer previous list -- within the slots
+    ; this build owns. Anything past them is left exactly as it was found.
+    while (index <= StartupProgramSlotCount()) {
         try IniDelete(IniPath, "StartupPrograms", "Program" index)
         index += 1
     }
@@ -5909,12 +5921,12 @@ SettingsCategoryNames() {
     return names
 }
 
-; The in-memory list as editor rows: what this product has, padded to the forty
-; slots it can store. The pad is what gives the user somewhere to add to.
+; The in-memory list as editor rows: what this product has, padded to the slot
+; count both products share. The pad is what gives the user somewhere to add to.
 SettingsStartupSlotValues() {
     global StartupPrograms
     slots := []
-    Loop 40
+    Loop StartupProgramSlotCount()
         slots.Push(A_Index <= StartupPrograms.Length
             ? StartupPrograms[A_Index] : "")
     return slots

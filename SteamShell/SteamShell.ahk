@@ -10714,7 +10714,7 @@ SettingsEditorResetCategory(*) {
         }
     }
     if (category = "Startup Programs") {
-        Loop 20 {
+        Loop StartupProgramSlotCount() {
             key := "Program" A_Index
             lookupKey := "StartupPrograms" Chr(31) key
             changes.Push(Map(
@@ -11029,7 +11029,7 @@ ProductHealthResults() {
     startupEnabled := ReadBool("StartupPrograms", "Enable", true)
     invalidStartup := []
     configuredStartup := 0
-    Loop 20 {
+    Loop StartupProgramSlotCount() {
         commandLine := Trim(IniReadS("StartupPrograms", "Program" A_Index, ""))
         if (commandLine = "")
             continue
@@ -13350,11 +13350,17 @@ ShowSettingsEditor(*) {
     category := "Startup Programs"
     y := 150
     SettingsAddRowsForCategory(SettingsGui, category, "standalone", &y)
-    ; The editor itself is shared. Twenty slots, read here because this product
-    ; stores them at twenty fixed keys and writes every one of them back, holes
-    ; included; the companion reads its own and hands over what it has.
+    ; The editor itself is shared, and the slot count comes from
+    ; SteamShell-Common.ahk so this page cannot show fewer slots than the
+    ; launcher reads -- which is exactly what it did while this said 20 and
+    ; ReadStartupProgramList said 40.
+    ;
+    ; Read here, rather than through ReadStartupProgramList, because the editor
+    ; wants the slots AS STORED: the shared reader packs, and packing is what an
+    ; editor showing slot numbers must not do to the rows it is about to let the
+    ; user reorder.
     startupSlots := []
-    Loop 20
+    Loop StartupProgramSlotCount()
         startupSlots.Push(IniReadS("StartupPrograms", "Program" A_Index, ""))
     SettingsAddStartupProgramsEditor(SettingsGui, category, &y, startupSlots)
 
@@ -15965,6 +15971,11 @@ StartUserStartupProgramsNow() {
         IniReadS("StartupPrograms", "WindowMode", "Hidden"))
     staggerMs := ReadInt("StartupPrograms", "StaggerMs", 1200, 0, 30000)
     programs := ReadStartupProgramList(
+        (key) => IniReadS("StartupPrograms", key, ""))
+    ; The same report the companion makes, from the same function: this product
+    ; read forty slots and showed twenty, so a settings file can hold entries that
+    ; USED to launch here and no longer do. Nothing is deleted; the log names them.
+    ReportStartupProgramsBeyondSlotCount(
         (key) => IniReadS("StartupPrograms", key, ""))
     SharedLaunchWithStagger(
         programs, staggerMs, (entry) => RunStartupCommandLine(entry, windowMode))

@@ -111,6 +111,7 @@ ReadIniBool
 ReadIniInt
 ReadStartupProgramList
 ReleaseControllerMouseButtons
+ReportStartupProgramsBeyondSlotCount
 ResetControllerEdgeState
 ResolveXInputDll
 RtssFrameCapModeIsKnown
@@ -132,6 +133,7 @@ SharedReportSettingsLayoutAudit
 ShortenText
 SortCandidatesByScoreAreaDesc
 SplitStartupCommandLine
+StartupProgramSlotCount
 SteamShellPathIsAdminOnlyWritable
 StrRepeat
 SweepAbandonedIniUpdates

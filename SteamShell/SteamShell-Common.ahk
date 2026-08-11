@@ -2362,16 +2362,69 @@ SplitStartupCommandLine(commandLine, &target, &arguments) {
     return target != ""
 }
 
-; Read the configured list. Forty slots in both -- the shell stopped at twenty,
-; so entries 21..40 were accepted by its editor and never launched.
+; How many startup programs either product offers. ONE NUMBER, and it is the
+; answer to a question that had four different ones.
+;
+; The count used to be 40 here and 20 in every other place the shell mentions a
+; startup slot -- its Settings editor, its Health Check validation, its category
+; reset and the Program1..Program20 block in the INI it ships. So the shell
+; LAUNCHED forty and could only show, check or reset twenty: an entry at slot 21
+; ran at every boot while being invisible to the editor, absent from the health
+; report and untouched by "Restore Category Defaults".
+;
+; Twenty is the number, chosen by the user: it is what the shipped INI documents,
+; what the shell has always presented, and more startup programs than a
+; living-room machine has any business launching at sign-in. The companion
+; offered forty and now offers twenty; StartupProgramsBeyondSlotCount below is
+; what keeps that from being a silent loss.
+StartupProgramSlotCount() {
+    return 20
+}
+
+
+; Read the configured list, packed: blanks are skipped, so slot numbering is a
+; display convenience rather than an order the launcher depends on.
 ReadStartupProgramList(readValue) {
     programs := []
-    Loop 40 {
+    Loop StartupProgramSlotCount() {
         entry := Trim(readValue("Program" A_Index))
         if (entry != "")
             programs.Push(entry)
     }
     return programs
+}
+
+
+; Entries stored past the last slot, which nothing will launch.
+;
+; The companion accepted up to forty, so an existing settings file can hold
+; entries this build no longer reaches. They are NOT deleted -- a saved settings
+; file is the user's, and quietly dropping five programs on the first save after
+; an update is not a thing a program should do. They are reported instead, by
+; name, so the log says what happened and the file can be edited by hand.
+;
+; The ceiling is the companion's old count. Nothing ever wrote beyond it.
+;
+; THE MESSAGE IS HERE TOO, not in each product's loader. Both trees reported
+; this, in the same words, over lists read the same way -- which is two copies of
+; one sentence, and the duplicate check paired them on it within a minute of the
+; second one being written.
+ReportStartupProgramsBeyondSlotCount(readValue) {
+    beyond := []
+    index := StartupProgramSlotCount() + 1
+    while (index <= 40) {
+        if (Trim(readValue("Program" index)) != "")
+            beyond.Push("Program" index)
+        index += 1
+    }
+    if (beyond.Length = 0)
+        return beyond
+    LogLine("Startup programs beyond slot " StartupProgramSlotCount()
+        . " are no longer launched and are not shown in Settings: "
+        . JoinWith(beyond, ", ")
+        . ". They are still in the settings file; move one into a free slot to "
+        . "use it.", "Warning")
+    return beyond
 }
 
 ; "hidden" | "minimized" | "normal", from whatever the INI says.

@@ -10866,11 +10866,18 @@ SettingsLauncherCleanupPreviewReport(launcherNames, helperNames, protectedNames,
 ; were written at different times by different hands, and the smaller one was
 ; never revisited.
 ;
-; SLOT COUNT IS THE CALLER'S, and that is a real difference rather than a
-; layout one. The shell keeps twenty fixed slots and writes every one of them,
-; holes included; the companion reads up to forty and stores them packed. The
-; editor does not care -- it shows the rows it is handed -- so neither product
-; has to change how it stores anything to share the editor that edits it.
+; THE SLOTS COME IN AS ROWS, and the count behind them is one number in
+; SteamShell-Common.ahk -- StartupProgramSlotCount. It was called "the caller's,
+; and a real difference" when this was written, on the strength of the shell
+; keeping twenty and the companion forty. That was wrong, and the correction is
+; worth keeping: the shell's LAUNCHER read forty through ReadStartupProgramList
+; while its editor, its Health Check, its category reset and its shipped INI all
+; said twenty, so slot 21 ran at every boot and could not be seen or removed.
+; Not two storage models -- one product disagreeing with itself.
+;
+; What is still the caller's is how the rows reach the INI: the shell stages a
+; copy of the settings file and moves it over the original, the companion writes
+; keys directly. That one is real.
 SettingsAddStartupProgramsEditor(guiObj, category, &y, slotValues) {
     global SettingsStartupListView, SettingsStartupCommandEdit
     global SettingsStartupSelectedSlot
@@ -11453,9 +11460,14 @@ SettingsCategoryDefinitions() {
             "xfeDescription", "Quick Menu, heartbeat, and the controls shown in the living-room interface."),
         Map("name", "Startup & Splash", "product", "standalone",
             "description", "SteamShell stays at normal integrity. The optional helper provides controller input and window geometry for administrator windows."),
+        ; ONE SENTENCE NOW, and the xfeDescription that stood beside it is gone.
+        ; It said "Applications launched shortly after the companion starts",
+        ; which described a page with a list box and two buttons. Both products
+        ; build the same editor over the same twenty slots and launch on the
+        ; ordinary user's token, so there is nothing left for the second sentence
+        ; to say differently.
         Map("name", "Startup Programs", "product", "both",
-            "description", "Add up to 20 standard-user programs. Select a row to edit its command or optional arguments.",
-            "xfeDescription", "Applications launched shortly after the companion starts."),
+            "description", "Add up to 20 standard-user programs. Select a row to edit its command or optional arguments."),
         Map("name", "Controller & Cursor", "product", "both",
             "description", "Shell mode uses an allowlist; Windows desktop mode can cover every app except your exclusions.",
             "xfeDescription", "View/Back mappings, controller pointer behavior, cursor hiding, and parking."),
