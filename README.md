@@ -28,7 +28,7 @@ status panel as much as a control one. D-pad moves, A selects, Left/Right change
 without opening anything.*
 
 <details>
-<summary><b>More screenshots</b> — Settings editor, tray menu, Control Panel</summary>
+<summary><b>More screenshots</b> — Settings editor, tray menu</summary>
 
 ### Settings editor
 
@@ -42,10 +42,6 @@ The escape hatch — everything here is reachable with a keyboard alone, which i
 controller learner and its undo live in it.
 
 ![SteamShell tray menu on the Windows desktop](SteamShell/images/tray-menu-desktop.png)
-
-### Control Panel
-
-![SteamShell Control Panel running inside Steam Big Picture](SteamShell/images/control-panel.png)
 
 </details>
 

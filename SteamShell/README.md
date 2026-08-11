@@ -32,9 +32,6 @@ reach.
 
 ![SteamShell tray menu on the Windows desktop, showing Open Quick Menu, Open Settings, Open Diagnostics, Learn Controller, Delete Learned Profile, Automatic Mouse Throughout Desktop, Return to SteamShell, Reload Settings and Exit](images/tray-menu-desktop.png)
 
-### Control Panel (live in Steam Big Picture)
-![SteamShell Control Panel](images/control-panel.png)
-
 **The full picture tour — every Quick Menu page and every Settings category — is
 in the [Wiki](../../../wiki).**
 
