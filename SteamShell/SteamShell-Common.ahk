@@ -3134,8 +3134,15 @@ CommitIniChangesAt(iniPath, ownerPid, changes, deletes := 0) {
         for _, item in changes
             IniWrite(item["value"], workPath, item["section"], item["key"])
         if IsObject(deletes) {
+            ; A key that is already absent satisfies "make sure this is not
+            ; here", so a delete that finds nothing must not abandon the batch
+            ; the caller's other changes are riding on. Every caller pushes
+            ; deletes speculatively -- the mapping editor clears a .Display key
+            ; that may never have existed, the companion's startup save clears
+            ; every slot past the end of the list -- and a genuine permission or
+            ; disk fault still fails at the FileCopy or FileMove bracketing this.
             for _, item in deletes
-                IniDelete(workPath, item["section"], item["key"])
+                try IniDelete(workPath, item["section"], item["key"])
         }
         FileMove(workPath, iniPath, true)
         return true
@@ -3163,6 +3170,15 @@ CommitIniChangesAt(iniPath, ownerPid, changes, deletes := 0) {
 ; the user is expected to be able to read. Shared with the commit above rather
 ; than left behind with it: a product that stages without sweeping trades one
 ; kind of litter for another.
+;
+; MATCHES THE CONVENTION, NOT ONE SUFFIX. This swept "<ini>.update-<pid>.tmp"
+; only -- the name the commit above happens to use -- while standalone stages
+; under four more of its own: .unicode-, .migration-, .import- and .reset-, none
+; of which were ever cleaned up. The sweeper had been tidying after the one path
+; that could not litter without the others being noticed. Any
+; "<ini>.<word>-<pid>.tmp" beside the settings file is a staging file by this
+; project's naming, so that is what it looks for, and a fifth suffix invented
+; later is swept without anyone having to remember this function exists.
 SweepAbandonedIniUpdates(iniPath, ownerPid) {
     settingsDirectory := ""
     settingsName := ""
@@ -3171,8 +3187,8 @@ SweepAbandonedIniUpdates(iniPath, ownerPid) {
         return 0
     removed := 0
     try {
-        Loop Files, settingsDirectory "\" settingsName ".update-*.tmp" {
-            if !RegExMatch(A_LoopFileName, "\.update-(\d+)\.tmp$", &match)
+        Loop Files, settingsDirectory "\" settingsName ".*.tmp" {
+            if !RegExMatch(A_LoopFileName, "\.[A-Za-z]+-(\d+)\.tmp$", &match)
                 continue
             abandonedPid := Integer(match[1])
             ; Never touch a live commit -- the caller's, or a second instance's.

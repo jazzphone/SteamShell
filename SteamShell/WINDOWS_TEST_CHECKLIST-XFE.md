@@ -1533,6 +1533,20 @@ setting than the one shown, silently.
   the leftover staging file is swept on startup rather than accumulating.
 - Make the INI read-only and Save. The companion must report the failure and
   leave the original file intact and readable.
+- **The Settings window's own Save & Apply is staged too, as of this pass** — it
+  was the last direct writer, looping `IniWrite` over every field and then
+  writing the startup slots separately afterwards. Change a field on one page AND
+  edit the startup list, then Save & Apply, and confirm both land together. With
+  the INI read-only, confirm the status line reads that the previous settings
+  were kept and that the startup slots on disk are unchanged; the fields could
+  previously fail and leave the startup slots written anyway.
+- Confirm a save that succeeds but fails to re-apply now says "Saved, but
+  applying it failed" rather than reporting a save failure for a change that is
+  already on disk.
+- Confirm no `.tmp` staging file is left beside `<ini>-Controllers.ini` after
+  learning a controller profile, and that one left by a killed run is swept on
+  the next start — the profile file stages through the same commit as the
+  settings file but was previously swept by nothing.
 
 ## Launcher Cleanup is its own page
 

@@ -457,11 +457,12 @@ compile), if the shared file defines something the manifest does not list, if
 either tree stops including it, or if either tree stops providing the seam.
 
 Shared code may call back into exactly two per-tree functions, `LogLine` and
-`SharedPersistSettings(changes)`. The second exists because the trees write
-settings differently and both ways are right for their program: standalone stages
-a copy and replaces the live INI only after every write succeeds, because a
-half-written settings file in the Windows shell is a machine that signs in to
-nothing; XFE writes directly, because it is an ordinary application.
+`SharedPersistSettings(changes)`. The second exists because each tree names its
+own settings file and its own PID — **not** because the trees write settings
+differently. They no longer do: both wrappers pass those two values to
+`CommitIniChangesAt` in `SteamShell-Common.ahk`, which stages a copy and replaces
+the live INI only after every write in the batch has succeeded. XFE's loop of
+bare `IniWrite` calls is gone.
 
 The manifest is still a decision record, not a lock. If two functions genuinely
 need to diverge, move the function back into both trees and remove the name in

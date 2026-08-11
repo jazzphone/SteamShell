@@ -2514,19 +2514,27 @@ LoadStartupPrograms() {
     ReportStartupProgramsBeyondSlotCount(StartupProgramIniValue)
 }
 
-SaveStartupPrograms() {
-    global IniPath, StartupPrograms
+; Adds this build's startup slots to a pending INI batch.
+;
+; Was SaveStartupPrograms, which wrote each slot with a bare IniWrite the moment
+; Save & Apply was pressed. The slots now join the batch SaveSettings commits, so
+; the startup list and the fields it sits beside land together or not at all --
+; a save that failed part way used to be able to leave a machine starting a
+; program the Settings window no longer showed.
+CollectStartupProgramWrites(changes, deletes) {
+    global StartupPrograms
     index := 1
     for _, path in StartupPrograms {
         if (index > StartupProgramSlotCount())
             break
-        IniWrite(path, IniPath, "StartupPrograms", "Program" index)
+        changes.Push(Map("section", "StartupPrograms",
+            "key", "Program" index, "value", path))
         index += 1
     }
     ; Clear any entries left over from a longer previous list -- within the slots
     ; this build owns. Anything past them is left exactly as it was found.
     while (index <= StartupProgramSlotCount()) {
-        try IniDelete(IniPath, "StartupPrograms", "Program" index)
+        deletes.Push(Map("section", "StartupPrograms", "key", "Program" index))
         index += 1
     }
 }
@@ -4193,16 +4201,13 @@ SyncElevatedRtssHelperWithSettings() {
 ; calls SharedNotify, and each program routes it to its own surface. The
 ; companion has a status line rather than a toast.
 
-; Per-tree seam required by SteamShell-Shared.ahk.
-;
-; Takes an array of Map("section", "key", "value"). XFE is an ordinary companion
-; started from an existing desktop, so direct writes are appropriate. Standalone
-; implements the same name transactionally, because it is the Windows shell.
-; Shared code calls this and does not have to know which.
 ; Per-tree seam required by SteamShell-Shared.ahk: persist one Quick Menu
-; setting AND make it live. This tree writes directly and then re-reads, which
-; is what Reload and Save & Apply already do; the shell stages a copy first
-; because a half-written INI is a machine that boots into nothing.
+; setting AND make it live.
+;
+; Takes an array of Map("section", "key", "value") and commits it through
+; SharedPersistSettings below -- which is to say through CommitIniChangesAt, the
+; same staged replacement standalone uses. This tree then re-reads, which is what
+; Reload and Save & Apply already do.
 ProductApplyQuickMenuSetting(section, key, value) {
     if !SharedPersistSettings([Map("section", section, "key", key, "value", value)]) {
         ShowNotification("The setting could not be saved", "Warning")
@@ -4260,6 +4265,11 @@ SharedPersistSettings(changes, deletes := 0) {
 SweepAbandonedSettingsUpdates() {
     global IniPath, ScriptPid
     SweepAbandonedIniUpdates(IniPath, ScriptPid)
+    ; And the controller profile file, which stages through the same commit and
+    ; was swept by nothing in either product. Its staging files are named after
+    ; "<ini>-Controllers.ini", so the sweep above cannot see them however wide its
+    ; pattern is -- what was missing is this call.
+    SweepAbandonedIniUpdates(ControllerProfilePathFor(IniPath), ScriptPid)
 }
 
 ; Per-tree seam required by SteamShell-Shared.ahk. See the header above
@@ -5253,9 +5263,11 @@ ShowSettings(*) {
     ; try an entry without restarting the companion. Standalone has had all of
     ; that on the same page for as long as the page has existed.
     ;
-    ; Forty slots, because that is what this product stores and reads. They are
-    ; handed over as rows and come back as rows; how they are written to the INI
-    ; is still this product's own business, in SaveStartupPrograms.
+    ; The slot count is StartupProgramSlotCount() -- one number, in Common, for
+    ; both products. They are handed over as rows and come back as rows; how they
+    ; reach the INI is no longer this product's own business either, since
+    ; CollectStartupProgramWrites now folds them into the batch SaveSettings
+    ; commits.
     SettingsAddStartupProgramsEditor(settings, category, &y,
         SettingsStartupSlotValues())
     SettingsAddNote(settings, category,
@@ -6206,31 +6218,50 @@ SettingsFieldPairs() {
 }
 
 SaveSettings(*) {
-    global IniPath, SettingsDirty
+    global SettingsDirty
     pairs := SettingsFieldPairs()
+    changes := []
+    deletes := []
+    for _, pair in pairs
+        changes.Push(Map("section", pair[1], "key", pair[2], "value", pair[3]))
+    ; The startup list is collected from the editor first -- its rows are the
+    ; working copy now -- and it must be collected BEFORE the reload below, which
+    ; would otherwise overwrite the edited in-memory list with what is on disk.
+    ; It joins the same batch rather than being written separately.
+    SettingsCollectStartupPrograms()
+    CollectStartupProgramWrites(changes, deletes)
+
+    ; ONE staged replacement, through the same Common commit standalone uses.
+    ; This was a loop of bare IniWrite calls into the live file: a failure part
+    ; way through left the file holding some of the changes while this handler
+    ; reported that the save had failed, and a crash mid-loop could truncate the
+    ; INI outright, because IniWrite rewrites it in place. The detail of a
+    ; failure goes to the log, which is where every other caller of this commit
+    ; already leaves it.
+    if !SharedPersistSettings(changes, deletes) {
+        SettingsUpdateStatus("Save failed; the previous settings were kept")
+        ShowNotification(
+            "Settings save failed; the previous settings were kept", "Warning")
+        return
+    }
+
+    SettingsDirty := false
+    ; Applying is a separate failure from saving, and saying "save failed" for it
+    ; used to send the user looking for a change that is already on disk.
     try {
-        for _, pair in pairs
-            IniWrite(pair[3], IniPath, pair[1], pair[2])
-        ; The startup list is variable length, so it is written separately and
-        ; before the reload -- LoadSettings would otherwise overwrite the edited
-        ; in-memory list with what is still on disk.
-        ;
-        ; Collected from the editor first. Its rows are the working copy now, and
-        ; the array they are collected into is what SaveStartupPrograms writes.
-        SettingsCollectStartupPrograms()
-        SaveStartupPrograms()
-        SettingsDirty := false
         LoadSettings()
         ApplyRuntimeTimers()
         ; Save & Apply is the path this setting is actually toggled from, so the
         ; helper has to start or stop here as well as on Reload.
         SyncElevatedRtssHelperWithSettings()
-        SettingsUpdateStatus("Saved and applied")
-        ShowNotification("Settings saved and applied")
     } catch as err {
-        SettingsUpdateStatus("Save failed: " err.Message)
-        ShowNotification("Settings save failed: " err.Message, "Warning")
+        SettingsUpdateStatus("Saved, but applying it failed: " err.Message)
+        ShowNotification(
+            "Settings saved, but applying them failed: " err.Message, "Warning")
+        return
     }
+    SettingsUpdateStatus("Saved and applied")
+    ShowNotification("Settings saved and applied")
 }
 
 CloseSettings(*) {

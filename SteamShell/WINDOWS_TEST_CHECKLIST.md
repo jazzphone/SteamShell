@@ -1794,6 +1794,29 @@ first; the tap and hold switches beside it are on.
   Separate and confirm the shortcut rows below grey and un-grey correctly,
   including on first open. Repeat for **Frame limiter control mode**.
 
+## Settings staging goes through the shared commit
+
+- Save & Apply in the Full Settings editor now commits through
+  `CommitIniChanges` instead of staging into a `.save-<pid>.tmp` of its own.
+  Change fields on several pages AND edit the startup list, Save, and confirm
+  everything lands together.
+- Make the settings file read-only and Save. Confirm the dialog says the previous
+  settings were kept, the file is intact, and `SteamShell.log` carries the
+  specific reason — the failure detail moved from the dialog to the log.
+- Confirm no `.save-<pid>.tmp` is created at any point; that filename should no
+  longer exist anywhere.
+- The startup sweep matches any `<ini>.<word>-<pid>.tmp` now, not just
+  `.update-`. Drop dummy files named `SteamShellSettings.ini.import-99999.tmp`
+  and `SteamShellSettings.ini.reset-99999.tmp` (using a PID that is not running)
+  beside the settings file, start SteamShell, and confirm both are removed and
+  the log reports the count. Confirm a file whose name does not fit the pattern —
+  `SteamShellSettings.ini.backup.tmp` — is left alone.
+- The controller profile file is swept now too. Drop
+  `SteamShellSettings-Controllers.ini.update-99999.tmp` beside it, start
+  SteamShell, and confirm it is removed. It stages through the same commit as
+  the settings file, but the sweep was only ever called with the settings path,
+  so nothing had cleaned up after it in either product.
+
 ## Settings pages and layout
 
 - Confirm the category list reads: General, Startup & Splash, Startup Programs,

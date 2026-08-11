@@ -66,12 +66,14 @@
 ;   SharedPersistSettings(changes)          apply Map("section","key","value")
 ;                                           entries as one unit, return bool
 ;
-; SharedPersistSettings exists because the two trees write settings differently
-; and both ways are correct for their program: standalone stages a copy and
-; replaces the live INI only after every write succeeds, because it is the
-; Windows shell and a half-written settings file is a machine that boots into
-; nothing. XFE writes directly, because it is an ordinary application. The
-; shared logic should not have to know which.
+; SharedPersistSettings exists because each tree names its own settings file and
+; its own PID -- NOT because the two write settings differently. They no longer
+; do. Both wrappers hand those two values to CommitIniChangesAt in
+; SteamShell-Common.ahk, which stages a copy, writes into the copy and moves it
+; over the original, so a batch either lands whole or leaves the file untouched.
+; The companion's loop of bare IniWrite calls is gone; a half-written INI was
+; never acceptable there either, it was only survivable. The seam is a binding,
+; and shared code still does not have to know which file it is bound to.
 ; ==============================================================================
 
 ; Whether a foreground executable is on the user's automatic-mouse list.
@@ -5204,8 +5206,8 @@ GetRtssMenuStatus() {
 ; Two seams keep it product-neutral, and both already existed:
 ;   ProductCenterGui      -- the shell centres on its target monitor, the
 ;                            companion on its own
-;   SharedPersistSettings -- the shell stages through CommitIniChanges, the
-;                            companion writes its portable INI directly
+;   SharedPersistSettings -- each tree binds its own INI path and PID; both
+;                            commit through CommitIniChangesAt in Common
 ; ==============================================================================
 
 GetDefaultQuickMenuOrder() {
@@ -12118,9 +12120,10 @@ ControllerCustomLine(key, which) {
 ; mapping experiment is undoable on the surface that made it.
 ;
 ; Two seams carry the parts that genuinely differ: ProductSaveControllerMappings,
-; because the shell stages a batch through CommitIniChanges and the companion
-; writes its own way, and ProductCaptureLastRealForeground, because remembering
-; what was in front is shell bookkeeping the companion has no use for.
+; because each tree assembles the batch against its own INI -- both then commit
+; it the same way, through CommitIniChangesAt -- and
+; ProductCaptureLastRealForeground, because remembering what was in front is
+; shell bookkeeping the companion has no use for.
 
 ShowControllerMappingWindow(*) {
     global ControllerMapGui, ControllerChordHoldMs, ControllerPollIntervalMs

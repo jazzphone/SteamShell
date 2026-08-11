@@ -3448,6 +3448,13 @@ ProductIdentity() {
 SweepAbandonedSettingsUpdates() {
     global SettingsPath, ScriptPid
     SweepAbandonedIniUpdates(SettingsPath, ScriptPid)
+    ; The controller profile file stages through the same commit and was swept by
+    ; nothing. Its staging files are named after "<settings>-Controllers.ini", so
+    ; the settings sweep above cannot see them however wide its pattern is -- the
+    ; gap was the missing CALL, not the matcher. Learning a profile is exactly
+    ; when a controller is misbehaving and the program is most likely to be killed
+    ; rather than closed, so this is not the rarer of the two.
+    SweepAbandonedIniUpdates(ControllerProfilePathFor(SettingsPath), ScriptPid)
 }
 
 CommitIniChanges(changes, deletes := 0) {
@@ -10440,7 +10447,7 @@ SettingsEditorValidateField(field, &value, &message) {
 }
 
 SettingsEditorSave(*) {
-    global SettingsPath, ScriptPid, SettingsEditorFields, SettingsEditorCategories
+    global SettingsEditorFields, SettingsEditorCategories
     global SettingsEditorDirty, SettingsEditorStatusCtrl
     ; What is in the command edit belongs to the selected slot, whether or not
     ; Apply Command was pressed.
@@ -10463,25 +10470,23 @@ SettingsEditorSave(*) {
             "section", field["section"], "key", field["key"], "value", value))
     }
 
-    workPath := SettingsPath ".save-" ScriptPid ".tmp"
-    try {
-        if FileExist(workPath)
-            FileDelete(workPath)
-        FileCopy(SettingsPath, workPath, true)
-        for _, item in pendingWrites
-            IniWrite(item["value"], workPath, item["section"], item["key"])
-        ; Every slot, blanks included: a slot the user emptied has to be written
-        ; empty or the previous command survives the save.
-        for slot, commandLine in SettingsStartupSlotCommands()
-            IniWrite(commandLine, workPath, "StartupPrograms", "Program" slot)
-        FileMove(workPath, SettingsPath, true)
-    } catch as err {
-        try {
-            if FileExist(workPath)
-                FileDelete(workPath)
-        }
+    ; Every slot, blanks included: a slot the user emptied has to be written
+    ; empty or the previous command survives the save.
+    for slot, commandLine in SettingsStartupSlotCommands()
+        pendingWrites.Push(Map("section", "StartupPrograms",
+            "key", "Program" slot, "value", commandLine))
+
+    ; One batch through the shared commit, rather than the second hand-written
+    ; staging loop this used to be. It staged into SettingsPath ".save-<pid>.tmp"
+    ; and performed by hand the same copy-write-move CommitIniChanges performs --
+    ; under a filename SweepAbandonedIniUpdates did not recognise, so a run killed
+    ; mid-save left the copy beside the user's settings file for good. The detail
+    ; of a failure goes to the log, which is where every other caller of this
+    ; commit already leaves it.
+    if !CommitIniChanges(pendingWrites) {
         SettingsEditorMsgBox(
-            "SteamShell could not save the settings file.`n`n" err.Message, "Iconx")
+            "SteamShell could not save the settings file.`n`n"
+            . "The previous settings were kept. See the log for details.", "Iconx")
         return false
     }
 
