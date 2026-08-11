@@ -36,6 +36,15 @@ __pycache__/
 /releases/2.0.1/current.staging-*/
 /releases/2.0.1/current.backup-*/
 
+# 2.0.2, listed before that release exists for the same reason 2.0.1's were.
+# The lock is a Windows step -- it is a copy of this tree plus the verified
+# installer, which only a Windows build produces -- so these entries are here
+# waiting rather than describing something on disk.
+/releases/2.0.2/SteamShell/dist/
+/releases/2.0.2/SteamShell/build/
+/releases/2.0.2/current.staging-*/
+/releases/2.0.2/current.backup-*/
+
 # Generated only when the self-contained 1.9.9 release bundle is rebuilt. That
 # bundle predates the single-folder layout and still has a SteamShell-XFE tree
 # of its own, so its paths are listed as they actually are.

@@ -1,5 +1,134 @@
 # SteamShell changelog
 
+## 2.0.2 — 2026-08-10
+
+A convergence release. 2.0.1 left the two products sharing their logic but not
+their surfaces; this one finishes the Settings window, and most of what you will
+notice follows from that. Fifty-one commits, and the recurring finding is the one
+2.0.1 began recording: a difference between the two trees is usually nobody's
+decision, and the reason written beside it has usually gone stale.
+
+**The companion's Settings window is standalone's now** — not similar to it. One
+window frame, one scrolling pass, one ordered list of pages, one set of layout
+builders, and one placement routine shared by every window Settings can open. The
+pages that were still the companion's own are gone:
+
+- **Startup Programs** was a list box and two buttons. It is standalone's editor
+  now — slots, the selected command line, Browse, Apply, Remove, Test Launch and
+  Move Up/Down — so an entry already in the list can be seen, corrected,
+  reordered or tried without restarting the companion.
+- **Launcher Cleanup** carried a note sending you to Notepad for the two lists
+  that decide everything the page does. Both are on the page now, side by side at
+  standalone's geometry, with the same **Preview Running Cleanup Targets**
+  button.
+- **Advanced & Logging** drew its thirteen buttons *above* the settings the page
+  is named for. The rows come first, and the logon-task status line sits under
+  the button that fills it.
+- Every executable list in both products is one editor. The companion no longer
+  asks anyone to type pipe characters into a text box.
+
+**What the companion gained along the way**, because sharing a surface means
+sharing what it reaches: the Live Log viewer, the log-rotation settings whose
+rows it was already drawing, the controller test, and the controller mapping
+editor on standalone's rows. It contributed **Restore Defaults** back, which
+standalone never had — and mapping edits are now explicit in both products,
+staged until Save rather than written the instant they change, so an experiment
+can be reverted on the surface that made it.
+
+**A controller works over elevated windows in the companion.** It did not: the
+helper ran with input disabled, so a pad was dead over Task Manager and every
+other High-integrity window — in the product most likely to be driven from a sofa
+with no keyboard. Both reasons recorded for that had stopped being true. One was
+never true; the other was retired when the helper gained RawInput.
+
+**The companion's elevated frame-cap writes are on by default.** RTSS installs
+under Program Files and `RTSSHooks64.dll` loads into the *calling* process, so an
+unelevated companion silently could not set the FPS value or save a per-game
+profile. The flag was defaulted off on the reasoning that the companion is the
+unelevated product — but its installer has always written the helper payload to
+disk dormant, so the binary was never what the flag defended.
+
+**Fixed: the companion's Settings window would not open.** Reaching Advanced &
+Logging threw `Invalid callback function` and the window never drew, so Settings
+was unreachable from the Quick Menu. A seam written to be *called* had been wired
+directly to a button's Click handler, and AutoHotkey passes a Click handler two
+values the function did not accept. It passed a full build: the name existed, the
+function was real, and every assertion about it held — only its arity was wrong,
+and nothing here read arity. Something does now.
+
+**Fixed: switching applications in Xbox Mode.** The Xbox FSE task switcher is an
+`explorer.exe` window that holds the foreground while it is open, so with
+`explorer.exe` on the companion's automatic-mouse list the stick became a pointer
+over the switcher itself — the one surface you are trying to drive with the
+D-pad. The companion no longer accepts that entry anywhere: not in the shipped
+default, not from an existing INI, not from the Settings list, and not from Quick
+Menu ▸ Current Application, which says so rather than reporting an add that the
+next launch undoes. Nothing is rewritten behind you — the key stays in your INI,
+one line goes to the log, and saving in Settings is what clears it. Standalone
+keeps `explorer.exe`, because it *replaces* Explorer as the shell, where the same
+name means a File Explorer or Control Panel window you opened deliberately.
+
+**Fixed: a startup program that ran at every boot and appeared nowhere.** The
+shared reader took forty slots for both products while the shell's editor, its
+Health Check, its category reset and its shipped INI all said twenty. A
+hand-written `Program21` therefore launched at sign-in while being invisible in
+Settings, absent from the health report and untouched by a reset. There is one
+slot count now — twenty, in one place. A companion INI holding more keeps them:
+nothing is deleted, and the extras are named once per load in the log.
+
+**Fixed: the Learn Controller wizard on gyro pads.** A controller reporting
+motion could answer its own prompts. The wizard bound a gyro's high byte as a
+button, a gyro crossing zero answered the stick's prompt, and the A press that
+*opens* the wizard was captured as the resting state. Pads that report only on
+change now take rest from their last report instead of timing out. A settle gate
+added mid-cycle was reverted rather than repaired after hardware testing found it
+made buttons register intermittently and sticks not at all.
+
+**Fixed: LT and RT stopped changing category in the shell's Full Settings.** A
+rename aligned the poll's trigger statics with the companion's names — which were
+already taken, by the locals holding the current sample. The edge test became a
+self-comparison that is never true, so one of the few things reachable on a
+handheld without a keyboard quietly stopped working.
+
+**Fixed: installing standalone over a `Shell` value of `explorer.exe` reported
+success and changed nothing.** The write was never at fault; it was never asked
+to run. Setup preset its own **Register as shell** checkbox from whether the
+machine was *already* registered, so the one case that needs the write most —
+not yet the shell — was the case that skipped it.
+
+**Fixed: standalone's Launcher Cleanup preview listed the launchers it protects.**
+The report named every running launcher as a target, including the ones the
+exclusion list exists to defend. Found by sharing the report with the companion.
+
+**Settings saves are one transaction in both products.** The companion wrote each
+key straight into the live file and stopped at the first failure, which does not
+undo the keys already written; standalone hand-rolled a second staging loop of
+its own. Both stage a copy and replace the file only once every write in the
+batch has succeeded, so a field change and a startup-list edit land together or
+not at all. Failure detail moves to the log, and the companion now distinguishes
+"save failed" from "saved, but applying it failed".
+
+Smaller, and mostly things that were true in one product and not the other:
+
+- **Every window Settings opens is placed by one routine**, and AutoHotkey's own
+  `Gui` centring is banned — it centres on the wrong monitor in a multi-monitor
+  living room. Settings also comes to the front reliably, and the Live Log no
+  longer hides its own buttons.
+- **`DiagnosticLogging` means the same thing in both products.** So do the
+  settings both trees read, which are read in one place now, and the three
+  stepped settings they share, which use one clamp.
+- **A calibrated deadzone is saved the way every other setting is saved**, rather
+  than by its own path.
+- **The elevated helper's log rotates on the same settings as everything else**,
+  from one key rather than a branch on which product started it.
+- **Abandoned settings staging files are swept whatever they are named.** The
+  sweep matched one suffix out of five, and never looked at the controller
+  profile file at all.
+- **The Mac can now run most of what only the Windows validators used to check.**
+  The replay harness reads the validators' own extractors, so a rule written in
+  PowerShell is enforced before the build rather than by it — including the new
+  callback-arity check that would have caught the Settings crash above.
+
 ## 2.0.1 — 2026-08-09
 
 The 2.0.0 follow-up queue, worked in order, plus one feature that came out of

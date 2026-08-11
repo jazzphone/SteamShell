@@ -4,11 +4,11 @@ SteamShell XFE is a portable controller-utility companion for Windows Xbox Full
 Screen Experience. It is separate from the standalone SteamShell application
 and does not replace, install, or modify the Windows shell.
 
-The working tree is **2.0.1**, locked with standalone SteamShell in the
-self-contained `releases/2.0.1` bundle. Controller input, the Quick Menu,
+The working tree is **2.0.2**. The current locked release is 2.0.1, bundled with
+standalone SteamShell in the self-contained `releases/2.0.1`. Controller input, the Quick Menu,
 Settings, display/HDR controls, RTSS integration, and notification-area control
 work inside Xbox FSE. The companion remains deliberately separate from the
-SteamShell Windows-shell application, whose working tree is also 2.0.1.
+SteamShell Windows-shell application, whose working tree is also 2.0.2.
 
 1.9.9 advances to settings schema 9 and consolidates the validated 0.1.21 feature
 line into the coordinated pre-2.0 version. Every companion-owned settings/editor
@@ -1269,7 +1269,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Build-SteamShell.ps1
 
 It runs both validators, then validates each source with the installed 64-bit
 AutoHotkey v2 interpreter before compiling it. The companion is compiled to
-`build\SteamShell-XFE.exe` for embedding and verified at file version 2.0.1.0,
+`build\SteamShell-XFE.exe` for embedding and verified at file version 2.0.2.0,
 and `assets\SteamShell-XFE.ico` is applied automatically. A copy is left in
 `dist\SteamShell-XFE.exe` for developing the companion — pass `-NoXfeDist` to
 skip it.
