@@ -1166,14 +1166,45 @@ desktop -- but keep a keyboard connected anyway.
 Schema 11 removed `EnableDesktopAutoMouseMode` and
 `DesktopAutoMouseExcludeExeList`. Two settings remain.
 
-- Defaults: `EnableAutoMouseMode=true`, `AutoMouseExeList=explorer.exe`.
-- On the Windows desktop, move the right stick without holding View/Back and
-  confirm the pointer moves, and that a hidden cursor is revealed rather than
-  moved invisibly. Include Start and the search surface.
+- Defaults: `EnableAutoMouseMode=true`,
+  `AutoMouseExeList=brave.exe|chrome.exe|msedge.exe|firefox.exe|notepad.exe|taskmgr.exe`
+  — standalone's default **minus `explorer.exe`**.
+- Open a listed browser, move the right stick without holding View/Back, and
+  confirm the pointer moves and that a hidden cursor is revealed rather than
+  moved invisibly.
 - Switch to Xbox FSE and confirm the pointer does **not** activate there, and
   that FSE navigation is unaffected. This now follows from FSE not being on the
   list rather than from an exclusion, so it is worth confirming rather than
   assuming.
+
+### explorer.exe is refused on this product
+
+`explorer.exe` owns the Xbox FSE task/application switcher, and a pointer over
+it stops application switching working. Standalone keeps it; the companion must
+not.
+
+- **The regression this fixes:** with `explorer.exe` on the list, open the Xbox
+  Mode task switcher and confirm switching applications works normally now.
+- Start with an INI that still has `AutoMouseExeList=explorer.exe|brave.exe`
+  (every companion INI written before this build does). Confirm the log carries
+  one Warning naming `explorer.exe`, that the pointer does **not** activate over
+  the desktop, taskbar, Start or Search, and that it still activates in
+  `brave.exe`.
+- Confirm the key is **left in the INI**, unmodified, by that load — nothing is
+  rewritten behind the user.
+- Open **Settings → Controller & Cursor** and confirm the list shows
+  `brave.exe` only, with no `explorer.exe` row. Save, then confirm the INI now
+  reads without it and the next launch logs no Warning.
+- With `explorer.exe` as the **only** entry, confirm the list comes out empty and
+  automatic mouse mode is therefore off — the same as any empty list. This is the
+  one case where the exclusion changes whether the feature runs at all.
+- Try to add it back: with File Explorer in the foreground, open the Quick Menu ▸
+  **Current Application**. Confirm the **Automatic Mouse** row reads *(not
+  accepted)* and that activating it reports why instead of adding. Confirm
+  **Protect From Cleanup** on the same page still accepts `explorer.exe`.
+- Type `explorer.exe` into the Settings list by hand and save. It is allowed to
+  reach the INI; confirm the next load drops it, warns once, and that the
+  Settings list no longer shows it.
 - Add a second application to `AutoMouseExeList`, save, and confirm the pointer
   starts activating inside it without a restart.
 - Clear `AutoMouseExeList` entirely and confirm the pointer stops activating

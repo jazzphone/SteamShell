@@ -2582,10 +2582,31 @@ function Assert-AutoMouseDefaults {
         "executables; it came out as '$expected'. The scan cannot check the " +
         "copies against something it has misread.")
 
+    # The companion ships the same list MINUS one name, so there are two shapes
+    # to hold the copies to, not one. The name has its own function in
+    # SteamShell-Common.ahk precisely so this can DERIVE the second shape instead
+    # of restating either -- a second literal here would be the tenth copy, which
+    # is the thing this whole function exists to prevent.
+    #
+    # explorer.exe owns the Xbox FSE task switcher. The companion runs beside a
+    # live Explorer and must not point at it; standalone replaces Explorer as the
+    # shell, so the same entry there is a window the user opened on purpose.
+    $excludedBody = Get-AhkFunctionBody -Source $commonText -Name "AutoMouseExeExcludedFromCompanion"
+    Assert-True ($excludedBody -ne "") (
+        "SteamShell-Common.ahk defines no AutoMouseExeExcludedFromCompanion(); " +
+        "what the companion drops from the allowlist has no single source, so " +
+        "this check cannot tell its sample apart from one that has drifted.")
+    $excluded = ([regex]::Match($excludedBody, '"([^"]*)"')).Groups[1].Value
+    Assert-True ($excluded -ne "" -and $expected.Split("|") -contains $excluded) (
+        "AutoMouseExeExcludedFromCompanion() is '$excluded', which is not one of " +
+        "DefaultAutoMouseExeList() ($expected). The exclusion would be a no-op " +
+        "and the companion's sample would silently be the shell's list.")
+    $expectedXfe = (($expected.Split("|") | Where-Object { $_ -ne $excluded }) -join "|")
+
     foreach ($copy in @(
-        @{ File = "SteamShell.ahk";                What = "the shell's embedded default INI text" },
-        @{ File = "SteamShellSettings_SAMPLE.ini"; What = "the shell's sample INI" },
-        @{ File = "SteamShell-XFE_SAMPLE.ini";     What = "the companion's sample INI" })) {
+        @{ File = "SteamShell.ahk";                What = "the shell's embedded default INI text"; Want = $expected;    Source = 'DefaultAutoMouseExeList()' },
+        @{ File = "SteamShellSettings_SAMPLE.ini"; What = "the shell's sample INI";                Want = $expected;    Source = 'DefaultAutoMouseExeList()' },
+        @{ File = "SteamShell-XFE_SAMPLE.ini";     What = "the companion's sample INI";            Want = $expectedXfe; Source = 'DefaultAutoMouseExeListFor("xfe")' })) {
         $path = Join-Path $ProjectRoot $copy.File
         Assert-True (Test-Path -LiteralPath $path) (
             "$($copy.File) is missing; it carries a copy of the automatic-mouse " +
@@ -2597,9 +2618,9 @@ function Assert-AutoMouseDefaults {
             "$($copy.File) states no AutoMouseExeList=; $($copy.What) has lost " +
             "the allowlist, so a user starting from it gets an empty one.")
         foreach ($m in $found) {
-            Assert-True ($m.Groups[1].Value -eq $expected) (
+            Assert-True ($m.Groups[1].Value -eq $copy.Want) (
                 "$($copy.File) ships AutoMouseExeList=$($m.Groups[1].Value) but " +
-                "DefaultAutoMouseExeList() is $expected. $($copy.What) has " +
+                "$($copy.Source) is $($copy.Want). $($copy.What) has " +
                 "drifted from the code, so what a user gets depends on whether " +
                 "their INI came from the sample or from the shell writing one.")
         }

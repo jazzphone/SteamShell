@@ -283,6 +283,7 @@ QuickMenuAdjustSharedSetting
 QuickMenuAppTargetFromId
 QuickMenuAppTargetIds
 QuickMenuAppTargetLabel
+QuickMenuAppTargetRefusal
 QuickMenuAppTargets
 QuickMenuAppTargetsFor
 QuickMenuApplyAccent

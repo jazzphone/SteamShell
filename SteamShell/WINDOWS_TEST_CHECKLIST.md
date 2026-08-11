@@ -699,6 +699,12 @@ every test below.
 
 ## Automatic mouse mode
 
+- **`explorer.exe` must still be on THIS product's shipped list.** The companion
+  now drops it — the shell must not. Confirm the shipped default and
+  `SteamShellSettings_SAMPLE.ini` both still read
+  `explorer.exe|brave.exe|chrome.exe|msedge.exe|firefox.exe|notepad.exe|taskmgr.exe`,
+  and that adding File Explorer from the Quick Menu's **Current Application ▸
+  Automatic Mouse** row still works here rather than reading *(not accepted)*.
 - Confirm `AutoMouseExeList` is **empty** on a fresh install and that behaviour is unchanged: the controller does
   nothing without View/Back held.
 - Add `explorer.exe` from Settings ▸ Controller & Cursor. With File Explorer foreground and **View/Back not held**,

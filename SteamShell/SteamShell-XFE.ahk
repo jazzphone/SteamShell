@@ -102,7 +102,7 @@ global EnablePersistentMouseMode := false
 ; the controller should be a mouse. Xbox FSE needs no exclusion because it is
 ; simply never on the list.
 global EnableAutoMouseMode := true
-global AutoMouseExeListRaw := DefaultAutoMouseExeList()
+global AutoMouseExeListRaw := DefaultAutoMouseExeListFor("xfe")
 global AutoMouseExeSet := Map()
 ; "auto" (default), "rawinput", "xinput", or "gameinput".
 ;
@@ -566,7 +566,7 @@ DefaultSettings() {
         "Controller", Map(
             "EnableControllerMouseMode", "true",
             "EnablePersistentMouseMode", "false",
-            "AutoMouseExeList", DefaultAutoMouseExeList(),
+            "AutoMouseExeList", DefaultAutoMouseExeListFor("xfe"),
             "Backend", "auto",
             "DiagnosticLogging", "false",
             "RawInputProbe", "false",
@@ -1051,8 +1051,13 @@ LoadSettings() {
     ; Automatic mouse mode. Both gates must pass: the toggle allows the feature,
     ; the list decides where it applies.
     EnableAutoMouseMode := ReadBool(MovedSettingSection("Features", "Controller", "EnableAutoMouseMode"), "EnableAutoMouseMode", true)
+    ; Reported against what the user actually wrote, then filtered. explorer.exe
+    ; owns the Xbox FSE switcher and this product will not honour it; see
+    ; AutoMouseExeListFor in SteamShell-Common.ahk for the measurement.
     AutoMouseExeListRaw := ReadText("Controller", "AutoMouseExeList",
-        DefaultAutoMouseExeList())
+        DefaultAutoMouseExeListFor("xfe"))
+    ReportAutoMouseExeListExclusion("xfe", AutoMouseExeListRaw)
+    AutoMouseExeListRaw := AutoMouseExeListFor("xfe", AutoMouseExeListRaw)
     AutoMouseExeSet := ProcessNameSetFromList(AutoMouseExeListRaw)
     ControllerBackend := StrLower(ReadText("Controller", "Backend", "auto"))
     if (ControllerBackend != "xinput" && ControllerBackend != "gameinput"
@@ -5218,12 +5223,18 @@ ShowSettings(*) {
     SettingsAddExeListField(settings, category, "Controller", "AutoMouseExeList",
         "Automatic mouse applications", layout["contentX"], y,
         layout["contentWidth"],
-        ReadText("Controller", "AutoMouseExeList", DefaultAutoMouseExeList()))
+        ; Filtered, so the editor never shows a row this product will not act on.
+        ; A visible entry that does nothing is worse than an absent one, and
+        ; saving from here is what finally clears it out of the INI.
+        AutoMouseExeListFor("xfe",
+            ReadText("Controller", "AutoMouseExeList",
+                DefaultAutoMouseExeListFor("xfe"))))
     y += SettingsExeListHeight()
     SettingsAddNote(settings, category,
         "The controller acts as a mouse in these applications without holding "
         . "View/Back. Leave Xbox FSE off the list: it is controller-driven and "
-        . "a pointer inside it gets in the way.", &y, 40)
+        . "a pointer inside it gets in the way. explorer.exe is not accepted "
+        . "here — it owns the Xbox Mode task switcher.", &y, 60)
     SettingsAddButtonRow(settings, category, [
         ["Controller Mappings...", ShowControllerMappingWindow],
         ["Learn Controller...", ShowControllerLearner],
@@ -6045,7 +6056,7 @@ SettingsCompanionFieldSpecs() {
         ; a ListView's .Value is the selected row number, so the generic branch
         ; would have written "3" over the user's list.
         Map("section", "Controller", "key", "AutoMouseExeList",
-            "type", "exe-list", "default", DefaultAutoMouseExeList()),
+            "type", "exe-list", "default", DefaultAutoMouseExeListFor("xfe")),
         ; The Launcher Cleanup pair. Both are hand-placed side by side on their
         ; page rather than flowed by the shared row table, which is why they are
         ; here and not there -- and being here is what makes them SAVED: a field

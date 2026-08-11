@@ -564,7 +564,8 @@ Assert-True (
 # the samples and the embedded INI text to it.
 Assert-True (
     $source -match '(?m)^global EnableAutoMouseMode := true$' -and
-    $source -match '(?m)^global AutoMouseExeListRaw := DefaultAutoMouseExeList\(\)$' -and
+    $source -match '(?m)^global AutoMouseExeListRaw := DefaultAutoMouseExeListFor\("xfe"\)$' -and
+    $source -match 'AutoMouseExeListRaw := AutoMouseExeListFor\("xfe", AutoMouseExeListRaw\)' -and
     $source -notmatch 'EnableDesktopAutoMouseMode\s*:=' -and
     $source -notmatch 'DesktopAutoMouseExcludeExeSet' -and
     $source -match
@@ -576,7 +577,9 @@ Assert-True (
     $sample -match '(?m)^EnableAutoMouseMode=true$' -and
     $sample -match '(?m)^AutoMouseExeList=\S' -and
     $sample -notmatch '(?m)^DesktopAutoMouseExcludeExeList=') (
-    "XFE automatic mouse mode must be the master switch and AutoMouseExeList alone.")
+    "XFE automatic mouse mode must be the master switch and AutoMouseExeList " +
+    "alone, with the companion's exclusion applied to the list it LOADS and not " +
+    "only to the default it ships.")
 # The retired keys have to be actively removed from an existing INI, not merely
 # ignored. A value left sitting in the file the user edits reads as live
 # configuration, which is the exact failure mode this removal exists to end.

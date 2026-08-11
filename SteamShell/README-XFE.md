@@ -704,9 +704,23 @@ feature; an empty list turns it off as surely as the switch does. Both settings
 are on **Settings → Controller & Cursor**.
 
 The shipped list is
-`explorer.exe|brave.exe|chrome.exe|msedge.exe|firefox.exe|notepad.exe|taskmgr.exe`
-— the same default standalone SteamShell ships, stated once in the shared code
-and held to both sample INIs by the build.
+`brave.exe|chrome.exe|msedge.exe|firefox.exe|notepad.exe|taskmgr.exe` — standalone
+SteamShell's default minus `explorer.exe`, stated once in the shared code and
+held to both sample INIs by the build.
+
+**`explorer.exe` is not accepted here.** Explorer owns the Xbox FSE
+task/application switcher — an `explorer.exe` window that does hold the
+foreground while it is open — so an entry for it turns the stick into a pointer
+over the switcher itself and application switching in Xbox Mode stops working.
+The companion drops the entry when it loads the list and records one line in the
+log; the key is left in your INI untouched, and saving on **Settings → Controller
+& Cursor** is what clears it. Standalone keeps `explorer.exe` on its own list
+because it *replaces* Explorer as the Windows shell, so the same name there means
+a File Explorer or Control Panel window you opened deliberately.
+
+If `explorer.exe` was the only entry in your list, dropping it leaves the list
+empty — which turns automatic mouse mode off, exactly as an empty list always
+has. Add the applications you actually want it in.
 
 **Two ways to add to it without a keyboard**, because a list you can only fill
 by typing an executable name is a list that stays empty on a couch:

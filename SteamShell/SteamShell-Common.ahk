@@ -3364,6 +3364,86 @@ DefaultAutoMouseExeList() {
         . "|notepad.exe|taskmgr.exe"
 }
 
+; The one entry the COMPANION must never carry on that allowlist.
+;
+; Its own function for the same reason the list above is one: Assert-
+; AutoMouseDefaults holds three text copies to the default, and the companion's
+; sample is now a fourth shape -- the default minus this name. The validator
+; derives that shape from these two functions rather than restating either, so
+; there is still one place to change the list and one place to change what the
+; companion drops from it.
+AutoMouseExeExcludedFromCompanion() {
+    return "explorer.exe"
+}
+
+; The allowlist as a given product may actually use it.
+;
+; The Xbox FSE task/application switcher is an explorer.exe window of class
+; XamlExplorerHostIslandWindow, and -- measured 2026-07-25, recorded beside
+; SuspendOnShellOverlay in SteamShell-XFE_SAMPLE.ini -- it DOES own the
+; foreground while it is open. With explorer.exe on the list the companion turns
+; the stick into a pointer over the switcher itself, which is the one surface the
+; user is trying to drive with the D-pad, so switching applications in Xbox Mode
+; stops working.
+;
+; GENUINELY PER PRODUCT, which is rare enough in this codebase to be worth
+; stating. Standalone REPLACES Explorer as the Windows shell, so explorer.exe in
+; the foreground there is a File Explorer or Control Panel window the user opened
+; deliberately -- exactly the couch-browsing case the allowlist exists for. The
+; companion runs beside a live Explorer that owns the desktop, the taskbar and
+; the switcher, so the same name means something else entirely.
+;
+; Applied to the USER'S list and not only to the default, because the default is
+; not where most companion users will have got it: every companion INI written
+; before this build carries explorer.exe straight from the shipped sample, so a
+; filter that cleaned only the default would fix nobody who already has one.
+AutoMouseExeListFor(product, rawList) {
+    if (StrLower(Trim(product)) != "xfe")
+        return rawList
+    excluded := StrLower(AutoMouseExeExcludedFromCompanion())
+    kept := []
+    for _, entry in StrSplit(rawList, "|") {
+        name := Trim(entry)
+        if (name = "" || StrLower(name) = excluded)
+            continue
+        kept.Push(name)
+    }
+    return JoinWith(kept, "|")
+}
+
+DefaultAutoMouseExeListFor(product) {
+    return AutoMouseExeListFor(product, DefaultAutoMouseExeList())
+}
+
+; Says so, once per load, when a product drops an entry it will not honour.
+;
+; Nothing is rewritten: the key stays in the INI exactly as the user left it, and
+; the Settings field shows the filtered list, so saving there is what removes it.
+; Silence was the alternative and it is the worse one -- a list entry that is
+; visible in the file the user edits and quietly does nothing is the same defect
+; as a settings row wired to nothing.
+;
+; Membership is tested directly rather than by comparing the filtered list with
+; the raw one: the filter also trims and drops blanks, so a list the user spaced
+; out differs from its filtered form without anything having been excluded.
+ReportAutoMouseExeListExclusion(product, rawList) {
+    if (StrLower(Trim(product)) != "xfe")
+        return false
+    excluded := StrLower(AutoMouseExeExcludedFromCompanion())
+    for _, entry in StrSplit(rawList, "|") {
+        if (StrLower(Trim(entry)) != excluded)
+            continue
+        LogLine("The automatic-mouse allowlist names "
+            . AutoMouseExeExcludedFromCompanion() ", which this product does not "
+            . "honour: Explorer owns the Xbox FSE task switcher, and making the "
+            . "stick a pointer over that window is what stops application "
+            . "switching working. The entry is ignored and has been left in the "
+            . "settings file; clear it in Settings to silence this.", "Warning")
+        return true
+    }
+    return false
+}
+
 ; MB_SYSTEMMODAL. Despite the name, its actual effect here is to make the message
 ; box topmost, which is exactly what is needed and needs no timer.
 TopmostMsgBox(text, title := "", options := "") {

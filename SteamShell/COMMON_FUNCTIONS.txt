@@ -14,6 +14,8 @@ ApplyPrimaryDisplayScale
 ApplyPrimaryHdrState
 ApplyRoundedCorners
 ApplyStartupWindowModeOnce
+AutoMouseExeExcludedFromCompanion
+AutoMouseExeListFor
 BlendHexColor
 CalculateProcessCpuPercent
 CaptureExecutablePidSet
@@ -37,6 +39,7 @@ ControllerProfileAxisSpan
 ControllerProfileLengthKey
 ControllerProfilePathFor
 DefaultAutoMouseExeList
+DefaultAutoMouseExeListFor
 DisplayScaleLevels
 ElevatedHelperTaskXml
 ExpandEnvVars
@@ -111,6 +114,7 @@ ReadIniBool
 ReadIniInt
 ReadStartupProgramList
 ReleaseControllerMouseButtons
+ReportAutoMouseExeListExclusion
 ReportStartupProgramsBeyondSlotCount
 ResetControllerEdgeState
 ResolveXInputDll

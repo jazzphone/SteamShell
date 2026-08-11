@@ -6287,6 +6287,35 @@ QuickMenuCurrentAppSelectable() {
     return QuickMenuCurrentAppBlockedReason() = ""
 }
 
+; Why a destination will not take this executable in this product, or "".
+;
+; ONE rule today: the companion will not have explorer.exe on the automatic-mouse
+; allowlist, because Explorer owns the Xbox FSE task/application switcher and a
+; pointer over it stops switching working. Standalone replaces Explorer as the
+; shell, so the same entry there is a window the user opened deliberately.
+;
+; Asked by the LABEL as well as by the write. Without this the Quick Menu would
+; happily add explorer.exe, report success, show "(already added)" on the next
+; visit, and the companion would drop it on the following load -- a row that
+; reports a result it did not produce, which is the defect shape this codebase
+; keeps turning up.
+;
+; The rule itself is not restated here: a product that filters this one name to
+; nothing is a product that refuses it, so AutoMouseExeListFor stays the single
+; place the exclusion is written and a second exclusion added there needs no
+; change here. Keyed on AutoMouseExeList alone -- Protect From Cleanup wants
+; explorer.exe and has always had it.
+QuickMenuAppTargetRefusal(target, exe, product) {
+    if (!IsObject(target) || target["key"] != "AutoMouseExeList")
+        return ""
+    exe := Trim(exe)
+    if (exe = "" || AutoMouseExeListFor(product, exe) != "")
+        return ""
+    return exe " cannot be on the automatic-mouse list in this product: "
+        . "Explorer owns the Xbox Mode task switcher, and a pointer over it "
+        . "stops application switching working."
+}
+
 ; A destination row's label, with whether the application is already on it.
 ;
 ; Read live rather than cached, so a second visit to the page after adding shows
@@ -6296,6 +6325,8 @@ QuickMenuAppTargetLabel(id, product) {
     if !IsObject(target)
         return ""
     exe := QuickMenuCurrentAppExe()
+    if (QuickMenuAppTargetRefusal(target, exe, product) != "")
+        return target["label"] " (not accepted)"
     if (exe != "" && SharedExeListContains(
         ReadText(target["section"], target["key"], ""), exe))
         return target["label"] " (already added)"
@@ -6321,9 +6352,8 @@ SharedExeListContains(rawList, exe) {
 ; own persistence.
 ;
 ; ProductApplyQuickMenuSetting is the seam every other Quick Menu write already
-; uses, so this inherits the shell's staged-copy write and the companion's direct
-; one without knowing which it got. Read-modify-write, because the seam takes a
-; whole value.
+; uses, so this inherits each product's staged commit without knowing whose INI
+; it got. Read-modify-write, because the seam takes a whole value.
 SharedAppendExeToListSetting(section, key, exe) {
     current := Trim(ReadText(section, key, ""))
     if SharedExeListContains(current, exe)
@@ -6348,6 +6378,11 @@ QuickMenuAddCurrentAppTo(id, product) {
         return
     }
     exe := QuickMenuCurrentAppExe()
+    refusal := QuickMenuAppTargetRefusal(target, exe, product)
+    if (refusal != "") {
+        SharedNotify(refusal, "Warning")
+        return
+    }
     if SharedExeListContains(
         ReadText(target["section"], target["key"], ""), exe) {
         SharedNotify(exe " is already in " target["label"])
