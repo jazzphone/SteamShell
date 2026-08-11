@@ -35,7 +35,7 @@
 #NoTrayIcon
 ;@Ahk2Exe-SetName SteamShell Elevated Window Helper
 ;@Ahk2Exe-SetDescription Elevated-window controller input and geometry for SteamShell
-;@Ahk2Exe-SetVersion 2.0.2.1
+;@Ahk2Exe-SetVersion 2.0.3.1
 
 Persistent
 SendMode "Input"
@@ -52,7 +52,7 @@ CoordMode "Mouse", "Screen"
 ; is the only copy anything reads.
 #Include SteamShell-Common.ahk
 
-global HelperVersion := "2.0.2"
+global HelperVersion := "2.0.3"
 ; "standalone" or "xfe". Set once from --product and never re-read from the
 ; settings file: which product started this process is not a preference.
 global HelperProduct := "standalone"

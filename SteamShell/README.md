@@ -335,14 +335,35 @@ like the feature being broken and it says so instead.
 `SteamShell.exe` installs either of two things, and Setup Assistant opens with
 the question everything else depends on:
 
-| | Replace the Windows shell | Work alongside Xbox FSE |
-|---|---|---|
-| What is installed | `SteamShell.exe` | `SteamShell-XFE.exe` |
-| Winlogon `Shell` registration | Yes | **Never** |
-| Elevated input helper | Yes | **Never** — XFE stays normal integrity |
-| Startup | Winlogon | Per-user logon task, `LeastPrivilege` |
-| Recovery shortcut | Yes | Not needed; Explorer still owns the desktop |
-| Auto-Login, UAC guidance | Shared | Shared |
+| | Shell mode | Alongside mode | Xbox FSE companion |
+|---|---|---|---|
+| What is installed | `SteamShell.exe` | `SteamShell.exe` | `SteamShell-XFE.exe` |
+| Winlogon `Shell` registration | Yes | **Never** | **Never** |
+| Elevated input helper | Yes | Yes | Opt-in, default off |
+| Startup | Winlogon | Manual or a logon task | Per-user logon task, `LeastPrivilege` |
+| Recovery shortcut | Yes | Not needed; Explorer owns the desktop | Not needed, same reason |
+| Auto-Login, UAC guidance | Shared | Shared | Shared |
+
+**Shell and Alongside are the same executable and the same settings file.** The whole of
+the difference is `[Features] ReplaceWindowsShell` and whether Winlogon starts SteamShell
+instead of Explorer. Setup writes that key from the "register as the Windows shell"
+checkbox, so the box means what it says: clearing it no longer produces an install that
+believes it owns a desktop it was never given.
+
+Alongside is `DesktopMode` you cannot leave. That is not a shortcut — `DesktopMode`
+already stands down precisely the four things that only mean anything while SteamShell
+owns presentation: the taskbar guard, the desktop backdrop, shell monitoring, and the
+window engine. What remains is what the mode is for: the Quick Menu, the controller
+pointer and mappings, RTSS control, startup programs and Launcher Cleanup.
+
+The window engine is off there **by design**. The mode assumes a keyboard and mouse are
+within reach, and a program rearranging windows on an ordinary desktop is an annoyance
+rather than a help.
+
+`ReturnToShellMode` refuses in Alongside, and the tray draws no takeover row — the setting
+is the decision, and **Settings → Advanced & Logging → "Switch to Shell Mode…"** is where
+it gets revisited. That converter writes the setting *and* the shell registry together;
+either alone is a half-converted machine.
 
 The XFE companion is embedded in `SteamShell.exe` exactly as the elevated helper
 is, so one download installs either. Choosing XFE on a machine where SteamShell

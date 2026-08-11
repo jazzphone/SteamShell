@@ -1,5 +1,106 @@
 # SteamShell changelog
 
+## 2.0.3 — 2026-08-11
+
+A consolidation release, and one new way to run the program.
+
+### Alongside mode
+
+SteamShell no longer has to replace the Windows shell. **Setup's first question now
+offers three answers**, not two: replace the shell, run alongside Explorer, or install the
+XFE companion.
+
+In Alongside mode Explorer keeps the desktop and the taskbar, nothing is written to the
+shell registry, and Steam is not launched automatically. What you keep is the Quick Menu,
+the controller pointer and mappings, RTSS control, startup programs and Launcher Cleanup.
+
+The window engine, taskbar guard, desktop backdrop and shell monitoring are **off** in
+that mode. The first is a deliberate product decision — Alongside assumes a keyboard and
+mouse are within reach, and a program rearranging windows on an ordinary desktop is an
+annoyance rather than a help. The other three are simply Explorer's job.
+
+Alongside is implemented as the existing desktop mode made permanent, rather than as a
+second flag beside it. `ReturnToShellMode` refuses, and the tray draws no takeover row.
+
+- **New setting** `[Features] ReplaceWindowsShell`, default `true`. Read once at startup.
+- **New setting** `[Features] LaunchSteamOnStart`. Consulted in Alongside mode only; Shell
+  mode always launches Steam, because a shell that starts nothing leaves an empty screen
+  with no taskbar and no way back.
+- **Settings → Advanced & Logging → "Switch to Shell Mode…"** converts between the two.
+  The button names its destination rather than being a toggle you have to read twice. It
+  writes the setting *and* the shell registry together; either alone is a half-converted
+  machine.
+- Setup's "register as the Windows shell" checkbox now **records the mode in the deployed
+  settings file**. Clearing it had always produced an install Winlogon never starts as the
+  shell — but it never told the installed copy, so the deployed program came up believing
+  it owned the desktop, hiding a taskbar Explorer had drawn.
+
+### GameInput backend removed
+
+The companion's GameInput backend is gone: 189 lines of COM vtable interop, six globals
+and a health row.
+
+It was measured byte-identical to XInput at every sample, including the all-zero readings
+inside Xbox FSE — the two share a layer, so no choice between them could help. That
+measurement is why RawInput exists, and it is kept in `README-XFE.md`; the implementation
+that produced it does not have to stay compiled in to preserve it. It was reachable only
+by typing `gameinput` into the Backend setting, never by `auto`.
+
+Removing it made `ControllerReadState` identical in both products, so it is now one shared
+definition instead of two.
+
+- The `gameinput` Backend value is gone. A settings file naming it falls back to `auto`.
+
+### The two products share more
+
+- **The elevated helper launch** is one path now: `RunSchTasks`, `StartHelperViaScheduledTask`
+  and `StartElevatedHelperViaUac` are shared, and `RegisterElevatedHelperTask` registers
+  both products' tasks.
+- **`schtasks.exe` is invoked by absolute path** in both products. The companion resolved
+  it by bare name, which is resolved against the working directory and PATH — the weaker
+  form, in the one command whose purpose is to reach a High-integrity token.
+- **Setup registers the companion's elevated-helper task** while it already holds an
+  administrator token, so the companion no longer needs a UAC prompt on the secure desktop
+  the first time the helper is used.
+- The companion's helper task is renamed to **"SteamShell XFE Elevated Input Helper"**. It
+  said "RTSS Helper", from when that was all it did; the helper has done elevated
+  controller input for some time. Registration and uninstall both retire the old name.
+- **The companion gates its helper on `[Features] EnableElevatedInputHelper`**, the same
+  setting the shell uses, rather than on the RTSS frame-cap flag. That flag had been doing
+  two jobs since the helper gained input.
+- `HideQuickMenuForHandoff` replaces `HideQuickMenu(false)` and the companion's
+  `HideQuickMenuForOwnWindow` — one concept that had two shapes.
+- `ProductElevatedHelperPath` replaces `GetElevatedHelperPath` and `XfeElevatedHelperPath`.
+
+### Fixes
+
+- **Launcher Cleanup no longer stops when you exit to the desktop.** It was gated on
+  desktop mode, and closing a launcher that outlived its game has nothing to do with who
+  owns the desktop.
+- The shell waited **2000 ms** for a task-started helper where the companion waited 2500;
+  on a slow boot it gave up early and fell through to a UAC prompt the task exists to
+  avoid. Both wait 2500 now.
+- The companion's tray gains **Learn Controller…** and **Delete Learned Profile**. The
+  shell has always had them, for a reason that applies at least as strongly to the
+  companion: the person who needs them is the one whose controller does not work yet, so
+  neither may require a controller to reach.
+- The companion's direct-UAC helper launch logs a failure as a warning rather than as
+  information.
+
+### Build and validation
+
+- **Seam parameter shapes are checked.** `$sharedSeamAllowed` records that those functions
+  differ per product; it did not check that they take the same arguments, and two had
+  drifted. `HideQuickMenu` was declared `(*)` in the companion, which accepts any argument
+  and discards it, while fifteen shell call sites passed one.
+- **Seam subset relationships are reported.** One tree's call sequence being a strict
+  subset of the other's is the shape of a fix applied to one product and not the other.
+- Four rules that only Windows could check are **replayed in `Replay-Validation.py`**:
+  required functions, the elevation allowlist, continuation-section hazards, and the
+  sample INI against the embedded schema. Each had cost a full Windows round-trip.
+- Stale similarity scores are gone from `DIVERGENT_FUNCTIONS.txt`. Four of eight were
+  wrong; `--dump` prints the current ones.
+
 ## 2.0.2 — 2026-08-10
 
 A convergence release. 2.0.1 left the two products sharing their logic but not

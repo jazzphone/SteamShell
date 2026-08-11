@@ -3,23 +3,29 @@
 **Turn a Windows PC into a console. Boot straight into Steam Big Picture, and run the whole
 machine from a controller.**
 
-Two programs, one codebase:
+Two programs, one codebase, and **three ways to run them**:
 
-- **SteamShell** replaces the Windows shell entirely. Windows boots, Big Picture appears,
-  and you never see a desktop.
-- **SteamShell XFE** does the controller half *without* replacing anything, for people
-  running Windows' Xbox Full Screen Experience instead.
+| | What it does | Touches your shell? |
+|---|---|---|
+| **SteamShell — Shell mode** | Replaces the Windows shell entirely. Windows boots, Big Picture appears, you never see a desktop. | **Yes** |
+| **SteamShell — Alongside mode** | The same program as an ordinary app. Explorer keeps the desktop and taskbar; you get the Quick Menu, controller mouse, RTSS control and Launcher Cleanup. Steam is **not** launched unless you ask. | **No** |
+| **SteamShell XFE** | The controller half for people running Windows' Xbox Full Screen Experience. | **No** |
+
+Only the first one carries the warning below. It is also the default, because owning the
+shell is what the program is *for* — but it is now a choice made at install time, on a
+checkbox, and reversible from Settings afterwards.
 
 > [!WARNING]
-> **SteamShell is a Windows shell replacement.** It rewrites the shell registry value,
-> terminates `explorer.exe` on its restore paths, and takes over the session.
-> **Test it on a machine or account you are prepared to restore.**
+> **In Shell mode, SteamShell is a Windows shell replacement.** It rewrites the shell
+> registry value, terminates `explorer.exe` on its restore paths, and takes over the
+> session. **Test it on a machine or account you are prepared to restore.**
 >
 > `Ctrl+Alt+Shift+E` is the emergency permanent restore: it registers Explorer as the
 > shell and closes SteamShell. Learn it before you need it.
 >
-> **The XFE companion changes nothing about your shell and carries none of this risk.**
-> If you are unsure, start there.
+> **Alongside mode and the XFE companion never write that registry value** and carry none
+> of this risk. If you are unsure, start with one of those — you can convert to Shell mode
+> later without reinstalling.
 
 ![SteamShell's Quick Menu open over Steam Big Picture, showing Audio, Display & HDR, RTSS & Performance, Steam Menu, Task Switcher, Game Bar, Mouse Mode, Settings and System rows with their current values](SteamShell/images/quickmenu-main.png)
 
@@ -94,7 +100,7 @@ companion reads the pad through RawInput instead, and can be taught unfamiliar h
 - **Windows Start menu and File Explorer** on a controller chord
 
 ### Making the controller actually work
-- **Three input backends** — RawInput, XInput and GameInput, selected automatically
+- **Two input backends** — RawInput and XInput, selected automatically
 - **Controller Learner** — teach it any pad it does not recognise, by pressing buttons,
   and delete a profile that learned wrongly from a hotkey, the tray or Settings
 - **Input recovery after sleep**, including the case where Windows never tells you the
@@ -117,35 +123,42 @@ companion reads the pad through RawInput instead, and can be taught unfamiliar h
 
 ## Feature comparison
 
-| | **SteamShell** | **SteamShell XFE** |
-|---|:---:|:---:|
-| **Replaces the Windows shell** | Yes | **No** |
-| Boots to Steam Big Picture | Yes | — |
-| Window centring, maximising, exclusions | Yes | — |
-| Full focus scoring engine | Yes | Lite |
-| Always Focus list | Yes | — |
-| Taskbar hiding / desktop blackout | Yes | — |
-| Desktop mode | Yes | — |
-| Splash video | Yes | — |
-| Setup Assistant and install modes | Yes | — |
-| Task list, switch and force-close | Yes | — |
-| **Quick Menu** | Yes | Yes |
-| Current Application → executable list | 4 destinations | 2 destinations |
-| Recent-application picker in Settings | Yes | Yes |
-| Controller pointer and mappings | Yes | Yes |
-| Controller Learner | Yes | Yes |
-| Input recovery after sleep | Yes | Yes |
-| Display mode, resolution, refresh, scale | Yes | Yes |
-| HDR toggle | Yes | Yes |
-| Audio output switching | Yes | Yes |
-| RTSS frame cap and overlay | Yes | Yes |
-| Launcher Cleanup | Yes | Lite |
-| Startup programs | Yes | Yes |
-| Health Check and diagnostic bundle | Yes | Yes |
-| GameInput backend | — | Yes |
-| Runs inside Xbox FSE | — | Yes |
-| Can be disabled without exiting | — | Yes |
-| Portable, nothing registered | Optional | Always |
+| | **Shell mode** | **Alongside mode** | **XFE** |
+|---|:---:|:---:|:---:|
+| **Replaces the Windows shell** | Yes | **No** | **No** |
+| Boots to Steam Big Picture | Yes | Optional, off by default | — |
+| Window centring, maximising, exclusions | Yes | — | — |
+| Full focus scoring engine | Yes | — | Lite |
+| Always Focus list | Yes | — | — |
+| Taskbar hiding / desktop blackout | Yes | — | — |
+| Desktop mode | Yes | n/a | — |
+| Splash video | Yes | — | — |
+| Setup Assistant and install modes | Yes | Yes | — |
+| Task list, switch and force-close | Yes | Yes | — |
+| **Quick Menu** | Yes | Yes | Yes |
+| Current Application → executable list | 4 destinations | 4 destinations | 2 destinations |
+| Recent-application picker in Settings | Yes | Yes | Yes |
+| Controller pointer and mappings | Yes | Yes | Yes |
+| Controller Learner | Yes | Yes | Yes |
+| Input recovery after sleep | Yes | Yes | Yes |
+| Display mode, resolution, refresh, scale | Yes | Yes | Yes |
+| HDR toggle | Yes | Yes | Yes |
+| Audio output switching | Yes | Yes | Yes |
+| RTSS frame cap and overlay | Yes | Yes | Yes |
+| Launcher Cleanup | Yes | Yes | Lite |
+| Startup programs | Yes | Yes | Yes |
+| Health Check and diagnostic bundle | Yes | Yes | Yes |
+| Runs inside Xbox FSE | — | — | Yes |
+| Can be disabled without exiting | — | — | Yes |
+| Portable, nothing registered | Optional | Always | Always |
+
+**Shell mode and Alongside mode are the same executable and the same settings file** —
+the difference is one key, `[Features] ReplaceWindowsShell`, and whether Windows starts
+SteamShell instead of Explorer. Switching between them does not reinstall anything.
+
+The window engine is **off** in Alongside mode by design, not by omission: that mode
+assumes a keyboard and mouse are within reach, and a program rearranging windows on an
+ordinary desktop is an annoyance rather than a help.
 
 Roughly half the settings are shared between the two products, and the build fails if a
 shared behaviour drifts apart.
@@ -277,8 +290,16 @@ produced it.
 
 1. Put `SteamShell.exe` somewhere sensible and run it.
 2. The **Setup Assistant** opens. Choose a product, confirm the detected Steam path, and
-   decide whether to register as the shell — you can skip that and launch manually first.
+   decide whether to **register as the Windows shell**.
+   - Leave that box **ticked** for Shell mode — the full takeover.
+   - **Clear it** for Alongside mode: Explorer keeps the desktop and taskbar, nothing is
+     written to the shell registry, and you still get the Quick Menu, controller pointer,
+     RTSS control and Launcher Cleanup.
 3. Press `Ctrl+Alt+Shift+S` for Settings, or hold **L3 + R3** for the Quick Menu.
+
+Changed your mind? **Settings → Advanced & Logging → "Switch to Shell Mode…"** (or
+"Switch to Alongside Mode…", depending which you are in) converts between them and
+restarts into the other. Nothing is reinstalled.
 
 Requires Windows 10 or 11. Building from source additionally needs AutoHotkey v2.0.19 or
 newer, 64-bit.

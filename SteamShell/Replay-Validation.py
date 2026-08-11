@@ -2020,6 +2020,135 @@ def check_elevated_helper_protocol(sources):
                      "this command line is what that function exists to end.")
 
 
+def check_required_functions_present():
+    """Every name in $requiredFunctions must exist in the effective source.
+
+    KEPT IN STEP WITH the $requiredFunctions loop in Validate-SteamShell.ps1, and
+    the LIST IS READ OUT OF IT rather than copied -- a second copy of a 110-name
+    list is exactly what this project keeps finding wrong in itself.
+
+    The matcher is deliberately the PowerShell one, warts and all: that validator
+    builds its name set with a regex requiring the WHOLE header on one line. Seven
+    real definitions wrap across lines and are invisible to it. Replaying a
+    kinder rule here would mean the two harnesses disagree, and the build would
+    pass on this machine and fail on Windows -- which is how a wrapped
+    RegisterElevatedHelperTask reached a Windows run and failed as "missing".
+    """
+    ps = (ROOT / "Validate-SteamShell.ps1").read_text(encoding="utf-8", errors="replace")
+    block = re.search(r"\$requiredFunctions\s*=\s*@\((.*?)\n\)", ps, re.S)
+    if not block:
+        fail("Validate-SteamShell.ps1 no longer declares $requiredFunctions, so "
+             "the replay cannot check it. Restore the literal spelling or update "
+             "this reader in the same commit.")
+        return
+    required = re.findall(r'"(\w+)"', block.group(1))
+    src = _effective_source("SteamShell.ahk")
+    defined = {m.group(1).lower() for m in re.finditer(
+        r"(?m)^([A-Za-z_][A-Za-z0-9_]*)\([^\r\n{}]*\)\s*\{", src)}
+    for name in required:
+        if name.lower() not in defined:
+            fail(f"Required recovery function is missing from the effective source: "
+                 f"{name}. If it exists but its header wraps across lines, that is "
+                 "the same thing as far as Validate-SteamShell.ps1 is concerned.")
+
+
+def check_elevation_sites():
+    """Every *RunAs site must name what it elevates, ON THE SAME LINE.
+
+    KEPT IN STEP WITH the $runAsSites loop in Validate-SteamShell-XFE.ps1.
+
+    Restated rather than read: it is a rule, not a list. Two things about it are
+    easy to get wrong and both have been -- it scans to END OF LINE, so hoisting
+    the command into a variable above the elevation hides the target; and it
+    scans RAW SOURCE INCLUDING COMMENTS, so prose mentioning the literal fails
+    the check as surely as code does.
+    """
+    for tree in ("SteamShell.ahk", "SteamShell-XFE.ahk"):
+        for m in re.finditer(r"(?i)\*RunAs[^\r\n]*", _effective_source(tree)):
+            line = m.group(0)
+            if re.search(r"schtasks\.exe", line, re.I):
+                continue
+            if re.search(r"QuoteWindowsCommandLineArg\((?:ElevatedHelperPath|helperPath)\)", line):
+                continue
+            fail(f"{tree}: an elevation site does not name what it elevates on its "
+                 f"own line: {line.strip()[:70]}")
+
+
+def check_continuation_sections(sources):
+    """A line that OPENS with "(" and does not close it is a continuation section.
+
+    KEPT IN STEP WITH the continuation-section scan in Validate-SteamShell.ps1.
+
+    AutoHotkey reads such a line as a continuation section and parses the rest of
+    it as OPTIONS rather than as an expression, so a ternary that happens to start
+    a line inside a call is not a syntax error -- it is a directive, and the
+    failure surfaces somewhere else entirely. Assign it to a local first.
+
+    A multi-line string literal opens the same way, and legitimately: `txt := "`
+    followed by a bare "(" is the documented form. Those are skipped by looking
+    at what the previous non-blank line ends with.
+    """
+    for name, text in sources.items():
+        lines = text.split("\n")
+        for i, raw in enumerate(lines):
+            line = raw.strip()
+            if not line.startswith("(") or line.startswith("(*"):
+                continue
+            if line.count("(") <= line.count(")"):
+                continue
+            previous = ""
+            for back in range(i - 1, -1, -1):
+                if lines[back].strip():
+                    previous = lines[back].rstrip()
+                    break
+            if previous.endswith('"'):
+                continue
+            fail(f"{name}:{i + 1} starts with '(' and does not close it on the same "
+                 f"line, so AutoHotkey reads it as a continuation section and parses "
+                 f"the rest as options. Assign it to a local first: {line[:50]}")
+
+
+def check_sample_matches_embedded_schema():
+    """The sample INI and the embedded default text must offer the same keys.
+
+    KEPT IN STEP WITH the embedded-schema comparison in Validate-SteamShell.ps1.
+
+    They are two statements of one schema: the embedded text is what a first run
+    writes, the sample is what the documentation points at. A key in one and not
+    the other means either a fresh install never receives it, or the sample
+    documents something the product does not ship.
+    """
+    def keys_of(text):
+        found, section = set(), ""
+        for raw in text.split("\n"):
+            line = raw.strip()
+            if line.startswith("[") and line.endswith("]"):
+                section = line[1:-1]
+                continue
+            if not line or line.startswith(";"):
+                continue
+            m = re.match(r"([A-Za-z_]\w*)\s*=", line)
+            if m:
+                found.add(section + m.group(1))
+        return found
+
+    src = read_source("SteamShell.ahk")
+    embedded = re.search(
+        r'GetDefaultSettingsIniText\(\)\s*\{\s*txt := "\s*\n\((.*?)\n\)', src, re.S)
+    if not embedded:
+        fail("GetDefaultSettingsIniText's embedded INI text could not be located, "
+             "so the sample cannot be compared against it.")
+        return
+    in_embedded = keys_of(embedded.group(1))
+    in_sample = keys_of(read_source("SteamShellSettings_SAMPLE.ini"))
+    for extra in sorted(in_sample - in_embedded):
+        fail(f"Sample INI has a key absent from the embedded schema: {extra}. A "
+             "fresh install would never receive it.")
+    for missing in sorted(in_embedded - in_sample):
+        fail(f"The embedded schema writes a key the sample INI does not document: "
+             f"{missing}.")
+
+
 def check_game_score_weight_keys(sources):
     """The two products' score-weight tables must offer the same KEYS.
 
@@ -2965,6 +3094,14 @@ def main():
     check_validator_assertion_shapes()
     check_binding_label_tables(sources)
     check_game_score_weight_keys(sources)
+    # Four rules that only Windows used to check. Each is a line scan or a list
+    # comparison, so "only Windows can run it" was never true of the RULE -- only
+    # of how it happened to be written. Each cost a full Windows round-trip
+    # before it was replayed here.
+    check_required_functions_present()
+    check_elevation_sites()
+    check_continuation_sections(sources)
+    check_sample_matches_embedded_schema()
     check_elevated_helper_protocol(sources)
     check_controller_poll_frame(sources)
     check_learner_guard(sources)

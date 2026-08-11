@@ -232,8 +232,8 @@ if ($helperCompileResult.ExitCode -ne 0 -or -not $helperOutputIsFresh) {
         $helperCompileResult.ExitCode + ". A fresh helper payload was not produced.")
 }
 $helperVersion = (Get-Item -LiteralPath $helperOutputPath).VersionInfo.FileVersion
-if ($helperVersion -ne "2.0.2.1") {
-    throw "SteamShell-Helper version verification failed. Expected 2.0.2.1; found '$helperVersion'."
+if ($helperVersion -ne "2.0.3.1") {
+    throw "SteamShell-Helper version verification failed. Expected 2.0.3.1; found '$helperVersion'."
 }
 Write-Host "Verified embedded helper version: $helperVersion"
 
@@ -300,9 +300,9 @@ if ($xfeCompileResult.ExitCode -ne 0 -or -not $xfeOutputIsFresh) {
         $xfeCompileResult.ExitCode + "). " + $xfeOutputState)
 }
 $xfeEmbedVersion = (Get-Item -LiteralPath $xfeEmbedPath).VersionInfo.FileVersion
-if ($xfeEmbedVersion -ne "2.0.2.0") {
+if ($xfeEmbedVersion -ne "2.0.3.0") {
     throw (
-        "SteamShell-XFE version verification failed. Expected 2.0.2.0; " +
+        "SteamShell-XFE version verification failed. Expected 2.0.3.0; " +
         "found '$xfeEmbedVersion'.")
 }
 Write-Host "Verified embedded XFE version: $xfeEmbedVersion"
@@ -377,8 +377,8 @@ if ($compilerResult.ExitCode -ne 0 -or -not $outputIsFresh) {
 }
 
 $mainVersion = (Get-Item -LiteralPath $OutputPath).VersionInfo.FileVersion
-if ($mainVersion -ne "2.0.2.0") {
-    throw "SteamShell version verification failed. Expected 2.0.2.0; found '$mainVersion'."
+if ($mainVersion -ne "2.0.3.0") {
+    throw "SteamShell version verification failed. Expected 2.0.3.0; found '$mainVersion'."
 }
 Write-Host "Verified SteamShell version: $mainVersion"
 Write-Host "Built: $OutputPath"

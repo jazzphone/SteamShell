@@ -298,7 +298,7 @@ $builds = @(
         ProjectDir = $projectDir
         SourceName = "SteamShell.ahk"
         ExeName = "SteamShell.exe"
-        ExpectedVersion = "2.0.2.0"
+        ExpectedVersion = "2.0.3.0"
         ValidatesMainSource = $true
     }
 )

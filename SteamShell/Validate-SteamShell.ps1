@@ -70,12 +70,12 @@ $commonSource = Get-SourceText $commonSourcePath
 $sample = Get-SourceText $samplePath
 
 Assert-True (
-    $source -match '@Ahk2Exe-SetVersion 2\.0\.2\.0' -and
-    $source -match 'SteamShellVersion\s*:=\s*"2\.0\.2"' -and
-    $helperSource -match '@Ahk2Exe-SetVersion 2\.0\.2\.1' -and
-    $helperSource -match 'HelperVersion\s*:=\s*"2\.0\.2"' -and
-    $source -match 'ElevatedHelperExpectedVersion\s*:=\s*"2\.0\.2\.1"') (
-    "SteamShell 2.0.2 main/helper version metadata is inconsistent.")
+    $source -match '@Ahk2Exe-SetVersion 2\.0\.3\.0' -and
+    $source -match 'SteamShellVersion\s*:=\s*"2\.0\.3"' -and
+    $helperSource -match '@Ahk2Exe-SetVersion 2\.0\.3\.1' -and
+    $helperSource -match 'HelperVersion\s*:=\s*"2\.0\.3"' -and
+    $source -match 'ElevatedHelperExpectedVersion\s*:=\s*"2\.0\.3\.1"') (
+    "SteamShell 2.0.3 main/helper version metadata is inconsistent.")
 $buildScript = Get-SourceText $buildScriptPath
 
 # The helper version is DERIVED from the helper source, not written down a fourth
@@ -1910,11 +1910,21 @@ Assert-True (
     "Shell monitoring is no longer disarmed in desktop mode.")
 # Desktop mode leaves Explorer visibly in charge; the guard, window engine, and
 # shell monitor must not be rescheduled behind it, but controller input must.
+#
+# LAUNCHER CLEANUP IS DELIBERATELY OUTSIDE that block and is asserted separately
+# below. Closing a launcher that outlived its game has nothing to do with who
+# owns the desktop, and gating it on DesktopMode meant exiting to the desktop --
+# or running alongside Explorer -- silently stopped it. EnableLauncherCleanup is
+# the switch; that was an over-broad second one.
 Assert-True (
     $source -match
         '(?sm)^ApplyRuntimeTimers\(\)\s*\{(?:(?!\n\})[\s\S])*?if\s*\(!DesktopMode\)\s*\{(?:(?!\n\})[\s\S])*?' +
         'SetTimer\(MonitorShell,\s*ShellMonitorIntervalMs\)(?:(?!\n\})[\s\S])*?' +
-        'StartTaskbarGuard\(\)(?:(?!\n\})[\s\S])*?\}\s*\r?\n\s*\r?\n\s*if\s*\(EnableControllerMouseMode') (
+        'StartTaskbarGuard\(\)(?:(?!\n\})[\s\S])*?\}' -and
+    $source -match
+        '(?sm)^ApplyRuntimeTimers\(\)\s*\{(?:(?!\n\})[\s\S])*?\}\s*\r?\n\s*\r?\n[^\n]*\r?\n(?:[^\n]*\r?\n)*?\s*if\s*\(EnableLauncherCleanup\)\s*\r?\n\s*SetTimer\(CheckLauncherCleanup' -and
+    $source -match
+        '(?sm)^ApplyRuntimeTimers\(\)\s*\{(?:(?!\n\})[\s\S])*?if\s*\(EnableControllerMouseMode') (
     "Desktop mode no longer isolates shell enforcement from controller polling.")
 Assert-True (
     $source -match
@@ -2531,14 +2541,30 @@ Assert-True (
 Assert-True (
     $source -match '"1\. What are you setting up\?"' -and
     $source -match 'vSetupProductStandalone Group Checked' -and
+    $source -match 'vSetupProductAlongside' -and
     $source -match 'vSetupProductXfe' -and
-    # The two radios must be created CONSECUTIVELY. AutoHotkey groups radios by
-    # creation order, so a control between them ends the run and the pair stops
-    # being mutually exclusive -- both render selected and Apply reads whichever
-    # it likes. This shipped once; nothing but adjacency prevents it.
+    # All THREE radios must be created CONSECUTIVELY. AutoHotkey groups radios by
+    # creation order, so a control between any two ends the run and the group
+    # stops being mutually exclusive -- more than one renders selected and Apply
+    # reads whichever it likes. This shipped once; nothing but adjacency prevents
+    # it, and adding Alongside between the original pair is exactly the edit that
+    # could have broken it.
+    # COMMENTS between them are fine; a CONTROL is not. So the gap is matched as
+    # "anything that is not another AddXxx call", rather than as literal
+    # adjacency -- pinning the lines would fail the moment someone explains the
+    # rule in a comment above the thing the rule protects, which is what happened.
     $source -match
-        '(?s)vSetupProductStandalone Group Checked",\s*\r?\n\s*"[^"]*"\s*\)\s*\r?\n\s*' +
-        'xfeModeRadio\s*:=\s*SetupAssistantGui\.AddRadio\(' -and
+        '(?s)vSetupProductStandalone Group Checked"' +
+        '(?:(?!SetupAssistantGui\.Add)[\s\S])*?' +
+        'alongsideModeRadio := SetupAssistantGui\.AddRadio\(' +
+        '(?:(?!SetupAssistantGui\.Add)[\s\S])*?' +
+        'xfeModeRadio := SetupAssistantGui\.AddRadio\(' -and
+    # Alongside must not be able to register the shell. The radio is the
+    # decision; the checkbox follows it rather than being a second way to answer.
+    $source -match
+        '(?sm)^SetupAssistantRefreshProductMode\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?' +
+        'isAlongside\s*:=\s*product\s*=\s*"Alongside"(?:(?!\n\})[\s\S])*?' +
+        'SetupRegisterShell"\]\.Enabled := !isXfe && !isAlongside' -and
     # The mode has to visibly reconfigure what follows it, or it is a question
     # whose answer does nothing.
     $source -match
@@ -3181,6 +3207,34 @@ Assert-True (
         '(?s)if helperDeployed \{[\s\S]*?RegisterElevatedHelperTask\(\s*\r?\n?\s*"xfe"' -and
     $xfeDeployBody.Value -match 'XfeElevatedHelperTaskLegacyName\(\)') (
     "Setup must register the XFE helper task when the payload deployed, retiring the legacy task name.")
+
+# Setup's "register as the Windows shell" checkbox must reach the DEPLOYED
+# settings file, not just the registry.
+#
+# Clearing it always produced an install Winlogon never starts as the shell. It
+# did not tell the installed copy that, so the deployed program came up believing
+# it owned the desktop -- hiding a taskbar Explorer had drawn, and running the
+# window engine over an ordinary session. The checkbox and the mode are one
+# decision and have to be written together.
+Assert-True (
+    $source -match
+        '(?sm)^DeploySteamShell\([^\r\n{}]*\)\s*\{(?:(?!\n\})[\s\S])*?' +
+        'IniWrite\(registerShell \? "true" : "false",\s*\r?\n\s*' +
+        'targetIni, "Features", "ReplaceWindowsShell"\)') (
+    "Setup no longer records which shell mode it installed for.")
+
+# Alongside mode is DesktopMode you cannot leave, so the two refusals that make
+# it a mode rather than a suggestion must both be present: ReturnToShellMode
+# declines, and the tray does not draw a takeover row.
+Assert-True (
+    $source -match
+        '(?sm)^ReturnToShellMode\(reason\s*:=\s*""\)\s*\{(?:(?!\n\})[\s\S])*?' +
+        'if\s*\(AlongsideMode\)(?:(?!\n\})[\s\S])*?return false' -and
+    $source -match
+        '(?sm)^ProductTrayItems\(\)\s*\{(?:(?!\n\})[\s\S])*?' +
+        'if\s*\(AlongsideMode\)(?:(?!\n\})[\s\S])*?\}\s*else if\s*\(DesktopMode\)' -and
+    $source -match 'AlongsideMode := !ReplaceWindowsShell') (
+    "Alongside mode no longer refuses the shell takeover it opted out of.")
 # ...and an uninstall must clear it, because Setup never created it and a stale
 # HighestAvailable task pointing at a removed binary is the worst artefact an
 # uninstall can leave behind.

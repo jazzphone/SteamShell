@@ -20,8 +20,8 @@
 #Include SteamShell-Shared.ahk
 ;@Ahk2Exe-SetName SteamShell
 ;@Ahk2Exe-SetDescription Steam Big Picture living-room Windows shell
-;@Ahk2Exe-SetVersion 2.0.2.0
-global SteamShellVersion := "2.0.2"
+;@Ahk2Exe-SetVersion 2.0.3.0
+global SteamShellVersion := "2.0.3"
 ; Declared `global` like every other script-scope variable here. Without it
 ; these are ordinary globals rather than super-globals, so a function that
 ; reads them without its own `global` declaration would silently get an empty
@@ -102,11 +102,11 @@ global ElevatedHelperPath := ""
 global ElevatedHelperPid := 0
 global ElevatedHelperAvailable := false
 global ElevatedHelperLastError := "Not started"
-global ElevatedHelperExpectedVersion := "2.0.2.1"
+global ElevatedHelperExpectedVersion := "2.0.3.1"
 ; SteamShell.exe installs either product, so it embeds the XFE companion the same
 ; way it embeds the elevated helper. "Standalone" replaces the Windows shell;
 ; "XFE" runs alongside Xbox Full Screen Experience at normal integrity.
-global XfeExpectedVersion := "2.0.2.0"
+global XfeExpectedVersion := "2.0.3.0"
 global SteamShellProduct := "Standalone"
 global ElevatedGeometryEventHandle := 0
 ; Publishes AutoMouseModeActive() to the elevated helper. See
@@ -140,6 +140,17 @@ global BpmTitle := "Steam Big Picture Mode"
 
 ; Feature toggles
 global EnableElevatedInputHelper := true
+global ReplaceWindowsShell := true
+; Whether starting SteamShell also starts Steam Big Picture.
+;
+; ONLY CONSULTED IN ALONGSIDE MODE. In Shell mode Steam always launches, because
+; a Windows shell that starts nothing leaves the user looking at an empty screen
+; with no taskbar and no way back -- that is not a preference, it is the job.
+;
+; Alongside defaults it OFF, and Setup writes that when the mode is chosen. On a
+; machine that is also an ordinary PC, a program that seizes the screen with Big
+; Picture every time it starts is the opposite of what "runs alongside" promised.
+global LaunchSteamOnStart := true
 global EnableSplashScreen := true
 global EnableTaskbarHiding := true
 global EnableDesktopBlackout := true
@@ -670,6 +681,23 @@ global SystemReady := false
 ; resident so the notification-area icon, controller mouse, and Quick Menu keep
 ; working. Distinct from Safe Mode, which never enforced the shell at all.
 global DesktopMode := false
+; ALONGSIDE MODE: SteamShell runs beside Explorer instead of replacing it.
+;
+; Read from [Features] ReplaceWindowsShell, which defaults TRUE -- the shell
+; takeover is what this program is for, and an existing installation must not
+; change behaviour because a new key appeared.
+;
+; It is DesktopMode you cannot leave. That is not a shortcut: DesktopMode already
+; stands down exactly the right things -- the taskbar guard, the desktop
+; blackout, the shell monitor, the window engine -- because those are the four
+; that only mean something while SteamShell owns the presentation. Inventing a
+; second flag beside it would have been one concept with two names, which is the
+; failure this codebase keeps finding in itself.
+;
+; What Alongside adds on top of DesktopMode is refusal: ReturnToShellMode says no,
+; the tray drops the two rows that offer a takeover, and nothing writes the shell
+; registry value. See ReplaceWindowsShell below for what stays running.
+global AlongsideMode := false
 ; True from the moment a desktop-restore action is committed until Explorer is
 ; ready (or the attempt is cancelled). It prevents controller/tray input from
 ; reopening the Quick Menu while Steam's fullscreen surface is disappearing.
@@ -2599,6 +2627,8 @@ ViewHoldMs=500                                             ; Hold threshold with
 ViewHoldInGameMs=1000                                      ; Hold threshold inside a game (200-5000)
 
 [Features]
+ReplaceWindowsShell=true                                    ; false = Alongside mode: Explorer keeps the desktop and taskbar; read once at startup
+LaunchSteamOnStart=true                                     ; Alongside mode only; Shell mode always launches Steam
 EnableElevatedInputHelper=true                             ; Launch the separate elevated window helper; applies immediately on reload; SteamShell.exe remains normal integrity
 EnableSplashScreen=true                                     ; Show a black splash overlay during boot
 EnableTaskbarHiding=true                                    ; Hide taskbar & tray windows (kiosk feel)
@@ -3419,6 +3449,7 @@ CommitIniChanges(changes, deletes := 0) {
 }
 
 LoadSettings() {
+    global ReplaceWindowsShell, LaunchSteamOnStart
     global AudioPeakThreshold, DEFAULT_AUDIO_PEAK_THRESHOLD
     AudioPeakThreshold := ReadNumber("GameForegroundAssist", "AudioPeakThreshold", DEFAULT_AUDIO_PEAK_THRESHOLD, 0.0, 1.0)
     global SteamPath, BpmTitle
@@ -3483,6 +3514,12 @@ LoadSettings() {
     ; default and range. See LoadSharedSettings in SteamShell-Shared.ahk.
     LoadSharedSettings()
 
+    ; Read but NOT applied here. Whether SteamShell owns the desktop is decided
+    ; once at startup: flipping it live would mean registering or surrendering
+    ; the Windows shell underneath a running session, which is what the converter
+    ; in Settings -> Advanced & Logging exists to do deliberately.
+    ReplaceWindowsShell := ReadBool("Features", "ReplaceWindowsShell", true)
+    LaunchSteamOnStart := ReadBool("Features", "LaunchSteamOnStart", true)
     EnableSplashScreen := ReadBool("Features", "EnableSplashScreen", true)
     EnableTaskbarHiding := ReadBool("Features", "EnableTaskbarHiding", true)
     EnableDesktopBlackout := ReadBool("Features", "EnableDesktopBlackout", true)
@@ -3731,9 +3768,14 @@ ApplyRuntimeTimers() {
         if (EnableAutoHideCursor)
             SetTimer(MouseWatch, MouseMonitorInterval)
 
-        if (EnableLauncherCleanup)
-        SetTimer(CheckLauncherCleanup, LauncherCleanupCheckIntervalMs)
     }
+
+    ; OUTSIDE the block above, because closing a launcher that outlived its game
+    ; has nothing to do with who owns the desktop. It sat inside, so exiting to
+    ; the desktop -- or running alongside Explorer -- silently stopped it. Its own
+    ; setting is the switch; this was an over-broad second one.
+    if (EnableLauncherCleanup)
+        SetTimer(CheckLauncherCleanup, LauncherCleanupCheckIntervalMs)
 
     if (EnableControllerMouseMode || EnableQuickMenu || IsSet(SettingsGui))
         SetTimer(PollController, ControllerPollIntervalMs)
@@ -3867,7 +3909,7 @@ TrayExitSteamShell(*) {
 ; anything that is not a Map is a separator.
 ProductTrayItems() {
     global DesktopMode, EnableAutoMouseMode, EnableDesktopAutoMouseMode
-    global SteamShellDataDir, SteamShellInstallationMode
+    global SteamShellDataDir, SteamShellInstallationMode, AlongsideMode
     items := []
     ; Offered, never forced. A record that disagrees with reality must not reach
     ; SetupAssistantRequired(), which decides whether the shell starts at all --
@@ -3894,7 +3936,17 @@ ProductTrayItems() {
     items.Push(Map("label", "Delete Learned Profile",
         "handler", DeleteControllerProfileForActiveDevice))
     items.Push("")
-    if (DesktopMode) {
+    ; Alongside mode gets the desktop mouse toggle and NEITHER takeover row.
+    ; "Return to SteamShell" would offer a presentation handover the user opted
+    ; out of for the session, and "Exit Steam to Desktop" would offer to leave a
+    ; desktop that was never left. ReturnToShellMode refuses either way; not
+    ; drawing them is the honest half of that.
+    if (AlongsideMode) {
+        items.Push(Map(
+            "label", "Automatic Mouse Throughout Desktop",
+            "handler", TrayToggleDesktopAutoMouse,
+            "checked", EnableAutoMouseMode && EnableDesktopAutoMouseMode))
+    } else if (DesktopMode) {
         items.Push(Map(
             "label", "Automatic Mouse Throughout Desktop",
             "handler", TrayToggleDesktopAutoMouse,
@@ -11634,8 +11686,15 @@ SetupAssistantPreselectExistingInstallation() {
         &product, &directory, &registeredAsShell, &xfeStartsAtLogon)
         return false
 
+    ; Three radios to restore, not two. A standalone record that was NOT
+    ; registered as the shell is an Alongside install -- reading it back as Shell
+    ; mode would re-tick a box the user cleared, and a re-run of Setup would
+    ; quietly convert them.
     isXfe := SteamShellProductIsXfe(product)
-    try SetupAssistantGui["SetupProductStandalone"].Value := isXfe ? 0 : 1
+    isAlongside := !isXfe && !registeredAsShell
+    try SetupAssistantGui["SetupProductStandalone"].Value :=
+        (!isXfe && !isAlongside) ? 1 : 0
+    try SetupAssistantGui["SetupProductAlongside"].Value := isAlongside ? 1 : 0
     try SetupAssistantGui["SetupProductXfe"].Value := isXfe ? 1 : 0
     SetupAssistantRefreshProductMode()
 
@@ -12292,9 +12351,13 @@ SetupAssistantSelectedProduct() {
     global SetupAssistantGui
     if !IsSet(SetupAssistantGui)
         return "Standalone"
-    selected := false
-    try selected := SetupAssistantGui["SetupProductXfe"].Value = 1
-    return selected ? "XFE" : "Standalone"
+    try {
+        if (SetupAssistantGui["SetupProductXfe"].Value = 1)
+            return "XFE"
+        if (SetupAssistantGui["SetupProductAlongside"].Value = 1)
+            return "Alongside"
+    }
+    return "Standalone"
 }
 
 ; XFE has no Windows-shell registration and no elevated helper, so the controls
@@ -12305,8 +12368,13 @@ SetupAssistantRefreshProductMode(*) {
     global SetupAssistantGui
     if !IsSet(SetupAssistantGui)
         return
-    isXfe := SetupAssistantSelectedProduct() = "XFE"
-    try SetupAssistantGui["SetupRegisterShell"].Enabled := !isXfe
+    product := SetupAssistantSelectedProduct()
+    isXfe := product = "XFE"
+    isAlongside := product = "Alongside"
+    ; Only Shell mode may register. The radio is the decision now, so the
+    ; checkbox follows it rather than being a second, quieter way to answer the
+    ; same question -- two controls for one choice is how they end up disagreeing.
+    try SetupAssistantGui["SetupRegisterShell"].Enabled := !isXfe && !isAlongside
     try SetupAssistantGui["SetupRegisterXfeStartup"].Enabled := isXfe
     ; Each branch sets BOTH boxes: the selected product's registration on, the
     ; other product's off. Clearing only one left the other showing a tick it had
@@ -12320,6 +12388,12 @@ SetupAssistantRefreshProductMode(*) {
         SetupAssistantSetStatus(
             "XFE mode: the companion installs to the selected location, starts at sign-in through a "
             . "normal logon task, and never registers itself as the Windows shell or elevates.")
+    } else if isAlongside {
+        try SetupAssistantGui["SetupRegisterShell"].Value := 0
+        try SetupAssistantGui["SetupRegisterXfeStartup"].Value := 0
+        SetupAssistantSetStatus(
+            "Alongside mode: Explorer keeps the desktop and taskbar, nothing is written to the "
+            . "shell registry, and Steam is not launched automatically. Launch SteamShell when you want it.")
     } else {
         try SetupAssistantGui["SetupRegisterShell"].Value := 1
         try SetupAssistantGui["SetupRegisterXfeStartup"].Value := 0
@@ -12503,7 +12577,9 @@ SetupAssistantApply(*) {
             "Setup is complete. "
             . (registerShell
                 ? "Sign out and back in to start SteamShell as the Windows shell."
-                : "Launch SteamShell.exe from the selected directory when ready."))
+                : "SteamShell is installed in Alongside mode: Explorer keeps the "
+                    . "desktop and taskbar. Launch SteamShell.exe from the "
+                    . "selected directory when ready."))
     }
 }
 
@@ -13008,7 +13084,7 @@ ShowSetupAssistant(*) {
             "Prepare a recoverable SteamShell installation. First-run setup keeps Explorer available and does not launch Steam or enable kiosk presentation.")
 
         ; The first question, because every later one depends on the answer.
-        SetupAssistantGui.AddGroupBox("xm y+10 w720 h128", "1. What are you setting up?")
+        SetupAssistantGui.AddGroupBox("xm y+10 w720 h176", "1. What are you setting up?")
         ; The two radios are created back to back on purpose. AutoHotkey groups
         ; radio buttons that are created CONSECUTIVELY, so a control added
         ; between them ends the run and the pair stops being mutually exclusive:
@@ -13018,18 +13094,31 @@ ShowSetupAssistant(*) {
         shellModeRadio := SetupAssistantGui.AddRadio(
             "xp+14 yp+26 w680 h24 vSetupProductStandalone Group Checked",
             "Replace the Windows shell — SteamShell owns the desktop and launches Steam Big Picture")
+        ; Alongside is a FIRST-CLASS answer to this question, not a checkbox
+        ; further down the page. It was one -- "register as the Windows shell",
+        ; below the fold -- and a question headed "Replace the Windows shell"
+        ; with a hidden opt-out reads as though replacing the shell is the only
+        ; way to run the program. It is not, and for a PC that is also used as a
+        ; PC it is the wrong one.
+        alongsideModeRadio := SetupAssistantGui.AddRadio(
+            "xp y+24 w680 h24 vSetupProductAlongside",
+            "Run alongside Explorer — SteamShell is an ordinary program on your desktop")
         xfeModeRadio := SetupAssistantGui.AddRadio(
             "xp y+24 w680 h24 vSetupProductXfe",
             "Work alongside Xbox Full Screen Experience — install the SteamShell-XFE companion")
         shellModeRadio.GetPos(&productRadioX, &shellRadioY, , &productRadioH)
+        alongsideModeRadio.GetPos( , &alongsideRadioY)
         xfeModeRadio.GetPos( , &xfeRadioY)
         SetupAssistantGui.AddText(
             "x" (productRadioX + 22) " y" (shellRadioY + productRadioH + 1) " w650 h20 +Wrap",
             "Registers SteamShell as the Windows shell and installs the elevated input helper.")
         SetupAssistantGui.AddText(
+            "x" (productRadioX + 22) " y" (alongsideRadioY + productRadioH + 1) " w650 h20 +Wrap",
+            "Never touches the shell registry. Explorer keeps the desktop and taskbar; you get the Quick Menu, controller pointer, RTSS and Launcher Cleanup.")
+        SetupAssistantGui.AddText(
             "x" (productRadioX + 22) " y" (xfeRadioY + productRadioH + 1) " w650 h20 +Wrap",
             "Never becomes the Windows shell and never elevates. Starts at sign-in through a normal logon task.")
-        for _, productControl in [shellModeRadio, xfeModeRadio]
+        for _, productControl in [shellModeRadio, alongsideModeRadio, xfeModeRadio]
             productControl.OnEvent("Click", SetupAssistantRefreshProductMode)
 
         SetupAssistantGui.AddGroupBox("xm y+14 w720 h128", "2. Applications")
@@ -13206,6 +13295,7 @@ ShowSettingsCategory(categoryName) {
 }
 
 ShowSettings(*) {
+    global AlongsideMode
     global SettingsGui, SettingsEditorFields, SettingsEditorCategoryControls
     global SettingsEditorControlPositions, SettingsEditorCategoryOffsets
     global SettingsEditorCategories, SettingsEditorDirty, SettingsEditorUpdating, SettingsEditorStatusCtrl
@@ -13454,6 +13544,13 @@ ShowSettings(*) {
     SettingsAddButtonRow(SettingsGui, category, [
         ["Install Managed Copy as Shell", SettingsEditorInstallSteamShell],
         ["Register Current EXE as Shell", SettingsEditorRegisterCurrentShell],
+        ; Label names the DESTINATION, not the toggle. "Switch Shell / Alongside
+        ; Mode" made the reader work out which way they were about to go from a
+        ; row that looked the same in both modes; this says it. The window is
+        ; rebuilt on every open, so it is always current.
+        [AlongsideMode
+            ? "Switch to Shell Mode…"
+            : "Switch to Alongside Mode…", SettingsEditorConvertShellMode],
         ["Repair Managed Installation", SettingsEditorRepairSteamShell],
         ["Permanently Restore Explorer", SettingsEditorRestoreDesktop],
         ["Pause / Resume Focus", SettingsEditorToggleFocusPause],
@@ -13973,7 +14070,18 @@ EnterDesktopMode(reason := "") {
 
 ReturnToShellMode(reason := "") {
     global DesktopMode, AllowExplorer, SafeMode, SystemReady, QuickMenuVisible
-    global SteamLaunched
+    global SteamLaunched, AlongsideMode
+    ; Alongside mode has no shell presentation to return TO. Explorer owns the
+    ; desktop for the whole session by the user's choice, and taking it over here
+    ; would be a takeover they never asked for -- the setting is the decision, and
+    ; the converter in Advanced & Logging is where it gets revisited.
+    if (AlongsideMode) {
+        ShowNotification(
+            "SteamShell is running alongside Explorer. Convert it to the Windows "
+            . "shell in Settings, Advanced & Logging, to take over presentation.",
+            "Warning")
+        return false
+    }
     if (SafeMode) {
         ShowNotification(
             "Safe Mode keeps the Explorer desktop available. Restart SteamShell normally to resume the shell.",
@@ -14936,6 +15044,25 @@ DeploySteamShell(targetDirectory, portableMode := false, registerShell := true, 
         WriteSetupStateToIni(
             targetIni, "InProgress", installationMode,
             targetDirectory, dataDirectory, "Standalone", portableHelperChoice)
+        ; The installed copy is told which mode it was installed FOR.
+        ;
+        ; "Register as the Windows shell" was already a Setup choice, and
+        ; clearing it already produced an install that Winlogon never starts as
+        ; the shell. What it did not do was tell the program that -- so the
+        ; deployed copy came up believing it owned the desktop, hiding a taskbar
+        ; Explorer had drawn and running the window engine over a normal session.
+        ;
+        ; This is the line that makes the checkbox mean what it says. Written
+        ; here rather than in SetupAssistantApply because targetIni is the
+        ; DEPLOYED settings file, which is not the one the running process has
+        ; open when Setup installs somewhere else.
+        IniWrite(registerShell ? "true" : "false",
+            targetIni, "Features", "ReplaceWindowsShell")
+        ; Alongside does not seize the screen on start. Shell mode always does,
+        ; and the key is written either way so the file states the behaviour
+        ; rather than relying on a default the reader has to know.
+        IniWrite(registerShell ? "true" : "false",
+            targetIni, "Features", "LaunchSteamOnStart")
 
         if sourceDiffersFromTarget {
             if FileExist(stagedExe)
@@ -15914,6 +16041,82 @@ SettingsEditorRegisterCurrentShell(*) {
         RegisterCurrentSteamShellAsShell(true)
 }
 
+; Converts between the two ways SteamShell can run, in both directions.
+;
+; ONE BUTTON, not two, because the two directions are never both available: the
+; question is always "leave the mode you are in", and a grid offering "Switch to
+; Shell" while already the shell is a row that can only ever refuse.
+;
+; It writes the SETTING and the shell REGISTRY together. Either alone is a
+; half-converted machine -- the setting without the registry gives a session that
+; stands down its shell features while Winlogon still starts it as the shell, and
+; the registry without the setting gives the reverse. They are committed in that
+; order so a failed registry write leaves a setting that simply reads as the
+; user's intent for next time, rather than a shell value pointing somewhere the
+; program will not behave as.
+;
+; A RESTART IS REQUIRED and is stated rather than performed. AlongsideMode is
+; read once at startup on purpose -- see the global -- and flipping presentation
+; ownership underneath a live session would mean starting or stopping the taskbar
+; guard, the window engine and the desktop backdrop against a desktop that is
+; already drawn one way.
+SettingsEditorConvertShellMode(*) {
+    global AlongsideMode, ScriptPid
+    toAlongside := !AlongsideMode
+    if (toAlongside) {
+        prompt := "Run SteamShell alongside Explorer instead of replacing it?"
+            . "`n`nExplorer keeps the desktop and the taskbar. SteamShell keeps "
+            . "the Quick Menu, controller mouse and mappings, RTSS control and "
+            . "Launcher Cleanup."
+            . "`n`nThe taskbar guard, desktop backdrop and window engine stay off "
+            . "in this mode -- Explorer owns presentation."
+    } else {
+        prompt := "Make SteamShell the Windows shell?"
+            . "`n`nSteamShell will replace Explorer at sign-in and own the "
+            . "desktop, the taskbar and window focus."
+            . "`n`nThis rewrites the Winlogon shell registry value. "
+            . "Ctrl+Alt+Shift+E restores Explorer permanently if you need it back."
+    }
+    if (SettingsEditorMsgBox(prompt, "YesNo Icon?", "Change how SteamShell runs") != "Yes")
+        return
+    if !CommitIniChanges([Map(
+        "section", "Features", "key", "ReplaceWindowsShell",
+        "value", toAlongside ? "false" : "true")]) {
+        SettingsEditorMsgBox(
+            "The setting could not be saved, so nothing was changed.", "OK Icon!")
+        return
+    }
+    registryError := ""
+    if (toAlongside) {
+        ; Explorer back, but SteamShell keeps running -- this is a mode change,
+        ; not the ExitToDesktop escape hatch, which also closes the program.
+        if !WriteAndVerifyShellValue("explorer.exe", &registryError)
+            registryError := "Explorer could not be restored as the shell. " registryError
+    } else if !RegisterCurrentSteamShellAsShell(false) {
+        registryError := "The shell registry value could not be written. "
+            . "Run SteamShell as administrator and try again."
+    }
+    if (registryError != "") {
+        SettingsEditorMsgBox(
+            "The setting was saved, but the shell registration did not change."
+            . "`n`n" registryError
+            . "`n`nSteamShell will use the saved setting at the next start.",
+            "OK Icon!")
+        return
+    }
+    LogLine("Shell mode converted to "
+        . (toAlongside ? "alongside Explorer" : "Windows shell") ".")
+    ; Built into a local first, deliberately. A line that OPENS with "(" and does
+    ; not close it on the same line is a continuation section to AutoHotkey, which
+    ; parses the rest of the line as options rather than as an expression -- so
+    ; the ternary that stood here read as a directive and failed the build.
+    outcome := toAlongside
+        ? "SteamShell will run alongside Explorer from the next start."
+        : "SteamShell will be the Windows shell from the next sign-in."
+    SettingsEditorMsgBox(
+        outcome "`n`nRestart SteamShell to apply it.", "OK Iconi")
+}
+
 SettingsEditorRestoreDesktop(*) {
     result := SettingsEditorMsgBox(
         "Permanently restore Explorer as the Windows shell?`n`n"
@@ -16818,10 +17021,41 @@ if FirstRunSetupMode {
 ; fails and the broadcast is what actually places it.
 InitializeTrayMenu()
 
+; Decided once, here, from the setting LoadSettings has already read. Not
+; re-derived later: whether SteamShell owns the desktop must be one answer for
+; the whole session, and the converter in Advanced & Logging is what changes it
+; -- by registering or surrendering the shell and asking for a restart.
+AlongsideMode := !ReplaceWindowsShell
+
 if FirstRunSetupMode {
     StartFirstRunSetupSession()
 } else if SafeMode {
     StartSafeModeSession()
+} else if AlongsideMode {
+    ; ALONGSIDE. Explorer is the shell, Windows started it, and it keeps the
+    ; desktop and the taskbar for the whole session.
+    ;
+    ; EnterDesktopMode is the whole of it, because DesktopMode already stands
+    ; down precisely the four things that only mean something while SteamShell
+    ; owns presentation -- taskbar guard, desktop blackout, shell monitor and the
+    ; window engine. What is left is what this mode is for: the Quick Menu, the
+    ; controller mouse and mappings, RTSS, and Launcher Cleanup.
+    ;
+    ; No splash: it is a boot curtain over a bare desktop, and there is no boot
+    ; here. No Explorer bootstrap either -- Windows owns that.
+    StartElevatedInputHelper()
+    LastMouseMoveTick := A_TickCount
+    try MouseGetPos(&LastMouseX, &LastMouseY)
+    SetSystemReady()
+    EnterDesktopMode("alongside mode")
+    KickUserStartupPrograms()
+    SetTimer(RestoreRtssFrameLimitTick, 2000)
+    ; Off by default here, and Setup writes that when Alongside is chosen. The
+    ; user asked for a program that runs beside their desktop; taking the screen
+    ; with Big Picture on every start is not that. Turning it on is one setting
+    ; away for anyone who does want it.
+    if LaunchSteamOnStart
+        LaunchSteamBpm()
 } else {
     StartElevatedInputHelper()
     LastMouseMoveTick := A_TickCount
