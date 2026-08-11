@@ -74,3 +74,4 @@ setup-admin-requested.tmp
 # Removing it does not purge it from history -- it is low-risk enough not to be
 # worth a rewrite -- but nothing new should land here.
 logs.txt
+wiki/
