@@ -56,13 +56,13 @@ global ScriptPid := DllCall("GetCurrentProcessId", "UInt")
 global XInputDll := ""
 
 ; Controller input backend state.
-global GameInputModule := 0
-global GameInputPtr := 0
-global GameInputReady := false
-global GameInputFailed := false
+;
+; GameInput used to keep six globals here. It is gone: measured byte-identical to
+; XInput at every sample and all-zero inside Xbox FSE, which is the environment
+; this product exists for. README-XFE.md keeps the measurement, which is where a
+; negative result belongs -- the 189 lines of COM vtable DllCall that produced it
+; do not have to stay compiled in to preserve it.
 global ActiveInputBackend := "none"
-global GameInputLastRawButtons := 0
-global GameInputLastHr := 0
 global LastStatusText := "Ready"
 global LastStatusLevel := "Info"
 ; The Quick Menu status line shows transient feedback only. Zero means nothing
@@ -336,6 +336,18 @@ global RtssPendingFrameCap := 0
 ; with nothing elevated in it, and turning this on is the user deciding
 ; otherwise. See StartElevatedRtssHelper for what it does and does not do.
 global RtssElevatedFrameCapWrites := true
+; Gates the elevated helper PROCESS, exactly as it does in the shell.
+;
+; This product had no such setting: RtssElevatedFrameCapWrites gated both the
+; helper and the RTSS writes, from when the helper did the frame cap and nothing
+; else. SteamShell-Helper.ahk's --product=xfe branch sets
+; HelperGeometryEnabled := false and nothing else, so the helper has done
+; elevated controller input here for some time with no setting naming it.
+;
+; Two settings now, the same two the shell has: this one decides whether the
+; helper runs at all, EnableElevatedFrameCapWrites decides whether the frame cap
+; goes through it.
+global EnableElevatedInputHelper := true
 global ElevatedHelperPath := ""
 global ElevatedHelperPid := 0
 ; Handle for the manual-reset event that tells the elevated helper whether
@@ -1274,6 +1286,20 @@ ProductTrayItems() {
         "label", "Open Quick Menu", "handler", TrayOpenQuickMenu,
         "disabled", CompanionDisabled))
     items.Push(Map("label", "Open Settings", "handler", TrayOpenSettings))
+    ; Reachable from the tray, not only from Settings, and for the reason the
+    ; shell's copy of this list has always given: the user who needs the learner
+    ; is the one whose controller does not work yet, so it must not require a
+    ; controller to get to. The undo matters more again -- a profile learned
+    ; wrongly reads as a stick held over, so the pointer runs off and Settings
+    ; becomes hard to reach with the very device the profile broke.
+    ;
+    ; The shell had both here and this product had neither, which was never a
+    ; decision: the argument is a keyboard-only escape route, and it applies at
+    ; least as strongly to the product most likely to be driven from a couch.
+    ; Both windows are in SteamShell-Shared.ahk, so this costs two lines.
+    items.Push(Map("label", "Learn Controller…", "handler", ShowControllerLearner))
+    items.Push(Map("label", "Delete Learned Profile",
+        "handler", DeleteControllerProfileForActiveDevice))
     items.Push("")
     items.Push(Map(
         "label", CompanionDisabled ? "Enable" : "Disable",
@@ -1339,18 +1365,11 @@ ToggleCompanionDisabled(*) {
     SetCompanionDisabled(!CompanionDisabled)
 }
 
-TrayOpenSettings(*) {
-    ShowSettings()
-}
 
 ReloadSettings(*) {
-    global QuickMenuVisible, SettingsVisible, GameInputFailed, GameInputReady
+    global QuickMenuVisible, SettingsVisible
     EnsureSettingsFile()
     LoadSettings()
-    ; Clear the failure latch so switching the backend in Settings can retry
-    ; GameInput without restarting the companion.
-    if !GameInputReady
-        GameInputFailed := false
     ApplyRuntimeTimers()
     ; Both directions, immediately. An elevated process the user has just asked
     ; to stop, which keeps running until the next sign-in, is not a control.
@@ -1359,7 +1378,9 @@ ReloadSettings(*) {
         QuickMenuBuildGui()
     if SettingsVisible
         SettingsPopulate()
-    ShowNotification("Settings reloaded", "Info")
+    ; "Success", matching the shell. The same event reported at two levels was
+    ; drift, not a product difference: a reload that worked is a success in both.
+    ShowNotification("Settings reloaded", "Success")
 }
 
 Heartbeat() {
@@ -1382,6 +1403,7 @@ Heartbeat() {
 OnCompanionExit(exitReason, exitCode) {
     ReleaseControllerMouseButtons()
     global DisplayPendingOldMode, DisplayPendingOldScale, AssistPendingHardKillPids
+    global ElevatedAutoMouseEventHandle
     SetTimer(PollController, 0)
     SetTimer(MouseWatch, 0)
     SetTimer(ObserveForeground, 0)
@@ -1389,7 +1411,6 @@ OnCompanionExit(exitReason, exitCode) {
     SetTimer(AssistTick, 0)
     SetTimer(AssistHardKillLaunchers, 0)
     AssistPendingHardKillPids := Map()
-    ShutdownGameInput()
     ShutdownRtssHooksApi()
     ; The shared teardown, directly. This went through a one-line
     ; ReleaseQuickMenuPaintResources that only called it, and standalone had a
@@ -1397,6 +1418,16 @@ OnCompanionExit(exitReason, exitCode) {
     ; which is the drift the manifests exist to catch and the one form of it a
     ; name-keyed check cannot see.
     QuickMenuDestroyWindow()
+    ; Matching the shell's teardown. Windows closes this at process exit either
+    ; way, so the leak is not the point -- the asymmetry was: one product closed
+    ; the automatic-mouse event it publishes to the elevated helper and the other
+    ; did not, in an otherwise symmetric pair of exit paths. Closing it here is
+    ; also the honest signal to a helper still reading it.
+    if ElevatedAutoMouseEventHandle {
+        try DllCall(
+            "Kernel32\CloseHandle", "Ptr", ElevatedAutoMouseEventHandle, "Int")
+        ElevatedAutoMouseEventHandle := 0
+    }
     if IsObject(DisplayPendingOldMode) {
         ApplyPrimaryDisplayMode(DisplayPendingOldMode)
         if IsObject(DisplayPendingOldScale)
@@ -1467,7 +1498,6 @@ PromoteDialogsToTopmost() {
         try WinSetAlwaysOnTop(1, "ahk_id " hwnd)
     }
 }
-
 
 
 ; Seams for the shared MouseWatch. Nothing stops the pass here -- this product
@@ -1623,295 +1653,38 @@ ObserveForeground() {
 }
 
 ; ==============================================================================
-; GameInput backend
-;
-; Xbox FSE appears to withhold View, Menu, L3, and R3 from background XInput
-; consumers. GameInput is the only documented Windows input stack with an
-; explicit background focus policy, so it is offered as an alternative source
-; for the same gamepad state.
-;
-; This backend is deliberately opt-in and fully fallback-guarded. GameInput is
-; a COM-style interface reached through raw vtable offsets: an offset that is
-; wrong for the installed GameInput version is not a catchable error, it is an
-; access violation. Every entry point below is therefore probed once, failures
-; are latched, and any failure returns the companion to XInput rather than
-; leaving it without input.
-;
-; VERIFY BEFORE TRUSTING IN PRODUCTION: the vtable indices and the gamepad
-; struct layout below match the documented GameInput v1 interface. If the log
-; reports GameInput initialising but readings never arrive, these constants are
-; the first thing to re-check against the GameInput version on the machine.
+; GameInput backend -- REMOVED, and this is the record of why
 ; ==============================================================================
-; IGameInput vtable slots (0-2 are IUnknown).
-global GI_VT_RELEASE := 2
-; Verified working on Windows 11 / July 2026: readings arrive through slot 4.
-global GI_VT_GETCURRENTREADING := 4
-; UNVERIFIED. Slot 22 raised an exception in testing, so the focus policy is
-; never actually applied and the log reports it as unavailable. This turned out
-; not to matter: GameInput delivered background readings to the companion while
-; Xbox FSE held the foreground, which proves background input already works
-; without the call. Correct the slot only if a future need for an explicit
-; policy appears; do not read the "unavailable" log line as the cause of any
-; missing-button problem.
-global GI_VT_SETFOCUSPOLICY := 22
-; IGameInputReading vtable slots.
-global GIR_VT_GETGAMEPADSTATE := 22
-; GameInputKind::GameInputKindGamepad.
-global GI_KIND_GAMEPAD := 2
-; GameInputFocusPolicy::GameInputDefaultFocusPolicy — background input allowed.
-global GI_FOCUS_DEFAULT := 0
-
-InitGameInput() {
-    global GameInputModule, GameInputPtr, GameInputReady, GameInputFailed
-    global GI_VT_SETFOCUSPOLICY, GI_FOCUS_DEFAULT
-
-    if GameInputReady
-        return true
-    if GameInputFailed
-        return false
-
-    ; Latch failure up front so a broken environment cannot retry every poll.
-    GameInputFailed := true
-
-    hmod := 0
-    try {
-        hmod := DllCall("GetModuleHandle", "Str", "GameInput.dll", "Ptr")
-        if !hmod
-            hmod := DllCall("LoadLibrary", "Str", "GameInput.dll", "Ptr")
-    }
-    if !hmod {
-        LogLine("GameInput: GameInput.dll is not available; using XInput.", "Warning")
-        return false
-    }
-
-    proc := 0
-    try proc := DllCall("GetProcAddress", "Ptr", hmod, "AStr", "GameInputCreate", "Ptr")
-    if !proc {
-        LogLine("GameInput: GameInputCreate was not exported; using XInput.", "Warning")
-        return false
-    }
-
-    obj := 0
-    hr := -1
-    try hr := DllCall(proc, "Ptr*", &obj, "Int")
-    if (hr < 0 || !obj) {
-        LogLine("GameInput: GameInputCreate failed (hr=0x"
-            . Format("{:08X}", hr & 0xFFFFFFFF) "); using XInput.", "Warning")
-        return false
-    }
-
-    GameInputModule := hmod
-    GameInputPtr := obj
-
-    ; Background input is the entire reason this backend exists. The call is
-    ; absent on older GameInput builds, so treat a failure as informational.
-    policyText := "not applied"
-    try {
-        policyProc := GameInputVtable(obj, GI_VT_SETFOCUSPOLICY)
-        if policyProc {
-            phr := DllCall(policyProc, "Ptr", obj, "Int", GI_FOCUS_DEFAULT, "Int")
-            policyText := phr >= 0
-                ? "default (background input allowed)"
-                : "rejected (hr=0x" Format("{:08X}", phr & 0xFFFFFFFF) ")"
-        }
-    } catch {
-        policyText := "unavailable on this GameInput version"
-    }
-
-    GameInputReady := true
-    GameInputFailed := false
-    LogLine("GameInput: initialised. Focus policy: " policyText ".")
-    return true
-}
-
-GameInputVtable(ptr, index) {
-    if !ptr
-        return 0
-    table := NumGet(ptr, 0, "Ptr")
-    if !table
-        return 0
-    return NumGet(table, index * A_PtrSize, "Ptr")
-}
-
-ShutdownGameInput() {
-    global GameInputPtr, GameInputReady, GI_VT_RELEASE
-    if !GameInputPtr
-        return
-    try {
-        release := GameInputVtable(GameInputPtr, GI_VT_RELEASE)
-        if release
-            DllCall(release, "Ptr", GameInputPtr)
-    }
-    GameInputPtr := 0
-    GameInputReady := false
-}
-
-; Reads a gamepad through GameInput and writes it into the XINPUT_STATE-shaped
-; buffer the rest of the companion already understands, so the poll loop and
-; every mapping stay backend-agnostic.
-GameInputReadState(&state) {
-    global GameInputPtr, GameInputReady, GameInputFailed
-    global GI_VT_GETCURRENTREADING, GI_VT_RELEASE
-    global GIR_VT_GETGAMEPADSTATE, GI_KIND_GAMEPAD
-    global GameInputLastRawButtons, GameInputLastHr
-
-    if !GameInputReady
-        return false
-    if !IsObject(state)
-        state := Buffer(16, 0)
-
-    reading := 0
-    hr := -1
-    try {
-        proc := GameInputVtable(GameInputPtr, GI_VT_GETCURRENTREADING)
-        if !proc
-            return false
-        hr := DllCall(proc, "Ptr", GameInputPtr, "Int", GI_KIND_GAMEPAD,
-            "Ptr", 0, "Ptr*", &reading, "Int")
-    } catch {
-        LogLine("GameInput: reading call raised an exception; reverting to XInput.", "Warning")
-        GameInputReady := false
-        GameInputFailed := true
-        return false
-    }
-    GameInputLastHr := hr
-    ; No reading simply means no gamepad is currently reporting.
-    if (hr < 0 || !reading)
-        return false
-
-    pad := Buffer(28, 0)
-    ok := false
-    try {
-        proc := GameInputVtable(reading, GIR_VT_GETGAMEPADSTATE)
-        if proc
-            ok := DllCall(proc, "Ptr", reading, "Ptr", pad, "Int") != 0
-    }
-    try {
-        release := GameInputVtable(reading, GI_VT_RELEASE)
-        if release
-            DllCall(release, "Ptr", reading)
-    }
-    if !ok
-        return false
-
-    ; GameInputGamepadState: uint32 buttons, then six normalised floats.
-    giButtons := NumGet(pad, 0, "UInt")
-    GameInputLastRawButtons := giButtons
-    lt := NumGet(pad, 4, "Float")
-    rt := NumGet(pad, 8, "Float")
-    lx := NumGet(pad, 12, "Float")
-    ly := NumGet(pad, 16, "Float")
-    rx := NumGet(pad, 20, "Float")
-    ry := NumGet(pad, 24, "Float")
-
-    buttons := 0
-    if (giButtons & 0x0001)
-        buttons |= 0x0010    ; Menu  -> Start
-    if (giButtons & 0x0002)
-        buttons |= 0x0020    ; View  -> Back
-    if (giButtons & 0x0004)
-        buttons |= 0x1000    ; A
-    if (giButtons & 0x0008)
-        buttons |= 0x2000    ; B
-    if (giButtons & 0x0010)
-        buttons |= 0x4000    ; X
-    if (giButtons & 0x0020)
-        buttons |= 0x8000    ; Y
-    if (giButtons & 0x0040)
-        buttons |= 0x0001    ; D-pad up
-    if (giButtons & 0x0080)
-        buttons |= 0x0002    ; D-pad down
-    if (giButtons & 0x0100)
-        buttons |= 0x0004    ; D-pad left
-    if (giButtons & 0x0200)
-        buttons |= 0x0008    ; D-pad right
-    if (giButtons & 0x0400)
-        buttons |= 0x0100    ; LB
-    if (giButtons & 0x0800)
-        buttons |= 0x0200    ; RB
-    if (giButtons & 0x1000)
-        buttons |= 0x0040    ; L3
-    if (giButtons & 0x2000)
-        buttons |= 0x0080    ; R3
-
-    NumPut("UInt", 0, state, 0)
-    NumPut("UShort", buttons, state, 4)
-    NumPut("UChar", GameInputTrigger(lt), state, 6)
-    NumPut("UChar", GameInputTrigger(rt), state, 7)
-    NumPut("Short", GameInputAxis(lx), state, 8)
-    NumPut("Short", GameInputAxis(ly), state, 10)
-    NumPut("Short", GameInputAxis(rx), state, 12)
-    NumPut("Short", GameInputAxis(ry), state, 14)
-    return true
-}
-
-GameInputTrigger(value) {
-    scaled := Round(value * 255)
-    if (scaled < 0)
-        return 0
-    return scaled > 255 ? 255 : scaled
-}
-
-GameInputAxis(value) {
-    scaled := Round(value * 32767)
-    if (scaled < -32767)
-        return -32767
-    return scaled > 32767 ? 32767 : scaled
-}
-
+; Six functions, 189 lines of COM-style vtable DllCall, and six globals stood
+; here. They are gone, and nothing replaced them.
+;
+; WHAT IT WAS FOR. Xbox FSE appears to withhold View, Menu, L3 and R3 from
+; background XInput consumers. GameInput is the only documented Windows input
+; stack with an explicit background focus policy, so it was tried as a second
+; source for the same gamepad state.
+;
+; WHAT THE MEASUREMENT SAID. XInput and GameInput report byte-identical state at
+; every sample, including all-zero inside Xbox FSE -- they share a layer, and no
+; choice between them can help. That result is why RawInput was built: HID
+; reports delivered as WM_INPUT straight from the HID stack, with
+; RIDEV_INPUTSINK explicitly requesting delivery while this process is NOT in
+; the foreground. RawInput is what actually answers the question GameInput was
+; brought in for, and it is the default half of `auto`.
+;
+; WHY THE CODE WENT AND THE FINDING STAYED. A negative result is worth keeping.
+; The implementation that produced it is not: it was reachable only by typing
+; `gameinput` into the Backend setting -- `auto` never selected it -- and it
+; could only ever return what XInput already returns, or nothing at all in the
+; product's own environment. Against that it carried raw vtable offsets, where a
+; wrong index is not a catchable error but an access violation, and a second
+; failure-latch to reset on every settings reload.
+;
+; The finding lives in README-XFE.md and beside RawInputProbeStart in
+; SteamShell-Shared.ahk, which is where a measurement belongs. Removing the code
+; also made ControllerReadState identical in both trees, so it is one shared
+; definition now instead of two that had drifted.
 ; ==============================================================================
-; Backend dispatch
-; ==============================================================================
-; Single entry point for controller state. GameInput is tried first when
-; selected; XInput remains the fallback so the companion is never left without
-; input because of a backend problem.
-ControllerReadState(&state) {
-    global ControllerBackend, ActiveInputBackend, GameInputReady, GameInputFailed
-    static warnedUnusable := false
 
-    wanted := StrLower(ControllerBackend)
-    ; RawInput first: it is the only source that survives Xbox FSE, and it is
-    ; silent everywhere else, so it yields to XInput on the desktop by itself.
-    if (wanted = "rawinput" || wanted = "auto") {
-        if RawInputReadState(&state) {
-            SetActiveBackend("rawinput")
-            return true
-        }
-        ; An explicit rawinput request does NOT fall back to XInput.
-        ;
-        ; The setting exists to isolate RawInput for diagnosis, and a silent
-        ; fallback made it behave identically to auto -- which is precisely what
-        ; made a post-sleep test inconclusive: input still worked on the desktop,
-        ; which looked like RawInput having recovered when it was XInput the
-        ; whole time. A diagnostic setting that quietly does something else is
-        ; worse than no setting at all.
-        if (wanted = "rawinput") {
-            SetActiveBackend("none")
-            return false
-        }
-    }
-    if (wanted = "gameinput") {
-        if (!GameInputReady && !GameInputFailed)
-            InitGameInput()
-        if (GameInputReady && GameInputReadState(&state)) {
-            SetActiveBackend("gameinput")
-            return true
-        }
-        ; An explicit GameInput request still falls back, but says so once.
-        if (wanted = "gameinput" && GameInputFailed && !warnedUnusable) {
-            warnedUnusable := true
-            LogLine("GameInput was requested but is unusable; falling back to XInput.", "Warning")
-        }
-    }
-
-    if XInputResolveController(&state) {
-        SetActiveBackend("xinput")
-        return true
-    }
-
-    SetActiveBackend("none")
-    return false
-}
 
 ; Backend selection can legitimately alternate when one source goes quiet, and
 ; poll runs every ~16 ms, so repeat changes are throttled to keep a flapping
@@ -1924,7 +1697,6 @@ ControllerReadState(&state) {
 ; SetActiveBackend lives in SteamShell-Shared.ahk now, with the throttle and the
 ; always-log-the-first-time rule intact. The shell needed the same answer for its
 ; Health Check and had no way to record it.
-
 
 
 ; ==============================================================================
@@ -2072,44 +1844,22 @@ global LearnPeak := 0
 ; Per-tree seam required by SteamShell-Shared.ahk: what this product can add to
 ; a controller diagnostic tick.
 ;
-; GameInput is the companion's alone -- it reads all zeros outside Xbox FSE, so
-; the shell cannot offer it honestly -- and so is the second backend name. Those
-; two facts are the whole of the difference between the two ticks, which is why
-; the rest of it is shared rather than written twice.
+; What this product can add to a controller diagnostic tick: the name of the
+; backend actually in use.
 ;
-; Returned as three strings rather than one so the log line keeps its shape:
-; the backend suffix sits with the backend, the GameInput reading after the
-; slots, and the signature feeds the tick's change detection without appearing
-; in the output at all.
+; This used to also initialise GameInput purely to OBSERVE it, and report its
+; reading alongside XInput's on every tick -- the comparison between the two
+; stacks was the point. The comparison is finished: they were byte-identical at
+; every sample, GameInput is gone, and a tick that reported a backend which no
+; longer exists would be noise.
+;
+; The backend NAME still differs from the shell's, which reports nothing here,
+; so this stays a seam rather than moving into SteamShell-Shared.ahk. The
+; signature is empty because there is no longer a second reading whose change
+; the tick would be detecting.
 ProductControllerDiagnosticProbe() {
-    global ActiveInputBackend, GameInputReady, GameInputFailed
-    global GameInputLastRawButtons, GameInputLastHr
-
-    ; Initialise GameInput for OBSERVATION even when it is not the active input
-    ; backend. The comparison between the two stacks is the entire point of this
-    ; diagnostic, and it must not force the user to route real input through the
-    ; less-proven backend just to collect it.
-    if (!GameInputReady && !GameInputFailed)
-        InitGameInput()
-
-    giText := "off"
-    signature := ""
-    if GameInputReady {
-        giState := Buffer(16, 0)
-        if GameInputReadState(&giState) {
-            giText := "0x" Format("{:04X}", NumGet(giState, 4, "UShort"))
-                . " raw=0x" Format("{:08X}", GameInputLastRawButtons)
-            signature := GameInputLastRawButtons
-        } else {
-            giText := "noreading hr=0x" Format("{:08X}", GameInputLastHr & 0xFFFFFFFF)
-            signature := "none"
-        }
-    } else if GameInputFailed {
-        giText := "initfailed"
-    }
-    return Map("suffix", "/" ActiveInputBackend,
-        "detail", " | GI=" giText,
-        "signature", signature)
+    global ActiveInputBackend
+    return Map("suffix", "/" ActiveInputBackend, "detail", "", "signature", "")
 }
 
 ; Per-tree seam required by SteamShell-Shared.ahk: the builtin actions only
@@ -2377,13 +2127,39 @@ LogLogonTaskDetails() {
 ; schtasks needs administrator rights to register a highest-privileges task.
 ; When the companion is already elevated it runs directly; otherwise this is the
 ; one place a UAC prompt is raised, at the user's explicit request.
-RunSchTasks(arguments) {
+; ELEVATION IS PER-OPERATION, not per-caller.
+;
+; This forced the elevation verb below onto everything the companion asked
+; schtasks to do, and two of those operations need no token at all: /query reads
+; a task definition and /run starts a task the interactive user already owns --
+; the task's own HighestAvailable RunLevel is what supplies the elevated token,
+; which is the entire point of registering one.
+;
+; (The verb is not spelled in this comment on purpose. The rule that governs it
+; is a regex over every occurrence in this file, and it requires each one to name
+; schtasks.exe or the verified helper path -- so a comment quoting the token
+; fails the build. Same reason ControllerReadState does not quote the XInput call
+; it replaced.)
+;
+; So the on-demand helper path prompted for UAC to CHECK whether its task existed
+; and again to RUN it. That path exists precisely to avoid a UAC prompt, on the
+; product most likely to be driven by a controller with no keyboard, and it
+; prompted twice per invocation instead. Standalone never had this: its
+; StartElevatedHelperTask calls schtasks /run through a plain RunWait.
+;
+; Registering and deleting a HighestAvailable task genuinely do need
+; administrator, so those keep the default. The default is `true` deliberately --
+; a new caller that forgets to think about this fails closed with a prompt rather
+; than silently with an access-denied exit code.
+; Reads a registered task definition back. schtasks writes /xml to stdout, so it
+; goes through the shell to a file; the read needs no token, like the /query it
+; wraps.
+RunSchTasksCapture(arguments, outputPath) {
     try {
-        if A_IsAdmin
-            return RunWait('schtasks.exe ' arguments, , "Hide")
-        return RunWait('*RunAs schtasks.exe ' arguments, , "Hide")
+        return RunWait(A_ComSpec ' /d /c schtasks.exe ' arguments
+            . ' > ' QuoteWindowsCommandLineArg(outputPath) ' 2>&1', , "Hide")
     } catch as err {
-        LogLine("Scheduled task command failed: " err.Message, "Warning")
+        LogLine("Scheduled task query failed: " err.Message, "Warning")
         return -1
     }
 }
@@ -3970,7 +3746,7 @@ GetAudioSummary() {
 ; have to be: ElevatedHelperLocationIsProtected checks the owner and DACL of the
 ; path this resolves to, and a redirected value pointing somewhere the user can
 ; write fails that check and the helper is not launched.
-XfeElevatedHelperPath() {
+ProductElevatedHelperPath() {
     return A_ProgramFiles "\SteamShell-XFE\bin\SteamShell-Helper.exe"
 }
 
@@ -4017,23 +3793,79 @@ XfeInitializeInteractiveIdentity() {
 ; Registered lazily, the first time the opt-in is actually used, rather than at
 ; install: someone who never enables elevated frame-cap writes should never have
 ; a HighestAvailable task on their machine.
-XfeElevatedHelperTaskName() {
-    return "SteamShell XFE Elevated RTSS Helper"
+
+; True when the registered task already carries the arguments the helper needs.
+;
+; A task registered before this was fixed carries only --product= and
+; --main-path=. The helper stops at its own argument gate when --settings= is
+; absent, and because --log= was absent too, LogLine returns before writing, so
+; it says so NOWHERE -- the companion sees only "the scheduled task did not
+; produce a verified helper" and falls through to the UAC prompt the task exists
+; to avoid. Those tasks are already on machines, so recognising the old shape and
+; replacing it is part of the fix rather than a migration nicety.
+XfeElevatedHelperTaskArgumentsAreCurrent() {
+    xmlPath := A_Temp "\SteamShell-XFE-helper-task-query.xml"
+    try FileDelete(xmlPath)
+    if (RunSchTasksCapture(
+        '/query /tn "' XfeElevatedHelperTaskName() '" /xml ONE', xmlPath) != 0) {
+        try FileDelete(xmlPath)
+        return false
+    }
+    ; schtasks writes UTF-16 here, but the encoding it lands in has varied with
+    ; the console code page, so fall back rather than assume. Anything that does
+    ; not read back as a task definition is treated as not current, which
+    ; re-registers -- the safe direction.
+    text := ""
+    try text := FileRead(xmlPath, "UTF-16")
+    if !InStr(text, "<Task")
+        try text := FileRead(xmlPath, "UTF-8")
+    if !InStr(text, "<Task")
+        try text := FileRead(xmlPath)
+    try FileDelete(xmlPath)
+    if !InStr(text, "<Task")
+        return false
+    ; The flags are DERIVED from the builder, never spelled here. Writing them out
+    ; would be a fourth hand-written copy of the command line -- which is what
+    ; SharedElevatedHelperArguments exists to end, and what Validate-Common.ps1
+    ; fails the build over. It also keeps this correct for free if the argument
+    ; list ever changes: the probe is built with the same shape the registration
+    ; uses below, so whatever that produces is what is looked for.
+    probe := SharedElevatedHelperArguments("xfe", 0, "m", "s", "l")
+    for _, token in StrSplit(probe, " ") {
+        separator := InStr(token, "=")
+        if !separator
+            continue
+        if !InStr(text, SubStr(token, 1, separator))
+            return false
+    }
+    return true
 }
 
-EnsureXfeElevatedHelperTask(helperPath, &failureReason) {
+EnsureXfeElevatedHelperTask(helperPath, helperLog, &failureReason) {
+    global IniPath
     failureReason := ""
     if !ElevatedHelperLocationIsProtected(helperPath, &protectionError) {
         failureReason := "The helper location is not administrator-protected ("
             . protectionError ")."
         return false
     }
-    if (RunSchTasks('/query /tn "' XfeElevatedHelperTaskName() '"') = 0)
-        return true
+    ; Unelevated: reading a task definition needs no token. See RunSchTasks.
+    if (RunSchTasks('/query /tn "' XfeElevatedHelperTaskName() '"', false) = 0) {
+        if XfeElevatedHelperTaskArgumentsAreCurrent()
+            return true
+        LogLine("The registered elevated-helper task predates the full argument "
+            . "list and starts a helper that stops immediately; re-registering it.",
+            "Warning")
+        ; Falls through to /create /f, which overwrites in place.
+    }
     SplitPath(helperPath, , &helperDirectory)
     account := LogonTaskAccountForXml()
+    ; ALL FIVE ARGUMENTS, exactly as the direct elevation path below builds them.
+    ; schtasks /run cannot add any, so whatever is registered here is everything
+    ; the task-started helper will ever receive.
     xml := ElevatedHelperTaskXml(account, helperPath,
-        SharedElevatedHelperArguments("xfe", 0, A_ScriptFullPath),
+        SharedElevatedHelperArguments(
+            "xfe", 0, A_ScriptFullPath, IniPath, helperLog),
         helperDirectory)
     xmlPath := A_Temp "\SteamShell-XFE-helper-task.xml"
     try FileDelete(xmlPath)
@@ -4042,6 +3874,10 @@ EnsureXfeElevatedHelperTask(helperPath, &failureReason) {
         failureReason := "The task definition could not be written (" err.Message ")."
         return false
     }
+    ; Retire the old name first. /delete on a task that is not there returns
+    ; non-zero and that is not a failure -- there was nothing to remove.
+    RunSchTasks(
+        '/delete /f /tn "' XfeElevatedHelperTaskLegacyName() '"')
     exitCode := RunSchTasks(
         '/create /f /tn "' XfeElevatedHelperTaskName() '" /xml "' xmlPath '"')
     try FileDelete(xmlPath)
@@ -4056,13 +3892,15 @@ EnsureXfeElevatedHelperTask(helperPath, &failureReason) {
 }
 
 StartElevatedRtssHelper() {
-    global RtssElevatedFrameCapWrites, ElevatedHelperPath, ElevatedHelperPid
+    global EnableElevatedInputHelper, ElevatedHelperPath, ElevatedHelperPid
     global ElevatedHelperAvailable, ElevatedHelperLastError
     global ElevatedHelperExpectedVersion, IniPath, ScriptPid
 
     ElevatedHelperAvailable := false
     ElevatedHelperPid := 0
-    if !RtssElevatedFrameCapWrites {
+    ; The helper setting, not the RTSS one. Whether the frame cap goes through
+    ; the helper is a separate question, asked where the frame cap is written.
+    if !EnableElevatedInputHelper {
         ElevatedHelperLastError := "Disabled in Settings."
         return false
     }
@@ -4074,7 +3912,7 @@ StartElevatedRtssHelper() {
         LogLine("Elevated RTSS helper: " ElevatedHelperLastError)
         return false
     }
-    ElevatedHelperPath := XfeElevatedHelperPath()
+    ElevatedHelperPath := ProductElevatedHelperPath()
     installedVersion := ""
     try installedVersion := FileGetVersion(ElevatedHelperPath)
     if (installedVersion != ElevatedHelperExpectedVersion) {
@@ -4110,12 +3948,19 @@ StartElevatedRtssHelper() {
     ; desktop where a controller cannot answer it. Registered lazily here rather
     ; than at install, so a machine that never enables this never carries a
     ; HighestAvailable task.
-    if EnsureXfeElevatedHelperTask(ElevatedHelperPath, &taskSetupError) {
-        existingPids := CaptureExecutablePidSet(ElevatedHelperPath)
-        if (RunSchTasks('/run /tn "' XfeElevatedHelperTaskName() '"') = 0) {
-            taskPid := WaitForNewExecutablePid(ElevatedHelperPath, existingPids, 5000)
-            if (taskPid && WaitForVerifiedElevatedHelper(
-                taskPid, &taskVerifyError, 2500)) {
+    if EnsureXfeElevatedHelperTask(
+        ElevatedHelperPath, helperLog, &taskSetupError) {
+        ; Unelevated: the task's own HighestAvailable RunLevel supplies the token,
+        ; which is why registering one avoids a prompt. See RunSchTasks.
+        ;
+        ; Run-and-wait is StartHelperViaScheduledTask in SteamShell-Shared.ahk,
+        ; which the shell calls too. VERIFICATION stays here: this product closes
+        ; a task process it could not verify before falling through to UAC, so
+        ; that it does not leave a second helper behind.
+        if StartHelperViaScheduledTask(
+            ElevatedHelperPath, XfeElevatedHelperTaskName(),
+            &taskPid, &taskRunError) {
+            if WaitForVerifiedElevatedHelper(taskPid, &taskVerifyError, 2500) {
                 ElevatedHelperPid := taskPid
                 ElevatedHelperAvailable := true
                 ElevatedHelperLastError := "Running as PID " taskPid
@@ -4135,24 +3980,14 @@ StartElevatedRtssHelper() {
         LogLine("Elevated RTSS helper: no scheduled task (" taskSetupError
             . "); elevation will prompt.", "Warning")
     }
-    commandLine := "*RunAs " QuoteWindowsCommandLineArg(ElevatedHelperPath)
-        . " " SharedElevatedHelperArguments("xfe", ScriptPid, "", IniPath, helperLog)
-    try {
-        Run(commandLine, A_ScriptDir, , &ElevatedHelperPid)
-        ElevatedHelperAvailable := WaitForVerifiedElevatedHelper(
-            ElevatedHelperPid, &verificationError, 2500)
-        ElevatedHelperLastError := ElevatedHelperAvailable
-            ? "Running as PID " ElevatedHelperPid "."
-            : "The elevated helper could not be verified: " verificationError
-        LogLine("Elevated RTSS helper: " ElevatedHelperLastError,
-            ElevatedHelperAvailable ? "Info" : "Warning")
-        return ElevatedHelperAvailable
-    } catch as err {
-        ElevatedHelperLastError := "Elevation was cancelled or failed: " err.Message
-        LogLine("Elevated RTSS helper unavailable: " ElevatedHelperLastError,
-            "Warning")
-        return false
-    }
+    ; The direct-UAC fallback is StartElevatedHelperViaUac in
+    ; SteamShell-Shared.ahk, which the shell also calls. Only the log prefix
+    ; differed between the two copies.
+    ElevatedHelperAvailable := StartElevatedHelperViaUac(
+        ElevatedHelperPath,
+        SharedElevatedHelperArguments("xfe", ScriptPid, "", IniPath, helperLog),
+        "Elevated RTSS helper", &ElevatedHelperPid, &ElevatedHelperLastError)
+    return ElevatedHelperAvailable
 }
 
 ; Turning the setting off must take effect now, not at the next sign-in.
@@ -4181,21 +4016,13 @@ EnsureElevatedRtssHelperAlive() {
     return false
 }
 
+; The companion's half: one setting, and the only thing that blocks an otherwise
+; wanted helper is already running elevated, where a second elevated process buys
+; nothing and costs a UAC prompt.
 SyncElevatedRtssHelperWithSettings() {
-    global RtssElevatedFrameCapWrites, ElevatedHelperAvailable, ElevatedHelperPid
-    global ElevatedHelperLastError
-    if !RtssElevatedFrameCapWrites {
-        if (ElevatedHelperPid || ElevatedHelperAvailable)
-            return StopElevatedHelper("disabled in Settings")
-        ElevatedHelperLastError := "Disabled in Settings."
-        return true
-    }
-    if A_IsAdmin
-        return false
-    if (ElevatedHelperAvailable && ElevatedHelperPid
-        && ProcessExist(ElevatedHelperPid))
-        return true
-    return StartElevatedRtssHelper()
+    global EnableElevatedInputHelper
+    return SharedSyncElevatedHelper(
+        EnableElevatedInputHelper, A_IsAdmin, StartElevatedRtssHelper)
 }
 
 ; ------------------------------------------------------------------------------
@@ -4267,15 +4094,6 @@ SharedPersistSettings(changes, deletes := 0) {
 ; them for the same reason standalone does -- adopting the commit without the
 ; sweep would just trade one kind of litter for another, beside the INI the user
 ; is expected to be able to read.
-SweepAbandonedSettingsUpdates() {
-    global IniPath, ScriptPid
-    SweepAbandonedIniUpdates(IniPath, ScriptPid)
-    ; And the controller profile file, which stages through the same commit and
-    ; was swept by nothing in either product. Its staging files are named after
-    ; "<ini>-Controllers.ini", so the sweep above cannot see them however wide its
-    ; pattern is -- what was missing is this call.
-    SweepAbandonedIniUpdates(ControllerProfilePathFor(IniPath), ScriptPid)
-}
 
 ; Per-tree seam required by SteamShell-Shared.ahk. See the header above
 ; VerifyElevatedHelperProcess there for why this exists.
@@ -4360,19 +4178,16 @@ QuickMenuHideThenSteamMenu(steamInFront) {
         SetTimer(SendSteamOverlayChord, -150)
 }
 
-; Closes the Quick Menu when one of OUR OWN windows is opening next.
-;
-; The normal close hands the foreground back to whatever was in front, and Xbox
-; FSE then re-asserts it. The window opened a moment later therefore loses the
-; race and never comes forward -- it has to be found with the task switcher.
-; Clearing the remembered window means there is nothing to hand back to.
-HideQuickMenuForOwnWindow() {
-    global QuickMenuPreviousHwnd
-    QuickMenuPreviousHwnd := 0
-    HideQuickMenu()
-}
+; HideQuickMenuForOwnWindow used to be defined here. It is HideQuickMenuForHandoff
+; in SteamShell-Shared.ahk now, one definition for both trees, and the reason it
+; moved -- along with the evidence this product supplied for it, that the normal
+; close lets Xbox FSE re-assert the old foreground and the window opened a moment
+; later loses the race -- is recorded beside it there.
 
-HideQuickMenu(*) {
+; Takes no arguments. It was declared `(*)` here, which accepted the shell's
+; `HideQuickMenu(false)` and silently discarded it; the two trees shared a name
+; and not a contract. Validate-Common.ps1 compares seam parameter shapes now.
+HideQuickMenu() {
     global QuickMenuVisible, QuickMenuGui, EnableAutoHideCursor, MouseHidden
     global QuickMenuPreviousHwnd, ControllerNeedsFreshBaseline
     wasVisible := QuickMenuVisible
@@ -4611,18 +4426,6 @@ QuickMenuResizeToRows() {
 ; the same coordinate space the window is measured in, and resizes to fit if the
 ; window is short. That is DPI-agnostic by construction: whatever scaling was
 ; applied to the controls is already baked into the measurement.
-QuickMenuEnsureContentFits() {
-    global QuickMenuGui, QuickMenuStatusCtrl, QuickMenuMonitorIndex
-    if (!IsSet(QuickMenuGui) || !IsSet(QuickMenuStatusCtrl))
-        return
-    ; The monitor the menu was opened on, stored rather than re-derived. Xbox FSE
-    ; owns presentation here, so there is no foreground window to follow and no
-    ; re-centre once the content fits -- the false below is that decision.
-    monitorIndex := ClampInt(QuickMenuMonitorIndex, 1, MonitorGetCount())
-    MonitorGetWorkArea(monitorIndex, &left, &top, &right, &bottom)
-    QuickMenuFitContent(
-        QuickMenuGui, QuickMenuStatusCtrl, left, top, right, bottom, false)
-}
 
 QuickMenuRender() {
     global QuickMenuRows, QuickMenuSelected, QuickMenuTitleCtrl, QuickMenuStatusCtrl
@@ -4849,7 +4652,11 @@ QuickMenuActivateSelected() {
             QuickMenuHideThenSend("#g")
             return
         case "openKeyboard":
-            HideQuickMenu()
+            ; Handing off, not closing: the touch keyboard is what should be in
+            ; front next. This closed normally, which restored the previous
+            ; window first and left Xbox FSE to re-assert it -- the same race
+            ; the shell had already answered with its own no-restore close.
+            HideQuickMenuForHandoff()
             SetTimer(OpenTouchKeyboard, -100)
             return
         case "steamMenu":
@@ -4861,19 +4668,22 @@ QuickMenuActivateSelected() {
             QuickMenuHideThenSend(SendSteamQuickAccess(IsSteamProcess(QuickMenuPreviousExe)))
             return
         case "settingsEditor":
-            HideQuickMenuForOwnWindow()
+            HideQuickMenuForHandoff()
             ShowSettings()
             return
         case "windowsSettings":
-            HideQuickMenu()
+            ; Same handoff as openKeyboard above. ms-settings: is not our window,
+            ; which is why the old ForOwnWindow name did not reach either of
+            ; these two and the plain close was used by default.
+            HideQuickMenuForHandoff()
             SetTimer(OpenWindowsSettings, -100)
             return
         case "setControllerMappings":
-            HideQuickMenuForOwnWindow()
+            HideQuickMenuForHandoff()
             SetTimer(ShowControllerMappingWindow, -100)
             return
         case "rtssSettings":
-            HideQuickMenuForOwnWindow()
+            HideQuickMenuForHandoff()
             ShowSettingsCategory("RTSS & Performance")
             return
         case "sleep":
@@ -5355,9 +5165,9 @@ ShowSettings(*) {
     SettingsAddRowsForCategory(settings, category, "xfe", &y)
     SettingsAddNote(settings, category,
         "The heartbeat log proves whether the companion remains responsive while "
-        . "Xbox FSE is active. Diagnostic logging compares every controller slot "
-        . "against GameInput and records the foreground process, which reveals a "
-        . "virtualised pad forwarding only some buttons.", &y, 60)
+        . "Xbox FSE is active. Diagnostic logging records every controller slot "
+        . "and the foreground process, which reveals a virtualised pad "
+        . "forwarding only some buttons.", &y, 60)
     y += 12
     SettingsAddButtonRow(settings, category, [
         ["Open INI", (*) => Run(IniPath)],
@@ -6340,12 +6150,6 @@ SettingsRecordShortcut(key, *) {
 ; silently do nothing.
 
 
-
-
-
-
-
-
 RecordShortcutKeyDown(inputObj, vk, sc) {
     global _ShortcutCap
     if !IsObject(_ShortcutCap)
@@ -6450,7 +6254,7 @@ RecordShortcutAccept(*) {
 ExportDiagnosticBundle(*) {
     global AppVersion, IniPath, LogPath, ControllerBackend, ActiveInputBackend
     global RawInputProbeActive, RawInputLastReportTick, RawInputDevice
-    global GameInputReady, GameInputFailed, ActiveControllerIndex
+    global ActiveControllerIndex
     stamp := FormatTime(A_Now, "yyyyMMdd-HHmmss")
     tempDir := A_Temp "\SteamShell-XFE-Diagnostics-" stamp
     zipPath := A_Desktop "\SteamShell-XFE-Diagnostics-" stamp ".zip"
@@ -6490,8 +6294,6 @@ ExportDiagnosticBundle(*) {
         . "RawInputRegistered=" (RawInputProbeActive ? "true" : "false") "`r`n"
         . "RawInputDevice=0x" Format("{:X}", RawInputDevice) "`r`n"
         . "RawInputReceiving=" (RawInputLastReportTick ? "true" : "false") "`r`n"
-        . "GameInputReady=" (GameInputReady ? "true" : "false") "`r`n"
-        . "GameInputFailed=" (GameInputFailed ? "true" : "false") "`r`n"
         . "Foreground=" foreground "`r`n"
         . "AnyFSERunning=" (ProcessExist("AnyFSE.exe") ? "true" : "false") "`r`n"
         . "SteamRunning=" (ProcessExist("steam.exe") ? "true" : "false") "`r`n"
@@ -6527,7 +6329,6 @@ ProductHealthResults() {
     global RtssElevatedFrameCapWrites, ElevatedHelperAvailable, ElevatedHelperPid
     global ElevatedHelperLastError, ElevatedHelperPath
     global ControllerBackend, ActiveInputBackend
-    global GameInputReady, GameInputFailed
     global RawInputProbeActive, RawInputLastReportTick
     results := []
 
@@ -6538,19 +6339,15 @@ ProductHealthResults() {
     AddInstallationRecordHealthRow(results, A_ScriptDir, A_ScriptDir, "Portable")
 
     ; Controller, Input backend and RawInput are the same three rows in both
-    ; products and are built in SteamShell-Shared.ahk. Detection stays here
-    ; because ControllerReadState is the part that still differs -- this tree
-    ; tries GameInput in between, and the shell deliberately does not offer it.
+    ; products and are built in SteamShell-Shared.ahk. ControllerReadState is
+    ; shared too now -- the GameInput branch that used to sit between RawInput
+    ; and XInput here was the only thing that differed, and it is gone.
+    ;
+    ; There was a fourth row below this one reporting GameInput's own state. It
+    ; went with the backend: a health row for something no longer compiled in
+    ; can only ever say "Not requested."
     controller := Buffer(16, 0)
     SharedControllerHealthRows(results, ControllerReadState(&controller))
-    ; The companion's own fourth row. GameInput exists in this product only, so
-    ; the shared builder does not describe it.
-    HealthResult(results,
-        GameInputReady ? "PASS" : (GameInputFailed ? "WARN" : "INFO"),
-        "GameInput",
-        GameInputReady
-            ? "Initialised."
-            : (GameInputFailed ? "Unavailable; fallback in use." : "Not requested."))
 
     if !EnableRTSSIntegration {
         HealthResult(results, "INFO", "RTSS", "Integration is disabled.")
@@ -6598,7 +6395,7 @@ ProductHealthResults() {
     ; "protected" is what decides whether it may be launched at all, and a
     ; failure here is the most likely reason the row above says WARN.
     checkedPath := ElevatedHelperPath != ""
-        ? ElevatedHelperPath : XfeElevatedHelperPath()
+        ? ElevatedHelperPath : ProductElevatedHelperPath()
     if !RtssElevatedFrameCapWrites {
         HealthResult(results, "INFO", "Elevated helper protection",
             "Not checked; the helper is disabled.")
@@ -7200,6 +6997,32 @@ ProductDataDir() {
     return A_ScriptDir
 }
 
+; The companion's half of the desktop-shell seam: always allowed.
+;
+; NOT A STUB -- it is the honest answer. The gate exists so a process that has
+; ended up with an administrator token does not hand it to TabTip or Explorer
+; through the desktop broker, and the companion is an ordinary user process with
+; no takeover path and nothing to leak. Answering the question rather than
+; skipping it is what lets RunViaDesktopShell be one function, and what gives
+; this tree the cold-boot retry it used to go without.
+DesktopShellRefusalReason() {
+    return ""
+}
+
+; The companion's half of the Quick Menu work-area seam: the monitor the menu
+; was opened on, stored rather than re-derived, and do NOT re-centre.
+;
+; Xbox FSE owns presentation here, so there is no foreground window to follow --
+; the returned false is that decision, not a missing feature. Clamped because a
+; display can be detached between the menu opening and the content being fitted.
+ProductQuickMenuWorkArea(&left, &top, &right, &bottom) {
+    global QuickMenuMonitorIndex
+    MonitorGetWorkArea(
+        ClampInt(QuickMenuMonitorIndex, 1, MonitorGetCount()),
+        &left, &top, &right, &bottom)
+    return false
+}
+
 ; Seams for the shared settings scrollbar. Bounds come from SettingsLayout()
 ; here; the shell keeps them in two globals.
 ProductSettingsScrollBar() {
@@ -7212,17 +7035,6 @@ ProductSettingsViewportHeight() {
     return Max(1, SettingsContentBottom - SettingsContentTop)
 }
 
-RunViaDesktopShell(filePath, arguments := "", directory := "", show := 1) {
-    static VT_UI4 := 0x13
-    static SWC_DESKTOP := ComValue(VT_UI4, 0x8)
-    try {
-        ComObject("Shell.Application").Windows.Item(SWC_DESKTOP).Document.Application
-            .ShellExecute(filePath, arguments, directory, "open", show)
-        return true
-    } catch {
-        return false
-    }
-}
 
 OpenTouchKeyboard() {
     if WinExist("ahk_class IPTip_Main_Window") {

@@ -89,7 +89,7 @@ $requiredFunctions = @(
     "SendSteamOverlayChord",
     "ShowHealthCheck",
     "RotateLogIfNeeded",
-    "XfeElevatedHelperPath",
+    "ProductElevatedHelperPath",
     "XfeInitializeInteractiveIdentity",
     "ElevatedRtssRequestPath",
     "VerifyElevatedHelperProcess",
@@ -166,8 +166,16 @@ $runAsSites = [regex]::Matches($source, '(?i)\*RunAs[^\r\n]*')
 foreach ($match in $runAsSites) {
     $line = $match.Value
     $isSchtasks = $line -imatch 'schtasks\.exe'
+    # helperPath as well as ElevatedHelperPath. The direct-UAC launch is
+    # StartElevatedHelperViaUac in SteamShell-Shared.ahk now, one definition for
+    # both products, and it takes the path as a PARAMETER -- so the name on the
+    # elevating line is the parameter's. The security property is unchanged and
+    # is asserted where it belongs: both call sites pass their own
+    # ElevatedHelperPath, and both prove it administrator-protected through
+    # ElevatedHelperLocationIsProtected before reaching the call. That ordering
+    # is pinned by the protection assertion further down this file.
     $isVerifiedHelper =
-        $line -match 'QuoteWindowsCommandLineArg\(ElevatedHelperPath\)'
+        $line -match 'QuoteWindowsCommandLineArg\((?:ElevatedHelperPath|helperPath)\)'
     Assert-True ($isSchtasks -or $isVerifiedHelper) (
         "Only schtasks.exe and the verified elevated helper may be elevated; found: " +
         $line)
@@ -902,10 +910,10 @@ Assert-True (
 
 Assert-True (
     $source -match
-        '(?s)case\s+"openKeyboard":.*?HideQuickMenu\(\).*?' +
+        '(?s)case\s+"openKeyboard":.*?HideQuickMenuForHandoff\(\).*?' +
         'SetTimer\(OpenTouchKeyboard,\s*-100\)' -and
     $source -match
-        '(?s)case\s+"windowsSettings":.*?HideQuickMenu\(\).*?' +
+        '(?s)case\s+"windowsSettings":.*?HideQuickMenuForHandoff\(\).*?' +
         'SetTimer\(OpenWindowsSettings,\s*-100\)' -and
     $source -match
         '(?s)case\s+"SETTINGS":.*?MenuRow\("windowsSettings",\s*"Windows Settings"') (
@@ -1271,11 +1279,17 @@ Assert-True (
 # origin shifted, so an unmoved pointer read as having moved.
 Assert-True ($source -match '(?m)^CoordMode "Mouse", "Screen"$') (
     "CoordMode Mouse must be set to Screen in the auto-execute section.")
-# Opening one of our own windows from the Quick Menu must not hand the foreground
-# back first; Xbox FSE re-asserts it and the new window never comes forward.
+# Opening a window from the Quick Menu must not hand the foreground back first;
+# Xbox FSE re-asserts it and the new window never comes forward.
+#
+# HideQuickMenuForOwnWindow was this product's name for it and is now
+# HideQuickMenuForHandoff in SteamShell-Shared.ahk, defined once for both trees.
+# The name changed with the move: two of the call sites hand off to ms-settings:
+# and the touch keyboard, which are not our windows, and neither of those used
+# the no-restore close while the name said "own window".
 Assert-True (
-    $source -match 'HideQuickMenuForOwnWindow\(' -and
-    $source -match '(?s)case "settingsEditor":\s*\r?\n\s*HideQuickMenuForOwnWindow\(\)') (
+    $source -match 'HideQuickMenuForHandoff\(' -and
+    $source -match '(?s)case "settingsEditor":\s*\r?\n\s*HideQuickMenuForHandoff\(\)') (
     "Opening Settings from the Quick Menu must suppress the focus hand-back.")
 # Window resizing must be done by Gui.Show, not by a predicted physical size: a
 # mismatch does not wobble the window, it sizes it wrong and cuts content off.
@@ -1990,7 +2004,7 @@ Assert-True (
         'FileGetVersion\(ElevatedHelperPath\)(?:(?!\n\})[\s\S])*?' +
         'ElevatedHelperExpectedVersion(?:(?!\n\})[\s\S])*?' +
         'ElevatedHelperLocationIsProtected\((?:(?!\n\})[\s\S])*?' +
-        '\*RunAs') (
+        'StartElevatedHelperViaUac\(') (
     "The XFE helper can be elevated without proving it is administrator-protected.")
 
 # --product=xfe is the whole difference between an RTSS helper and a second
@@ -2002,7 +2016,7 @@ Assert-True (
 Assert-True (
     $source -match
         '(?sm)^StartElevatedRtssHelper\(\)\s*\{(?:(?!\n\})[\s\S])*?' +
-        'commandLine := "\*RunAs "(?:(?!\n\})[\s\S])*?' +
+        'StartElevatedHelperViaUac\((?:(?!\n\})[\s\S])*?' +
         'SharedElevatedHelperArguments\("xfe"') (
     "The XFE helper is no longer launched in RTSS-only mode.")
 
@@ -2094,9 +2108,21 @@ Assert-True (
 # Health Check reports it as fine, is not a control. Both Settings paths must
 # reach it: Save & Apply is the one this setting is actually toggled from.
 Assert-True (
+    # Two halves since the control flow became SharedSyncElevatedHelper: this
+    # tree hands its setting and its starter over, and the shared function is
+    # what stops a running helper when the setting says off.
+    # The setting handed over is EnableElevatedInputHelper, the same one the
+    # shell gates its helper on. It was RtssElevatedFrameCapWrites, because this
+    # product had no helper setting of its own and gated the process on the RTSS
+    # flag -- a holdover from when its helper did the frame cap and nothing else.
+    # Whether the frame cap goes through the helper is still asked separately,
+    # where the frame cap is written.
     $source -match
         '(?sm)^SyncElevatedRtssHelperWithSettings\(\)\s*\{(?:(?!\n\})[\s\S])*?' +
-        'if\s*!RtssElevatedFrameCapWrites(?:(?!\n\})[\s\S])*?' +
+        'SharedSyncElevatedHelper\(\s*EnableElevatedInputHelper(?:(?!\n\})[\s\S])*?' +
+        'StartElevatedRtssHelper' -and
+    $source -match
+        '(?sm)^SharedSyncElevatedHelper\([^)]*\)(?:(?!\n\})[\s\S])*?' +
         'StopElevatedHelper\(' -and
     $source -match
         '(?sm)^ReloadSettings\(\*\)\s*\{(?:(?!\n\})[\s\S])*?' +

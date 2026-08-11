@@ -395,6 +395,82 @@ function Get-AhkFunctionBodies {
     return $functions
 }
 
+# The PARAMETER SHAPE of a function header: how many arguments it requires, how
+# many it accepts, and whether it is variadic. "1..2", "0+", "1..1".
+#
+# WHY THIS EXISTS. The seam is exempt from the drift report, and correctly so --
+# $sharedSeamAllowed IS the record that those functions differ per product, and
+# reporting them as drift asks for a decision that has already been made. But
+# that exemption silently covered their SIGNATURES too, and a signature is not a
+# product difference. It is the contract shared code calls through.
+#
+# Nothing compared them, and two had drifted apart:
+#
+#   HideQuickMenu           `restorePrevious := true` in the shell, `(*)` in the
+#                           companion -- which accepts any argument and DISCARDS
+#                           it. Fifteen shell call sites passed `false` to mean
+#                           "do not restore the previous foreground". The
+#                           companion would have ignored every one of them.
+#
+#   SharedPersistSettings   `(changes)` against `(changes, deletes := 0)`, so
+#                           shared code could never delete an INI key: the
+#                           narrower tree has no parameter for it.
+#
+# Neither was reachable at the time, because shared code happened to call both
+# with the argument count they agreed on. That is the whole hazard. The moment
+# one of those `HideQuickMenu(false)` call sites moved into
+# SteamShell-Shared.ahk -- which is the direction this project has been moving
+# code for months -- it would have compiled in BOTH products, behaved correctly
+# in the shell, and quietly pulled focus to a stale window in the companion.
+# AutoHotkey cannot report it, the fingerprint gate does not look at the seam,
+# and no runtime test would think to check. So it is checked here.
+function Get-AhkParameterShape {
+    param([Parameter(Mandatory = $true)][string]$Body)
+    # Strings and comments first, for the reason Get-AhkFunctionMap states: a
+    # default value like `separator := "("` unbalances an otherwise well-formed
+    # header, and a ";" inside a literal is not a comment.
+    $text = $Body -replace '"(?:[^"`]|`.)*"', '""'
+    $text = $text -replace "'(?:[^'``]|``.)*'", "''"
+    $text = $text -replace '(?<!`);[^\r\n]*', ''
+    $open = $text.IndexOf('(')
+    if ($open -lt 0) { return "?" }
+    $depth = 0
+    $close = -1
+    for ($i = $open; $i -lt $text.Length; $i++) {
+        if ($text[$i] -eq '(') { $depth++ }
+        elseif ($text[$i] -eq ')') {
+            $depth--
+            if ($depth -le 0) { $close = $i; break }
+        }
+    }
+    if ($close -lt 0) { return "?" }
+    $inner = $text.Substring($open + 1, $close - $open - 1)
+    $parts = @()
+    $current = ""
+    $depth = 0
+    foreach ($ch in $inner.ToCharArray()) {
+        if ($ch -eq '(' -or $ch -eq '[' -or $ch -eq '{') { $depth++ }
+        elseif ($ch -eq ')' -or $ch -eq ']' -or $ch -eq '}') { $depth-- }
+        if ($ch -eq ',' -and $depth -eq 0) {
+            $parts += $current
+            $current = ""
+        } else {
+            $current += $ch
+        }
+    }
+    $parts += $current
+    $parts = @($parts | Where-Object { $_.Trim() -ne "" })
+    $required = 0
+    foreach ($part in $parts) {
+        # A variadic tail accepts everything after it, so the ceiling is gone and
+        # only the floor is worth comparing.
+        if ($part -match '\*\s*$') { return "$required+" }
+        if ($part -match ':=') { continue }
+        $required++
+    }
+    return "$required..$($parts.Count)"
+}
+
 # Verifies that the functions both programs share are defined exactly once, in
 # SteamShell-Shared.ahk, and nowhere else.
 #
@@ -549,7 +625,30 @@ $sharedSeamAllowed = @(
     "QuickMenuActivateSelected", "QuickMenuAdjustSelected",
     "QuickMenuBuildGui", "QuickMenuCloseSelected",
     "QuickMenuMouseChoose",
-    "QuickMenuRefresh", "QuickMenuValue")
+    "QuickMenuRefresh", "QuickMenuValue",
+    # Widened for RunViaDesktopShell, which became one function when the
+    # recorded reason for its two copies -- that sharing would compile
+    # DesktopShellMatchesInteractiveUser into a tree that has none -- turned
+    # out to be about the identity GATE and not about the rest of it. The
+    # companion had one attempt where the shell retries a broker that is not
+    # ready yet, which is a cold-boot bug in the product that starts from a
+    # logon task. This seam is that gate: the shell asks the real question,
+    # the companion answers "" because it has no elevated-token case.
+    "DesktopShellRefusalReason",
+    # Widened for TrayOpenSettings, which became one function when the shell's
+    # Settings window was renamed from ShowSettingsEditor to the name the
+    # companion already used. The wrapper's whole body is this call, so a prefix
+    # split was the only thing keeping it duplicated. The two WINDOWS remain
+    # separate implementations -- PRODUCT_SURFACES.txt records why -- so this
+    # asks each product to open its own rather than sharing the page.
+    "ShowSettings",
+    # Widened for QuickMenuEnsureContentFits, whose measurement and centring were
+    # already shared and whose remaining four lines were duplicated because each
+    # product resolves the target monitor from different state -- the shell from
+    # the window that was in front, the companion from the monitor the menu was
+    # opened on. That difference is four numbers and a re-centre flag, which is an
+    # argument, so this seam returns exactly those.
+    "ProductQuickMenuWorkArea")
 # The seam's SIZE is asserted, not just its contents.
 #
 # Both file headers used to state a count in prose -- "three", then "24" --
@@ -561,7 +660,7 @@ $sharedSeamAllowed = @(
 # Restated here, next to the list, and asserted in Assert-SharedParity: changing
 # one without the other fails the build. Update the expectation in the same
 # commit that changes the list, and say in the message why the seam moved.
-$sharedSeamExpectedCount = 56
+$sharedSeamExpectedCount = 59
 
 # Reports same-named functions in both trees whose difference is only naming and
 # formatting -- the drift that a raw similarity score hides.
@@ -1458,6 +1557,60 @@ function Assert-ElevatedHelperProtocol {
                 "command line is what that function exists to end.")
         }
     }
+    # ...and every CALL must supply what the helper cannot start without.
+    #
+    # Everything above is about the builder: that it exists, that its flag
+    # vocabulary matches what the helper reads, and that nobody spells a flag by
+    # hand. All three passed while the companion registered its elevated-helper
+    # scheduled task with two arguments out of five. Calling the builder was
+    # never the question -- WHAT IS PASSED TO IT is, and that is a property of
+    # the call site, so no rule about the builder could reach it.
+    #
+    # The helper stops at a hard gate without a settings path, and the missing
+    # log path meant it stopped silently; the companion then fell through to the
+    # UAC prompt its scheduled task exists to avoid, on the product least able to
+    # answer one. schtasks /run cannot add arguments, so what is registered is
+    # everything that helper will ever receive.
+    #
+    # Positional, matching the builder's parameters:
+    #   product, parentPid, mainPath, settingsPath, logPath
+    #
+    # Replay-Validation.py carries the same rule natively, so this one is checked
+    # off-Windows too rather than only here.
+    foreach ($tree in @("SteamShell.ahk", "SteamShell-XFE.ahk")) {
+        $treeText = Get-SourceText (Join-Path $ProjectRoot $tree)
+        foreach ($call in [regex]::Matches($treeText,
+            'SharedElevatedHelperArguments\(((?:[^()]|\([^()]*\))*)\)')) {
+            $parts = @()
+            $current = ''
+            $depth = 0
+            foreach ($ch in $call.Groups[1].Value.ToCharArray()) {
+                if ($ch -eq '(') { $depth++ }
+                elseif ($ch -eq ')') { $depth-- }
+                if ($ch -eq ',' -and $depth -eq 0) {
+                    $parts += $current.Trim()
+                    $current = ''
+                } else {
+                    $current += $ch
+                }
+            }
+            if ($current.Trim() -ne '') { $parts += $current.Trim() }
+            $shown = ($parts -join ', ') -replace '\s+', ' '
+            Assert-True ($parts.Count -ge 5) (
+                "$tree calls SharedElevatedHelperArguments($shown) with " +
+                "$($parts.Count) argument(s). The helper needs a settings path -- " +
+                "it stops at its own argument gate without one -- and a log path, " +
+                "or it cannot report that it stopped.")
+            if ($parts.Count -ge 5) {
+                Assert-True ($parts[3] -ne '""' -and $parts[4] -ne '""') (
+                    "$tree calls SharedElevatedHelperArguments($shown) with an " +
+                    "empty settings or log path. schtasks /run cannot add " +
+                    "arguments, so whatever is registered is everything the " +
+                    "helper will ever receive.")
+            }
+        }
+    }
+
     if (-not $Quiet) {
         Write-Host ("Elevated helper protocol: $($built.Count) flags, built in one " +
             "place and all read by the helper.")
@@ -2023,8 +2176,13 @@ function Assert-SettingsWindowPlacement {
         "visible, and while it lived in one tree only that product's Settings " +
         "window centred.")
 
+    # ONE NAME NOW. This was a two-entry table only because the shell called its
+    # Settings window ShowSettingsEditor and the companion called the same window
+    # ShowSettings -- a prefix split, not a product difference, and the shape that
+    # kept TrayOpenSettings duplicated in both trees. The pair is same-named, so
+    # the fingerprint gate can see it; it could not before.
     foreach ($pair in @(
-        @{ File = "SteamShell.ahk";     Name = "ShowSettingsEditor" },
+        @{ File = "SteamShell.ahk";     Name = "ShowSettings" },
         @{ File = "SteamShell-XFE.ahk"; Name = "ShowSettings" })) {
         $text = Get-SourceText (Join-Path $ProjectRoot $pair.File)
         $body = Get-AhkFunctionBody -Source $text -Name $pair.Name
@@ -2691,12 +2849,27 @@ function Assert-ControllerSurfaceParity {
         [switch]$Quiet
     )
     $sharedText = Get-SourceText (Join-Path $ProjectRoot "SteamShell-Shared.ahk")
+    # ControllerReadState joined this list when it stopped being written twice.
+    # The GameInput branch that sat between RawInput and XInput in the companion
+    # was the only thing that differed between the two copies, and it went when
+    # GameInput did -- measured byte-identical to XInput, and all-zero inside
+    # Xbox FSE. What was left was the same routine in both trees.
     foreach ($name in @("SharedControllerHealthRows", "SetActiveBackend",
+                        "ControllerReadState",
                         "DeleteControllerProfileForActiveDevice")) {
         Assert-True ((Get-AhkFunctionBody -Source $sharedText -Name $name) -ne "") (
             "SteamShell-Shared.ahk defines no $name(); the controller surface " +
             "is no longer shared and this check cannot see what replaced it.")
     }
+    # One definition, so one assertion: the backend it selects must be RECORDED,
+    # or ActiveInputBackend stays "none" and the shared Health Check row reports
+    # no active backend in BOTH products while the controller works.
+    Assert-True (
+        (Get-AhkFunctionBody -Source $sharedText -Name "ControllerReadState") -match
+            'SetActiveBackend\(') (
+        "SteamShell-Shared.ahk: ControllerReadState never calls SetActiveBackend, " +
+        "so ActiveInputBackend stays 'none' and the shared Health Check row " +
+        "reports no active backend in BOTH products while the controller works.")
     foreach ($pair in @(
         @{ Name = "SteamShell.ahk";     Product = "the shell" },
         @{ Name = "SteamShell-XFE.ahk"; Product = "the companion" })) {
@@ -2707,11 +2880,11 @@ function Assert-ControllerSurfaceParity {
             "controller rows. $($pair.Product) would report nothing about the " +
             "backend, RawInput, or duplicate mappings.")
 
-        $read = Get-AhkFunctionBody -Source $treeText -Name "ControllerReadState"
-        Assert-True ($read -match 'SetActiveBackend\(') (
-            "$($pair.Name): ControllerReadState never calls SetActiveBackend, so " +
-            "ActiveInputBackend stays 'none' and the shared Health Check row " +
-            "reports no active backend while the controller works.")
+        # ControllerReadState is asserted ONCE, below, against the shared file.
+        # It used to be checked here per tree, reading the tree text directly --
+        # which is why moving it into SteamShell-Shared.ahk made this report it
+        # as missing from the shell while the shell was calling it perfectly.
+        # A per-tree check for a shared function asks the wrong file.
 
         # Reachable means WIRED: a hotkey, a tray entry or a control. A bare
         # mention in a comment is not a route to it, so comments come out first.
@@ -3602,7 +3775,8 @@ function Assert-SharedParity {
             "SteamShell-Common.ahk, so it carries its own copy of shared logic.")
     }
     # ...and the helper must NOT include the tree-coupled half, which reaches
-    # into eight tree functions and would not compile there.
+    # into the per-tree functions on $sharedSeamAllowed and would not compile
+    # there. No count here: see the assertion on $sharedSeamExpectedCount.
     $helperText = Get-SourceText $helperPath
     Assert-True (-not ($helperText -match '(?m)^#Include\s+SteamShell-Shared\.ahk\s*$')) (
         "SteamShell-Helper.ahk includes SteamShell-Shared.ahk, which is the " +
@@ -4097,6 +4271,33 @@ function Assert-SharedParity {
                 "$($pair.Name) does not define '$name', which SteamShell-Shared.ahk " +
                 "depends on. Shared code calls it and AutoHotkey will not fail the build.")
         }
+    }
+    # DEFINED IN BOTH IS NOT ENOUGH; THEY MUST TAKE THE SAME ARGUMENTS.
+    #
+    # The loop above asks whether each tree answers the seam call at all. It does
+    # not ask whether the two answers have the same shape, and for two names they
+    # did not -- see Get-AhkParameterShape for what that cost and how close it
+    # came to costing more.
+    #
+    # The exemption list is deliberately a hashtable of name -> reason rather
+    # than a bare array, for the reason DIVERGENT_FUNCTIONS.txt states about
+    # itself: a bare name is the state these files exist to end. It is EMPTY, and
+    # an empty exemption list is the claim that every seam pair currently agrees.
+    $seamShapeExempt = @{}
+    foreach ($name in $sharedSeamAllowed) {
+        if (-not ($standalone.ContainsKey($name) -and $companion.ContainsKey($name))) {
+            continue
+        }
+        if ($seamShapeExempt.ContainsKey($name)) { continue }
+        $shellShape = Get-AhkParameterShape -Body $standalone[$name]
+        $companionShape = Get-AhkParameterShape -Body $companion[$name]
+        Assert-True ($shellShape -eq $companionShape) (
+            "Seam function '$name' takes $shellShape arguments in SteamShell.ahk and " +
+            "$companionShape in SteamShell-XFE.ahk. SteamShell-Shared.ahk calls ONE " +
+            "name and would get two contracts: the tree with the wider shape accepts " +
+            "what the other acts on and silently discards it, which AutoHotkey cannot " +
+            "report and no runtime test would think to check. Make the shapes agree, " +
+            "or add '$name' to `$seamShapeExempt with the reason they cannot.")
     }
     # Full-line comments stripped first, for the same reason the Common scan
     # strips them: a comment naming a tree function explains the boundary rather

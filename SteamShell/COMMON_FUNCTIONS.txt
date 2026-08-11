@@ -150,6 +150,8 @@ WaitForNewExecutablePid
 WindowEngineIsLegacyApplicationSurface
 WindowEngineIsMinimizedLegacyGameSurface
 WindowEngineItemIntersectsMonitor
+XfeElevatedHelperTaskLegacyName
+XfeElevatedHelperTaskName
 XfeLogonTaskLegacyName
 XfeLogonTaskName
 XfeLogonTaskXml

@@ -60,11 +60,22 @@
 ; not resolve -- the third time a sentence in one of these headers has described
 ; a shape the code had already left.
 ;
-; The two seam functions worth understanding rather than looking up:
+; The one seam function worth understanding rather than looking up:
 ;
-;   LogLine(message, level)                 diagnostic log line
-;   SharedPersistSettings(changes)          apply Map("section","key","value")
+;   SharedPersistSettings(changes, deletes) apply Map("section","key","value")
 ;                                           entries as one unit, return bool
+;
+; LogLine used to be named here as the second of "the two seam functions". It is
+; not a seam function and never was: it is DEFINED in this file, and listed in
+; SHARED_FUNCTIONS.txt. Only SteamShell-Helper.ahk keeps its own copy, because it
+; cannot see this file, and that copy is on the record in DIVERGENT_FUNCTIONS.txt.
+; This is the same class of error as the counts above -- a header describing a
+; shape the code had already left -- in the paragraph that exists to warn about it.
+;
+; `deletes` is the second half of the settings seam and was missing from the
+; shell's wrapper for a long time, so shared code could add a key and never
+; remove one. Both trees take it now, and Validate-Common.ps1 compares seam
+; parameter shapes so the two cannot drift apart again.
 ;
 ; SharedPersistSettings exists because each tree names its own settings file and
 ; its own PID -- NOT because the two write settings differently. They no longer
@@ -1334,6 +1345,107 @@ WaitForVerifiedElevatedHelper(pid, &failureReason, timeoutMs := 2500) {
 ; while being impossible to read, launch, or replace. Hardening has to prove the
 ; binary is still USABLE as well as unwritable, so the readability test below is
 ; part of the gate rather than a diagnostic.
+; Run schtasks.exe, by ABSOLUTE PATH, optionally through UAC.
+;
+; WRITTEN TWICE, AND THE TWO COPIES DID NOT AGREE ON THE PART THAT MATTERS. The
+; companion had this as RunSchTasks and invoked `schtasks.exe` by bare name; the
+; shell built the same command line inline, five times over, always as
+; A_WinDir "\System32\schtasks.exe" and always quoted. The absolute path is the
+; correct one and the shared copy takes it: a bare program name is resolved
+; against the working directory and PATH, and this is the one command in either
+; product whose whole purpose is to reach a High-integrity token.
+;
+; The shell is the program that could least afford the weaker form -- it REPLACES
+; Explorer, so it defines the environment its own children resolve names in --
+; and it happened to be the one that already had the stronger. Sharing settles it
+; for both rather than leaving the answer to whichever file a reader opens.
+;
+; requiresElevation is false for /query and /run, which need no token, and true
+; for /create and /delete, which do.
+; THE ELEVATED PATH IS SPELLED OUT ON THE LINE THAT ELEVATES, not hoisted into a
+; variable above it. Validate-SteamShell-XFE.ps1 enumerates every elevation site
+; in the compiled source -- comments included, and to end of line -- and requires
+; each one to name what it elevates: schtasks.exe, or the verified helper.
+; Hoisting the command into a variable was tidier and cost both the reader and
+; the checker the one thing an elevation site has to state.
+RunSchTasks(arguments, requiresElevation := true) {
+    schTasks := QuoteWindowsCommandLineArg(A_WinDir "\System32\schtasks.exe")
+    try {
+        if (A_IsAdmin || !requiresElevation)
+            return RunWait(schTasks " " arguments, A_WinDir, "Hide")
+        ; One line, because the check reads to the end of the line.
+        elevated := "*RunAs " QuoteWindowsCommandLineArg(A_WinDir "\System32\schtasks.exe")
+        return RunWait(elevated " " arguments, A_WinDir, "Hide")
+    } catch as err {
+        LogLine("Scheduled task command failed: " err.Message, "Warning")
+        return -1
+    }
+}
+
+; Start the elevated helper through an already-registered scheduled task, and
+; report the PID it produced.
+;
+; Both products did exactly this and neither called the other's version: the
+; shell had StartElevatedHelperTask, the companion had the same four steps
+; written inline inside StartElevatedRtssHelper. Capture the PIDs that exist,
+; run the task, wait for a new one, and refuse if none appears. `schtasks /run`
+; returns as soon as the task is HANDED to the scheduler, so the PID wait is not
+; belt-and-braces -- it is the only evidence the helper actually started.
+;
+; Verification of that PID -- same user, same session, High integrity -- is
+; deliberately NOT here. It belongs to the caller, because the two products
+; report a failed verification differently and one of them closes the process it
+; could not verify.
+StartHelperViaScheduledTask(helperPath, taskName, &helperPid, &failureReason) {
+    helperPid := 0
+    failureReason := ""
+    existingPids := CaptureExecutablePidSet(helperPath)
+    exitCode := RunSchTasks(
+        "/run /tn " QuoteWindowsCommandLineArg(taskName), false)
+    if (exitCode != 0) {
+        failureReason := "schtasks /run returned exit code " exitCode "."
+        return false
+    }
+    helperPid := WaitForNewExecutablePid(helperPath, existingPids, 5000)
+    if !helperPid {
+        failureReason := "The task ran but no new helper process was observed."
+        return false
+    }
+    return true
+}
+
+; The direct-UAC fallback, for when no scheduled task is available or the task
+; produced nothing verifiable.
+;
+; The tail of both products' helper launch was the same fifteen lines: run the
+; helper elevated, wait for it to verify, record a message saying which happened,
+; and treat a cancelled prompt as an ordinary negative rather than an error. Only
+; the log prefix differed -- "Elevated helper:" against "Elevated RTSS helper:"
+; -- which is a parameter.
+;
+; The elevation prefix below is what raises the prompt. A user who dismisses it
+; has declined, not failed, so this returns false with the reason recorded and
+; nothing is thrown.
+StartElevatedHelperViaUac(
+        helperPath, arguments, logPrefix, &helperPid, &lastError) {
+    helperPid := 0
+    commandLine := "*RunAs " QuoteWindowsCommandLineArg(helperPath) " " arguments
+    try {
+        Run(commandLine, A_ScriptDir, , &helperPid)
+        available := WaitForVerifiedElevatedHelper(
+            helperPid, &verificationError, 2500)
+        lastError := available
+            ? "Running as PID " helperPid "."
+            : "The elevated helper could not be verified: " verificationError
+        LogLine(logPrefix ": " lastError, available ? "Info" : "Warning")
+        return available
+    } catch as err {
+        lastError := "Elevation was cancelled or failed: " err.Message
+        LogLine(logPrefix " unavailable: " lastError, "Warning")
+        return false
+    }
+}
+
 ElevatedHelperLocationIsProtected(helperPath, &failureReason) {
     global ElevatedHelperExpectedVersion
     failureReason := ""
@@ -2359,6 +2471,188 @@ ReadNumber(section, key, fallback, minimum, maximum) {
     return ClampFloat(value, minimum, maximum)
 }
 
+; ShellExecute through Explorer's desktop automation object, so a process that
+; has ended up elevated does not force ordinary interactive utilities such as
+; TabTip to inherit its administrator token.
+;
+; ONE COPY, AND THE COMPANION GAINS THE RETRY. This was two functions: fifty
+; lines in the shell and eleven in the companion, and DIVERGENT_FUNCTIONS.txt
+; recorded the difference as the privilege boundary -- sharing the shell's body
+; would compile DesktopShellMatchesInteractiveUser into a program that has no
+; such function, which is a LOAD-time failure. That was true of the IDENTITY
+; GATE, and only of the identity gate; it was read as settling the whole
+; function, so the companion also went without the part that has nothing to do
+; with privilege.
+;
+; That part is the cold-boot retry. Shell_TrayWnd can exist shortly before
+; Explorer publishes its desktop COM automation object, so a call during early
+; sign-in fails against a broker that is merely not ready yet. The companion
+; starts from a logon scheduled task, which is exactly when that window is open,
+; and it had one attempt and no logging: a failure there was indistinguishable
+; from the feature being broken.
+;
+; The gate is a SEAM instead -- DesktopShellRefusalReason, on $sharedSeamAllowed,
+; answered by each tree. The shell asks the real question; the companion answers
+; "" because it has no elevated-token case to defend against. Nothing
+; standalone-only is compiled into the companion, which is what the recorded
+; reason actually required.
+RunViaDesktopShell(filePath, arguments := "", directory := "", show := 1) {
+    static VT_UI4 := 0x13
+    static SWC_DESKTOP := ComValue(VT_UI4, 0x8)
+    static DESKTOP_BROKER_TIMEOUT_MS := 10000
+    startedTick := A_TickCount
+    attempts := 0
+    lastError := "Explorer's desktop automation object was unavailable."
+
+    Loop {
+        ; Re-asked every pass, not once before the loop: the broker's identity is
+        ; what is being waited on, so a stale answer is the one thing this must
+        ; not act on.
+        refusal := DesktopShellRefusalReason()
+        if (refusal != "") {
+            try LogLine(
+                "Desktop-shell launch rejected for " filePath ": " refusal,
+                "Warning")
+            return false
+        }
+
+        attempts += 1
+        try {
+            desktopWindow := ComObject("Shell.Application").Windows.Item(SWC_DESKTOP)
+            desktopApplication := desktopWindow.Document.Application
+            desktopApplication.ShellExecute(
+                filePath, arguments, directory, "open", show)
+            if (attempts > 1) {
+                try LogLine(
+                    "Desktop-shell broker became ready after "
+                    . (A_TickCount - startedTick) " ms for " filePath ".")
+            }
+            return true
+        } catch as err {
+            lastError := err.Message
+        }
+
+        if (A_TickCount - startedTick >= DESKTOP_BROKER_TIMEOUT_MS)
+            break
+        Sleep 200
+    }
+
+    try LogLine(
+        "Desktop-shell launch failed for " filePath " after " attempts
+        . " attempts: " lastError,
+        "Warning")
+    return false
+}
+
+; Grows the Quick Menu if its content does not fit, and re-centres it if the
+; product wants that.
+;
+; The measurement, the requirement, the clamp, the centring and the log are in
+; QuickMenuFitContent (SteamShell-Common.ahk) and have been for a while. What
+; stayed duplicated was this four-line wrapper, and the reason recorded for it
+; was real: each product resolves the target monitor from different state. The
+; shell follows the window that was in front before the menu opened; the
+; companion uses the monitor the menu was opened on, because Xbox FSE owns
+; presentation and there is no foreground to follow.
+;
+; That is a genuine product difference and it is FOUR NUMBERS AND A FLAG, which
+; is an argument rather than a reason to write the function twice. It is asked
+; through ProductQuickMenuWorkArea, which fills the rectangle and returns whether
+; to re-centre -- the two things the two products actually disagree about.
+QuickMenuEnsureContentFits() {
+    global QuickMenuGui, QuickMenuStatusCtrl
+    ; IsSet on both, then IsObject on both. The shell asked IsSet of the window
+    ; and IsObject of the status control, the companion IsSet of each; IsObject
+    ; of a genuinely unset global throws rather than returning false, so the
+    ; stricter test is only safe once the set test has passed.
+    if (!IsSet(QuickMenuGui) || !IsSet(QuickMenuStatusCtrl))
+        return
+    if (!IsObject(QuickMenuGui) || !IsObject(QuickMenuStatusCtrl))
+        return
+    recentre := ProductQuickMenuWorkArea(&left, &top, &right, &bottom)
+    QuickMenuFitContent(
+        QuickMenuGui, QuickMenuStatusCtrl, left, top, right, bottom, recentre)
+}
+
+; Brings the elevated helper into line with the setting that governs it, in
+; whichever direction that setting has just moved.
+;
+; TURNING IT OFF MUST TAKE EFFECT NOW. An elevated process the user has just
+; asked to stop, which keeps running for the rest of the session while Health
+; Check reports it as fine, is not a control. The shell learned that first and
+; the companion adopted it, and both validators grew an assertion to protect it
+; -- two rules, two copies, one behaviour.
+;
+; The pair was a cross-name duplicate recorded nowhere:
+; SyncElevatedInputHelperWithSettings against SyncElevatedRtssHelperWithSettings.
+; The anchor detector could not pair them because the names differ on Input
+; against Rtss, and CROSS_NAME_DUPLICATES.txt had recorded the STARTER pair
+; sitting directly beside them. What differed was three things -- which setting
+; enables it, what else blocks it, and which starter to call -- so those are
+; parameters and this is the control flow.
+;
+; `blocked` is separate from `enabled` on purpose: the shell also stands down
+; during first-run Setup and in Safe Mode, which the companion has no concept of,
+; and folding those into `enabled` would make "disabled in Settings" the reported
+; reason for a helper that is merely deferred.
+SharedSyncElevatedHelper(enabled, blocked, starter) {
+    global ElevatedHelperAvailable, ElevatedHelperPid, ElevatedHelperLastError
+    if !enabled {
+        if (ElevatedHelperPid || ElevatedHelperAvailable)
+            return StopElevatedHelper("disabled in Settings")
+        ElevatedHelperLastError := "Disabled in Settings."
+        return true
+    }
+    if blocked
+        return false
+    if (ElevatedHelperAvailable && ElevatedHelperPid
+        && ProcessExist(ElevatedHelperPid))
+        return true
+    return starter()
+}
+
+; The tray menu's "Open Settings" handler, in both products.
+;
+; Three lines, and it was two copies of them for one reason: the shell called its
+; Settings window ShowSettingsEditor and the companion called the same window
+; ShowSettings, so a wrapper whose entire body is one call could not be written
+; once. The shell's is renamed and the bodies became byte-identical, which is
+; what a prefix split costs -- the duplication was never about behaviour.
+;
+; ShowSettings is on $sharedSeamAllowed rather than shared: the two WINDOWS are
+; still separate implementations (PRODUCT_SURFACES.txt records why), and asking
+; each product to open its own is exactly what a seam is for.
+TrayOpenSettings(*) {
+    ShowSettings()
+}
+
+; Clears staging files a previous run left behind, for the settings file and for
+; the controller profile beside it.
+;
+; HERE RATHER THAN IN SteamShell-Common.ahk, and that distinction is the whole
+; reason this was written twice. It binds two globals -- IniPath and ScriptPid --
+; and Common may declare none, which is exactly what DIVERGENT_FUNCTIONS.txt
+; recorded. That reason was true and it was about Common; nobody asked the next
+; question, which is that this file may declare globals and both trees define
+; both names. So the entry explained why one door was shut and the pair stayed
+; duplicated behind a door that was open.
+;
+; It only LOOKED like a divergence because the shell called the path
+; SettingsPath and the companion called it IniPath. The shell's alias is gone and
+; the two bodies were otherwise the same call twice; see the IniPath declaration
+; in SteamShell.ahk for why the alias went.
+;
+; The controller profile is swept explicitly. Its staging files are named after
+; "<ini>-Controllers.ini", so the sweep above cannot see them however wide its
+; pattern is -- what was missing is this second call, not a better matcher.
+; Learning a profile is exactly when a controller is misbehaving and the program
+; is most likely to be killed rather than closed, so it is not the rarer case.
+SweepAbandonedSettingsUpdates() {
+    global IniPath, ScriptPid
+    SweepAbandonedIniUpdates(IniPath, ScriptPid)
+    SweepAbandonedIniUpdates(ControllerProfilePathFor(IniPath), ScriptPid)
+}
+
 ; ==============================================================================
 ; Transient status
 ; ==============================================================================
@@ -2651,9 +2945,13 @@ XInputGetCapabilities(index, &caps) {
 ; concludes the pad is not being sampled.
 ;
 ; The per-product half is behind ProductControllerDiagnosticProbe(). The
-; companion has GameInput to compare XInput against and a second backend name to
-; report; the shell has neither, and inventing a placeholder for it would put
-; the fabrication in the log where the missing feature used to be.
+; companion names the backend actually answering; the shell has no second
+; backend to name and returns empty strings, which leaves the log line exactly
+; as short as the information behind it rather than inventing a placeholder.
+;
+; The companion also used to report a GameInput reading beside XInput's on every
+; tick, which was the larger half of the difference. That comparison is finished
+; -- the two were byte-identical at every sample -- and the backend is gone.
 ControllerDiagnosticTick() {
     global EnableControllerDiagnostics, ControllerBackend
     static lastSignature := ""
@@ -2732,6 +3030,40 @@ GetQuickMenuPreviousExe() {
     if (QuickMenuPreviousHwnd && DllCall("IsWindow", "Ptr", QuickMenuPreviousHwnd, "Int"))
         try return WinGetProcessName("ahk_id " QuickMenuPreviousHwnd)
     return ""
+}
+
+; Close the Quick Menu because something ELSE is about to take the foreground.
+;
+; ONE CONCEPT THAT USED TO HAVE TWO SHAPES, one per tree, and neither gate could
+; see it. The shell wrote HideQuickMenu(false) and the companion wrote
+; HideQuickMenuForOwnWindow(); DIVERGENT_FUNCTIONS.txt compares same-named pairs,
+; CROSS_NAME_DUPLICATES.txt compares renamed function pairs, and a function in
+; one tree against an ARGUMENT in the other is neither. It fell through all
+; three.
+;
+; The boolean was the worse half of it. The companion's HideQuickMenu was
+; declared `(*)`, which accepts any argument and discards it, so the two trees
+; agreed on the name, disagreed on the contract, and nothing compared them --
+; see Get-AhkParameterShape in Validate-Common.ps1, which now does.
+;
+; WHY CLEARING THE HANDLE IS THE MECHANISM rather than a flag: HideQuickMenu only
+; restores when QuickMenuPreviousHwnd still holds a live window, so clearing it
+; means there is nothing to hand back to. The companion found this the hard way
+; -- the normal close hands the foreground back, Xbox FSE re-asserts it, and the
+; window opened a moment later loses the race and has to be found with the task
+; switcher. The shell's boolean skipped the restore and left the handle set,
+; which is the same outcome by a different route: every reader of that handle
+; runs while the menu is OPEN, and ShowQuickMenu clears and re-captures it on the
+; way in, so nothing observes the difference.
+;
+; NOT named ForOwnWindow, which was the companion's name for it. Two of the call
+; sites hand off to ms-settings: and the touch keyboard, which are not our
+; windows, and a name that was wrong at a third of its call sites is how the
+; shell came to use the boolean at those two and the companion the plain close.
+HideQuickMenuForHandoff() {
+    global QuickMenuPreviousHwnd
+    QuickMenuPreviousHwnd := 0
+    HideQuickMenu()
 }
 
 ; The window in front of the Quick Menu first, then whatever the tree's own
@@ -3322,6 +3654,50 @@ HealthResult(results, status, checkName, detail) {
         "detail", detail))
 }
 
+; Single entry point for controller state: RawInput first when selected or on
+; auto, XInput as the fallback, so neither product is ever left without input
+; because of a backend problem.
+;
+; WRITTEN TWICE UNTIL THE THING THAT DIFFERED WAS REMOVED. The companion tried a
+; GameInput backend in between RawInput and XInput, and the shell deliberately
+; did not offer one, which is why this sat in both trees with an entry in
+; DIVERGENT_FUNCTIONS.txt. GameInput is gone -- measured byte-identical to XInput
+; at every sample, and all-zero inside Xbox FSE, which is the environment the
+; companion exists for -- and what was left was the same routine in both trees,
+; line for line. The record of the measurement is in README-XFE.md and beside
+; RawInputProbeStart below.
+ControllerReadState(&state) {
+    global ControllerBackend, ActiveInputBackend
+    wanted := StrLower(ControllerBackend)
+    ; RawInput first: it is the only source that survives Xbox FSE, and it is
+    ; silent everywhere else, so it yields to XInput on the desktop by itself.
+    if (wanted = "rawinput" || wanted = "auto") {
+        if RawInputReadState(&state) {
+            SetActiveBackend("rawinput")
+            return true
+        }
+        ; An explicit rawinput request does NOT fall back to XInput.
+        ;
+        ; The setting exists to isolate RawInput for diagnosis, and a silent
+        ; fallback made it behave identically to auto -- which is precisely what
+        ; made a post-sleep test inconclusive: input still worked on the desktop,
+        ; which looked like RawInput having recovered when it was XInput the
+        ; whole time. A diagnostic setting that quietly does something else is
+        ; worse than no setting at all.
+        if (wanted = "rawinput") {
+            SetActiveBackend("none")
+            return false
+        }
+    }
+    if XInputResolveController(&state) {
+        SetActiveBackend("xinput")
+        return true
+    }
+    SetActiveBackend("none")
+    return false
+}
+
+
 ; Records which backend answered, and says so in the log the first time each one
 ; does.
 ;
@@ -3329,17 +3705,21 @@ HealthResult(results, status, checkName, detail) {
 ; backend from burying the button diagnostics.
 ;
 ; The FIRST time each backend becomes active is always logged, even inside the
-; throttle window. Suppressing it once cost a whole test cycle: the switch to
-; GameInput happened seconds after startup, was throttled away, and the log gave
-; no indication which backend produced the button readings that followed.
+; throttle window. Suppressing it once cost a whole test cycle: a backend switch
+; happened seconds after startup, was throttled away, and the log gave no
+; indication which backend produced the button readings that followed.
 ;
 ; Shared because "which backend is answering" is the same question in both
 ; products, and the shell could not answer it at all: it selected a backend the
 ; same way and then threw the answer away, so its log and its Health Check could
-; only report the SETTING. DIVERGENT_FUNCTIONS.txt names this function as one of
-; the four things ControllerReadState needs in both trees before it can be shared
-; outright; the other three are the GameInput backend itself, which stays the
-; companion's until somebody can put hardware behind it.
+; only report the SETTING.
+;
+; This used to be named as one of four things ControllerReadState needed before
+; it could be shared, the other three being the GameInput backend "which stays
+; the companion's until somebody can put hardware behind it". Hardware answered
+; the other way: GameInput was measured byte-identical to XInput and all-zero
+; inside Xbox FSE, so it was removed rather than ported, and ControllerReadState
+; is shared above.
 SetActiveBackend(backend) {
     global ActiveInputBackend
     static lastLoggedBackend := ""
@@ -3385,26 +3765,22 @@ SetActiveBackend(backend) {
 ; "controller 1"; the companion printed the raw index, so the same pad was "slot
 ; 0" in one product and "slot 1" in the other.
 ;
-; `detected` is passed in rather than probed here so this stays a formatter.
-; ControllerReadState is the one part that genuinely still differs per product --
-; the companion tries a GameInput backend the shell deliberately does not offer --
-; so each tree does its own detection and hands over the answer.
+; `detected` is passed in rather than probed here so this stays a formatter, and
+; both products now hand it the answer from the SAME ControllerReadState -- the
+; GameInput branch that used to sit between RawInput and XInput in the companion
+; was the only thing that differed, and it is gone.
 ;
-; GameInput has no row here for the same reason. The Backend setting offers it in
-; the companion only ("it reads all zeros outside Xbox FSE, so it is not an option
-; the shell could offer honestly"), and a row reporting a backend that cannot
-; exist would be noise in the shell's report. The companion appends its own.
+; There is no GameInput row here, and the companion no longer appends one of its
+; own. Both products report RawInput or XInput, which is the whole of what either
+; can now select.
 SharedControllerHealthRows(results, detected) {
     global ControllerBackend, ActiveInputBackend, ActiveControllerIndex
     global ControllerIndex, ControllerMap
     global RawInputProbeActive, RawInputLastReportTick
     if detected {
-        via := ActiveInputBackend = "rawinput"
-            ? "RawInput"
-            : (ActiveInputBackend = "gameinput" ? "GameInput" : "XInput")
+        via := ActiveInputBackend = "rawinput" ? "RawInput" : "XInput"
         slot := ""
-        if (ActiveInputBackend != "rawinput" && ActiveInputBackend != "gameinput"
-            && ActiveControllerIndex >= 0) {
+        if (ActiveInputBackend != "rawinput" && ActiveControllerIndex >= 0) {
             slot := " on slot " (ActiveControllerIndex + 1)
                 . (ActiveControllerIndex != ControllerIndex
                     ? " (configured: " (ControllerIndex + 1) ")" : "")
@@ -7236,9 +7612,15 @@ SettingsCategoryRows(category) {
         ; here, with the companion passing it explicitly while its own list keeps
         ; the shorter name until category structure is unified too.
         "Startup & Splash", [
-            Map("product", "standalone", "type", "checkbox",
+            ; Both products. The companion gates its helper on this exactly as
+            ; the shell does; what the helper DOES differs -- geometry is off
+            ; there, by the product rule in SteamShell-Helper.ahk -- but whether
+            ; it runs is the same question and now has the same answer.
+            Map("product", "both", "type", "checkbox",
                 "section", "Features", "key", "EnableElevatedInputHelper",
                 "label", "Enable elevated helper for administrator windows",
+                "xfeLabel", "Enable elevated helper for administrator windows "
+                    . "(controller input over elevated windows, and the RTSS frame cap)",
                 "default", "true"),
             Map("product", "standalone", "type", "path",
                 "section", "Paths", "key", "SteamPath",
@@ -7631,12 +8013,12 @@ SettingsCategoryRows(category) {
                 "section", "Logging", "key", "LogRotateBackups",
                 "label", "Rotated copies to keep (0 = never rotate)",
                 "default", "2", "fieldType", "integer", "min", 0, "max", 10),
-            ; GameInput is named only in the companion's wording because only the
-            ; companion has it to compare against.
+            ; One wording in both products now. The companion's used to name
+            ; GameInput as the thing XInput was logged against; there is no
+            ; second stack left to compare to.
             Map("product", "both", "type", "checkbox",
                 "section", "Controller", "key", "DiagnosticLogging",
                 "label", "Log all XInput slots on every change (diagnostic)",
-                "xfeLabel", "Log all XInput slots and GameInput on every change (diagnostic)",
                 "default", "false"),
             Map("product", "both", "type", "checkbox",
                 "section", "Controller", "key", "RawInputProbe",
@@ -7706,7 +8088,13 @@ SettingsCategoryRows(category) {
                     . "(needed when RTSS is in Program Files)",
                 "xfeLabel", "Use an elevated helper to set the Frame Limit — "
                     . "needed when RTSS is in Program Files, and asks for UAC at startup",
-                "default", "true", "xfeDefault", "false"),
+                ; One default, and it is TRUE in both. This carried
+                ; "xfeDefault", "false" while LoadSharedSettings read it with a
+                ; default of true, so the companion's checkbox described a
+                ; default the runtime did not use -- two copies of one number,
+                ; which is the defect the scores in DIVERGENT_FUNCTIONS.txt were.
+                ; The reader is the copy that decides, so this one goes.
+                "default", "true"),
             Map("product", "both", "type", "shortcut",
                 "section", "RTSS", "key", "CustomFrameCapShortcut",
                 "label", "Frame limiter toggle shortcut", "default", "^+f"),
@@ -7721,14 +8109,16 @@ SettingsCategoryRows(category) {
                 "section", "Controller", "key", "EnableControllerMouseMode",
                 "label", "Enable controller mouse mode while holding View/Back",
                 "default", "true"),
-            ; Auto, RawInput and XInput in both. GameInput is the companion's
-            ; alone -- it reads all zeros outside Xbox FSE, so it is not an
-            ; option the shell could offer honestly.
+            ; Auto, RawInput and XInput, and now the same three in both.
+            ; The companion used to offer GameInput as a fourth; it is gone,
+            ; measured byte-identical to XInput and all-zero inside Xbox FSE.
+            ; Leaving it on the list would have been the worse half of keeping
+            ; it: ControllerReadState no longer has a branch for the value, so
+            ; a user who picked it would silently get XInput.
             Map("product", "both", "type", "choice",
                 "section", "Controller", "key", "Backend",
                 "label", "Input backend",
                 "choices", ["Auto", "RawInput", "XInput"],
-                "xfeChoices", ["Auto", "XInput", "GameInput", "RawInput"],
                 "default", "Auto"),
             Map("product", "both", "type", "note",
                 "text", "Auto is recommended. XInput covers Xbox-compatible "
@@ -12813,5 +13203,10 @@ LoadSharedSettings() {
     ; whenever RTSS sits under Program Files, which is where RTSS installs
     ; itself, behind a checkbox on a page most people never open.
     RtssElevatedFrameCapWrites := ReadBool("RTSS", "EnableElevatedFrameCapWrites", true)
+    ; Whether the helper PROCESS runs, which is a different question from whether
+    ; the frame cap goes through it. Read here for both products because both now
+    ; ask it: the companion had no such setting and gated the helper on the RTSS
+    ; flag above, from when its helper did the frame cap and nothing else.
+    EnableElevatedInputHelper := ReadBool("Features", "EnableElevatedInputHelper", true)
     RtssLastFrameCapFps := ReadInt("RTSS", "LastFrameCapFps", 0, 0, 1000)
 }

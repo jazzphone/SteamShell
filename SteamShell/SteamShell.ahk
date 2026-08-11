@@ -80,9 +80,18 @@ if !SteamShellManagedPathMatched
 try DirCreate(SteamShellDataDir)
 try DirCreate(SteamShellDataDir "\logs")
 try DirCreate(SteamShellDataDir "\backups")
-global SettingsPath := SteamShellDataDir "\SteamShellSettings.ini"
-; Back-compat alias used by some helper functions
-global IniPath := SettingsPath
+; IniPath, not SettingsPath. This tree used to call it SettingsPath and carry
+; IniPath as an alias assigned beside it at every site that moved the file,
+; because SteamShell-Shared.ahk's readers name IniPath and the companion's global
+; already did. Two names for one path is what that was, and the lockstep was an
+; invariant a validator had to police rather than a property the code had: a
+; reassignment that updated one and not the other would have pointed every shared
+; reader at a stale file, silently.
+;
+; The alias is gone and this is the only name. SweepAbandonedSettingsUpdates was
+; the visible cost -- it was duplicated in both trees purely because the shell's
+; copy said SettingsPath, and it is one shared function now.
+global IniPath := SteamShellDataDir "\SteamShellSettings.ini"
 global CurrentSettingsSchemaVersion := 23
 global LogPath := SteamShellDataDir "\logs\SteamShell.log"
 global IntentionalExitMode := ""
@@ -1663,12 +1672,12 @@ AbortAdministratorSetup(message) {
 }
 
 ReadElevatedHelperPreference() {
-    global SettingsPath
-    if !FileExist(SettingsPath)
+    global IniPath
+    if !FileExist(IniPath)
         return true
     rawValue := "true"
     try rawValue := IniRead(
-        SettingsPath, "Features", "EnableElevatedInputHelper", "true")
+        IniPath, "Features", "EnableElevatedInputHelper", "true")
     catch
         return true
     return ToBool(CleanIniValue(rawValue, "true"), true)
@@ -1693,7 +1702,7 @@ ReadElevatedHelperPreference() {
 ; on disk, and moving the folder to another machine needs Setup run again. That
 ; was already true of the scheduled task and the registry record.
 SteamShellElevatedHelperDirectory() {
-    global SteamShellInstallationMode, SettingsPath
+    global SteamShellInstallationMode, IniPath
     ; A Portable install may keep the helper beside the executable, but only
     ; because Setup either PROVED the folder is administrator-only-writable or
     ; the user chose it knowing the trade. The choice is recorded rather than
@@ -1727,7 +1736,7 @@ SteamShellElevatedHelperDirectories(installDirectory := "") {
     return directories
 }
 
-GetElevatedHelperPath() {
+ProductElevatedHelperPath() {
     return SteamShellElevatedHelperDirectory() "\SteamShell-Helper.exe"
 }
 
@@ -2099,12 +2108,23 @@ RegisterXfeLogonTask(xfePath, &failureReason) {
 
 ; The companion registers this lazily the first time elevated RTSS writes are
 ; used, so an uninstall has to clear it even though Setup never created it.
+;
+; BOTH names, and through SteamShell-Common.ahk rather than a literal. The name
+; was spelled out here as "SteamShell XFE Elevated RTSS Helper" while the
+; companion was the only thing that could register it -- so when the companion
+; renamed the task to say what it actually does, this would have gone on deleting
+; a name nothing registers any more and left the real task behind. That is the
+; exact artefact the assertion below calls the worst an uninstall can leave: a
+; HighestAvailable task pointing at a removed binary.
+;
+; Same shape as RemoveXfeLogonTask below, for the same reason.
 RemoveXfeElevatedHelperTask() {
-    taskCommand := QuoteWindowsCommandLineArg(A_WinDir "\System32\schtasks.exe")
-        . " /delete /tn "
-        . QuoteWindowsCommandLineArg("SteamShell XFE Elevated RTSS Helper") " /f"
-    try return RunWait(taskCommand, A_WinDir, "Hide") = 0
-    return false
+    removed := false
+    for _, name in [XfeElevatedHelperTaskName(), XfeElevatedHelperTaskLegacyName()] {
+        if (RunSchTasks("/delete /tn " QuoteWindowsCommandLineArg(name) " /f") = 0)
+            removed := true
+    }
+    return removed
 }
 
 RemoveXfeLogonTask() {
@@ -2145,7 +2165,23 @@ ElevatedHelperTaskName() {
     return "SteamShell Elevated Input Helper"
 }
 
-RegisterElevatedHelperTask(helperPath, mainPath, settingsFile, helperLog, &failureReason) {
+; Registers a protected on-demand task that starts an elevated helper without a
+; UAC prompt. ONE function for BOTH products' tasks.
+;
+; It was standalone's alone, with "standalone" and ElevatedHelperTaskName()
+; written into the body -- so the companion had no way to get a task out of
+; Setup and registered its own lazily at first use, which costs a UAC prompt on
+; the secure desktop where a controller cannot answer it. Setup already deploys
+; the companion's helper and is already elevated; it just never registered the
+; task to go with it.
+;
+; HEADER ON ONE LINE, deliberately. Validate-SteamShell.ps1 builds the list it
+; checks $requiredFunctions against with its own regex, and that regex requires
+; the whole header on a single line -- so wrapping this one made the function
+; invisible to it and failed the build with "Required recovery function is
+; missing", which is true of the check and not of the code. Retiring a renamed
+; task is the caller's job for the same reason: it kept this signature short.
+RegisterElevatedHelperTask(product, taskName, helperPath, mainPath, settingsFile, helperLog, &failureReason) {
     global ExpectedInteractiveUserSid, ScriptPid
     failureReason := ""
     if !A_IsAdmin {
@@ -2162,8 +2198,7 @@ RegisterElevatedHelperTask(helperPath, mainPath, settingsFile, helperLog, &failu
     ; standalone user never silently gets the narrower XFE helper, and naming it
     ; here means the task XML records which product registered the task.
     taskArguments := SharedElevatedHelperArguments(
-        "standalone", 0, mainPath, settingsFile, helperLog)
-    SplitPath(helperPath, , &helperDirectory)
+        product, 0, mainPath, settingsFile, helperLog)
     ; Built by SteamShell-Common.ahk; the companion registers the same shape of
     ; task for its own helper and the two used to be written out separately.
     SplitPath(helperPath, , &helperDirectory)
@@ -2174,10 +2209,9 @@ RegisterElevatedHelperTask(helperPath, mainPath, settingsFile, helperLog, &failu
         if FileExist(xmlPath)
             FileDelete(xmlPath)
         FileAppend(taskXml, xmlPath, "UTF-16")
-        taskCommand := QuoteWindowsCommandLineArg(A_WinDir "\System32\schtasks.exe")
-            . " /create /tn " QuoteWindowsCommandLineArg(ElevatedHelperTaskName())
-            . " /xml " QuoteWindowsCommandLineArg(xmlPath) " /f"
-        exitCode := RunWait(taskCommand, A_WinDir, "Hide")
+        exitCode := RunSchTasks(
+            "/create /tn " QuoteWindowsCommandLineArg(taskName)
+            . " /xml " QuoteWindowsCommandLineArg(xmlPath) " /f")
         if (exitCode != 0)
             throw Error("schtasks /create returned exit code " exitCode ".")
         return true
@@ -2192,35 +2226,19 @@ RegisterElevatedHelperTask(helperPath, mainPath, settingsFile, helperLog, &failu
     }
 }
 
+; Names this product's task and hands the rest to the shared launcher, which the
+; companion also calls. The four steps behind it -- capture PIDs, run the task,
+; wait for a new process, refuse if none appears -- were written out here and
+; again inside the companion's StartElevatedRtssHelper.
 StartElevatedHelperTask(helperPath, &helperPid, &failureReason) {
-    helperPid := 0
-    failureReason := ""
-    existingPids := CaptureExecutablePidSet(helperPath)
-    taskCommand := QuoteWindowsCommandLineArg(A_WinDir "\System32\schtasks.exe")
-        . " /run /tn " QuoteWindowsCommandLineArg(ElevatedHelperTaskName())
-    try exitCode := RunWait(taskCommand, A_WinDir, "Hide")
-    catch as err {
-        failureReason := err.Message
-        return false
-    }
-    if (exitCode != 0) {
-        failureReason := "schtasks /run returned exit code " exitCode "."
-        return false
-    }
-    helperPid := WaitForNewExecutablePid(helperPath, existingPids, 5000)
-    if !helperPid {
-        failureReason := "The task ran but no new helper process was observed."
-        return false
-    }
-    return true
+    return StartHelperViaScheduledTask(
+        helperPath, ElevatedHelperTaskName(), &helperPid, &failureReason)
 }
 
 RemoveElevatedHelperTask() {
-    taskCommand := QuoteWindowsCommandLineArg(A_WinDir "\System32\schtasks.exe")
-        . " /delete /tn " QuoteWindowsCommandLineArg(ElevatedHelperTaskName())
-        . " /f"
-    try return RunWait(taskCommand, A_WinDir, "Hide") = 0
-    return false
+    return RunSchTasks(
+        "/delete /tn " QuoteWindowsCommandLineArg(ElevatedHelperTaskName())
+        . " /f") = 0
 }
 
 ElevatedGeometryEventName() {
@@ -2295,11 +2313,10 @@ SetElevatedGeometryRuntimeEnabled(enabled) {
 ; works even if this event never arrives.
 
 
-
 StartElevatedInputHelper() {
     global EnableElevatedInputHelper, ElevatedHelperPath, ElevatedHelperPid
     global ElevatedHelperAvailable, ElevatedHelperLastError
-    global SettingsPath, ScriptPid, SteamShellInstallationMode
+    global IniPath, ScriptPid, SteamShellInstallationMode
     global ElevatedHelperExpectedVersion
 
     EnableElevatedInputHelper := ReadElevatedHelperPreference()
@@ -2321,7 +2338,7 @@ StartElevatedInputHelper() {
     ; controller input, and fails closed until ApplyRuntimeTimers signals it.
     SetElevatedGeometryRuntimeEnabled(false)
 
-    ElevatedHelperPath := GetElevatedHelperPath()
+    ElevatedHelperPath := ProductElevatedHelperPath()
     ; Do not even attempt the write when it cannot possibly succeed.
     ;
     ; The helper's directory is administrator-only by design, so an unelevated
@@ -2331,19 +2348,21 @@ StartElevatedInputHelper() {
     ; when the real cause was that the deployed helper could not be READ, so its
     ; version came back empty and looked like a mismatch. Name the actual
     ; remedy instead.
-    if !A_IsAdmin {
-        installedVersion := ""
-        try installedVersion := FileGetVersion(ElevatedHelperPath)
-        if (installedVersion != ElevatedHelperExpectedVersion) {
-            ElevatedHelperLastError := installedVersion = ""
-                ? "The installed helper is missing or cannot be read by this account. "
-                    . "Run Setup from an elevated SteamShell session to repair it."
-                : "The installed helper is version " installedVersion "; this build "
-                    . "expects " ElevatedHelperExpectedVersion ". Run Setup from an "
-                    . "elevated SteamShell session to replace it."
-            LogLine("Elevated helper: " ElevatedHelperLastError, "Warning")
-            return false
-        }
+    ; Not wrapped in `if !A_IsAdmin` any more. The A_IsAdmin early return above
+    ; has already fired by this point and A_IsAdmin cannot change inside a
+    ; process, so the guard was always true -- it read as though the version
+    ; check were conditional when it is not.
+    installedVersion := ""
+    try installedVersion := FileGetVersion(ElevatedHelperPath)
+    if (installedVersion != ElevatedHelperExpectedVersion) {
+        ElevatedHelperLastError := installedVersion = ""
+            ? "The installed helper is missing or cannot be read by this account. "
+                . "Run Setup from an elevated SteamShell session to repair it."
+            : "The installed helper is version " installedVersion "; this build "
+                . "expects " ElevatedHelperExpectedVersion ". Run Setup from an "
+                . "elevated SteamShell session to replace it."
+        LogLine("Elevated helper: " ElevatedHelperLastError, "Warning")
+        return false
     }
     ; Expected on the first normal start after the main EXE is replaced by hand:
     ; the installed helper is the previous version and the directory holding it is
@@ -2373,9 +2392,7 @@ StartElevatedInputHelper() {
     SplitPath(ElevatedHelperPath, , &helperDirectory)
     helperLog := helperDirectory "\SteamShell-Helper.log"
     helperArguments := SharedElevatedHelperArguments(
-        "standalone", ScriptPid, "", SettingsPath, helperLog)
-    commandLine := "*RunAs " QuoteWindowsCommandLineArg(ElevatedHelperPath)
-        . " " helperArguments
+        "standalone", ScriptPid, "", IniPath, helperLog)
     ; The gate is the security property, not the installation mode.
     ;
     ; It used to be `mode = "standard"`, which was a proxy for "the helper sits
@@ -2396,8 +2413,14 @@ StartElevatedInputHelper() {
     if (taskEligible
         && StartElevatedHelperTask(
             ElevatedHelperPath, &taskHelperPid, &taskError)) {
+        ; 2500 ms, the same wait the companion gives its task-started helper and
+        ; the same one StartElevatedHelperViaUac gives the UAC-started one. This
+        ; was 2000 for no recorded reason, so on a slow boot the shell gave up
+        ; half a second early and fell through to a UAC prompt -- which, on a
+        ; machine with no taskbar and possibly no keyboard, is the outcome the
+        ; task exists to avoid.
         if WaitForVerifiedElevatedHelper(
-            taskHelperPid, &taskVerificationError, 2000) {
+            taskHelperPid, &taskVerificationError, 2500) {
             ElevatedHelperPid := taskHelperPid
             ElevatedHelperAvailable := true
             ElevatedHelperLastError :=
@@ -2417,42 +2440,29 @@ StartElevatedInputHelper() {
         LogLine(
             "Elevated helper scheduled task unavailable; requesting UAC directly: "
             . taskError, "Warning")
-    try {
-        Run(commandLine, A_ScriptDir, , &ElevatedHelperPid)
-        ElevatedHelperAvailable := WaitForVerifiedElevatedHelper(
-            ElevatedHelperPid, &directVerificationError, 2500)
-        ElevatedHelperLastError := ElevatedHelperAvailable
-            ? "Running as PID " ElevatedHelperPid "."
-            : "The elevated helper could not be verified: " directVerificationError
-        LogLine("Elevated helper: " ElevatedHelperLastError)
-        return ElevatedHelperAvailable
-    } catch as err {
-        ElevatedHelperLastError := "Elevation was cancelled or failed: " err.Message
-        LogLine("Elevated helper unavailable: " ElevatedHelperLastError, "Warning")
-        return false
-    }
+    ; The direct-UAC fallback is StartElevatedHelperViaUac in
+    ; SteamShell-Shared.ahk, which the companion also calls. The fifteen lines
+    ; that stood here differed from its copy only in the log prefix.
+    ElevatedHelperAvailable := StartElevatedHelperViaUac(
+        ElevatedHelperPath, helperArguments, "Elevated helper",
+        &ElevatedHelperPid, &ElevatedHelperLastError)
+    return ElevatedHelperAvailable
 }
 
 ; EnableElevatedInputHelper is a security control, and a security control that
 ; only takes effect at the next boot is not one. Turning it off used to leave the
 ; elevated process injecting for the rest of the session while Health Check
 ; happily reported it running.
+; The shell's half: the preference is re-read here because Setup can rewrite it
+; behind the running process, and first-run Setup and Safe Mode stand the helper
+; down without meaning "disabled in Settings".
 SyncElevatedInputHelperWithSettings() {
-    global EnableElevatedInputHelper, ElevatedHelperAvailable, ElevatedHelperPid
-    global ElevatedHelperLastError, FirstRunSetupMode, SafeMode
+    global EnableElevatedInputHelper, FirstRunSetupMode, SafeMode
     EnableElevatedInputHelper := ReadElevatedHelperPreference()
-    if !EnableElevatedInputHelper {
-        if (ElevatedHelperPid || ElevatedHelperAvailable)
-            return StopElevatedHelper("disabled in Settings")
-        ElevatedHelperLastError := "Disabled in Settings."
-        return true
-    }
-    if (FirstRunSetupMode || SafeMode || A_IsAdmin)
-        return false
-    if (ElevatedHelperAvailable && ElevatedHelperPid
-        && ProcessExist(ElevatedHelperPid))
-        return true
-    return StartElevatedInputHelper()
+    return SharedSyncElevatedHelper(
+        EnableElevatedInputHelper,
+        FirstRunSetupMode || SafeMode || A_IsAdmin,
+        StartElevatedInputHelper)
 }
 
 ElevatedHelperIsVerified() {
@@ -2810,40 +2820,40 @@ LB.Short.Display=Ctrl+Alt+Tab
 }
 
 EnsureSettingsIniExists() {
-    global SettingsPath
-    if FileExist(SettingsPath)
+    global IniPath
+    if FileExist(IniPath)
         return
     settingsDir := ""
-    try SplitPath(SettingsPath, , &settingsDir)
+    try SplitPath(IniPath, , &settingsDir)
     if (settingsDir != "")
         try DirCreate(settingsDir)
-    try FileAppend(GetDefaultSettingsIniText(), SettingsPath, "UTF-16")
+    try FileAppend(GetDefaultSettingsIniText(), IniPath, "UTF-16")
 }
 
 EnsureSettingsIniUnicode() {
-    global SettingsPath, ScriptPid
-    if !FileExist(SettingsPath)
+    global IniPath, ScriptPid
+    if !FileExist(IniPath)
         return true
 
     isUtf16 := false
     try {
-        rawFile := FileRead(SettingsPath, "RAW")
+        rawFile := FileRead(IniPath, "RAW")
         isUtf16 := rawFile.Size >= 2 && NumGet(rawFile, 0, "UShort") = 0xFEFF
     }
     if (isUtf16)
         return true
 
     ; Preserve the original before converting legacy UTF-8/ANSI settings.
-    backupPath := SettingsPath ".pre-unicode.bak"
+    backupPath := IniPath ".pre-unicode.bak"
     try {
         if !FileExist(backupPath)
-            FileCopy(SettingsPath, backupPath, false)
-        contents := FileRead(SettingsPath)
-        tempPath := SettingsPath ".unicode-" ScriptPid ".tmp"
+            FileCopy(IniPath, backupPath, false)
+        contents := FileRead(IniPath)
+        tempPath := IniPath ".unicode-" ScriptPid ".tmp"
         if FileExist(tempPath)
             FileDelete(tempPath)
         FileAppend(contents, tempPath, "UTF-16")
-        FileMove(tempPath, SettingsPath, true)
+        FileMove(tempPath, IniPath, true)
         return true
     } catch as err {
         try {
@@ -2885,15 +2895,15 @@ GetDefaultSettingsSchema() {
 }
 
 TryReadIniRaw(section, key, &value) {
-    global SettingsPath
+    global IniPath
     sentinel := "{SteamShell-Missing-7F3AA457-44A1-4B99}"
     value := sentinel
-    try value := IniRead(SettingsPath, section, key, sentinel)
+    try value := IniRead(IniPath, section, key, sentinel)
     return value != sentinel
 }
 
 GetRetiredIniKeys() {
-    global SettingsPath
+    global IniPath
     retired := []
 
     if TryReadIniRaw("Features", "RunElevatedOnStartup", &legacyElevationValue) {
@@ -2974,7 +2984,7 @@ GetRetiredIniKeys() {
 
     ; The old RTSS preset list was replaced by one user-configured frame cap.
     rtssSection := ""
-    try rtssSection := IniRead(SettingsPath, "RTSS")
+    try rtssSection := IniRead(IniPath, "RTSS")
     for _, rawLine in StrSplit(rtssSection, "`n", "`r") {
         separatorPos := InStr(rawLine, "=")
         if (separatorPos <= 1)
@@ -2988,18 +2998,18 @@ GetRetiredIniKeys() {
 }
 
 BackupSettingsBeforeMigration(sourceVersion) {
-    global SettingsPath
-    backupPath := SettingsPath ".pre-schema-" sourceVersion ".bak"
+    global IniPath
+    backupPath := IniPath ".pre-schema-" sourceVersion ".bak"
     if FileExist(backupPath)
         return true
-    try FileCopy(SettingsPath, backupPath, false)
+    try FileCopy(IniPath, backupPath, false)
     return FileExist(backupPath)
 }
 
 SyncSettingsIniSchema() {
-    global SettingsPath, IniPath, CurrentSettingsSchemaVersion, ScriptPid
+    global IniPath, CurrentSettingsSchemaVersion, ScriptPid
     global SteamShellDataDir, SteamShellInstallationMode
-    if !FileExist(SettingsPath)
+    if !FileExist(IniPath)
         return
 
     schema := GetDefaultSettingsSchema()
@@ -3022,14 +3032,13 @@ SyncSettingsIniSchema() {
     if !BackupSettingsBeforeMigration(sourceVersion)
         return
 
-    livePath := SettingsPath
+    livePath := IniPath
     workPath := livePath ".migration-" ScriptPid ".tmp"
     success := false
     try {
         if FileExist(workPath)
             FileDelete(workPath)
         FileCopy(livePath, workPath, true)
-        SettingsPath := workPath
         IniPath := workPath
 
         ; Transfer legacy values before deleting their old keys. Existing
@@ -3198,7 +3207,6 @@ SyncSettingsIniSchema() {
     } catch as err {
         LogLine("Settings schema migration failed; original INI retained: " err.Message)
     } finally {
-        SettingsPath := livePath
         IniPath := livePath
     }
 
@@ -3356,65 +3364,24 @@ JoinPipe(listObj) {
 ; about the other's surface -- this is what let the display selection, safety
 ; revert and HDR control become one definition instead of two that drifted.
 
-; Per-tree seam required by SteamShell-Shared.ahk.
-;
-; Takes an array of Map("section", "key", "value") and applies them as one unit.
-; Standalone stages a copy and replaces the live INI only after every write
-; succeeds, because it is the registered Windows shell and a half-written
-; settings file is a machine that signs in to nothing. XFE implements the same
-; name with direct writes, which is right for an ordinary application. Shared
-; code calls this and does not have to know which.
-; Per-tree seam required by SteamShell-Shared.ahk: does a learning wizard want
-; this report instead of the decoder?
-;
-; While the wizard is open it consumes reports, because decoding as well would
-; fire mappings from the very buttons being pressed to teach the layout.
-; Single entry point for controller state.
-;
-; RawInput first, and it yields by itself: RawInputReadState answers false
-; whenever no report has arrived inside RawInputStaleMs, so a machine whose
-; controller XInput already handles never takes this path and behaves exactly as
-; it did before the backend existed.
-;
-; An explicit "rawinput" does NOT fall back. The setting exists to isolate the
-; backend for diagnosis, and a silent fallback makes it behave identically to
-; auto -- which is what made a companion-side sleep test inconclusive once:
-; input still worked, which looked like RawInput recovering when it was XInput
-; the whole time.
-ControllerReadState(&state) {
-    global ControllerBackend, ActiveInputBackend
-    wanted := StrLower(ControllerBackend)
-    if (wanted = "rawinput" || wanted = "auto") {
-        if RawInputReadState(&state) {
-            SetActiveBackend("rawinput")
-            return true
-        }
-        if (wanted = "rawinput") {
-            SetActiveBackend("none")
-            return false
-        }
-    }
-    ; Every slot, not just the configured one -- see XInputResolveController.
-    ; This asked XInput for the configured index and nothing else, so a pad that
-    ; Steam Input moved to another slot mid-session simply stopped answering.
-    ; (The old call is not quoted here on purpose: the rule that forbids it is a
-    ; -notmatch over this file, and a comment quoting it would fail the build.)
-    ;
-    ; The buffer allocation that stood here is gone with it: XInputGetState
-    ; already creates one when it is handed something that is not a Buffer, so
-    ; the guard was a second answer to a question the callee had settled.
-    if XInputResolveController(&state) {
-        SetActiveBackend("xinput")
-        return true
-    }
-    SetActiveBackend("none")
-    return false
-}
 
-; Per-tree seam required by SteamShell-Shared.ahk: a modal dialog is up, so
-; controller input must not also drive the shell behind it.
-SharedPersistSettings(changes) {
-    return CommitIniChanges(changes)
+; Per-tree seam required by SteamShell-Shared.ahk: apply a batch of INI changes
+; as one unit, against whichever settings file this product owns, and report
+; whether the batch landed.
+;
+; The comment that stood here described a modal dialog standing controller input
+; down, which is a different function entirely -- it had drifted off whatever it
+; was written for and onto this.
+;
+; `deletes` is passed through rather than dropped. CommitIniChanges below has
+; always taken it and this wrapper did not, so the seam was one parameter
+; narrower in this tree than in the companion: shared code could add a key and
+; never remove one, because the shell had nowhere to put the request. Nothing
+; shared asks for a deletion today. The point is that it now CAN, and that the
+; two trees answer the same call with the same shape -- which Validate-Common.ps1
+; checks, and did not before.
+SharedPersistSettings(changes, deletes := 0) {
+    return CommitIniChanges(changes, deletes)
 }
 
 ; Per-tree seam required by SteamShell-Shared.ahk. See the header above
@@ -3445,21 +3412,10 @@ ProductIdentity() {
 ; PID to the single staged-commit implementation in SteamShell-Common.ahk. The
 ; reasoning that used to live here went with the code; the companion now runs the
 ; same two functions instead of its own unstaged loop.
-SweepAbandonedSettingsUpdates() {
-    global SettingsPath, ScriptPid
-    SweepAbandonedIniUpdates(SettingsPath, ScriptPid)
-    ; The controller profile file stages through the same commit and was swept by
-    ; nothing. Its staging files are named after "<settings>-Controllers.ini", so
-    ; the settings sweep above cannot see them however wide its pattern is -- the
-    ; gap was the missing CALL, not the matcher. Learning a profile is exactly
-    ; when a controller is misbehaving and the program is most likely to be killed
-    ; rather than closed, so this is not the rarer of the two.
-    SweepAbandonedIniUpdates(ControllerProfilePathFor(SettingsPath), ScriptPid)
-}
 
 CommitIniChanges(changes, deletes := 0) {
-    global SettingsPath, ScriptPid
-    return CommitIniChangesAt(SettingsPath, ScriptPid, changes, deletes)
+    global IniPath, ScriptPid
+    return CommitIniChangesAt(IniPath, ScriptPid, changes, deletes)
 }
 
 LoadSettings() {
@@ -3527,7 +3483,6 @@ LoadSettings() {
     ; default and range. See LoadSharedSettings in SteamShell-Shared.ahk.
     LoadSharedSettings()
 
-    EnableElevatedInputHelper := ReadBool("Features", "EnableElevatedInputHelper", true)
     EnableSplashScreen := ReadBool("Features", "EnableSplashScreen", true)
     EnableTaskbarHiding := ReadBool("Features", "EnableTaskbarHiding", true)
     EnableDesktopBlackout := ReadBool("Features", "EnableDesktopBlackout", true)
@@ -3848,9 +3803,6 @@ InitDpiAwareness() {
 ; LOG-ONLY ACTION MESSAGES + TRAY ACTIONS
 ; ==============================================================================
 
-TrayOpenSettings(*) {
-    ShowSettingsEditor()
-}
 
 TrayExitToDesktop(*) {
     ExitToDesktop(false)
@@ -5013,7 +4965,16 @@ QuickMenuHideThenSteamMenu(steamInFront) {
         SetTimer(SendSteamOverlayChord, -150)
 }
 
-HideQuickMenu(restorePrevious := true) {
+; Takes no arguments, and the companion's copy takes none either.
+;
+; It used to take `restorePrevious := true`, with fourteen call sites passing
+; false to mean "something else is about to take the foreground". The companion
+; declared the same seam function `(*)`, which accepts any argument and throws it
+; away -- so the two trees shared a name and not a contract, and a shared caller
+; passing false would have worked here and done nothing there. Those call sites
+; now say what they mean by name: HideQuickMenuForHandoff, in
+; SteamShell-Shared.ahk, which both trees reach.
+HideQuickMenu() {
     global QuickMenuGui, QuickMenuVisible, QuickMenuPreviousHwnd
     global ControllerNeedsFreshBaseline
     wasVisible := QuickMenuVisible
@@ -5034,7 +4995,7 @@ HideQuickMenu(restorePrevious := true) {
     if wasVisible
         ControllerNeedsFreshBaseline := true
 
-    if (wasVisible && restorePrevious && QuickMenuPreviousHwnd
+    if (wasVisible && QuickMenuPreviousHwnd
         && DllCall("IsWindow", "Ptr", QuickMenuPreviousHwnd)) {
         if ActivateWindowRobust(QuickMenuPreviousHwnd) {
             HandleCursorAfterManagedFocus(QuickMenuPreviousHwnd, false)
@@ -5045,7 +5006,7 @@ HideQuickMenu(restorePrevious := true) {
 ; Surface-changing operations also wait for DWM to retire the destroyed HWND
 ; before Steam or Explorer supplies the next fullscreen frame.
 DestroyQuickMenuForSurfaceTransition() {
-    HideQuickMenu(false)
+    HideQuickMenuForHandoff()
     ; Complete removal from the current composition frame before Steam's window
     ; disappears and Explorer supplies the next one.
     try DllCall("dwmapi\DwmFlush")
@@ -5505,20 +5466,6 @@ PositionQuickMenuOnTarget(guiObj, targetHwnd, width, height, deferShow := false)
     if (!wasVisible && !deferShow)
         RevealWindow(guiObj)
     return !wasVisible && deferShow
-}
-
-QuickMenuEnsureContentFits() {
-    global QuickMenuGui, QuickMenuStatusCtrl, QuickMenuPreviousHwnd
-    if (!IsSet(QuickMenuGui) || !IsObject(QuickMenuStatusCtrl))
-        return
-    ; The monitor of the window that was in front before the menu opened, which
-    ; is the per-tree half: this product re-centres onto it unconditionally, so
-    ; the menu follows the foreground window across displays.
-    GetTargetMonitorWorkArea(
-        QuickMenuPreviousHwnd, &workLeft, &workTop, &workRight, &workBottom)
-    QuickMenuFitContent(
-        QuickMenuGui, QuickMenuStatusCtrl,
-        workLeft, workTop, workRight, workBottom, true)
 }
 
 
@@ -6234,7 +6181,7 @@ SelectTaskSwitcherWindow(hwnd, lockFocus := false) {
     ; task back in front immediately.
     if !lockFocus
         ReleasePinnedForeground(false)
-    HideQuickMenu(false)
+    HideQuickMenuForHandoff()
 
     if ActivateWindowRobust(hwnd) {
         if lockFocus {
@@ -6292,7 +6239,7 @@ RequestCloseTaskSwitcherWindow(hwnd) {
     if DllCall("IsWindow", "Ptr", hwnd) {
         ; The application may be showing a save/close confirmation. Get the
         ; always-on-top Quick Menu out of its way and return focus to the app.
-        HideQuickMenu(false)
+        HideQuickMenuForHandoff()
         if ActivateWindowRobust(hwnd) {
             HandleCursorAfterManagedFocus(hwnd, false)
         }
@@ -6456,24 +6403,24 @@ QuickMenuActivateSelected() {
                 SaveRtssFrameLimitToProfile()
             }
         case "rtssSettings":
-            HideQuickMenu(false)
-            ShowSettingsEditorCategory("RTSS & Performance")
+            HideQuickMenuForHandoff()
+            ShowSettingsCategory("RTSS & Performance")
             return
         case "settingsEditor":
-            HideQuickMenu(false)
-            ShowSettingsEditor()
+            HideQuickMenuForHandoff()
+            ShowSettings()
             return
         case "windowsSettings":
-            HideQuickMenu(false)
+            HideQuickMenuForHandoff()
             SetTimer(OpenWindowsSettings, -100)
             return
         case "setControllerMappings":
-            HideQuickMenu(false)
+            HideQuickMenuForHandoff()
             SetTimer(ShowControllerMappingWindow, -100)
             return
         case "steamMenu":
             if !IsSteamRunning() {
-                HideQuickMenu(false)
+                HideQuickMenuForHandoff()
                 LaunchSteamAndReturnToShell()
                 return
             }
@@ -6488,13 +6435,13 @@ QuickMenuActivateSelected() {
             QuickMenuHideThenSend("#g")
             return
         case "openKeyboard":
-            HideQuickMenu(false)
+            HideQuickMenuForHandoff()
             SetTimer(OpenTouchKeyboard, -100)
             return
         case "desktop":
             if !QuickMenuConfirm("desktop", "exit Steam to desktop")
                 return
-            HideQuickMenu(false)
+            HideQuickMenuForHandoff()
             ExitSteamAndRestoreDesktop()
         case "returnShell":
             if !QuickMenuConfirm("returnShell", "return to SteamShell")
@@ -6503,7 +6450,7 @@ QuickMenuActivateSelected() {
         case "exitApp":
             if !QuickMenuConfirm("exitApp", "close SteamShell")
                 return
-            HideQuickMenu(false)
+            HideQuickMenuForHandoff()
             ExitSteamShell()
         ; These four navigate from the switch rather than from the row, because
         ; each does something the row-carried path cannot: a guard, or a return
@@ -6532,21 +6479,21 @@ QuickMenuActivateSelected() {
         case "sleep":
             if !QuickMenuConfirm("sleep", "sleep")
                 return
-            HideQuickMenu(false)
+            HideQuickMenuForHandoff()
             try {
                 DllCall("PowrProf\SetSuspendState", "Int", 0, "Int", 0, "Int", 0)
             }
         case "restart":
             if !QuickMenuConfirm("restart", "restart")
                 return
-            HideQuickMenu(false)
+            HideQuickMenuForHandoff()
             try {
                 Shutdown(2)
             }
         case "shutdown":
             if !QuickMenuConfirm("shutdown", "shut down")
                 return
-            HideQuickMenu(false)
+            HideQuickMenuForHandoff()
             try {
                 Shutdown(1)
             }
@@ -6787,7 +6734,7 @@ PollController() {
     if ControllerChordFired(settingsChordEligible, QuickMenuChordHoldMs, now,
         &settingsChordSince, &settingsChordFired) {
         try LogLine("Controller Settings chord detected.")
-        try ShowSettingsEditor()
+        try ShowSettings()
         return
     }
 
@@ -7966,7 +7913,7 @@ ShowDesktopRestoreRecovery(reason) {
     settingsButton := DesktopRecoveryGui.AddButton("x+12 yp w180 h38", "Open Settings")
     stayButton := DesktopRecoveryGui.AddButton("x+12 yp w236 h38", "Keep SteamShell Running")
     retryButton.OnEvent("Click", (*) => DesktopRecoveryChoice := "retry")
-    settingsButton.OnEvent("Click", (*) => ShowSettingsEditor())
+    settingsButton.OnEvent("Click", (*) => ShowSettings())
     stayButton.OnEvent("Click", (*) => DesktopRecoveryChoice := "stay")
     ; No Close/Escape dismissal: leaving with no choice made would drop the user on
     ; a shell-less desktop with nothing on screen explaining it.
@@ -8039,7 +7986,7 @@ RetrySteamFromRecovery(*) {
 }
 
 OpenSettingsFromRecovery(*) {
-    ShowSettingsEditor()
+    ShowSettings()
 }
 
 RestoreDesktopFromRecovery(*) {
@@ -9104,7 +9051,6 @@ RefreshPanelLog(*) {
 
     UpdateStatusIndicators()
 }
-
 
 
 StartHandsOffFromGui(*) {
@@ -10481,7 +10427,7 @@ SettingsEditorSave(*) {
             "key", "Program" slot, "value", commandLine))
 
     ; One batch through the shared commit, rather than the second hand-written
-    ; staging loop this used to be. It staged into SettingsPath ".save-<pid>.tmp"
+    ; staging loop this used to be. It staged into IniPath ".save-<pid>.tmp"
     ; and performed by hand the same copy-write-move CommitIniChanges performs --
     ; under a filename SweepAbandonedIniUpdates did not recognise, so a run killed
     ; mid-save left the copy beside the user's settings file for good. The detail
@@ -10512,7 +10458,7 @@ SettingsEditorReloadFromIni(*) {
     try SettingsGui.Destroy()
     SettingsGui := unset
     ReloadSettings()
-    ShowSettingsEditor()
+    ShowSettings()
 }
 
 SettingsEditorClose(*) {
@@ -10536,13 +10482,13 @@ SettingsEditorClose(*) {
 }
 
 SettingsEditorOpenIni(*) {
-    global SettingsPath, SettingsGui
+    global IniPath, SettingsGui
     if IsSet(SettingsGui)
         try WinSetAlwaysOnTop(0, "ahk_id " SettingsGui.Hwnd)
     pid := 0
     LaunchInteractiveApp(
         A_WinDir "\System32\notepad.exe",
-        QuoteWindowsCommandLineArg(SettingsPath),
+        QuoteWindowsCommandLineArg(IniPath),
         A_WinDir "\System32", "Normal", &pid, "SteamShell settings file")
 }
 
@@ -10580,10 +10526,10 @@ SettingsEditorReloadRuntime(*) {
 }
 
 CreateSettingsBackup(reason := "manual") {
-    global SettingsPath
-    if !FileExist(SettingsPath)
+    global IniPath
+    if !FileExist(IniPath)
         return ""
-    SplitPath(SettingsPath, &settingsName, &settingsDir, &settingsExt, &settingsStem)
+    SplitPath(IniPath, &settingsName, &settingsDir, &settingsExt, &settingsStem)
     safeReason := RegExReplace(StrLower(reason), "[^a-z0-9_-]+", "-")
     backupPath := settingsDir "\" settingsStem ".backup-"
         . FormatTime(A_Now, "yyyyMMdd-HHmmss") "-" safeReason ".ini"
@@ -10591,7 +10537,7 @@ CreateSettingsBackup(reason := "manual") {
         backupPath := settingsDir "\" settingsStem ".backup-"
             . FormatTime(A_Now, "yyyyMMdd-HHmmss") "-" safeReason "-" A_TickCount ".ini"
     try {
-        FileCopy(SettingsPath, backupPath, false)
+        FileCopy(IniPath, backupPath, false)
         return FileExist(backupPath) ? backupPath : ""
     } catch {
         return ""
@@ -10606,7 +10552,7 @@ SettingsEditorReloadAfterFileChange() {
     EnsureSettingsIniUnicode()
     SyncSettingsIniSchema()
     ReloadSettings()
-    ShowSettingsEditor()
+    ShowSettings()
 }
 
 SettingsEditorCreateBackup(*) {
@@ -10622,7 +10568,7 @@ SettingsEditorCreateBackup(*) {
 }
 
 SettingsEditorExportSettings(*) {
-    global SettingsPath, SettingsEditorStatusCtrl
+    global IniPath, SettingsEditorStatusCtrl
     exportPath := SettingsEditorFileSelect(
         "S16", A_Desktop, "Export SteamShell settings", "INI Files (*.ini)")
     if (exportPath = "")
@@ -10630,7 +10576,7 @@ SettingsEditorExportSettings(*) {
     if !RegExMatch(exportPath, "i)\.ini$")
         exportPath .= ".ini"
     try {
-        FileCopy(SettingsPath, exportPath, true)
+        FileCopy(IniPath, exportPath, true)
     } catch as err {
         SettingsEditorMsgBox("Settings export failed.`n`n" err.Message, "Iconx")
         return
@@ -10658,7 +10604,7 @@ SettingsFileLooksValid(path, &reason) {
 }
 
 SettingsEditorImportSettings(*) {
-    global SettingsPath, ScriptPid
+    global IniPath, ScriptPid
     importPath := SettingsEditorFileSelect(
         1, A_Desktop, "Import or restore SteamShell settings", "INI Files (*.ini)")
     if (importPath = "")
@@ -10678,12 +10624,12 @@ SettingsEditorImportSettings(*) {
             "A safety backup could not be created, so the import was cancelled.", "Iconx")
         return
     }
-    workPath := SettingsPath ".import-" ScriptPid ".tmp"
+    workPath := IniPath ".import-" ScriptPid ".tmp"
     try {
         if FileExist(workPath)
             FileDelete(workPath)
         FileCopy(importPath, workPath, true)
-        FileMove(workPath, SettingsPath, true)
+        FileMove(workPath, IniPath, true)
     } catch as err {
         try {
             if FileExist(workPath)
@@ -10757,7 +10703,7 @@ SettingsEditorResetCategory(*) {
 }
 
 SettingsEditorResetAll(*) {
-    global SettingsPath, ScriptPid
+    global IniPath, ScriptPid
     result := SettingsEditorMsgBox(
         "Reset every SteamShell setting to its built-in default?`n`n"
         . "Your current INI will be backed up first.", "YesNo Icon?")
@@ -10768,7 +10714,7 @@ SettingsEditorResetAll(*) {
         SettingsEditorMsgBox("A safety backup could not be created. Reset cancelled.", "Iconx")
         return
     }
-    workPath := SettingsPath ".reset-" ScriptPid ".tmp"
+    workPath := IniPath ".reset-" ScriptPid ".tmp"
     try {
         if FileExist(workPath)
             FileDelete(workPath)
@@ -10781,11 +10727,11 @@ SettingsEditorResetAll(*) {
             setupDefault := setupKey = "SetupState"
                 ? "Complete" : (setupKey = "SetupVersion" ? "1" : "")
             setupValue := IniRead(
-                SettingsPath, "Setup", setupKey,
+                IniPath, "Setup", setupKey,
                 setupDefault)
             IniWrite(setupValue, workPath, "Setup", setupKey)
         }
-        FileMove(workPath, SettingsPath, true)
+        FileMove(workPath, IniPath, true)
     } catch as err {
         try {
             if FileExist(workPath)
@@ -10827,7 +10773,7 @@ AppendProcessIntegrityHealth(results, checkName, pid, expectedIntegrity := "Medi
 ; -- the window, the list, the report text, Copy and Refresh -- is shared.
 ProductHealthResults() {
     global ControllerBackend, RawInputLastReportTick, ActiveControllerIndex
-    global SteamPath, SettingsPath, CurrentSettingsSchemaVersion
+    global SteamPath, IniPath, CurrentSettingsSchemaVersion
     global ShellRegKey, SteamShellInstalledExe, SteamShellVersion
     global SteamShellDataDir, SteamShellInstallationMode
     global EnableRTSSIntegration, RtssPath, RtssOverlayControlMode
@@ -10887,7 +10833,7 @@ ProductHealthResults() {
     ; makes elevating it safe at all, and it is the one a hand-moved or
     ; pre-1.9.9.2 installation silently loses.
     helperBinaryPath := ElevatedHelperPath != ""
-        ? ElevatedHelperPath : GetElevatedHelperPath()
+        ? ElevatedHelperPath : ProductElevatedHelperPath()
     if !EnableElevatedInputHelper {
         HealthResult(results, "info", "Elevated helper protection",
             "Not evaluated because the helper is disabled in Settings.")
@@ -10931,13 +10877,13 @@ ProductHealthResults() {
     AppendProcessIntegrityHealth(
         results, "Steam process integrity", ProcessExist("steam.exe"))
 
-    if !FileExist(SettingsPath) {
+    if !FileExist(IniPath) {
         HealthResult(results, "fail", "Settings file", "SteamShellSettings.ini is missing.")
     } else {
         attributes := ""
-        try attributes := FileGetAttrib(SettingsPath)
+        try attributes := FileGetAttrib(IniPath)
         HealthResult(results, InStr(attributes, "R") ? "warn" : "pass", "Settings file",
-            InStr(attributes, "R") ? "The INI is read-only." : SettingsPath)
+            InStr(attributes, "R") ? "The INI is read-only." : IniPath)
     }
 
     schemaVersion := ToInt(IniReadS("SteamShell", "SettingsSchemaVersion", "0"), 0)
@@ -11145,7 +11091,7 @@ ProductHealthResults() {
 }
 
 ExportDiagnosticBundle(*) {
-    global HealthCheckResults, SettingsPath, LogPath, SteamShellVersion, ShellRegKey
+    global HealthCheckResults, IniPath, LogPath, SteamShellVersion, ShellRegKey
     global ControllerBackend, ActiveControllerIndex
     global RawInputProbeActive, RawInputDevice, RawInputLastReportTick
     global HealthCheckGui, SettingsEditorStatusCtrl
@@ -11198,8 +11144,8 @@ ExportDiagnosticBundle(*) {
     files := Map()
     files["HealthCheck.txt"] := FormatHealthReport(results)
     files["SystemInfo.txt"] := systemInfo
-    if FileExist(SettingsPath)
-        files["SteamShellSettings-sanitized.ini"] := FileRead(SettingsPath)
+    if FileExist(IniPath)
+        files["SteamShellSettings-sanitized.ini"] := FileRead(IniPath)
     if FileExist(LogPath)
         files["SteamShell-log-tail.txt"] := GetLastLines(FileRead(LogPath), 2000)
 
@@ -13157,7 +13103,7 @@ ShowSetupAssistant(*) {
         healthButton := SetupAssistantGui.AddButton("x+10 yp w170 h32", "Run Health Check")
         healthButton.OnEvent("Click", ShowHealthCheck)
         settingsButton := SetupAssistantGui.AddButton("x+10 yp w180 h32", "Open Full Settings")
-        settingsButton.OnEvent("Click", ShowSettingsEditor)
+        settingsButton.OnEvent("Click", ShowSettings)
 
         SetupAssistantGui.AddGroupBox("xm y+10 w720 h96", "6. Remove an installation")
         SetupAssistantGui.AddText(
@@ -13246,9 +13192,9 @@ ShowSetupAssistant(*) {
     CenterGuiOnTargetMonitor(SetupAssistantGui, targetHwnd)
 }
 
-ShowSettingsEditorCategory(categoryName) {
+ShowSettingsCategory(categoryName) {
     global SettingsGui, SettingsEditorCategories
-    ShowSettingsEditor()
+    ShowSettings()
     if !IsSet(SettingsGui)
         return
     for index, candidate in SettingsEditorCategories {
@@ -13259,7 +13205,7 @@ ShowSettingsEditorCategory(categoryName) {
     }
 }
 
-ShowSettingsEditor(*) {
+ShowSettings(*) {
     global SettingsGui, SettingsEditorFields, SettingsEditorCategoryControls
     global SettingsEditorControlPositions, SettingsEditorCategoryOffsets
     global SettingsEditorCategories, SettingsEditorDirty, SettingsEditorUpdating, SettingsEditorStatusCtrl
@@ -13600,7 +13546,7 @@ ShowSettingsEditor(*) {
 }
 
 ShowControlPanel(*) {
-    global ControlGui, SettingsPath
+    global ControlGui, IniPath
     global ControllerMouseSpeed
     global SteamShellVersion
 
@@ -13670,7 +13616,7 @@ ShowControlPanel(*) {
     ControlGui.SetFont("s10 Bold")
     ControlGui.AddText("x" x1 " y+16", "INI configuration")
     ControlGui.SetFont("s9 Norm")
-    ControlGui.AddText("x" x1 " y+2 w" colW " h24 +Wrap", "INI file: " SettingsPath)
+    ControlGui.AddText("x" x1 " y+2 w" colW " h24 +Wrap", "INI file: " IniPath)
     ControlGui.SetFont("s10 Norm")
 
     btnLoad := ControlGui.AddButton("x" x1 " y+8 w" halfW, "Load from INI")
@@ -13836,18 +13782,13 @@ EnsureStatusRefreshTimer() {
 }
 
 
-
 ; ==============================================================================
 ; Controller Mapping UI helpers (config window)
 ; ==============================================================================
 
 
-
-
 ; ----- Controller Mapping UI event wrappers (avoid .Bind / #Warn issues) -----
 ; --------------------------------------------------------------------------
-
-
 
 
 ; The builtin actions this product offers, and what it calls them.
@@ -13893,10 +13834,6 @@ ControllerBindingPretty(key) {
         return SharedBindingLabelFor(SubStr(value, 9), ControllerBindingLabels())
     return value
 }
-
-
-
-
 
 
 ; ==============================================================================
@@ -14540,10 +14477,10 @@ WriteSetupStateToIni(iniFile, setupState, installationMode, installDirectory, da
 ; that so a later launch opens Setup instead of starting the shell runtime on a
 ; machine the user deliberately configured not to have a replaced shell.
 MarkSteamShellSetupCompleteForXfe(targetDirectory) {
-    global SettingsPath
+    global IniPath
     try {
         WriteSetupStateToIni(
-            SettingsPath, "Complete", "XFE", targetDirectory, targetDirectory, "XFE")
+            IniPath, "Complete", "XFE", targetDirectory, targetDirectory, "XFE")
         return true
     } catch as err {
         LogLine("The XFE product state could not be recorded: " err.Message, "Warning")
@@ -14798,7 +14735,7 @@ RequestSteamShellRestart(&failureReason) {
 }
 
 DeploySteamShell(targetDirectory, portableMode := false, registerShell := true, isRepair := false, showResult := true, requestedMode := "") {
-    global SettingsPath, IniPath, LogPath, SteamShellProgramData
+    global IniPath, LogPath, SteamShellProgramData
     global SteamShellInstallDir, SteamShellInstalledExe, SteamShellDataDir
     global SteamShellInstallationMode, SteamShellRegKey, ShellRegKey
     global ConfiguredShellValue, ScriptPid, IntentionalExitMode
@@ -14961,7 +14898,7 @@ DeploySteamShell(targetDirectory, portableMode := false, registerShell := true, 
     targetIni := dataDirectory "\SteamShellSettings.ini"
     targetLog := dataDirectory "\logs\SteamShell.log"
     sourceDataDirectory := SteamShellDataDir
-    sourceSettingsPath := SettingsPath
+    sourceSettingsPath := IniPath
     sourceExecutable := GetAbsoluteSteamShellPath(A_ScriptFullPath)
     existingTargetExe := FileExist(targetExe) != ""
     sourceDiffersFromTarget := StrLower(sourceExecutable) != StrLower(targetExe)
@@ -14991,8 +14928,8 @@ DeploySteamShell(targetDirectory, portableMode := false, registerShell := true, 
         ; inherits the current configuration, including the Steam path selected
         ; earlier in this assistant.
         if !FileExist(targetIni) {
-            if FileExist(SettingsPath)
-                FileCopy(SettingsPath, targetIni, false)
+            if FileExist(IniPath)
+                FileCopy(IniPath, targetIni, false)
             else
                 FileAppend(GetDefaultSettingsIniText(), targetIni, "UTF-16")
         }
@@ -15063,6 +15000,7 @@ DeploySteamShell(targetDirectory, portableMode := false, registerShell := true, 
         ; invokable auto-elevation task.
         if (StrLower(installationMode) = "standard") {
             helperTaskRegistered := RegisterElevatedHelperTask(
+                "standalone", ElevatedHelperTaskName(),
                 deployedHelper, targetExe, targetIni, targetLog,
                 &helperTaskError)
             RegWrite(helperTaskRegistered ? "true" : "false",
@@ -15130,7 +15068,6 @@ DeploySteamShell(targetDirectory, portableMode := false, registerShell := true, 
         SteamShellInstalledExe := targetExe
         SteamShellDataDir := dataDirectory
         SteamShellInstallationMode := installationMode
-        SettingsPath := targetIni
         IniPath := targetIni
         LogPath := targetLog
 
@@ -15215,7 +15152,7 @@ DeploySteamShell(targetDirectory, portableMode := false, registerShell := true, 
 ; the payload's own ACL mean something.
 ;
 ; A_ProgramFiles is read here in an ADMINISTRATOR process during Setup, and
-; XfeElevatedHelperPath() in the XFE tree resolves the same string at normal
+; ProductElevatedHelperPath() in the XFE tree resolves the same string at normal
 ; integrity. Neither is trusted on its own: XFE verifies owner, DACL and
 ; readability through ElevatedHelperLocationIsProtected before launching it, so
 ; a redirected environment pointing somewhere the user can write fails closed.
@@ -15338,6 +15275,47 @@ DeploySteamShellXfe(targetDirectory, registerStartup := true, showResult := true
                 . "rights: " helperDeployFailure, "Warning")
         RegWrite(helperDeployed ? "true" : "false",
             "REG_SZ", SteamShellRegKey, "XfeHelperDeployed")
+
+        ; Register the companion's on-demand task here, while Setup already holds
+        ; an administrator token.
+        ;
+        ; The companion cannot do this without prompting: registering a
+        ; HighestAvailable task needs elevation, and its UAC prompt lands on the
+        ; secure desktop, where a controller cannot answer it -- in the product
+        ; most likely to be driven from a couch. It used to register lazily at
+        ; first use for that reason, which was the best it could do alone.
+        ;
+        ; Setup deploys the payload three lines above and is already elevated, so
+        ; the task costs nothing extra here. Same function, same XML builder and
+        ; same protected-ancestor requirement as the shell's own task; only the
+        ; product argument, the task name and the paths differ.
+        ;
+        ; Gated on the payload actually landing. A task pointing at a helper that
+        ; was not deployed is the artefact the uninstall path calls the worst one
+        ; to leave behind.
+        xfeHelperTaskRegistered := false
+        if helperDeployed {
+            SplitPath(targetExe, , &xfeInstallDirectory)
+            ; Retire the name the companion registered under before the helper
+            ; was corrected to say what it does. /delete on a task that is not
+            ; there returns non-zero, and that is not a failure -- there was
+            ; nothing to remove.
+            RunSchTasks("/delete /tn "
+                . QuoteWindowsCommandLineArg(XfeElevatedHelperTaskLegacyName())
+                . " /f")
+            xfeHelperTaskRegistered := RegisterElevatedHelperTask(
+                "xfe", XfeElevatedHelperTaskName(), deployedHelper, targetExe,
+                xfeInstallDirectory "\SteamShell-XFE.ini",
+                helperBinDirectory "\SteamShell-Helper.log",
+                &xfeHelperTaskError)
+            if !xfeHelperTaskRegistered
+                LogLine(
+                    "The XFE elevated helper task was not registered; the "
+                    . "companion will ask for UAC the first time it starts the "
+                    . "helper: " xfeHelperTaskError, "Warning")
+        }
+        RegWrite(xfeHelperTaskRegistered ? "true" : "false",
+            "REG_SZ", SteamShellRegKey, "XfeHelperTaskRegistered")
 
         startupRegistered := false
         if registerStartup {
@@ -15951,7 +15929,7 @@ SettingsEditorRestoreDesktop(*) {
 ; USER STARTUP PROGRAMS (HIDDEN)
 ; ==============================================================================
 KickUserStartupPrograms() {
-    global SettingsPath
+    global IniPath
     ; Optional user-defined hidden programs to start with the shell.
     enable := ReadBool("StartupPrograms", "Enable", true)
     if (!enable)
@@ -15968,7 +15946,7 @@ KickUserStartupPrograms() {
 }
 
 StartUserStartupProgramsNow() {
-    global SettingsPath
+    global IniPath
     ; Once per session. The companion has no equivalent guard; its entry point is
     ; a single one-shot timer, so it does not need one today, and the asymmetry
     ; is now visible rather than implicit in two loop bodies.
@@ -16901,7 +16879,7 @@ Hotkey("^!+r", (*) => ReloadSettings())
 Hotkey("^!+g", (*) => ForceGameAssistOnce())
 Hotkey("^!+p", (*) => ShowControlPanel())
 Hotkey("^!+q", (*) => ToggleQuickMenu())
-Hotkey("^!+s", (*) => ShowSettingsEditor())
+Hotkey("^!+s", (*) => ShowSettings())
 ; Same chord the companion uses. This is the re-arm path that is actually
 ; reachable when the thing that broke is the controller: the Settings button
 ; needs navigating to, and on a handheld there is nothing but the pad to navigate
@@ -16951,7 +16929,7 @@ OnMessage(0x0218, PowerBroadcastMessage)
 OnMessage(0x0219, DeviceChangeMessage)
 
 if SafeMode && !FirstRunSetupMode
-    SetTimer(ShowSettingsEditor, -400)
+    SetTimer(ShowSettings, -400)
 
 ; Seam for SteamShell-Shared.ahk. The window engine's scored best candidate is
 ; this tree's answer to "what game is running".
@@ -16969,6 +16947,32 @@ ProductBestGameExe() {
 ProductDataDir() {
     global SteamShellDataDir
     return SteamShellDataDir
+}
+
+; The shell's half of the desktop-shell seam: "" when launching through
+; Explorer's broker is allowed, otherwise why not.
+;
+; This is the contingency the privilege boundary is about. SteamShell can END UP
+; elevated -- an administrator Setup takeover re-launches it, and nothing stops a
+; user starting it as admin -- and as the Windows shell it must not hand that
+; token to TabTip, Explorer or RTSS through a broker that is not the interactive
+; user's. The companion has no such case and answers "".
+DesktopShellRefusalReason() {
+    if DesktopShellMatchesInteractiveUser(&reason)
+        return ""
+    return reason
+}
+
+; The shell's half of the Quick Menu work-area seam: the monitor of the window
+; that was in front before the menu opened, and re-centre onto it.
+;
+; The shell follows the foreground window across displays, which is what the
+; returned true means. QuickMenuPreviousHwnd is the state the companion has no
+; equivalent of.
+ProductQuickMenuWorkArea(&left, &top, &right, &bottom) {
+    global QuickMenuPreviousHwnd
+    GetTargetMonitorWorkArea(QuickMenuPreviousHwnd, &left, &top, &right, &bottom)
+    return true
 }
 
 ; Seams for the shared health harness.
@@ -17014,56 +17018,6 @@ ProductSettingsViewportHeight() {
     return Max(1, SettingsEditorContentBottom - SettingsEditorContentTop)
 }
 
-RunViaDesktopShell(filePath, arguments := "", directory := "", show := 1) {
-    ; ShellExecute through Explorer's desktop automation object so an elevated
-    ; SteamShell does not force ordinary interactive utilities such as TabTip to
-    ; inherit its administrator token.
-    static VT_UI4 := 0x13
-    static SWC_DESKTOP := ComValue(VT_UI4, 0x8)
-    static DESKTOP_BROKER_TIMEOUT_MS := 10000
-    startedTick := A_TickCount
-    attempts := 0
-    lastError := "Explorer's desktop automation object was unavailable."
-
-    ; Shell_TrayWnd can exist shortly before Explorer publishes its desktop COM
-    ; automation object during a cold boot. Keep verifying the broker identity
-    ; while that object finishes initializing instead of treating this normal
-    ; readiness gap as a Steam launch failure.
-    Loop {
-        if !DesktopShellMatchesInteractiveUser(&shellReason) {
-            try LogLine(
-                "Desktop-shell launch rejected for " filePath ": " shellReason,
-                "Warning")
-            return false
-        }
-
-        attempts += 1
-        try {
-            desktopWindow := ComObject("Shell.Application").Windows.Item(SWC_DESKTOP)
-            desktopApplication := desktopWindow.Document.Application
-            desktopApplication.ShellExecute(
-                filePath, arguments, directory, "open", show)
-            if (attempts > 1) {
-                try LogLine(
-                    "Desktop-shell broker became ready after "
-                    . (A_TickCount - startedTick) " ms for " filePath ".")
-            }
-            return true
-        } catch as err {
-            lastError := err.Message
-        }
-
-        if (A_TickCount - startedTick >= DESKTOP_BROKER_TIMEOUT_MS)
-            break
-        Sleep 200
-    }
-
-    try LogLine(
-        "Desktop-shell launch failed for " filePath " after " attempts
-        . " attempts: " lastError,
-        "Warning")
-    return false
-}
 
 OpenTouchKeyboard() {
     ; Present the modern touch keyboard without terminating Windows text-input

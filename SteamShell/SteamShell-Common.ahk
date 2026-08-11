@@ -2171,6 +2171,27 @@ XfeLogonTaskLegacyName() {
     return "SteamShell-XFE"
 }
 
+; "Elevated Input Helper", matching the shell's task, because that is what the
+; helper IS in both products.
+;
+; It was "Elevated RTSS Helper", from when this product's helper did the frame
+; cap and nothing else. That stopped being true when the helper gained elevated
+; controller input: SteamShell-Helper.ahk's --product=xfe branch sets
+; HelperGeometryEnabled := false and NOTHING else, so input runs here exactly as
+; it does for the shell. A registered task's name is the one place a user sees
+; what the thing does, and this one named a third of it.
+XfeElevatedHelperTaskName() {
+    return "SteamShell XFE Elevated Input Helper"
+}
+
+; The name registered before that correction. Machines already carry it, so
+; every registration deletes it first -- the same shape XfeLogonTaskLegacyName
+; exists for, and for the same reason: leaving it behind means an orphaned
+; HighestAvailable task pointing at a helper nothing will ever start through it.
+XfeElevatedHelperTaskLegacyName() {
+    return "SteamShell XFE Elevated RTSS Helper"
+}
+
 ; account may be a SID or DOMAIN\User; both callers resolve a SID first because
 ; it survives a user rename. arguments is "" for a compiled build.
 XfeLogonTaskXml(account, command, arguments, workingDirectory) {

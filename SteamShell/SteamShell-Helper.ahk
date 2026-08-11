@@ -6,20 +6,29 @@
 ;
 ; ONE PAYLOAD, TWO PRODUCTS. --product selects how much of this file is live:
 ;
-;   standalone (default)  everything: controller input, window geometry, and the
-;                         RTSS frame cap.
-;   xfe                   the RTSS frame cap and nothing else.
+;   standalone (default)  everything: controller input, elevated window geometry,
+;                         and the RTSS frame cap.
+;   xfe                   controller input and the RTSS frame cap. Geometry off.
 ;
-; The XFE helper is deliberately not the same helper with a different parent.
-; Elevated input was left out of it because the remedy here is XInput, and XFE
-; exists precisely because XInput is not enough for its users -- a controller in
-; DirectInput mode is not an XInput device at all, so elevated input would have
-; worked only for the people who did not need XFE. Elevated window geometry was
-; left out because XFE never manages presentation; Xbox FSE does.
+; GEOMETRY is the only half that differs, and it is a product rule rather than a
+; capability one: centring and resizing elevated windows is shell behaviour, and
+; Xbox FSE owns presentation for the companion. A helper that moved windows
+; underneath it would fight the thing it is a companion to. HelperProduct sets
+; HelperGeometryEnabled := false and nothing else.
 ;
-; What is left is the one thing that cannot work any other way: RTSSHooks64.dll
-; loads into the calling process, so a per-game or global frame cap on a stock
-; Program Files RTSS install needs a token XFE does not have.
+; INPUT RUNS FOR BOTH. This header used to say the companion got "the RTSS frame
+; cap and nothing else", and gave two reasons for withholding elevated input.
+; Both had already stopped being true, and the branch that actually sets the
+; flags says so in full -- see HelperProduct below. In short: the parent image
+; name was parameterised (MainImageName), so the helper never did require
+; steamshell.exe; and the helper gained RawInput, so the input half is no longer
+; XInput-only and no longer helps every pad except the ones the companion exists
+; for. Without it a controller is dead over Task Manager and every other
+; High-integrity window, in the product most likely to be driven from a couch.
+;
+; The frame cap is the piece that cannot work any other way in either product:
+; RTSSHooks64.dll loads into the calling process, so a per-game or global frame
+; cap on a stock Program Files RTSS install needs a token neither main has.
 ; ==============================================================================
 #Requires AutoHotkey v2.0.19 64-bit
 #SingleInstance Force
@@ -37,7 +46,10 @@ CoordMode "Mouse", "Screen"
 ; compile into a High-integrity binary -- and what let this file drop its own
 ; second copy of the token, SID and session parsing. SteamShell-Shared.ahk is
 ; deliberately NOT included: it orchestrates RTSS and the Quick Menu and reaches
-; into eight tree functions, so including it here would not compile.
+; into the per-tree functions listed in $sharedSeamAllowed (Validate-Common.ps1),
+; none of which exist here, so including it would not compile. The count is not
+; repeated here on purpose: it has been wrong in prose three times, and the list
+; is the only copy anything reads.
 #Include SteamShell-Common.ahk
 
 global HelperVersion := "2.0.2"
@@ -1856,6 +1868,18 @@ InitXInput() {
     return XInputDll != ""
 }
 
+; Answers true like the shared definition does, rather than falling off the end.
+;
+; The shared copy returns false when CompanionDisabled, and that guard has no
+; meaning here -- the helper is started and stopped by its parent, not disabled
+; in a settings file. What DOES carry across is the contract: a caller that tests
+; the result must not read "the chord was not sent" out of the one copy that
+; simply never answered. AutoHotkey returns an empty string from a function that
+; falls off the end, and an empty string is false.
+;
+; No caller tests it today in any of the three programs. That is what makes this
+; cheap to fix and worth fixing now, rather than after the first one does.
 SendChordSafe(keys) {
     SendChordReleasingModifiers(keys)
+    return true
 }

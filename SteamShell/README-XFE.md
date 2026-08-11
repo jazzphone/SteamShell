@@ -130,10 +130,16 @@ than truncating it after 512 resolution/refresh combinations.
 
 ## Controller input backend
 
-Xbox FSE withholds controller input from background processes. Inside FSE both
-XInput and GameInput report **all-zero** state — measured returning
-byte-identical values, because on Windows 11 they share the same underlying
-gaming-input stack, so choosing between them changes nothing.
+Xbox FSE withholds controller input from background processes. Inside FSE
+XInput reports **all-zero** state.
+
+GameInput was measured as an alternative and returned byte-identical values at
+every sample, including the all-zero readings inside FSE — on Windows 11 the two
+share the same underlying gaming-input stack, so choosing between them changed
+nothing. It was offered as a fourth `Backend` value for a time and has been
+removed: it could only ever return what XInput already returns, and it was never
+selected by `auto`. The measurement is the useful part, and it is why RawInput
+exists.
 
 **RawInput** reads the HID reports underneath that stack. Registered with
 `RIDEV_INPUTSINK`, it receives the complete gamepad state inside FSE, including
@@ -145,7 +151,6 @@ silent outside FSE, so neither source works everywhere on its own.
 | `auto` | **Default, and what you want.** RawInput while HID reports arrive, XInput otherwise — this means RawInput is used *everywhere* it works, not only inside FSE. |
 | `rawinput` | RawInput only, **no fallback**. Diagnostic: use it to prove something is genuinely RawInput. Input will be dead wherever RawInput is silent. |
 | `xinput` | XInput only. Works on the desktop, reads zeros inside FSE. |
-| `gameinput` | Diagnostic only. Measured byte-identical to XInput; kept as a documented negative result. |
 
 Every backend decodes into the same gamepad state, so mappings, the Quick Menu
 and the controller mouse behave identically whichever is active.
@@ -1216,10 +1221,9 @@ Startup always logs the settings file in use and the values resolved from it.
 The INI is read from beside the executable, so editing a copy elsewhere silently
 has no effect and looks exactly like a broken feature.
 
-- **`Controller.DiagnosticLogging`** samples all four XInput slots plus
-  GameInput on one tick, with per-slot capabilities and the foreground process
-  name, plus an `(alive)` keepalive so silence is unambiguous. Also logs window
-  centring calculations.
+- **`Controller.DiagnosticLogging`** samples all four XInput slots on one tick,
+  with per-slot capabilities and the foreground process name, plus an `(alive)`
+  keepalive so silence is unambiguous. Also logs window centring calculations.
 - **`Controller.RawInputProbe`** logs raw HID report bytes and enumerates which
   HID devices RawInput can see.
 - **Probe Screen** (Settings → Advanced) logs every

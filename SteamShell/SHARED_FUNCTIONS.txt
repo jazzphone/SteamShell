@@ -184,6 +184,7 @@ ControllerMapUI_Revert
 ControllerMapUI_Save
 ControllerMapUI_UpdateEditor
 ControllerPollFrame
+ControllerReadState
 ControllerResumeGapCheck
 ControllerProfilePath
 ControllerProfileRestCheck
@@ -243,6 +244,7 @@ GuiLiteralText
 HasLongBinding
 HealthResult
 HideControllerTest
+HideQuickMenuForHandoff
 InitDefaultControllerMappings
 InitializeTrayMenu
 InitXInput
@@ -295,6 +297,7 @@ QuickMenuCurrentAppValue
 QuickMenuCycleSharedSetting
 QuickMenuDestroyWindow
 QuickMenuDisplayReflow
+QuickMenuEnsureContentFits
 QuickMenuGameDetectionValue
 QuickMenuGameScoreIds
 QuickMenuGameScoreLabel
@@ -369,6 +372,8 @@ RtssGlobalFrameLimit
 RtssGlobalFrameLimitRead
 RtssProfileTargetExe
 RtssSaveProfileValueText
+RunSchTasks
+RunViaDesktopShell
 SanitizeDiagnosticText
 SaveRtssFrameLimitToProfile
 SendChordSafe
@@ -440,6 +445,7 @@ SharedExeListContains
 SharedNotify
 SharedScoreGameCandidates
 SharedSettingsMaxScroll
+SharedSyncElevatedHelper
 SharedTaskSwitcherWindows
 SharedWindowInventoryBuild
 SharedWindowInventoryGet
@@ -454,11 +460,14 @@ ShowLiveLogWindow
 ShowQuickMenuLayoutManager
 ShutdownGdiPlus
 ShutdownRtssHooksApi
+StartElevatedHelperViaUac
 StartControllerCenterSample
+StartHelperViaScheduledTask
 SteamShellInstallationVerdict
 SteamShellSetupRecord
 SteamShellSetupRecordDrift
 StopElevatedHelper
+SweepAbandonedSettingsUpdates
 SystemCursor
 TaskbarCreatedHandler
 ToggleQuickMenuHdrState
@@ -466,6 +475,7 @@ ToggleQuickMenu
 ToggleRtssFrameLimiter
 ToggleRtssOverlay
 TrayOpenQuickMenu
+TrayOpenSettings
 TryInvokeTouchKeyboard
 UpdateControllerTest
 VerifyElevatedHelperProcess

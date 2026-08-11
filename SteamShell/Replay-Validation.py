@@ -321,6 +321,69 @@ def _declared_names(text, pattern):
     return names
 
 
+def parameter_shape(body):
+    """How many arguments a function requires and accepts: "1..2", "0+", "1..1".
+
+    Mirrors Get-AhkParameterShape in Validate-Common.ps1 and MUST return the same
+    string for the same header, for the reason this file's header states about
+    fingerprint()/similarity(): a gate the two harnesses disagree about is worse
+    than no gate, because the build would pass on Windows and fail here, and the
+    first instinct would be to loosen whichever one complained.
+
+    Why the shape is worth comparing at all: the seam is exempt from the
+    fingerprint gate -- $sharedSeamAllowed IS the record that those functions
+    differ per product -- and that exemption silently covered their SIGNATURES,
+    which are not a product difference but the contract shared code calls
+    through. Two had drifted: HideQuickMenu was `restorePrevious := true` in one
+    tree and `(*)` in the other, which accepts any argument and discards it.
+    """
+    # _parse keeps bodies as line lists; Get-AhkFunctionBodies joins them. Join
+    # here so both harnesses shape the same text.
+    if not isinstance(body, str):
+        body = "\n".join(body)
+    text = re.sub(r'"(?:[^"`]|`.)*"', '""', body)
+    text = re.sub(r"'(?:[^'`]|`.)*'", "''", text)
+    text = re.sub(r"(?<!`);[^\r\n]*", "", text)
+    open_at = text.find("(")
+    if open_at < 0:
+        return "?"
+    depth = 0
+    close_at = -1
+    for i in range(open_at, len(text)):
+        if text[i] == "(":
+            depth += 1
+        elif text[i] == ")":
+            depth -= 1
+            if depth <= 0:
+                close_at = i
+                break
+    if close_at < 0:
+        return "?"
+    parts, current, depth = [], "", 0
+    for ch in text[open_at + 1:close_at]:
+        if ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            depth -= 1
+        if ch == "," and depth == 0:
+            parts.append(current)
+            current = ""
+        else:
+            current += ch
+    parts.append(current)
+    parts = [p for p in parts if p.strip()]
+    required = 0
+    for part in parts:
+        # A variadic tail accepts everything after it, so the ceiling is gone and
+        # only the floor is worth comparing.
+        if re.search(r"\*\s*$", part.strip()):
+            return f"{required}+"
+        if ":=" in part:
+            continue
+        required += 1
+    return f"{required}..{len(parts)}"
+
+
 def fingerprint(body):
     """A naming- and comment-blind signature: the ordered sequence of calls the
     function makes, plus its DllCall targets.
@@ -1483,6 +1546,183 @@ def _has_inline_body(keyword, rest):
     return False
 
 
+def check_duplicate_function_globals(sources):
+    """No function may declare the same global twice.
+
+    ADDED AFTER IT COST A WINDOWS ROUND-TRIP. Validate-SteamShell.ps1 has had
+    this rule for a long time; this harness did not, so a rename that turned
+    `global SettingsPath, IniPath` into `global IniPath, IniPath` passed
+    everything checkable off-Windows and failed on the machine that matters.
+    AutoHotkey itself parses it, which is what makes the rule worth having: it is
+    a validator-only defect, invisible to a syntax check.
+
+    Counted across the whole function, not per statement -- the same name in two
+    separate `global` lines is the same mistake and the shape a rename is most
+    likely to produce.
+    """
+    for name, text in sources.items():
+        for fn, (line, body) in function_map(text).items():
+            seen = collections.Counter()
+            for body_line in (body if isinstance(body, list)
+                              else body.split("\n")):
+                m = re.match(r"^\s+global\s+(.*)", strip_comments(body_line))
+                if not m:
+                    continue
+                for decl in m.group(1).split(","):
+                    n = re.match(r"\s*([A-Za-z_]\w*)", decl)
+                    if n:
+                        seen[n.group(1).lower()] += 1
+            for global_name, count in sorted(seen.items()):
+                if count > 1:
+                    fail(f"{name}:{line} {fn} declares 'global {global_name}' "
+                         f"{count} times. AutoHotkey accepts it, so only a "
+                         "validator can catch it -- and a rename that merges two "
+                         "names into one is exactly how it happens.")
+
+
+def check_runas_targets(sources):
+    """Only schtasks.exe and the verified helper path may be elevated.
+
+    Replays Validate-SteamShell-XFE.ps1's rule, for the same reason as the check
+    above: it is a SECURITY rule that ran only on Windows, and the first thing it
+    caught was a comment of mine quoting the elevation verb it scans for. The
+    rule reads raw source deliberately -- the token it looks for lives in string
+    literals, so blanking strings would blind it to the thing it exists to find.
+    That is also why nothing here may quote the verb in prose.
+    """
+    text = sources.get("SteamShell-XFE.ahk")
+    if text is None:
+        return
+    for m in re.finditer(r"(?i)\*RunAs[^\r\n]*", text):
+        line = m.group(0)
+        if re.search(r"(?i)schtasks\.exe", line):
+            continue
+        if "QuoteWindowsCommandLineArg(ElevatedHelperPath)" in line:
+            continue
+        number = text[:m.start()].count("\n") + 1
+        fail(f"SteamShell-XFE.ahk:{number} elevates something that is neither "
+             f"schtasks.exe nor the verified helper: {line.strip()[:80]}")
+
+
+def check_no_seam_count_in_prose():
+    """No file may state the size of the shared seam in words.
+
+    THE SAME DEFECT FOUR TIMES. SteamShell-Shared.ahk's header said the seam was
+    three functions when it was 28. SteamShell-Common.ahk's said the shared file
+    reached into eight. Both headers then wrote at length about the failure,
+    concluded that "a number in prose is a number nothing reads", removed their
+    own counts and added $sharedSeamExpectedCount -- which works, and is exactly
+    right, and was applied to one copy. SteamShell-Helper.ahk still said eight,
+    Validate-Common.ps1 repeated it in a comment, and
+    STEAMSHELL_PROJECT_OVERVIEW.md said 29 in the very table that narrates the
+    first three errors.
+
+    The remedy was never "correct the number". It was "have nothing to correct",
+    and that only holds if something enforces it -- which is this. The seam's
+    size is asserted against $sharedSeamExpectedCount and stated nowhere else.
+    """
+    words = (r"\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|"
+             r"twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|"
+             r"nineteen|twenty|thirty|forty|fifty|sixty|"
+             r"(?:twenty|thirty|forty|fifty|sixty)[- ]\w+")
+    pattern = re.compile(r"(?i)\b(" + words + r")\s+(?:per-)?tree functions\b")
+    targets = [
+        ROOT / "SteamShell.ahk", ROOT / "SteamShell-XFE.ahk",
+        ROOT / "SteamShell-Shared.ahk", ROOT / "SteamShell-Common.ahk",
+        ROOT / "SteamShell-Helper.ahk", ROOT / "Validate-Common.ps1",
+        ROOT / "Validate-SteamShell.ps1", ROOT / "Validate-SteamShell-XFE.ps1",
+        ROOT / "SHARED_FUNCTIONS.txt", ROOT / "COMMON_FUNCTIONS.txt",
+        ROOT.parent / "STEAMSHELL_PROJECT_OVERVIEW.md",
+        ROOT.parent / "README.md",
+    ]
+    for path in targets:
+        if not path.exists():
+            continue
+        for number, line in enumerate(
+                decode_like_powershell(path.read_bytes()).split("\n"), 1):
+            hit = pattern.search(line)
+            if hit:
+                fail(f"{path.name}:{number} states the seam size in prose "
+                     f"(\"{hit.group(0)}\"). The seam's size is asserted against "
+                     "$sharedSeamExpectedCount in Validate-Common.ps1 and must be "
+                     "stated nowhere else -- this exact sentence has carried a "
+                     "wrong number four times. Point at $sharedSeamAllowed instead.")
+
+
+def _strip_comments_keep_strings(text):
+    """Comments out, string BODIES intact.
+
+    strip_comments and strip_code_noise both blank string bodies, which is right
+    for scans looking for calls and wrong for one looking at argument VALUES:
+    it cannot tell a deliberately empty "" from a path, which is the exact
+    distinction check_elevated_helper_call_sites exists to make.
+    """
+    out = []
+    for line in text.split("\n"):
+        res, i, n, in_string = [], 0, len(line), False
+        while i < n:
+            c = line[i]
+            if in_string:
+                if c == "`":
+                    res.append(line[i:i + 2])
+                    i += 2
+                    continue
+                if c == '"':
+                    in_string = False
+                res.append(c)
+            elif c == '"':
+                in_string = True
+                res.append(c)
+            elif c == ";" and (i == 0 or line[i - 1] in " \t"):
+                break
+            else:
+                res.append(c)
+            i += 1
+        out.append("".join(res))
+    return "\n".join(out)
+
+
+def check_elevated_helper_call_sites(sources):
+    """Every SharedElevatedHelperArguments call must supply a settings path and a log path.
+
+    THE CHECK THAT WAS MISSING, and the shape of what it missed is the point.
+    Assert-ElevatedHelperProtocol already verified three things: the builder
+    exists in SteamShell-Common.ahk, the flag VOCABULARY it builds is exactly
+    what SteamShell-Helper.ahk reads, and no tree spells a flag by hand. A call
+    site passing two of five arguments satisfies all three -- it calls the
+    builder, and the builder's flag set is unchanged -- so the companion
+    registered its elevated-helper scheduled task with only --product= and
+    --main-path= and nothing noticed.
+
+    The helper stops dead without a settings path: it is a hard gate, and the
+    missing log path meant it could not even say so. That is the whole failure,
+    and it is a property of the CALL, which is why no rule about the builder
+    could see it.
+
+    Positional, because the builder's parameters are positional:
+        product, parentPid, mainPath, settingsPath, logPath
+    """
+    for name in ("SteamShell.ahk", "SteamShell-XFE.ahk"):
+        text = sources.get(name)
+        if text is None:
+            continue
+        for args in call_arguments(_strip_comments_keep_strings(text),
+                                   "SharedElevatedHelperArguments"):
+            shown = ", ".join(args)
+            if len(args) < 5:
+                fail(f"{name} calls SharedElevatedHelperArguments({shown}) with "
+                     f"{len(args)} argument(s). The helper needs a settings path "
+                     "-- it stops at its own argument gate without one -- and a "
+                     "log path, or it cannot report that it stopped.")
+                continue
+            for index, what in ((3, "settings path"), (4, "log path")):
+                if args[index].strip() in ('""', "''", ""):
+                    fail(f"{name} calls SharedElevatedHelperArguments({shown}) "
+                         f"with an empty {what}. schtasks /run cannot add "
+                         "arguments, so whatever is registered is everything the "
+                         "helper will ever receive.")
+
+
 def check_required_functions(sources):
     """Every name in a validator's $requiredFunctions must still be defined.
 
@@ -2248,7 +2488,7 @@ def check_settings_window_placement(sources):
     if not function_body(shared, "RecenterVisibleGuiOnMonitorActual"):
         fail("RecenterVisibleGuiOnMonitorActual is not in SteamShell-Shared.ahk; "
              "while it lived in one tree only that product's Settings centred.")
-    for name, fn in (("SteamShell.ahk", "ShowSettingsEditor"),
+    for name, fn in (("SteamShell.ahk", "ShowSettings"),
                      ("SteamShell-XFE.ahk", "ShowSettings")):
         body = function_body(sources[name], fn)
         if not body:
@@ -2749,6 +2989,10 @@ def main():
     check_local_shadows_call(sources)
     check_product_surfaces(sources)
     check_required_functions(sources)
+    check_elevated_helper_call_sites(sources)
+    check_duplicate_function_globals(sources)
+    check_runas_targets(sources)
+    check_no_seam_count_in_prose()
     check_quickmenu_rows(sources)
     check_schema_versions()
     check_cross_name_anchors(sources)
@@ -2936,6 +3180,38 @@ def main():
                  "$sharedSeamAllowed does not list it. Widening the seam is meant to be "
                  "a decision somebody makes.")
 
+        # ---- and both definitions must take the same arguments ------------
+        #
+        # Being defined in both trees is what the check above asks. It is not
+        # enough: shared code calls ONE name, and if the two trees answer it with
+        # different arities the tree with the wider shape accepts what the other
+        # acts on and silently discards it. AutoHotkey cannot report that, the
+        # fingerprint gate below skips the seam by design, and no runtime test
+        # would think to check.
+        #
+        # Not hypothetical. HideQuickMenu was `restorePrevious := true` in the
+        # shell and `(*)` in the companion, with fifteen shell call sites passing
+        # `false` to mean "do not restore the previous foreground". It stayed
+        # invisible only because shared code happened to call it with no
+        # arguments -- and this project has spent months moving call sites INTO
+        # the shared file, which is exactly the move that would have turned it
+        # into a focus bug in one product and nothing at all in the other.
+        # _parse lower-cases its keys and read_shared_seam lower-cases the
+        # allowlist, so these line up directly.
+        shell_map = maps["SteamShell.ahk"]
+        companion_map = maps["SteamShell-XFE.ahk"]
+        for name in sorted(listed):
+            if name not in shell_map or name not in companion_map:
+                continue
+            shell_shape = parameter_shape(shell_map[name][1])
+            companion_shape = parameter_shape(companion_map[name][1])
+            if shell_shape != companion_shape:
+                fail(f"Seam function '{name}' takes {shell_shape} arguments in "
+                     f"SteamShell.ahk and {companion_shape} in SteamShell-XFE.ahk. "
+                     "SteamShell-Shared.ahk calls one name and would get two contracts. "
+                     "Make the shapes agree, or add the name to $seamShapeExempt in "
+                     "Validate-Common.ps1 with the reason they cannot.")
+
     # ---- globals Shared uses must exist in both trees ---------------------
     shared_globals = in_function_globals(sources["SteamShell-Shared.ahk"])
     for tree in ("SteamShell.ahk", "SteamShell-XFE.ahk"):
@@ -2997,6 +3273,30 @@ def main():
         fail(f"The shared seam has {len(seam_exempt)} entries but "
              f"$sharedSeamExpectedCount says {expected}. Update the "
              "expectation in the same commit that changes the list.")
+
+    # THE SEAM IS EXEMPT FROM FAILING, NOT FROM BEING LOOKED AT.
+    #
+    # Skipping it entirely threw away the one signal the exemption cannot
+    # justify. A seam pair scoring low says "these differ per product", which is
+    # what the list already records. A seam pair where one tree's call sequence
+    # is a STRICT SUBSET of the other's says something the list does not: one
+    # product does everything the other does, and then something more. That is
+    # the shape of a fix applied to one tree and not the other, and it is
+    # indistinguishable from a deliberate narrowing until somebody reads both.
+    #
+    # So it is REPORTED and never failed. Two pairs sit here today --
+    # LoadControllerMappings, whose extra half is a one-time schema-4 rewrite the
+    # companion never needed, and ProductTrayItems, whose extra half is shell
+    # controls Xbox FSE owns. Both are right. The point is that the next one is
+    # visible in the same pass, rather than found by an audit months later.
+    seam_subsets = []
+    for name in sorted(set(a) & set(b)):
+        if name.lower() not in seam_exempt:
+            continue
+        fa, fb = fingerprint(a[name][1]), fingerprint(b[name][1])
+        if fa and fb and fa != fb and (is_subsequence(fa, fb) or is_subsequence(fb, fa)):
+            wider = "SteamShell-XFE.ahk" if is_subsequence(fa, fb) else "SteamShell.ahk"
+            seam_subsets.append(f"{name} (wider in {wider})")
 
     flagged = []
     for name in sorted(set(a) & set(b)):
@@ -3185,6 +3485,15 @@ def main():
                 + _match_or_empty(
                     r"(?sm)^SettingsCategoryRows\(category\)\s*\{[\s\S]*?return table",
                     source)),
+            # The tree with its comments stripped. One rule reads this: the
+            # settings file has a single name in the shell now (IniPath), and the
+            # retired alias must not come back as an identifier -- while the
+            # declaration is still free to explain in prose why it went. Built the
+            # same way the validator builds it, so the rule is replayed rather
+            # than skipped.
+            "settingspathcode": "\n".join(
+                re.sub(r"(?<!`);.*$", "", line)
+                for line in read_source(spath).split("\n")),
         }
         # Subjects that are loop-local values rather than a file: each is a
         # per-iteration string the validator built itself, so there is nothing
@@ -3243,6 +3552,10 @@ def main():
         f"{n.replace('SteamShell', 'SS').replace('.ahk', '')}={len(m)}" for n, m in maps.items()))
     print(f"  defined in both   : {both}")
     print(f"  fingerprint flags : {len(flagged)} ({len(divergent)} allowlisted)")
+    # Advisory, never a failure -- see the seam_subsets loop for why this is
+    # worth printing and why it must not gate the build.
+    print(f"  seam subsets      : {len(seam_subsets)}"
+          + (" -- " + ", ".join(seam_subsets) if seam_subsets else ""))
     print(f"  product assertions: {replayed} replayed from the two validators")
     print(f"                      {unreplayable} written against a property "
           "subject; only Windows checks those")

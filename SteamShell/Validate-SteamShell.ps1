@@ -321,7 +321,7 @@ foreach ($match in $editorFieldMatches) {
         $match.Groups[1].Value + "." + $match.Groups[2].Value)
 }
 # FROM THE SHARED DEFINITION. This read the literal array
-# `SettingsEditorCategories := [...]` out of ShowSettingsEditor, which is where
+# `SettingsEditorCategories := [...]` out of ShowSettings, which is where
 # the page list used to live; it comes from SettingsCategoryDefinitions now, so
 # the two products cannot list the same pages in different orders. $source is
 # the EFFECTIVE source with #Include resolved, so the shared table is in it.
@@ -382,7 +382,7 @@ Assert-True (
     $source -match
         '(?s)SharedAuditSettingsLayout\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?overlaps\s*:=' -and
     $source -match
-        '(?s)ShowSettingsEditor\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?' +
+        '(?s)ShowSettings\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?' +
         'SettingsEditorReportLayoutAudit\(\).*?' +
         'SettingsEditorRefreshDependencies\(\)') (
     "The all-category Settings geometry audit is missing or disconnected.")
@@ -466,7 +466,7 @@ $requiredFunctions = @(
     "SteamShellDirectoryContainsOurArtifacts",
     "SteamShellRegisteredShellDirectory",
     "SteamShellXfeLogonTaskDirectory",
-    "GetElevatedHelperPath",
+    "ProductElevatedHelperPath",
     "ExtractEmbeddedElevatedHelper",
     "RegisterElevatedHelperTask",
     "StartElevatedHelperTask",
@@ -766,7 +766,7 @@ Assert-True (
         '"keyboard",\s*Map\("id",\s*"openKeyboard".*?' +
         '"mousemode",\s*Map\("id",\s*"qPersistentMouse"' -and
     $source -match
-        '(?s)case\s+"openKeyboard":.*?HideQuickMenu\(false\).*?' +
+        '(?s)case\s+"openKeyboard":.*?HideQuickMenuForHandoff\(\).*?' +
         'SetTimer\(OpenTouchKeyboard,\s*-100\)' -and
     $source -match
         '(?s)case\s+"qPersistentMouse":.*?EnablePersistentMouseMode.*?' +
@@ -826,7 +826,7 @@ Assert-True (
         '(?s)if\s*\(QuickMenuPage\s*=\s*"SETTINGS"\).*?' +
         '"windowsSettings".*?"Windows Settings".*?return rows' -and
     $source -match
-        '(?s)case\s+"windowsSettings":.*?HideQuickMenu\(false\).*?' +
+        '(?s)case\s+"windowsSettings":.*?HideQuickMenuForHandoff\(\).*?' +
         'SetTimer\(OpenWindowsSettings,\s*-100\)' -and
     $source -notmatch '"settingsReload",\s*"label",\s*"Reload Settings"') (
     "The Settings submenu does not expose Windows Settings or still exposes Reload Settings.")
@@ -972,9 +972,9 @@ Assert-True (
     $source -match
         'Hotkey\("\^!\+p",\s*\(\*\)\s*=>\s*ShowControlPanel\(\)\)' -and
     $source -match
-        'Hotkey\("\^!\+s",\s*\(\*\)\s*=>\s*ShowSettingsEditor\(\)\)' -and
+        'Hotkey\("\^!\+s",\s*\(\*\)\s*=>\s*ShowSettings\(\)\)' -and
     $source -notmatch
-        'Hotkey\("\^!\+p",\s*\(\*\)\s*=>\s*ShowSettingsEditor\(\)\)') (
+        'Hotkey\("\^!\+p",\s*\(\*\)\s*=>\s*ShowSettings\(\)\)') (
     "Global Quick Menu or Settings shortcut routing has regressed.")
 Assert-True (
     $source -match
@@ -1863,7 +1863,7 @@ Assert-True (
     "The Steam shutdown wait can reopen the Quick Menu during desktop restoration.")
 Assert-True (
     $source -match
-        '(?sm)^HideQuickMenu\(restorePrevious\s*:=\s*true\)\s*\{(?:(?!\n\})[\s\S])*?' +
+        '(?sm)^HideQuickMenu\(\)\s*\{(?:(?!\n\})[\s\S])*?' +
         'QuickMenuVisible\s*:=\s*false(?:(?!\n\})[\s\S])*?ShowWindow(?:(?!\n\})[\s\S])*?QuickMenuGui\.Hwnd(?:(?!\n\})[\s\S])*?"Int",\s*0(?:(?!\n\})[\s\S])*?' +
         'QuickMenuDestroyWindow\(\)' -and
     $source -match
@@ -1874,7 +1874,7 @@ Assert-True (
 Assert-True (
     $source -match
         '(?sm)^DestroyQuickMenuForSurfaceTransition\(\)\s*\{(?:(?!\n\})[\s\S])*?' +
-        'HideQuickMenu\(false\)(?:(?!\n\})[\s\S])*?DwmFlush') (
+        'HideQuickMenuForHandoff\(\)(?:(?!\n\})[\s\S])*?DwmFlush') (
     "Desktop restoration no longer destroys and flushes the Quick Menu compositor surface.")
 Assert-True (
     $source -match
@@ -2252,7 +2252,7 @@ Assert-True (
         '(?sm)^StartElevatedInputHelper\(\)\s*\{(?:(?!\n\})[\s\S])*?' +
         'ReadElevatedHelperPreference\(\)(?:(?!\n\})[\s\S])*?' +
         'if\s*!EnableElevatedInputHelper(?:(?!\n\})[\s\S])*?return false(?:(?!\n\})[\s\S])*?' +
-        'ExtractEmbeddedElevatedHelper(?:(?!\n\})[\s\S])*?\*RunAs' -and
+        'ExtractEmbeddedElevatedHelper(?:(?!\n\})[\s\S])*?StartElevatedHelperViaUac' -and
     $source -match
         '(?s)"section", "Features", "key", "EnableElevatedInputHelper".*?' +
         '"default", "true"') (
@@ -2282,11 +2282,27 @@ Assert-True (
         'InteractiveToken(?:(?!\n\})[\s\S])*?HighestAvailable' +
         '(?:(?!\n\})[\s\S])*?AllowStartOnDemand' -and
     $source -match
-        '(?sm)^RegisterElevatedHelperTask\([^)]*\)(?:(?!\n\})[\s\S])*?' +
-        'ElevatedHelperTaskXml\((?:(?!\n\})[\s\S])*?schtasks\.exe(?:(?!\n\})[\s\S])*?/create' -and
+        '(?sm)^RegisterElevatedHelperTask\([\s\S]*?\)\s*\{(?:(?!\n\})[\s\S])*?' +
+        'ElevatedHelperTaskXml\((?:(?!\n\})[\s\S])*?RunSchTasks\((?:(?!\n\})[\s\S])*?/create' -and
+    # StartElevatedHelperTask names the task and delegates; the run-and-wait is
+    # StartHelperViaScheduledTask in SteamShell-Shared.ahk, which the companion
+    # calls too. $source is the EFFECTIVE source, so the shared body is inlined
+    # here and this still checks the real steps rather than the wrapper.
     $source -match
         '(?sm)^StartElevatedHelperTask\([^)]*\)(?:(?!\n\})[\s\S])*?' +
-        'schtasks\.exe(?:(?!\n\})[\s\S])*?/run(?:(?!\n\})[\s\S])*?WaitForNewExecutablePid' -and
+        'StartHelperViaScheduledTask\((?:(?!\n\})[\s\S])*?ElevatedHelperTaskName\(\)' -and
+    $source -match
+        '(?sm)^StartHelperViaScheduledTask\([^)]*\)(?:(?!\n\})[\s\S])*?' +
+        'CaptureExecutablePidSet\((?:(?!\n\})[\s\S])*?/run(?:(?!\n\})[\s\S])*?' +
+        'WaitForNewExecutablePid' -and
+    # schtasks is reached by ABSOLUTE PATH, never by bare name: this is the one
+    # command in either product whose purpose is to reach a High-integrity token,
+    # and a bare program name is resolved against the working directory and PATH.
+    # The companion's own copy used the bare name until the two were merged.
+    $source -match
+        '(?sm)^RunSchTasks\([^)]*\)(?:(?!\n\})[\s\S])*?' +
+        'A_WinDir\s*"\\System32\\schtasks\.exe"' -and
+    $source -notmatch "RunWait\(\s*'schtasks\.exe" -and
     # The task gate is the SECURITY PROPERTY, not the installation mode.
     #
     # It used to read `mode = "standard"`, a proxy for "the helper sits where a
@@ -2314,11 +2330,18 @@ Assert-True (
         '(?sm)^VerifyElevatedHelperProcess\([^)]*\)(?:(?!\n\})[\s\S])*?ProcessGetPath(?:(?!\n\})[\s\S])*?' +
         'GetProcessTokenSecurity(?:(?!\n\})[\s\S])*?helperIntegrity\s*!=\s*"High"(?:(?!\n\})[\s\S])*?' +
         'ExpectedInteractiveUserSid(?:(?!\n\})[\s\S])*?ExpectedInteractiveSessionId' -and
+    # The direct-UAC fallback moved to StartElevatedHelperViaUac in
+    # SteamShell-Shared.ahk, so the *RunAs and the verification that follows it
+    # are asserted THERE. What is still this product's to prove is that it
+    # reaches the fallback, and that nothing between the gates and the elevation
+    # was lost in the move -- hence both halves below rather than one.
     $source -match
         '(?sm)^StartElevatedInputHelper\(\)(?:(?!\n\})[\s\S])*?' +
-        'WaitForVerifiedElevatedHelper(?:(?!\n\})[\s\S])*?ElevatedHelperAvailable' -and
+        'ElevatedHelperLocationIsProtected\((?:(?!\n\})[\s\S])*?' +
+        'StartElevatedHelperViaUac\(' -and
     $source -match
-        '(?sm)^StartElevatedInputHelper\(\)(?:(?!\n\})[\s\S])*?\*RunAs') (
+        '(?sm)^StartElevatedHelperViaUac\([^)]*\)(?:(?!\n\})[\s\S])*?\*RunAs' +
+        '(?:(?!\n\})[\s\S])*?WaitForVerifiedElevatedHelper') (
     "The protected helper task, verified process boundary, or direct-UAC fallback is disconnected.")
 Assert-True (
     $source -match
@@ -2958,9 +2981,19 @@ Assert-True (
         'try readVersion := FileGetVersion\(helperPath\)(?:(?!\n\})[\s\S])*?' +
         'cannot be read by this account' -and
     # An unelevated session must not attempt a write that cannot succeed.
+    #
+    # This used to pin `if !A_IsAdmin {` around the version check, which asserted
+    # a CONDITION rather than the behaviour -- and a condition that could never
+    # be false: the `if A_IsAdmin` early return above it has already fired by
+    # then, and A_IsAdmin cannot change inside a process. Anchored to the two
+    # things that actually matter instead: an elevated session is turned away
+    # before any of this, and a version mismatch names Setup as the remedy
+    # rather than attempting the doomed write.
     $source -match
         '(?sm)^StartElevatedInputHelper\(\)\s*\{(?:(?!\n\})[\s\S])*?' +
-        'if !A_IsAdmin \{(?:(?!\n\})[\s\S])*?Run Setup from an elevated') (
+        'if A_IsAdmin \{(?:(?!\n\})[\s\S])*?return false(?:(?!\n\})[\s\S])*?' +
+        'FileGetVersion\(ElevatedHelperPath\)(?:(?!\n\})[\s\S])*?' +
+        'Run Setup from an elevated') (
     "The helper hardening can leave the binary unreadable, or the gate no longer proves it is usable.")
 
 
@@ -3046,15 +3079,22 @@ Assert-True (
         'if HelperGeometryEnabled\s*\r?\n\s*SetTimer\(ElevatedWindowGeometryTick,\s*500\)') (
     "The elevated geometry timer is armed regardless of product.")
 
-# Standalone names its product explicitly on both launch routes, so the task XML
-# on disk records which product registered it.
-# The flags themselves are built in one place now, so what is asserted here is
-# the PRODUCT each route names -- which is the part that is standalone's and
-# cannot be delegated.
+# Each launch route names its product explicitly, so the task XML on disk records
+# which product registered it.
+#
+# RegisterElevatedHelperTask now registers BOTH products' tasks -- Setup deploys
+# the companion's helper and is already elevated, so it registers the companion's
+# task too rather than leaving it to prompt for UAC at first use. So the product
+# is a PARAMETER there, and what this asserts is that both call sites name one:
+# "standalone" for the shell's own task, "xfe" for the companion's.
 Assert-True (
     $source -match
-        '(?sm)^RegisterElevatedHelperTask\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?' +
-        'SharedElevatedHelperArguments\(\s*\r?\n?\s*"standalone"' -and
+        '(?sm)^RegisterElevatedHelperTask\([\s\S]*?\)\s*\{(?:(?!\n\})[\s\S])*?' +
+        'SharedElevatedHelperArguments\(\s*\r?\n?\s*product' -and
+    $source -match
+        'RegisterElevatedHelperTask\(\s*\r?\n?\s*"standalone", ElevatedHelperTaskName\(\)' -and
+    $source -match
+        'RegisterElevatedHelperTask\(\s*\r?\n?\s*"xfe", XfeElevatedHelperTaskName\(\)' -and
     $source -match
         '(?sm)^StartElevatedInputHelper\(\)\s*\{(?:(?!\n\})[\s\S])*?' +
         'SharedElevatedHelperArguments\(\s*\r?\n?\s*"standalone"') (
@@ -3108,22 +3148,39 @@ Assert-True (
         'helperBinDirectory := targetDirectory') (
     "The XFE elevated helper is no longer installed below a protected Program Files path.")
 
-# XFE never gets the on-demand HighestAvailable task. That task can be invoked
-# with schtasks /run without asking the companion to re-check anything, so it is
-# only safe below a protected ancestor chain Setup established for the WHOLE
-# path -- which is the reason it was removed from Custom installs.
+# Setup REGISTERS the companion's on-demand task, and this rule is the reverse of
+# what it said before. The reversal is recorded rather than quietly applied.
 #
-# REVISED. Setup still must not register it -- the companion does that itself,
-# lazily, the first time the opt-in is actually used, so a machine that never
-# enables elevated frame-cap writes never carries a HighestAvailable task.
+# The old rule read: "Setup still must not register it -- the companion does that
+# itself, lazily, the first time the opt-in is actually used, so a machine that
+# never enables elevated frame-cap writes never carries a HighestAvailable task."
 #
-# What made it unsafe before was not the task but WHERE the binary lived. The
-# helper is under %ProgramFiles%\SteamShell-XFE\bin, which the interactive user
-# cannot write, so `schtasks /run` cannot be pointed at anything replaceable.
+# That rested on the helper being OPT-IN AND DEFAULT-OFF in the companion, which
+# it no longer is. The companion gated its helper on [RTSS]
+# EnableElevatedFrameCapWrites -- a holdover from when the helper did the frame
+# cap and nothing else -- and now gates it on [Features]
+# EnableElevatedInputHelper, the same setting the shell uses, defaulting TRUE in
+# both. "A machine that never enables it" is the empty set, so the reason the old
+# rule gave for lazy registration no longer describes anything.
+#
+# What lazy registration DOES still cost is a UAC prompt on the secure desktop,
+# where a controller cannot answer it, in the product most likely to be driven
+# from a couch with no keyboard. Setup deploys the payload and is already
+# elevated, so registering there costs nothing and removes the prompt.
+#
+# The SAFETY question is unchanged and was never about who registers the task:
+# the old rule's own last paragraph says so. The binary sits under
+# %ProgramFiles%\SteamShell-XFE\bin, which the interactive user cannot write, so
+# `schtasks /run` cannot be pointed at anything replaceable. That is asserted
+# directly above this and still holds.
+#
+# GATED ON THE PAYLOAD LANDING. A task pointing at a helper that was not deployed
+# is the artefact the uninstall assertion calls the worst one to leave behind.
 Assert-True (
-    $xfeDeployBody.Value -notmatch 'RegisterElevatedHelperTask\(' -and
-    $xfeDeployBody.Value -notmatch 'EnsureXfeElevatedHelperTask\(') (
-    "Setup must not register the XFE helper task; the companion registers it on first use.")
+    $xfeDeployBody.Value -match
+        '(?s)if helperDeployed \{[\s\S]*?RegisterElevatedHelperTask\(\s*\r?\n?\s*"xfe"' -and
+    $xfeDeployBody.Value -match 'XfeElevatedHelperTaskLegacyName\(\)') (
+    "Setup must register the XFE helper task when the payload deployed, retiring the legacy task name.")
 # ...and an uninstall must clear it, because Setup never created it and a stale
 # HighestAvailable task pointing at a removed binary is the worst artefact an
 # uninstall can leave behind.
@@ -3131,8 +3188,17 @@ Assert-True (
     $source -match
         '(?sm)^RemoveSteamShellXfeInstallation\([^)]*\)\s*\{' +
         '(?:(?!\n\})[\s\S])*?RemoveXfeElevatedHelperTask\(\)' -and
+    # BOTH names, and taken from SteamShell-Common.ahk rather than spelled out.
+    # This asserted the literal "SteamShell XFE Elevated RTSS Helper", which is
+    # the name the companion registered under BEFORE it was corrected to say what
+    # the helper actually does -- so a literal here would have kept passing while
+    # the uninstall deleted a task nothing registers and left the real one behind.
     $source -match
         '(?sm)^RemoveXfeElevatedHelperTask\(\)\s*\{(?:(?!\n\})[\s\S])*?' +
+        'XfeElevatedHelperTaskName\(\)(?:(?!\n\})[\s\S])*?' +
+        'XfeElevatedHelperTaskLegacyName\(\)' -and
+    $commonSource -match
+        '(?sm)^XfeElevatedHelperTaskLegacyName\(\)\s*\{(?:(?!\n\})[\s\S])*?' +
         '"SteamShell XFE Elevated RTSS Helper"') (
     "Uninstall must remove the companion's opt-in elevated helper task.")
 # The elevated helper is offered for deletion in EVERY installation mode. It
@@ -3563,10 +3629,18 @@ Assert-True (
     $source -match
         '(?sm)^StopElevatedHelper\([^)]*\)(?:(?!\n\})[\s\S])*?ProcessClose(?:(?!\n\})[\s\S])*?' +
         'ElevatedHelperAvailable\s*:=\s*false' -and
+    # The stop-on-disable behaviour is SharedSyncElevatedHelper's now, so it is
+    # checked where it lives; this tree's half is that it re-reads the preference
+    # and hands over its own starter. The companion's validator asserts the same
+    # two halves, which is one behaviour with one implementation instead of two
+    # rules over two copies.
     $source -match
         '(?sm)^SyncElevatedInputHelperWithSettings\(\)(?:(?!\n\})[\s\S])*?' +
-        'ReadElevatedHelperPreference\(\)(?:(?!\n\})[\s\S])*?StopElevatedHelper(?:(?!\n\})[\s\S])*?' +
-        'StartElevatedInputHelper' -and
+        'ReadElevatedHelperPreference\(\)(?:(?!\n\})[\s\S])*?' +
+        'SharedSyncElevatedHelper\((?:(?!\n\})[\s\S])*?StartElevatedInputHelper' -and
+    $source -match
+        '(?sm)^SharedSyncElevatedHelper\([^)]*\)(?:(?!\n\})[\s\S])*?' +
+        'StopElevatedHelper\(' -and
     $source -match
         '(?sm)^ReloadSettings\(\)(?:(?!\n\})[\s\S])*?SyncElevatedInputHelperWithSettings\(\)') (
     "Toggling the elevated helper off no longer stops the running helper.")
@@ -3788,15 +3862,23 @@ Assert-True (
         '(?s)LaunchInteractiveApp\([^)]*\).*?' +
         'BootstrapVerifiedDesktopShell.*?CaptureExecutablePidSet.*?' +
         'RunViaDesktopShell.*?WaitForNewExecutablePid' -and
+    # RunViaDesktopShell lives in SteamShell-Shared.ahk now and asks through the
+    # DesktopShellRefusalReason seam, so the gate is checked in two halves: the
+    # shared body must consult the seam before ShellExecute, and THIS tree's half
+    # of the seam must be the real identity question rather than a stub. Pinning
+    # only the first half would pass on a shell that answered "" to everything.
     $source -match
         '(?s)RunViaDesktopShell\([^)]*\).*?' +
-        'DesktopShellMatchesInteractiveUser.*?ShellExecute') (
+        'DesktopShellRefusalReason\(\).*?ShellExecute' -and
+    $source -match
+        '(?sm)^DesktopShellRefusalReason\(\)\s*\{(?:(?!\n\})[\s\S])*?' +
+        'DesktopShellMatchesInteractiveUser\(') (
     "Desktop-shell fallback is no longer restricted to the matching medium-integrity Explorer shell.")
 Assert-True (
     $source -match
         '(?s)RunViaDesktopShell\([^)]*\).*?' +
         'DESKTOP_BROKER_TIMEOUT_MS.*?Loop\s*\{.*?' +
-        'DesktopShellMatchesInteractiveUser.*?ShellExecute.*?Sleep\s+200') (
+        'DesktopShellRefusalReason\(\).*?ShellExecute.*?Sleep\s+200') (
     "The desktop-shell fallback no longer waits for Explorer COM readiness at cold boot.")
 Assert-True (
     $source -match
@@ -4015,14 +4097,33 @@ Assert-True (
         '(?sm)^ReadNumber\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?CleanIniValue\(') (
     "A typed settings reader no longer strips inline comments through CleanIniValue.")
 
-# The readers take their path from IniPath, and this tree also keeps
-# SettingsPath. Every site that moves the settings file must move BOTH, or reads
-# and writes address different files. Three sites do; this is what keeps it so.
+# ONE NAME FOR THE SETTINGS FILE, and the check is that the second one has not
+# come back.
+#
+# This tree used to call it SettingsPath and keep IniPath as an alias assigned
+# beside it at every site that moved the file, because the shared readers name
+# IniPath. The assertion here was the lockstep -- equal reassignment counts --
+# which is a policed invariant rather than a property of the code: it could only
+# fail AFTER someone had written the site that moved one and not the other.
+#
+# The alias is gone. Asserting the absence is strictly stronger than asserting
+# the pairing, and it fails at the moment the name is reintroduced rather than at
+# the moment the two copies drift.
+#
+# COMMENTS ARE STRIPPED FIRST. The rule is about the identifier, and the history
+# above is worth explaining at the declaration -- a check that forbade naming the
+# retired alias in prose would forbid recording why it was retired.
+$settingsPathCode = (
+    (Get-SourceLines $sourcePath) |
+        ForEach-Object { $_ -replace '(?<!`);.*$', '' }
+) -join "`n"
 Assert-True (
-    ([regex]::Matches($rawSource, '(?m)^\s*SettingsPath\s*:=').Count -eq
-     [regex]::Matches($rawSource, '(?m)^\s*IniPath\s*:=').Count)) (
-    "SettingsPath and IniPath are no longer reassigned in step. The typed " +
-    "readers use IniPath; anything that moves the settings file must move both.")
+    $settingsPathCode -notmatch '\bSettingsPath\b') (
+    "SteamShell.ahk names SettingsPath again. The settings file has one name " +
+    "in this tree and it is IniPath, which is what SteamShell-Shared.ahk's " +
+    "readers use; a second name reintroduces the alias that had to be kept in " +
+    "step by hand. (sourceSettingsPath, a local, is a different token and is " +
+    "not matched here.)")
 
 # The log must not grow without bound, and the rotation check must not cost a
 # filesystem call on every line written.

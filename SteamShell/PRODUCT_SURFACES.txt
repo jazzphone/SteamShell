@@ -71,8 +71,7 @@ ShowControlPanel: the shell's own status and control window. The companion answe
 
 QuickMenuBuildGui: both products build their own Quick Menu window, and it is a named seam -- $sharedSeamAllowed in Validate-Common.ps1 carries it, with the rows themselves shared through QUICKMENU_ROWS.txt so the two windows cannot describe different menus
 RecordShortcutChord: recorded in DIVERGENT_FUNCTIONS.txt -- each tree's capture window writes back through its own Settings field registry, and the two registries are shaped differently
-ShowSettingsEditor: the shell's Settings implementation, one of the two ProductSettingsScrollBar records; the two windows are separate implementations and merge when they do
-ShowSettings: the companion's Settings implementation, the other half of the pair above
+ShowSettings: each tree's Settings window, and one name since the shell's was renamed from ShowSettingsEditor. Two entries stood here because the same window was called two things -- a prefix split rather than a product difference, and the shape that kept TrayOpenSettings duplicated in both trees for a body that was one call. The windows themselves are still two implementations and merge when they do; being same-named now puts them in front of the fingerprint gate, which could not see them before.
 
 # ------------------------------------------------------------------------------
 # QUEUED -- known duplication, decision pending
