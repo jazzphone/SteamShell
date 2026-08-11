@@ -21,7 +21,36 @@ Two programs, one codebase:
 > **The XFE companion changes nothing about your shell and carries none of this risk.**
 > If you are unsure, start there.
 
+![SteamShell's Quick Menu open over Steam Big Picture, showing Audio, Display & HDR, RTSS & Performance, Steam Menu, Task Switcher, Game Bar, Mouse Mode, Settings and System rows with their current values](SteamShell/images/quickmenu-main.png)
+
+*The Quick Menu, over Steam Big Picture. Every row shows its live value, so it reads as a
+status panel as much as a control one. D-pad moves, A selects, Left/Right changes a value
+without opening anything.*
+
+<details>
+<summary><b>More screenshots</b> — Settings editor, tray menu, Control Panel</summary>
+
+### Settings editor
+
+Nine categories, every key the INI holds, navigable with a controller or a mouse.
+
+![SteamShell Settings editor on the General page](SteamShell/images/settings-general.png)
+
+### Tray menu
+
+The escape hatch — everything here is reachable with a keyboard alone, which is why the
+controller learner and its undo live in it.
+
+![SteamShell tray menu on the Windows desktop](SteamShell/images/tray-menu-desktop.png)
+
+### Control Panel
+
 ![SteamShell Control Panel running inside Steam Big Picture](SteamShell/images/control-panel.png)
+
+</details>
+
+**Full picture tour:** every Quick Menu page and every Settings category is in the
+[Wiki](https://github.com/jazzphone/SteamShell/wiki).
 
 ## Why this exists
 

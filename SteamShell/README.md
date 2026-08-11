@@ -6,8 +6,37 @@ Vibe coded with ChatGPT
 
 ## Screenshots
 
+SteamShell has two faces. The **Quick Menu** is controller-first and draws over
+whatever is in front — you never leave the couch to reach it. The **Settings
+editor** is the full desktop window, with every key the INI holds.
+
+### Quick Menu — opens over Steam Big Picture
+
+Summoned with `Ctrl+Alt+Shift+Q` or a controller chord. D-pad moves, A selects,
+B goes back, and Left/Right adjusts a value in place without opening anything.
+
+![SteamShell Quick Menu open over Steam Big Picture, showing Audio, Display & HDR, RTSS & Performance, Steam Menu, Task Switcher, Game Bar, Mouse Mode, Settings and System rows](images/quickmenu-main.png)
+
+### Settings editor — the full desktop window
+
+Nine categories, every value read back from the INI, and a staged save so a
+half-written settings file is never left behind.
+
+![SteamShell Settings editor on the General page, showing taskbar hiding, black desktop background, Quick Menu toggles and accent colour](images/settings-general.png)
+
+### Tray menu — reachable with a keyboard alone
+
+The learner and its undo live here on purpose: the person who needs them is the
+one whose controller does not work yet, so neither may require a controller to
+reach.
+
+![SteamShell tray menu on the Windows desktop, showing Open Quick Menu, Open Settings, Open Diagnostics, Learn Controller, Delete Learned Profile, Automatic Mouse Throughout Desktop, Return to SteamShell, Reload Settings and Exit](images/tray-menu-desktop.png)
+
 ### Control Panel (live in Steam Big Picture)
 ![SteamShell Control Panel](images/control-panel.png)
+
+**The full picture tour — every Quick Menu page and every Settings category — is
+in the [Wiki](../../../wiki).**
 
 ## What it is
 
