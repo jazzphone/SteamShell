@@ -3129,9 +3129,9 @@ Assert-True (
 # ==============================================================================
 # XFE HELPER DEPLOYMENT (Setup Assistant)
 # ==============================================================================
-# Deployed dormant in XFE mode, so a user who later opts in from XFE's own
-# Settings -- a normal-integrity application that cannot write an
-# administrator-only directory -- does not have to re-run an installer.
+# Deployed and enabled by default in XFE mode. XFE is a normal-integrity
+# application that cannot write the administrator-only helper directory, so
+# Setup owns payload installation and task registration.
 #
 # The ORDER is the whole assertion, and it is the order an earlier revision of
 # the shell path got wrong: it ran /setowner once, before the payload existed,
@@ -3254,7 +3254,7 @@ Assert-True (
     $commonSource -match
         '(?sm)^XfeElevatedHelperTaskLegacyName\(\)\s*\{(?:(?!\n\})[\s\S])*?' +
         '"SteamShell XFE Elevated RTSS Helper"') (
-    "Uninstall must remove the companion's opt-in elevated helper task.")
+    "Uninstall must remove the companion's elevated helper task.")
 # The elevated helper is offered for deletion in EVERY installation mode. It
 # lives in Program Files even for a Portable install, so it is never under the
 # install directory and would otherwise survive an uninstall.
@@ -3551,7 +3551,12 @@ Assert-True (
         'LogLine\((?:(?!\n\})[\s\S])*?ExitApp\(1\)(?:(?!\n\})[\s\S])*?return\s+1' -and
     # Off by setting, without a restart, like every other helper control.
     $helperSource -match
-        'ReadBool\(\s*\r?\n?\s*"RTSS",\s*"EnableElevatedFrameCapWrites"') (
+        'ReadBool\(\s*\r?\n?\s*"RTSS",\s*"EnableElevatedFrameCapWrites",\s*true\)' -and
+    $helperSource -match
+        '(?m)^global\s+HelperInputEnabled\s*:=\s*true' -and
+    $helperSource -match
+        '(?s)if\s*\(HelperProduct\s*=\s*"xfe"\)\s*\{.*?' +
+        'HelperGeometryEnabled\s*:=\s*false') (
     "The helper's RTSS write is ungated, trusts the environment, loads its DLL unsafely, or accepts an uncorroborated profile name.")
 
 # The helper's expected file version proves only that some file with that

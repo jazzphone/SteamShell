@@ -1767,9 +1767,41 @@ function Assert-QuickMenuPageChangesRebuild {
         "QuickMenuGoToPage repaints. A repaint redraws the rows the page was " +
         "built with, so every page change in both products would leave the " +
         "previous page on screen.")
+    Assert-True (
+        $navigator -match 'static\s+selections\s*:=\s*Map\(\)' -and
+        $navigator -match 'selections\[QuickMenuPage\]\s*:=\s*QuickMenuSelected' -and
+        $navigator -match
+            'QuickMenuSelected\s*:=\s*selections\.Has\(page\)\s*\?\s*selections\[page\]\s*:\s*1') (
+        "QuickMenuGoToPage no longer saves and restores each page's selected " +
+        "row. Back must return to the row that opened the submenu, not row 1.")
+
+    $activation = Get-AhkFunctionBody -Source (Get-SourceText $sharedPath) `
+        -Name "QuickMenuControllerActivationEvent"
+    Assert-True (
+        $activation -match 'pressed\s*&\s*0x1000' -and
+        $activation -match 'QuickMenuControllerActivateArmed\s*:=\s*true' -and
+        $activation -match 'released\s*&\s*0x1000' -and
+        $activation -match 'QuickMenuControllerActivateArmed\s*:=\s*false') (
+        "Controller A activation is no longer armed on press and committed on " +
+        "release. A handoff while the physical button is still down leaks the " +
+        "same press into Steam behind the Quick Menu.")
 
     $callers = 0
     foreach ($file in @("SteamShell.ahk", "SteamShell-XFE.ahk")) {
+        $treeText = Get-SourceText (Join-Path $ProjectRoot $file)
+        $showMenu = Get-AhkFunctionBody -Source $treeText -Name "ShowQuickMenu"
+        $controller = Get-AhkFunctionBody `
+            -Source $treeText -Name "QuickMenuHandleController"
+        Assert-True ($showMenu -match 'QuickMenuGoToPage\("MAIN",\s*true\)') (
+            "${file}: a new Quick Menu session does not clear remembered page " +
+            "selections and stale controller activation state.")
+        Assert-True (
+            $controller -match
+                'QuickMenuControllerActivationEvent\(pressed,\s*released\)' -and
+            $controller -notmatch
+                '(?s)pressed\s*&\s*0x1000.*?QuickMenuActivateSelected\(\)') (
+            "${file}: Quick Menu controller A still activates on its press " +
+            "edge instead of waiting for release.")
         # Comments stripped. The paragraph above spells the forbidden assignment
         # in full, and a comment quoting it would otherwise fail the build.
         $lines = @((Get-SourceLines (Join-Path $ProjectRoot $file)) |

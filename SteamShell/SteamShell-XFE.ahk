@@ -330,11 +330,11 @@ global RtssFrameLimitCacheTick := 0
 global RtssPendingFrameCap := 0
 
 ; ------------------------------------------------------------------------------
-; Opt-in elevated RTSS helper
+; Elevated input and RTSS helper
 ; ------------------------------------------------------------------------------
-; OFF by default, and that is the point: choosing XFE means choosing a companion
-; with nothing elevated in it, and turning this on is the user deciding
-; otherwise. See StartElevatedRtssHelper for what it does and does not do.
+; ON by default because controller input over administrator windows and RTSS
+; writes under Program Files are core companion paths. XFE itself remains at
+; normal integrity; only the narrowly scoped helper is elevated.
 global RtssElevatedFrameCapWrites := true
 ; Gates the elevated helper PROCESS, exactly as it does in the shell.
 ;
@@ -406,6 +406,7 @@ global QuickMenuVisible := false
 global QuickMenuPage := "MAIN"
 global QuickMenuRows := []
 global QuickMenuSelected := 1
+global QuickMenuControllerActivateArmed := false
 ; How many rows the window was last sized for. A refresh re-derives the row
 ; list, so this is what tells it the page grew and the window has to follow.
 global QuickMenuSizedRowCount := 0
@@ -552,6 +553,7 @@ DefaultSettings() {
         ; SAME name moved; XFE-only concepts stayed where they were, because
         ; putting them in a section standalone does not have would align nothing.
         "Features", Map(
+            "EnableElevatedInputHelper", "true",
             "EnableAutoMouseMode", "true",
             ; Schema 13. Same intent as standalone's, so the same name and the
             ; same section; a user who configured one product finds it here.
@@ -1162,23 +1164,11 @@ LoadSettings() {
     RtssOverlayOnShortcut := ReadText("RTSS", "OverlayOnShortcut", "^+1")
     RtssOverlayOffShortcut := ReadText("RTSS", "OverlayOffShortcut", "^+2")
     RtssFrameLimiterControlMode := StrLower(ReadText("RTSS", "FrameLimiterControlMode", "separate"))
-    ; EnableElevatedFrameCapWrites is read by LoadSharedSettings now, on the
-    ; shell's default of TRUE. It used to default false here, and the comment
-    ; that stood in this place argued the default WAS the feature -- that the
-    ; companion is chosen because nothing about it is elevated, so switching the
-    ; helper on should be the user deciding otherwise.
-    ;
-    ; The argument does not survive what the installer already does. XFE's
-    ; deployment writes the elevated helper payload to disk DORMANT and always
-    ; has, precisely so a user opting in later is not sent back to an installer
-    ; they have already run. So the binary was never the line; the flag was. And
-    ; a flag that is off by default, buried on the RTSS page, and needed for the
-    ; one thing that cannot work any other way is a feature most people will
-    ; never find -- they get a frame cap that silently does nothing whenever RTSS
-    ; sits under Program Files, which is where RTSS installs itself.
-    ;
-    ; A binary on disk is still not an elevated process. Nothing starts it until
-    ; something needs a write only it can make.
+    ; EnableElevatedFrameCapWrites and EnableElevatedInputHelper are read by
+    ; LoadSharedSettings. Both generated configurations spell out their TRUE
+    ; defaults: protected RTSS writes and controller input over administrator
+    ; windows are core XFE behavior, while the visible companion stays at normal
+    ; integrity.
     ; Reloading settings re-arms the frame cap.
     ;
     ; RtssFrameCapWriteBlocked latches on the first failed write so the row
@@ -3697,40 +3687,18 @@ GetAudioSummary() {
 
 
 ; ==============================================================================
-; OPT-IN ELEVATED RTSS HELPER
+; ELEVATED INPUT AND RTSS HELPER
 ; ==============================================================================
-; What this is, and what it deliberately is not.
-;
-; XFE runs at medium integrity by design. Two consequences follow, and only one
-; of them is fixed here.
-;
-;   1. UIPI blocks XFE's synthetic input from an elevated foreground window,
-;      exactly as it blocked standalone's before 1.9.9. NOT FIXED, on purpose.
-;      The remedy in SteamShell-Helper.ahk is XInput, and XFE exists precisely
-;      because XInput is not enough for its users -- a controller in DirectInput
-;      mode is not an XInput device at all. Elevated input would therefore have
-;      worked only for the people who did not need XFE in the first place, while
-;      costing every XFE user a permanently resident elevated process that polls
-;      a controller. There is also a workaround: reach the window another way.
-;
-;   2. RTSSHooks64.dll is loaded into the CALLING process, so SaveProfile runs
-;      with XFE's token, and RTSS installs under Program Files. An unelevated
-;      XFE can read the cap and toggle the limiter flag -- shared memory, no
-;      file -- but cannot set the FPS value or save a per-game profile. FIXED
-;      here, because there is no workaround at all: the Frame Limit row reports
-;      itself read-only and the feature does not function.
-;
-; The runtime posture is the real cost of any elevated helper, and this is the
-; narrowest shape that answers (2): one High-integrity process that services a
-; bounded request and does no input, no window management, and no UI. It is
-; still OFF by default. The payload is deployed by Setup Assistant in XFE mode
-; so the setting can be turned on later without re-running an installer, but a
-; binary on disk is not an elevated process, and nothing starts it until the
-; user asks.
+; XFE itself stays at medium integrity. Its helper is enabled by default and
+; handles the two operations that otherwise fail across Windows privilege
+; boundaries: controller input to administrator windows and protected RTSS
+; profile writes. The XFE product branch deliberately disables geometry and UI;
+; Xbox FSE remains responsible for presentation.
 ;
 ; XFE never deploys, hardens, or extracts the helper: it has no embedded payload
-; and no administrator rights. It verifies and launches, or it explains why it
-; would not, and points at Setup.
+; and no administrator rights. Setup deploys the payload and registers its
+; protected on-demand task. Runtime verifies and launches that task, falling
+; back to explicit UAC if the task is missing or stale.
 
 ; Fixed, and deliberately NOT inside XFE's own install directory.
 ;
@@ -3756,7 +3724,7 @@ XfeInitializeInteractiveIdentity() {
     if !GetCurrentProcessUserSid(&sidText, &sidError) {
         ExpectedInteractiveUserSid := ""
         LogLine("The companion's own user SID could not be read (" sidError
-            . "); the elevated RTSS helper cannot be verified.", "Warning")
+            . "); the elevated input helper cannot be verified.", "Warning")
     } else {
         ExpectedInteractiveUserSid := sidText
     }
@@ -3769,18 +3737,6 @@ XfeInitializeInteractiveIdentity() {
 ; executable was a reason to answer ProductDataDir() differently, not a reason
 ; to write the path builder twice; see that seam below.
 
-; Explicit UAC, always. Standalone has a protected on-demand scheduled task for
-; its Standard installation mode, which avoids a prompt; XFE does not get one
-; and should not. A task registered at HighestAvailable can be invoked with
-; schtasks /run without asking this process to re-check anything, so it is only
-; safe where the whole path sits below a protected ancestor chain that Setup
-; established. XFE's own directory is user-writable by design, and giving it an
-; independently invokable auto-elevation task would reintroduce exactly the
-; bypass standalone removed for its Custom mode.
-;
-; The prompt is therefore part of the feature rather than a wart on it: turning
-; this on means seeing UAC when the companion starts, which is an honest
-; representation of what was turned on.
 ; The companion's helper is started through a protected on-demand task when one
 ; can be registered, and by explicit UAC otherwise.
 ;
@@ -3790,9 +3746,9 @@ XfeInitializeInteractiveIdentity() {
 ; task removes the prompt, and is only safe because the helper lives under
 ; %ProgramFiles%\SteamShell-XFE\bin where the interactive user cannot replace it.
 ;
-; Registered lazily, the first time the opt-in is actually used, rather than at
-; install: someone who never enables elevated frame-cap writes should never have
-; a HighestAvailable task on their machine.
+; Setup registers the task while it already holds an administrator token. This
+; function can repair a missing or stale task at runtime, with UAC fallback if
+; repair is not possible.
 
 ; True when the registered task already carries the arguments the helper needs.
 ;
@@ -3886,7 +3842,7 @@ EnsureXfeElevatedHelperTask(helperPath, helperLog, &failureReason) {
         return false
     }
     LogLine("Registered the protected on-demand task '"
-        . XfeElevatedHelperTaskName() "' so the elevated RTSS helper starts "
+        . XfeElevatedHelperTaskName() "' so the elevated input helper starts "
         . "without a UAC prompt.")
     return true
 }
@@ -3909,7 +3865,7 @@ StartElevatedRtssHelper() {
     if A_IsAdmin {
         ElevatedHelperLastError :=
             "The companion is already running elevated; the helper is unnecessary."
-        LogLine("Elevated RTSS helper: " ElevatedHelperLastError)
+        LogLine("Elevated input helper: " ElevatedHelperLastError)
         return false
     }
     ElevatedHelperPath := ProductElevatedHelperPath()
@@ -3925,7 +3881,7 @@ StartElevatedRtssHelper() {
             : "The installed helper is version " installedVersion "; this build "
                 . "expects " ElevatedHelperExpectedVersion ". Run SteamShell.exe "
                 . "Setup as administrator to replace it."
-        LogLine("Elevated RTSS helper: " ElevatedHelperLastError, "Warning")
+        LogLine("Elevated input helper: " ElevatedHelperLastError, "Warning")
         return false
     }
     ; Fail closed. A helper whose directory or binary the interactive user can
@@ -3936,7 +3892,7 @@ StartElevatedRtssHelper() {
             "The installed helper is not administrator-protected, so it was not elevated. "
             . protectionError
             . " Run SteamShell.exe Setup as administrator again to re-secure it."
-        LogLine("Elevated RTSS helper: " ElevatedHelperLastError, "Warning")
+        LogLine("Elevated input helper: " ElevatedHelperLastError, "Warning")
         return false
     }
     ; Beside the helper rather than beside XFE's own log: an elevated process
@@ -3965,7 +3921,7 @@ StartElevatedRtssHelper() {
                 ElevatedHelperAvailable := true
                 ElevatedHelperLastError := "Running as PID " taskPid
                     . " through the protected scheduled task."
-                LogLine("Elevated RTSS helper: " ElevatedHelperLastError)
+                LogLine("Elevated input helper: " ElevatedHelperLastError)
                 return true
             }
             ; A task process that did not verify is usually one Windows started
@@ -3974,10 +3930,10 @@ StartElevatedRtssHelper() {
             if (taskPid && ProcessExist(taskPid))
                 try ProcessClose(taskPid)
         }
-        LogLine("Elevated RTSS helper: the scheduled task did not produce a "
+        LogLine("Elevated input helper: the scheduled task did not produce a "
             . "verified helper; requesting UAC directly.", "Warning")
     } else if (taskSetupError != "") {
-        LogLine("Elevated RTSS helper: no scheduled task (" taskSetupError
+        LogLine("Elevated input helper: no scheduled task (" taskSetupError
             . "); elevation will prompt.", "Warning")
     }
     ; The direct-UAC fallback is StartElevatedHelperViaUac in
@@ -3986,7 +3942,7 @@ StartElevatedRtssHelper() {
     ElevatedHelperAvailable := StartElevatedHelperViaUac(
         ElevatedHelperPath,
         SharedElevatedHelperArguments("xfe", ScriptPid, "", IniPath, helperLog),
-        "Elevated RTSS helper", &ElevatedHelperPid, &ElevatedHelperLastError)
+        "Elevated input helper", &ElevatedHelperPid, &ElevatedHelperLastError)
     return ElevatedHelperAvailable
 }
 
@@ -4003,7 +3959,7 @@ StartElevatedRtssHelper() {
 ;
 ; Checked at the point of use rather than on a timer, because this is the only
 ; place the answer matters and a timer would be one more thing running for a
-; feature that is off by default.
+; helper process is already being monitored at its point of use.
 EnsureElevatedRtssHelperAlive() {
     global ElevatedHelperAvailable, ElevatedHelperPid, ElevatedHelperLastError
     if !ElevatedHelperAvailable
@@ -4012,7 +3968,7 @@ EnsureElevatedRtssHelperAlive() {
         return true
     ElevatedHelperAvailable := false
     ElevatedHelperLastError := "The helper process exited."
-    LogLine("Elevated RTSS helper: " ElevatedHelperLastError, "Warning")
+    LogLine("Elevated input helper: " ElevatedHelperLastError, "Warning")
     return false
 }
 
@@ -4112,7 +4068,7 @@ ProductIdentity() {
         "name", "the companion",
         "exe", "steamshell-xfe.exe",
         "dirToken", "XFE_DIR",
-        "helperLabel", "Elevated RTSS helper",
+        "helperLabel", "Elevated input helper",
         ; Shown at the top of the Quick Menu. Separate from "name", which is
         ; prose used inside sentences.
         "title", "SteamShell XFE",
@@ -4149,7 +4105,7 @@ ShowQuickMenu(*) {
     ; immediately while this flag is false -- the old order set the page before
     ; the flag and got away with it only because its own build came after both.
     QuickMenuVisible := true
-    QuickMenuGoToPage("MAIN")
+    QuickMenuGoToPage("MAIN", true)
     ; Showing an always-on-top window makes it visible but does not necessarily
     ; give it the foreground. Without the foreground, the application behind
     ; keeps receiving controller input and keeps reacting to it.
@@ -4769,7 +4725,7 @@ QuickMenuAdjustSelected(direction) {
     QuickMenuRefresh()
 }
 
-QuickMenuHandleController(pressed, lx, ly, buttons := 0) {
+QuickMenuHandleController(pressed, released := 0, lx := 0, ly := 0, buttons := 0) {
     global QuickMenuRows, QuickMenuSelected
     global QuickMenuPage, ControllerChordHoldMs
     static holdDir := 0
@@ -4797,6 +4753,16 @@ QuickMenuHandleController(pressed, lx, ly, buttons := 0) {
     } else {
         mainYDownTick := 0
         mainYLongFired := false
+    }
+
+    ; Keep the Quick Menu in front until the A press that chose a row is fully
+    ; released. Otherwise Steam can consume the still-held physical button in
+    ; the focus gap before Settings or the touch keyboard appears.
+    activationEvent := QuickMenuControllerActivationEvent(pressed, released)
+    if activationEvent {
+        if (activationEvent > 0)
+            QuickMenuActivateSelected()
+        return
     }
 
     ; Left-stick navigation with a short repeat delay for couch use.
@@ -4878,10 +4844,6 @@ QuickMenuHandleController(pressed, lx, ly, buttons := 0) {
     }
     if (pressed & 0x0008) {
         QuickMenuAdjustSelected(1)
-        return
-    }
-    if (pressed & 0x1000) {
-        QuickMenuActivateSelected()
         return
     }
     if (pressed & 0x2000) {
@@ -6326,7 +6288,8 @@ ExportDiagnosticBundle(*) {
 ProductHealthResults() {
     global AppVersion, IniPath, LogPath, ControllerIndex, ActiveControllerIndex, RtssPath
     global EnableRTSSIntegration, RtssUseDllIntegration
-    global RtssElevatedFrameCapWrites, ElevatedHelperAvailable, ElevatedHelperPid
+    global RtssElevatedFrameCapWrites, EnableElevatedInputHelper
+    global ElevatedHelperAvailable, ElevatedHelperPid
     global ElevatedHelperLastError, ElevatedHelperPath
     global ControllerBackend, ActiveInputBackend
     global RawInputProbeActive, RawInputLastReportTick
@@ -6370,24 +6333,24 @@ ProductHealthResults() {
         }
     }
 
-    ; Two separate rows, because "you did not turn it on" and "you turned it on
-    ; and it is not running" are different situations with different remedies,
-    ; and the second is the whole reason a frame cap row can still report itself
-    ; read-only after opting in.
-    if !RtssElevatedFrameCapWrites {
-        HealthResult(results, "INFO", "Elevated RTSS helper",
-            "Disabled (default). The frame cap is read-only where RTSS needs "
-            . "administrator rights.")
+    ; Process health follows the process-level setting. The RTSS setting only
+    ; decides whether frame-cap writes use an already-running helper; it must not
+    ; make a healthy input helper look disabled.
+    if !EnableElevatedInputHelper {
+        HealthResult(results, "INFO", "Elevated input helper",
+            "Disabled in Settings; controller input will not reach administrator "
+            . "windows and protected RTSS writes are unavailable.")
     } else if A_IsAdmin {
-        HealthResult(results, "INFO", "Elevated RTSS helper",
-            "The companion is elevated, so RTSS profile writes already work "
-            . "without a helper.")
+        HealthResult(results, "INFO", "Elevated input helper",
+            "The companion is elevated, so input and RTSS profile writes already "
+            . "work without a helper.")
     } else if (ElevatedHelperAvailable && ElevatedHelperPid
         && VerifyElevatedHelperProcess(ElevatedHelperPid, &helperVerifyError)) {
-        HealthResult(results, "PASS", "Elevated RTSS helper",
-            "Running as PID " ElevatedHelperPid ".")
+        HealthResult(results, "PASS", "Elevated input helper",
+            "Running as PID " ElevatedHelperPid "; protected RTSS writes "
+            . (RtssElevatedFrameCapWrites ? "enabled." : "disabled in Settings."))
     } else {
-        HealthResult(results, "WARN", "Elevated RTSS helper",
+        HealthResult(results, "WARN", "Elevated input helper",
             "Enabled but unavailable: " ElevatedHelperLastError)
     }
 
@@ -6396,7 +6359,7 @@ ProductHealthResults() {
     ; failure here is the most likely reason the row above says WARN.
     checkedPath := ElevatedHelperPath != ""
         ? ElevatedHelperPath : ProductElevatedHelperPath()
-    if !RtssElevatedFrameCapWrites {
+    if !EnableElevatedInputHelper {
         HealthResult(results, "INFO", "Elevated helper protection",
             "Not checked; the helper is disabled.")
     } else if ElevatedHelperLocationIsProtected(checkedPath, &helperProtectionError) {
@@ -6705,7 +6668,7 @@ PollController() {
             ; Forget any in-progress View hold: the menu opening mid-hold must
             ; not fire a Steam shortcut when the button is eventually released.
             viewWasDown := false
-            QuickMenuHandleController(pressed, lx, ly, buttons)
+            QuickMenuHandleController(pressed, released, lx, ly, buttons)
             return
         }
 
@@ -7031,7 +6994,6 @@ ProductSettingsScrollBar() {
 }
 
 ProductSettingsViewportHeight() {
-    layout := SettingsLayout()
     return Max(1, SettingsContentBottom - SettingsContentTop)
 }
 

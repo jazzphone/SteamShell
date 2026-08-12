@@ -199,6 +199,7 @@ global QuickMenuLayoutGui := unset
 global QuickMenuGui := unset
 global QuickMenuRows := []
 global QuickMenuSelected := 1
+global QuickMenuControllerActivateArmed := false
 ; Declared so SendChordSafe and SendSteamOverlayChord can be defined once.
 ; Standalone has no companion to disable, so the guard never fires; the
 ; alternative was keeping both functions in two copies to avoid the name.
@@ -805,7 +806,7 @@ global ControllerSuggestedDeadzone := 0
 ; (GetTokenInformationBuffer, OpenCurrentProcessToken, GetTokenUserSidString,
 ; GetTokenSessionId, GetCurrentProcessUserSid, GetCurrentProcessSessionId,
 ; GetProcessTokenSecurity) moved to SteamShell-Shared.ahk when XFE gained its
-; opt-in RTSS helper: verifying that the helper process has a High-integrity
+; elevated helper: verifying that the helper process has a High-integrity
 ; token belonging to the same user and session is the same question in both
 ; programs, asked of the same payload.
 ;
@@ -1852,8 +1853,8 @@ ExtractEmbeddedElevatedHelper(targetPath, &failureReason, forceReplace := false)
 }
 
 ; SteamShellPathIsAdminOnlyWritable and ElevatedHelperLocationIsProtected used to
-; be defined here. They now live in SteamShell-Shared.ahk, because XFE's opt-in
-; RTSS helper has to ask the same two questions about the same payload, and
+; be defined here. They now live in SteamShell-Shared.ahk, because XFE's
+; elevated helper has to ask the same two questions about the same payload, and
 ; neither function knows anything about a shell replacement: they take a path and
 ; an expected version and inspect owner, DACL and readability.
 ;
@@ -4910,7 +4911,7 @@ ShowQuickMenu(*) {
     ; Visible before the page, not after: QuickMenuGoToPage builds, and
     ; QuickMenuBuildGui returns immediately while this flag is false.
     QuickMenuVisible := true
-    QuickMenuGoToPage("MAIN")
+    QuickMenuGoToPage("MAIN", true)
     if IsSet(QuickMenuGui) {
         gotFocus := ForceForegroundWindow(QuickMenuGui.Hwnd)
         if !gotFocus {
@@ -5885,6 +5886,16 @@ QuickMenuHandleController(pressed, released := 0, lx := 0, ly := 0, buttons := 0
         mainYLongFired := false
     }
 
+    ; Commit A on release, not on its press edge. Rows that destroy this window
+    ; hand focus to Steam, Settings, or the keyboard; hiding while A is still
+    ; physically down lets the destination see the tail of the same press.
+    activationEvent := QuickMenuControllerActivationEvent(pressed, released)
+    if activationEvent {
+        if (activationEvent > 0)
+            QuickMenuActivateSelected()
+        return
+    }
+
     ; In Task Switcher, defer X until release so a tap can request a normal
     ; window close while a deliberate hold force-terminates the owning process.
     if (QuickMenuPage != "TASKS") {
@@ -6001,10 +6012,6 @@ QuickMenuHandleController(pressed, released := 0, lx := 0, ly := 0, buttons := 0
     }
     if (pressed & 0x0008) { ; D-pad right
         QuickMenuAdjustSelected(1)
-        return
-    }
-    if (pressed & 0x1000) { ; A
-        QuickMenuActivateSelected()
         return
     }
     if (pressed & 0x2000) { ; B
@@ -14495,6 +14502,7 @@ RestartSteamShellInSafeMode(*) {
 
 RunSteamShellSelfTests(showResult := true) {
     global CurrentSettingsSchemaVersion
+    global QuickMenuControllerActivateArmed
     failures := []
 
     if !IsSteamShellIdentityArgument(
@@ -14520,13 +14528,22 @@ RunSteamShellSelfTests(showResult := true) {
         || StrLower(editorExeList[2]) != "two.exe")
         failures.Push("Settings EXE-list de-duplication")
 
+    defaultOrder := GetDefaultQuickMenuOrder()
     order := ParseQuickMenuMainOrder("System|Audio|Audio|Bogus")
-    if (order.Length != 10 || order[1] != "system" || order[2] != "audio")
+    if (order.Length != defaultOrder.Length
+        || order[1] != "system" || order[2] != "audio")
         failures.Push("Quick Menu order normalization")
     if (SendToPretty("^1") != "Ctrl+1"
         || SendToPretty("^2") != "Ctrl+2"
         || SendToPretty("+{Tab}") != "Shift+Tab")
         failures.Push("Shortcut display formatting")
+
+    QuickMenuControllerActivateArmed := false
+    if (QuickMenuControllerActivationEvent(0x1000, 0) != -1
+        || QuickMenuControllerActivationEvent(0, 0x1000) != 1
+        || QuickMenuControllerActivationEvent(0, 0x1000) != -1)
+        failures.Push("Quick Menu A-button release gating")
+    QuickMenuControllerActivateArmed := false
 
     SplitTargetAndParams(
         '"C:\Program Files\Example\App.exe" --test value',
@@ -14565,6 +14582,11 @@ RunSteamShellSelfTests(showResult := true) {
     if (showResult)
         SteamShellMsgBox(
             report, failures.Length ? "Iconx" : "Iconi", "SteamShell Self-Test")
+    else
+        ; The build redirects stdout. Quiet means non-interactive, not silent:
+        ; if a compiled invariant fails, the log must identify it rather than
+        ; reducing the result to an unexplained exit code 1.
+        FileAppend(report "`n", "*")
     return failures.Length = 0
 }
 
@@ -15268,7 +15290,7 @@ DeploySteamShell(targetDirectory, portableMode := false, registerShell := true, 
     }
 }
 
-; Where XFE's opt-in elevated RTSS helper is installed.
+; Where XFE's elevated input and RTSS helper is installed.
 ;
 ; Fixed, and deliberately NOT inside the XFE install directory. Setup grants the
 ; signed-in user write access to that directory -- XFE keeps its INI, learned
@@ -15290,18 +15312,14 @@ XfeElevatedHelperDirectory() {
 ; Installs the XFE companion instead of the shell.
 ;
 ; Deliberately narrower than DeploySteamShell: XFE never becomes the Windows
-; shell, never registers a shell-integrity component directory beside itself,
-; and never gets the protected on-demand helper task, because it is an ordinary
-; normal-integrity application started from a desktop that already exists.
-; Everything this does not do is the point.
+; shell and never registers a shell-integrity component directory beside
+; itself. It is an ordinary normal-integrity application started from a desktop
+; that already exists.
 ;
-; It DOES deploy the elevated helper payload, dormant. XFE has no embedded
-; payload and no administrator rights, so a user who later opts in from XFE's
-; own Settings would otherwise be told to re-run an installer they have already
-; run. A binary on disk is not an elevated process: nothing starts it until
-; [RTSS] EnableElevatedFrameCapWrites is turned on -- which now defaults to ON
-; in both products, so in practice the helper is started the first time a frame
-; cap needs a write RTSS's own location will not allow.
+; It deploys the elevated helper payload and registers the protected on-demand
+; task while Setup already has an administrator token. The helper is enabled by
+; default for controller input over administrator windows and protected RTSS
+; writes; XFE can disable it from Settings without changing the installation.
 DeploySteamShellXfe(targetDirectory, registerStartup := true, showResult := true) {
     global SteamShellRegKey, ScriptPid, IntentionalExitMode, SteamShellProduct
     global ShellRegKey
@@ -15347,7 +15365,7 @@ DeploySteamShellXfe(targetDirectory, registerStartup := true, showResult := true
                 "Writable permissions could not be applied to the XFE directory. "
                 . permissionError)
 
-        ; The opt-in elevated RTSS helper, deployed dormant.
+        ; The elevated input and RTSS helper, enabled by default.
         ;
         ; Same ordering as the shell path, for the same reason it exists there:
         ; harden the directory FIRST so the write below cannot be raced, then
@@ -15390,16 +15408,15 @@ DeploySteamShellXfe(targetDirectory, registerStartup := true, showResult := true
         } catch as helperError {
             helperDeployFailure := helperError.Message
         }
-        ; NOT fatal, and this is a deliberate difference from the shell path.
-        ; The shell needs its helper to reach elevated windows at all; XFE needs
-        ; it only for a frame cap the user has not asked for yet. Refusing to
-        ; install the whole companion over a dormant optional payload would be
-        ; the wrong trade. It is reported rather than swallowed.
+        ; NOT fatal: the normal-integrity companion remains usable, but elevated
+        ; input and protected RTSS writes are degraded. Report that limitation
+        ; clearly instead of failing the entire companion installation.
         if !helperDeployed
             LogLine(
-                "The optional XFE elevated RTSS helper was not deployed; the "
-                . "frame cap will stay read-only where RTSS needs administrator "
-                . "rights: " helperDeployFailure, "Warning")
+                "The XFE elevated input helper was not deployed; controller input "
+                . "will not reach administrator windows and RTSS frame-cap writes "
+                . "may remain read-only under Program Files: " helperDeployFailure,
+                "Warning")
         RegWrite(helperDeployed ? "true" : "false",
             "REG_SZ", SteamShellRegKey, "XfeHelperDeployed")
 
@@ -15505,7 +15522,7 @@ DeploySteamShellXfe(targetDirectory, registerStartup := true, showResult := true
 
         LogLine("SteamShell-XFE companion installed: " targetExe
             . "; startup=" (startupRegistered ? "logon task" : "manual")
-            . "; elevated RTSS helper=" (helperDeployed ? "deployed (off by default)" : "not deployed")
+            . "; elevated input helper=" (helperDeployed ? "deployed and enabled by default" : "not deployed")
             . (shellRetired != "" ? "; " shellRetired : ""))
 
         if showResult {
@@ -15514,15 +15531,18 @@ DeploySteamShellXfe(targetDirectory, registerStartup := true, showResult := true
                     ? "It will start automatically at sign-in through a normal-integrity logon task."
                     : "The logon task could not be registered, so start it manually or add it to your startup programs.")
                 : "Automatic startup was not requested, so start it manually when you want it."
-            ; Stated plainly, because a user chooses XFE precisely to avoid an
-            ; elevated process and is entitled to know one was placed on disk.
+            ; State the default plainly: the companion stays normal-integrity,
+            ; while its narrow helper covers the operations UIPI and Program
+            ; Files permissions prevent it from performing itself.
             helperText := helperDeployed
-                ? "An optional elevated RTSS helper was installed to " helperBinDirectory
-                    . " and is TURNED OFF. XFE runs with nothing elevated unless you enable "
-                    . "it in Settings under RTSS & Performance, which it needs only to set the "
-                    . "frame cap when RTSS is installed under Program Files."
-                : "The optional elevated RTSS helper was not installed, so the frame cap "
-                    . "stays read-only where RTSS needs administrator rights."
+                ? "The elevated input helper was installed to " helperBinDirectory
+                    . " and is enabled by default. XFE itself remains at normal integrity; "
+                    . "the helper supplies controller input over administrator windows and "
+                    . "writes RTSS frame caps when Program Files permissions require it. "
+                    . "You can disable it in Settings under Startup & Splash."
+                : "The elevated input helper was not installed. XFE still runs normally, "
+                    . "but controller input will not reach administrator windows and RTSS "
+                    . "frame-cap writes may remain read-only under Program Files."
             ; Only mentioned when Setup actually stopped something, so a first
             ; install says nothing about a companion that was never running.
             restartText := !xfeWasRunning ? ""
@@ -15952,8 +15972,12 @@ HandleSteamShellCommandMode() {
         RemoveSteamShellRegistration(true, false)
     else if (mode = "uninstall")
         RemoveSteamShellInstallationForProduct(true, true)
-    else if (mode = "selftest")
-        RunSteamShellSelfTests(true)
+    else if (mode = "selftest") {
+        selfTestPassed := RunSteamShellSelfTests(!HasSteamShellArgument("quiet"))
+        IntentionalExitMode := "command"
+        ExitApp(selfTestPassed ? 0 : 1)
+        return true
+    }
 
     IntentionalExitMode := "command"
     ExitApp()

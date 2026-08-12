@@ -5,7 +5,8 @@ param(
     # BUILT -- it is the payload SteamShell.exe embeds -- and this only controls
     # whether a second distributable is left beside the installer.
     [switch]$NoXfeDist,
-    # FOR THE HARNESS, NOT FOR BUILDING. Skips the two static validators.
+    # FOR THE HARNESS, NOT FOR BUILDING. Skips static/Python validation and the
+    # compiled self-test; native syntax and compilation still run.
     #
     # Run-SteamShellValidation.ps1 builds this project nine times: once for real,
     # five times against a deliberately broken source, and twice against a locked
@@ -43,10 +44,13 @@ $helperSourcePath = Join-Path $projectRoot "SteamShell-Helper.ahk"
 $xfeSourcePath = Join-Path $projectRoot "SteamShell-XFE.ahk"
 $validatorPath = Join-Path $projectRoot "Validate-SteamShell.ps1"
 $xfeValidatorPath = Join-Path $projectRoot "Validate-SteamShell-XFE.ps1"
+$replayValidatorPath = Join-Path $projectRoot "Replay-Validation.py"
+$controllerProfileTestPath = Join-Path $projectRoot "Test-ControllerProfiles.py"
 
 foreach ($required in @(
     $sourcePath, $helperSourcePath, $xfeSourcePath,
-    $validatorPath, $xfeValidatorPath)) {
+    $validatorPath, $xfeValidatorPath, $replayValidatorPath,
+    $controllerProfileTestPath)) {
     if (-not (Test-Path $required)) {
         throw ("$([System.IO.Path]::GetFileName($required)) was not found " +
             "beside this build script.")
@@ -104,6 +108,24 @@ function Invoke-BuildProcess {
     }
 }
 
+function Get-PythonCommand {
+    $pyLauncher = Get-Command "py.exe" -ErrorAction SilentlyContinue
+    if ($null -ne $pyLauncher) {
+        return [PSCustomObject]@{
+            FilePath = $pyLauncher.Source
+            PrefixArguments = @("-3")
+        }
+    }
+    $python = Get-Command "python.exe" -ErrorAction SilentlyContinue
+    if ($null -ne $python) {
+        return [PSCustomObject]@{
+            FilePath = $python.Source
+            PrefixArguments = @()
+        }
+    }
+    throw "Python 3 was not found. Install it or add py.exe/python.exe to PATH."
+}
+
 # Both validators, before anything is compiled. They are separate scripts on
 # purpose -- several of XFE's architecture rules are the exact inverse of the
 # shell's -- but a build that produces one EXE from two sources has to satisfy
@@ -115,6 +137,25 @@ if ($SkipStaticValidation) {
     & $validatorPath
     Write-Host "Running SteamShell XFE static validation..."
     & $xfeValidatorPath
+    $python = Get-PythonCommand
+    foreach ($pythonCheck in @(
+        @{ Name = "cross-product validation replay"; Path = $replayValidatorPath },
+        @{ Name = "controller-profile simulation"; Path = $controllerProfileTestPath })) {
+        Write-Host "Running $($pythonCheck.Name)..."
+        $pythonArguments = @($python.PrefixArguments)
+        $pythonArguments += ConvertTo-NativeArgument $pythonCheck.Path
+        $pythonResult = Invoke-BuildProcess `
+            -FilePath $python.FilePath `
+            -Arguments $pythonArguments
+        if (-not [string]::IsNullOrWhiteSpace($pythonResult.Output)) {
+            Write-Host $pythonResult.Output
+        }
+        if ($pythonResult.ExitCode -ne 0) {
+            throw (
+                "$($pythonCheck.Name) failed with exit code " +
+                $pythonResult.ExitCode + ".")
+        }
+    }
 }
 
 $autoHotkeyRoots = @(
@@ -381,6 +422,25 @@ if ($mainVersion -ne "2.0.3.0") {
     throw "SteamShell version verification failed. Expected 2.0.3.0; found '$mainVersion'."
 }
 Write-Host "Verified SteamShell version: $mainVersion"
+
+# Exercise deterministic runtime invariants in the exact binary just built.
+# Quiet mode suppresses the message box so this remains a non-interactive build
+# gate. Hardware, window-focus, RTSS, and installation mutation checks stay in
+# the Windows functional checklist because they require a configured test PC.
+if (-not $SkipStaticValidation) {
+    Write-Host "Running compiled SteamShell self-test..."
+    $selfTestResult = Invoke-BuildProcess `
+        -FilePath $OutputPath `
+        -Arguments @("/selftest", "--quiet")
+    if (-not [string]::IsNullOrWhiteSpace($selfTestResult.Output)) {
+        Write-Host $selfTestResult.Output
+    }
+    if ($selfTestResult.ExitCode -ne 0) {
+        throw (
+            "Compiled SteamShell self-test failed with exit code " +
+            $selfTestResult.ExitCode + ".")
+    }
+}
 Write-Host "Built: $OutputPath"
 
 # The companion, copied out of build\ beside the installer.
@@ -388,7 +448,7 @@ Write-Host "Built: $OutputPath"
 # This is a convenience for developing XFE, not a distributable. Setup Assistant
 # inside SteamShell.exe is the supported way to install either product: it
 # registers the logon task, grants the companion's own directory to the
-# signed-in user, and deploys the dormant elevated helper. A hand-copied
+# signed-in user, and deploys the elevated helper. A hand-copied
 # SteamShell-XFE.exe gets none of that, which is why it is no longer published
 # to the repository's current\ folder.
 if (-not $NoXfeDist) {

@@ -110,7 +110,8 @@ companion reads the pad through RawInput instead, and can be taught unfamiliar h
 ### Keeping the frame rate sane
 - **RTSS** frame limiter and overlay from the Quick Menu
 - Global or **per-game profile** caps, keyed on the game the scorer identified
-- Optional **elevated helper** for profile writes, so the shell itself stays unprivileged
+- Default-on **elevated helper** for administrator-window input and protected
+  profile writes, so the main application stays unprivileged
 
 ### Not painting yourself into a corner
 - **Setup Assistant** — standard, custom or portable install, with shell registration
@@ -282,8 +283,8 @@ One executable installs both products. It embeds the elevated helper and the XFE
 and deploys whichever you choose through its Setup Assistant.
 
 Verify it if you like — the same binary is committed at
-`releases/2.0.2/current/SteamShell.exe`, and its SHA-256 is in
-[`releases/2.0.2/RELEASE.md`](releases/2.0.2/RELEASE.md) alongside the exact source that
+`releases/2.0.3/current/SteamShell.exe`, and its SHA-256 is in
+[`releases/2.0.3/RELEASE.md`](releases/2.0.3/RELEASE.md) alongside the exact source that
 produced it.
 
 ## Getting started
@@ -342,14 +343,17 @@ In-repo, for depth:
 Run-SteamShellValidation.cmd
 ```
 
-Syntax-checks all five AutoHotkey sources, runs both static validators, compiles the
-helper, the companion and the installer, **proves the build gate rejects broken and stale
+Runs both PowerShell validators, the Python structural replay and controller-profile
+simulation, native AutoHotkey validation, compiles the helper, companion and installer,
+runs the installer's quiet self-test, **proves the build gate rejects broken and stale
 output**, and only then publishes to `current\`.
 
 Needs Windows, PowerShell 5.1, and AutoHotkey v2 with Ahk2Exe. To build the installer
 alone, use `SteamShell\Build-SteamShell.cmd`.
 
-The harness never runs what it compiles, and neither should any automated process.
+The build runs only the deterministic `/selftest --quiet` command mode. Hardware,
+installation, UAC, RTSS, display, audio, and controller behavior stays in the Windows
+acceptance checklists.
 
 ## How this is built
 

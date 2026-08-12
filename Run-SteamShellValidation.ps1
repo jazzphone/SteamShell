@@ -16,10 +16,10 @@
     current\ folder is not changed unless every validation and negative test
     passes and both new EXEs have been verified.
 
-    It NEVER runs the produced executables, and neither should you on a machine
-    you care about. SteamShell.exe is a Winlogon shell replacement: it rewrites
-    the shell registry value, terminates explorer.exe on its restore paths, and
-    takes over the session.
+    It runs the produced main executable only in /selftest --quiet command mode.
+    That path checks deterministic runtime invariants and exits before settings,
+    shell registration, Explorer, Steam, or the ordinary runtime is initialized.
+    It never launches either product normally.
 
     What this CANNOT tell you: anything behavioural. Quick Menu painting, the HDR
     fallback, log rotation actually rolling, PreviousShell restore -- all of that
@@ -94,6 +94,17 @@ function Copy-ProjectForTest {
         ForEach-Object {
             Copy-Item -LiteralPath $_.FullName -Destination $Destination -Recurse -Force
         }
+}
+
+# Append a syntax fault without changing the source tree's LF line endings.
+# Add-Content writes CRLF on Windows; Replay-Validation deliberately treats the
+# resulting carriage return as trailing whitespace and can reject the copy for
+# file hygiene before AutoHotkey reaches the injected parse fault.
+function Add-AhkSyntaxFault {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::AppendAllText(
+        $Path, "this is not valid autohotkey ][ {{{`n", $utf8NoBom)
 }
 
 function Write-Section {
@@ -359,7 +370,7 @@ try {
     Start-Step
     $broken = Join-Path $temp "Broken.ahk"
     Copy-Item -LiteralPath (Join-Path $projectDir "SteamShell.ahk") -Destination $broken
-    Add-Content -LiteralPath $broken -Value "`r`nthis is not valid autohotkey ][ {{{"
+    Add-AhkSyntaxFault -Path $broken
 
     Write-Host ""
     Write-Host "5a. Exit-code mechanism comparison on a deliberately broken source"
@@ -434,9 +445,14 @@ try {
     # 5c's own comment records an earlier version of this same failure through a
     # different door. It is the recurring shape of bug in this harness, so it is
     # now checked rather than reasoned about.
-    $baselineGreen = @($results | Where-Object {
-        $_.Step -like "Validator:*" -or $_.Step -like "Build:*" }) |
-        Where-Object { $_.Status -notin @("OK", "PASS") }
+    $baselineGreen = @()
+    foreach ($result in $results) {
+        if (($result.Step -like "Validator:*" -or
+            $result.Step -like "Build:*") -and
+            $result.Status -notin @("OK", "PASS")) {
+            $baselineGreen += $result
+        }
+    }
     if ($baselineGreen.Count -gt 0) {
         Write-Host ""
         Write-Host ("    INCONCLUSIVE - the unmodified project already fails " +
@@ -465,7 +481,7 @@ try {
         $label = [System.IO.Path]::GetFileNameWithoutExtension($sourceName)
         $brokenTree = Join-Path $temp ("BrokenTree-" + $label)
         Copy-ProjectForTest -Destination $brokenTree
-        Add-Content -LiteralPath (Join-Path $brokenTree $sourceName) -Value "`r`nthis is not valid autohotkey ][ {{{"
+        Add-AhkSyntaxFault -Path (Join-Path $brokenTree $sourceName)
 
         $threw = $false
         $message = ""
@@ -687,8 +703,8 @@ if ($bad.Count -eq 0) {
     Write-Host "$($bad.Count) CHECK(S) FAILED" -ForegroundColor Red
 }
 Write-Host ""
-Write-Host "The produced EXE was not run. SteamShell.exe replaces the Windows shell;"
-Write-Host "do not launch it on a machine you are not prepared to restore."
+Write-Host "The produced EXE ran only in non-mutating /selftest --quiet mode."
+Write-Host "The harness did not launch SteamShell's shell or XFE runtime."
 if ($bad.Count -gt 0) {
     exit 1
 }

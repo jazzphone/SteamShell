@@ -2994,6 +2994,136 @@ def check_view_button_default_split(sources):
              + ", ".join(missing) + ".")
 
 
+def check_elevated_helper_generated_defaults(sources):
+    """Generated settings, samples, readers, and helper policy agree.
+
+    The fallback alone is not the installed default: both products immediately
+    create an INI, so a missing or contrary generated value wins before the
+    fallback can matter. This check deliberately reads the generator function
+    bodies, closing the gap that previously let source globals and samples agree
+    while a fresh installation behaved differently.
+    """
+    shell_defaults = function_body(
+        sources["SteamShell.ahk"], "GetDefaultSettingsIniText")
+    xfe_defaults = function_body(
+        sources["SteamShell-XFE.ahk"], "DefaultSettings")
+    shared_load = function_body(
+        sources["SteamShell-Shared.ahk"], "LoadSharedSettings")
+    helper_load = function_body(
+        sources["SteamShell-Helper.ahk"], "LoadConfiguration")
+    shell_sample = read_source("SteamShellSettings_SAMPLE.ini")
+    xfe_sample = read_source("SteamShell-XFE_SAMPLE.ini")
+
+    checks = [
+        (re.search(r"(?m)^EnableElevatedInputHelper=true", shell_defaults),
+         "standalone generated EnableElevatedInputHelper"),
+        (re.search(r"(?m)^EnableElevatedFrameCapWrites=true", shell_defaults),
+         "standalone generated EnableElevatedFrameCapWrites"),
+        (re.search(r'"EnableElevatedInputHelper",\s*"true"', xfe_defaults),
+         "XFE generated EnableElevatedInputHelper"),
+        (re.search(r'"EnableElevatedFrameCapWrites",\s*"true"', xfe_defaults),
+         "XFE generated EnableElevatedFrameCapWrites"),
+        (re.search(r"(?m)^EnableElevatedInputHelper=true", shell_sample),
+         "standalone sample EnableElevatedInputHelper"),
+        (re.search(r"(?m)^EnableElevatedFrameCapWrites=true", shell_sample),
+         "standalone sample EnableElevatedFrameCapWrites"),
+        (re.search(r"(?m)^EnableElevatedInputHelper=true", xfe_sample),
+         "XFE sample EnableElevatedInputHelper"),
+        (re.search(r"(?m)^EnableElevatedFrameCapWrites=true", xfe_sample),
+         "XFE sample EnableElevatedFrameCapWrites"),
+        (re.search(r'EnableElevatedInputHelper\s*:=\s*ReadBool\('
+                   r'"Features",\s*"EnableElevatedInputHelper",\s*true\)',
+                   shared_load), "shared helper-process fallback"),
+        (re.search(r'RtssElevatedFrameCapWrites\s*:=\s*ReadBool\('
+                   r'"RTSS",\s*"EnableElevatedFrameCapWrites",\s*true\)',
+                   shared_load), "shared RTSS-write fallback"),
+        (re.search(r'ReadBool\(\s*"RTSS",\s*"EnableElevatedFrameCapWrites",\s*true\)',
+                   helper_load), "elevated helper RTSS fallback"),
+        (re.search(r'(?m)^global\s+HelperInputEnabled\s*:=\s*true',
+                   sources["SteamShell-Helper.ahk"])
+         and re.search(r'(?s)if\s*\(HelperProduct\s*=\s*"xfe"\)\s*\{.*?'
+                       r'HelperGeometryEnabled\s*:=\s*false',
+                       sources["SteamShell-Helper.ahk"]),
+         "XFE helper input-on/geometry-off policy"),
+    ]
+    missing = [label for matched, label in checks if not matched]
+    if missing:
+        fail("Elevated-helper defaults disagree across generated settings, "
+             "samples, readers, or runtime policy. Missing: "
+             + ", ".join(missing) + ".")
+
+
+def check_quickmenu_release_and_page_memory(sources):
+    """Controller activation waits for release and Back restores selection."""
+    shared = sources["SteamShell-Shared.ahk"]
+    navigator = "\n".join(
+        strip_comments(line)
+        for line in function_body(shared, "QuickMenuGoToPage").splitlines())
+    activation = "\n".join(
+        strip_comments(line)
+        for line in function_body(
+            shared, "QuickMenuControllerActivationEvent").splitlines())
+    if not all([
+            re.search(r"static\s+selections\s*:=\s*Map\(\)", navigator),
+            re.search(r"selections\[QuickMenuPage\]\s*:=\s*QuickMenuSelected",
+                      navigator),
+            re.search(r"QuickMenuSelected\s*:=\s*selections\.Has\(page\)\s*\?\s*"
+                      r"selections\[page\]\s*:\s*1", navigator)]):
+        fail("QuickMenuGoToPage must remember each page's selected row so Back "
+             "returns to the row that opened the submenu.")
+    if not all([
+            re.search(r"pressed\s*&\s*0x1000", activation),
+            re.search(r"QuickMenuControllerActivateArmed\s*:=\s*true", activation),
+            re.search(r"released\s*&\s*0x1000", activation),
+            re.search(r"QuickMenuControllerActivateArmed\s*:=\s*false", activation)]):
+        fail("Quick Menu A activation must arm on press and commit on release; "
+             "otherwise the held physical button leaks into Steam during handoff.")
+    for tree in ("SteamShell.ahk", "SteamShell-XFE.ahk"):
+        show = _strip_comments_keep_strings(
+            function_body(sources[tree], "ShowQuickMenu"))
+        controller = "\n".join(
+            strip_comments(line)
+            for line in function_body(
+                sources[tree], "QuickMenuHandleController").splitlines())
+        if not re.search(r'QuickMenuGoToPage\("MAIN",\s*true\)', show):
+            fail(f"{tree}: a new Quick Menu session does not clear remembered "
+                 "page selections and controller activation state.")
+        if not re.search(
+                r"QuickMenuControllerActivationEvent\(pressed,\s*released\)",
+                controller):
+            fail(f"{tree}: Quick Menu controller activation does not use the "
+                 "shared release gate.")
+        if re.search(r"(?s)pressed\s*&\s*0x1000.*?"
+                     r"QuickMenuActivateSelected\(\)", controller):
+            fail(f"{tree}: Quick Menu still activates directly from the A press edge.")
+
+
+def check_compiled_selftest_contract(sources):
+    """The build's native smoke test stays data-driven and diagnostic."""
+    body = _strip_comments_keep_strings(
+        function_body(sources["SteamShell.ahk"], "RunSteamShellSelfTests"))
+    if not all([
+            re.search(r"defaultOrder\s*:=\s*GetDefaultQuickMenuOrder\(\)", body),
+            re.search(r"order\.Length\s*!=\s*defaultOrder\.Length", body)]):
+        fail("RunSteamShellSelfTests must compare the normalized Quick Menu "
+             "against the canonical default length, not a stale row-count literal.")
+    if re.search(r"order\.Length\s*!=\s*\d+", body):
+        fail("RunSteamShellSelfTests has reintroduced a literal Quick Menu row count.")
+    if not re.search(r'(?s)else\s+FileAppend\(report\s+"`n",\s*"\*"\)', body):
+        fail("Quiet compiled self-tests must write their report to stdout so a "
+             "build failure identifies the broken invariant.")
+
+    build_path = ROOT / "Build-SteamShell.ps1"
+    if not build_path.exists():
+        fail("Build-SteamShell.ps1 is missing; the compiled self-test has no build gate.")
+        return
+    build = decode_like_powershell(build_path.read_bytes())
+    if not re.search(
+            r'(?s)Running compiled SteamShell self-test.*?'
+            r'-Arguments\s+@\("/selftest",\s*"--quiet"\)', build):
+        fail("Build-SteamShell.ps1 no longer runs the compiled quiet self-test.")
+
+
 def check_rtss_limiter_restore(sources):
     """The limiter flag is re-enabled even when the FPS write fails.
 
@@ -3120,6 +3250,9 @@ def main():
     check_settings_row_placement(sources)
     check_view_button_actions(sources)
     check_view_button_default_split(sources)
+    check_elevated_helper_generated_defaults(sources)
+    check_quickmenu_release_and_page_memory(sources)
+    check_compiled_selftest_contract(sources)
     check_settings_row_keys(sources)
     check_settings_rows_reach_consumers(sources)
     check_ambiguous_deindented_blocks(sources)

@@ -995,7 +995,7 @@ RestoreRtssFrameLimitTick(*) {
 ; Shared because "is that process running as the same user, in the same session,
 ; at High integrity?" is the same question in both programs, asked of the same
 ; payload: standalone verifies its elevated helper before using it, and XFE
-; verifies the identical binary before using its opt-in RTSS helper.
+; verifies the identical binary before using its elevated input helper.
 ;
 ; Deliberately NOT here: InitializeExpectedInteractiveIdentity, which reads
 ; standalone's bootstrap identity arguments. Standalone re-launches itself
@@ -1322,8 +1322,8 @@ WaitForVerifiedElevatedHelper(pid, &failureReason, timeoutMs := 2500) {
 ; ELEVATED HELPER PROTECTION GATE
 ; ==============================================================================
 ; The two functions below decide whether a binary is safe to hand a
-; High-integrity token. They were standalone-only until XFE gained its opt-in
-; RTSS helper, and XFE_PARITY_NOTES.md previously recorded that they never would
+; High-integrity token. They were standalone-only until XFE gained its elevated
+; helper, and XFE_PARITY_NOTES.md previously recorded that they never would
 ; be shared. That entry has been reversed there rather than quietly dropped.
 ;
 ; They ask a question about a path and an expected version, and nothing about
@@ -2369,10 +2369,10 @@ QuickMenuNormalizeSelection() {
 ; STOPPING THE ELEVATED HELPER, AND CANCELLING A SHORTCUT CAPTURE
 ; ==============================================================================
 ; STARTING the helper stays per-tree and SHARED_FUNCTIONS.txt records why:
-; standalone passes --product=standalone and may use a protected on-demand task,
-; XFE passes --product=xfe and only ever uses explicit UAC. STOPPING it is not
-; like that. Closing a process by PID and waiting for it to go is the same
-; operation either way, and the only thing that ever differed was what the log
+; standalone passes --product=standalone and XFE passes --product=xfe. Both may
+; use protected on-demand tasks and fall back to explicit UAC. STOPPING is the
+; same operation either way: close a process by PID and wait for it to go. The
+; only thing that ever differed was what the log
 ; line calls the helper -- which is now the helperLabel field of ProductIdentity.
 ;
 ; The shortcut-capture cancel was kept apart by one Map key: standalone stored
@@ -6315,8 +6315,8 @@ GetPhysicalModsMap() {
 
 ; THE ONLY PLACE EITHER PRODUCT CHANGES THE QUICK MENU'S PAGE.
 ;
-; Three lines, and one of them is the whole feature: QuickMenuBuildGui composes
-; the rows from the product's row builder, and nothing else does. The repaint
+; QuickMenuBuildGui composes the rows from the product's row builder, and
+; nothing else does. The repaint
 ; routines -- QuickMenuRefresh in the shell, QuickMenuRender in the companion --
 ; redraw the rows that are ALREADY in QuickMenuRows, which is what makes them
 ; cheap and what makes them wrong here.
@@ -6338,10 +6338,21 @@ GetPhysicalModsMap() {
 ; opening the menu must set QuickMenuVisible before calling this, not after --
 ; the companion's ShowQuickMenu set the page first and the flag second, which
 ; was harmless only because its BuildGui call came after both.
-QuickMenuGoToPage(page) {
-    global QuickMenuPage, QuickMenuSelected
+;
+; Selection belongs to a PAGE, not to the window as a whole. Save the row being
+; left and restore the destination's row, so Back returns to the submenu entry
+; the user chose. A new menu session clears the Map and starts MAIN at row 1.
+QuickMenuGoToPage(page, resetSelections := false) {
+    static selections := Map()
+    global QuickMenuPage, QuickMenuSelected, QuickMenuControllerActivateArmed
+    if resetSelections {
+        selections.Clear()
+        QuickMenuControllerActivateArmed := false
+    } else if (QuickMenuPage != "") {
+        selections[QuickMenuPage] := QuickMenuSelected
+    }
     QuickMenuPage := page
-    QuickMenuSelected := 1
+    QuickMenuSelected := selections.Has(page) ? selections[page] : 1
     QuickMenuBuildGui()
 }
 
@@ -6353,6 +6364,27 @@ QuickMenuGoBack() {
     }
     QuickMenuGoToPage(
         SubStr(QuickMenuPage, 1, 9) = "SETTINGS_" ? "SETTINGS" : "MAIN")
+}
+
+; Controller activation is release-gated in both products. The Quick Menu owns
+; the foreground while the press is down; only after release may an action hide
+; it and hand focus to Steam, Settings, the keyboard, or another system surface.
+;
+; -1 means this edge was consumed but must not activate, 1 means activate now,
+; and 0 means it was not an A edge. A release without an arm is consumed too,
+; which covers a menu opened while A was already held.
+QuickMenuControllerActivationEvent(pressed, released) {
+    global QuickMenuControllerActivateArmed
+    if (pressed & 0x1000) {
+        QuickMenuControllerActivateArmed := true
+        return -1
+    }
+    if (released & 0x1000) {
+        activate := QuickMenuControllerActivateArmed
+        QuickMenuControllerActivateArmed := false
+        return activate ? 1 : -1
+    }
+    return 0
 }
 
 QuickMenuSetRedraw(enabled) {
@@ -13117,16 +13149,10 @@ ControllerLogInputChange(buttons, lt, rt, pressed, released) {
 ; reason, and an INI that sets the key explicitly is unaffected either way.
 ;
 ; EnableElevatedFrameCapWrites was the second of that pair and has joined the
-; list above. The reason recorded for keeping it apart was that the companion is
-; the unelevated product, so switching the helper on should be the user's
-; decision -- and it did not survive checking what the installer already does.
-; XFE's deployment writes the elevated helper payload to disk DORMANT and always
-; has, so the binary was never the line the flag was defending. What the flag
-; bought instead was a frame cap that silently did nothing whenever RTSS sits
-; under Program Files, which is where RTSS installs itself, behind a checkbox on
-; a page most people never open. The privilege boundary is untouched: elevated
-; INPUT is still not ported to the companion, and a payload on disk is not a
-; process until something needs a write only it can make.
+; list above. Both products now default their helper on because protected RTSS
+; writes and controller input over administrator windows are core paths. Their
+; visible main process remains at normal integrity; the helper's XFE branch turns
+; off geometry only, because Xbox FSE owns presentation.
 ;
 ; Three more used to be listed here -- ControllerPollIntervalMs,
 ; ControllerScrollIntervalMs and ControllerMouseFastMultiplier, same default in
@@ -13195,18 +13221,13 @@ LoadSharedSettings() {
     RtssPresetFrameCap := ReadInt("RTSS", "PresetFrameCap", 158, 0, 1000)
     RtssCustomFrameCap := ReadInt("RTSS", "CustomFrameCap", 158, 10, 1000)
     RtssRestoreFrameLimitOnStartup := ReadBool("RTSS", "RestoreFrameLimitOnStartup", true)
-    ; Defaulted TRUE in both products now. The companion defaulted it false on
-    ; the grounds that it is the unelevated product and switching the helper on
-    ; should be a decision -- but its installer already writes the helper payload
-    ; to disk dormant, so the binary was never the line the flag was defending.
-    ; What the flag actually bought was a frame cap that silently does nothing
-    ; whenever RTSS sits under Program Files, which is where RTSS installs
-    ; itself, behind a checkbox on a page most people never open.
+    ; Defaulted TRUE in both products. Their visible main process stays at normal
+    ; integrity; protected RTSS writes are one of the helper's core jobs.
     RtssElevatedFrameCapWrites := ReadBool("RTSS", "EnableElevatedFrameCapWrites", true)
     ; Whether the helper PROCESS runs, which is a different question from whether
     ; the frame cap goes through it. Read here for both products because both now
-    ; ask it: the companion had no such setting and gated the helper on the RTSS
-    ; flag above, from when its helper did the frame cap and nothing else.
+    ; ask it. It is explicit in both generated INIs so a fresh installation does
+    ; not depend on an invisible fallback for a process-level preference.
     EnableElevatedInputHelper := ReadBool("Features", "EnableElevatedInputHelper", true)
     RtssLastFrameCapFps := ReadInt("RTSS", "LastFrameCapFps", 0, 0, 1000)
 }

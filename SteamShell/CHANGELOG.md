@@ -68,6 +68,10 @@ definition instead of two.
 - **The companion gates its helper on `[Features] EnableElevatedInputHelper`**, the same
   setting the shell uses, rather than on the RTSS frame-cap flag. That flag had been doing
   two jobs since the helper gained input.
+- **The companion now generates that setting explicitly as `true`.** The runtime fallback,
+  shipped sample, Settings checkbox and installer message now agree on a default-on helper;
+  previously a fresh generated INI omitted the process-level key. The helper's own missing
+  RTSS-key fallback is also `true` for both products.
 - `HideQuickMenuForHandoff` replaces `HideQuickMenu(false)` and the companion's
   `HideQuickMenuForOwnWindow` — one concept that had two shapes.
 - `ProductElevatedHelperPath` replaces `GetElevatedHelperPath` and `XfeElevatedHelperPath`.
@@ -86,6 +90,14 @@ definition instead of two.
   neither may require a controller to reach.
 - The companion's direct-UAC helper launch logs a failure as a warning rather than as
   information.
+- XFE Health Check follows the process-level helper setting. Turning off only elevated
+  RTSS writes no longer reports the still-running input helper as disabled.
+- Quick Menu controller activation now commits on A release. The menu remains in
+  the foreground until the physical press is over, so opening the keyboard,
+  Full Settings, or another surface cannot leak the same press into Steam.
+- Quick Menu navigation remembers the selected row on every page for the current
+  session. Returning from a submenu restores the row that opened it; a newly
+  opened menu still begins at the top of Main.
 
 ### Build and validation
 
@@ -100,6 +112,18 @@ definition instead of two.
   sample INI against the embedded schema. Each had cost a full Windows round-trip.
 - Stale similarity scores are gone from `DIVERGENT_FUNCTIONS.txt`. Four of eight were
   wrong; `--dump` prints the current ones.
+- The double-click build now runs the Python structural replay and controller-profile
+  simulation, then executes `/selftest --quiet` against the compiled installer and fails
+  on its exit code. Hardware, UAC, RTSS and installation checks remain in the Windows
+  acceptance checklists.
+- The compiled self-test derives the Quick Menu row count from the canonical default
+  list instead of a stale literal, and quiet mode writes its full pass/failure report to
+  the captured build log. The end-to-end harness also preserves LF endings in injected
+  syntax faults, so its hygiene check cannot mask the parse failure being tested.
+- The duplicate manifest now records game-candidate scoring and Settings category layout
+  as resolved: their algorithms were already centralized in
+  `SharedScoreGameCandidates` and `SharedApplySettingsCategoryLayout`; only thin
+  product-state adapters remain.
 
 ## 2.0.2 — 2026-08-10
 

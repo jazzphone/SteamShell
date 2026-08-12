@@ -112,10 +112,9 @@ two-folder layout they were locked with.
 
 ## Release boundary
 
-The standalone and XFE working trees are both **1.9.9** and are locked together
-in the self-contained `releases/1.9.9/` bundle. Standalone uses settings schema
-19 and XFE uses schema 9; the post-1.9.9 working trees are at standalone
-schema 20 and XFE schema 16. The earlier `releases/1.7.7/` and
+The standalone and XFE working trees are both **2.0.3** and are locked together
+in the self-contained `releases/2.0.3/` bundle. Standalone uses settings schema
+23 and XFE uses schema 18. The earlier `releases/1.7.7/` and
 `releases/XFE-0.1.21/` snapshots remain intact; `releases/1.7.4/` remains intact;
 `releases/1.7.3/` remains the deliberate revert point immediately before the
 Quick Menu rendering rewrite, and `releases/XFE-0.1.17/` remains intact.
@@ -272,7 +271,7 @@ quietly deleted.** The original text said none of the following belonged in
 `RequestElevatedRtssFrameLimit`/`WaitForElevatedRtssRequest` family, and the
 `SetupAssistant*`, `RegisterElevatedHelperTask`, and Auto-Login families.
 
-XFE now has an opt-in, default-off RTSS helper, so three groups moved into
+XFE now has a default-on input and RTSS helper, so three groups moved into
 `SteamShell-Shared.ahk`:
 
 - `SteamShellPathIsAdminOnlyWritable` and `ElevatedHelperLocationIsProtected` —
@@ -286,18 +285,19 @@ XFE now has an opt-in, default-off RTSS helper, so three groups moved into
   because the two programs keep their data in different places.
 
 The rest of the list stands, and the line it now draws is worth stating: **the
-gate is shared, deployment is not.** `HardenElevatedHelperDirectory`, the
+gate is shared, deployment remains Setup-owned.** `HardenElevatedHelperDirectory`, the
 embedded payload, `ExtractEmbeddedElevatedHelper`, installation modes, the
-protected on-demand task and every `SetupAssistant*` function remain
-standalone-only, because they are properties of an installer rather than of a
-path. XFE has no embedded payload and no administrator rights: it verifies and
-launches, or it explains why it would not. `SteamShell.exe` Setup deploys the
-helper in XFE mode.
+protected on-demand task registration and every `SetupAssistant*` function
+remain in `SteamShell.exe`, because they are properties of the shared installer
+rather than of the normal-integrity companion. XFE has no embedded payload and
+no administrator rights: it verifies and launches, or it explains why it would
+not. Setup deploys the helper and registers its task in XFE mode.
 
 `StartElevatedInputHelper` and XFE's `StartElevatedRtssHelper` also stayed
 separate, deliberately. They are different launches of the same binary:
-standalone passes `--product=standalone` and may use its protected on-demand
-task, while XFE passes `--product=xfe` and only ever uses explicit UAC.
+standalone passes `--product=standalone`, while XFE passes `--product=xfe` to
+disable geometry. Both prefer their protected on-demand task and fall back to
+explicit UAC.
 
 **This divergence had a user-visible consequence, and that is what changed the
 decision.** Writing RTSS's frame cap is not a convenience the helper improves —
@@ -313,9 +313,9 @@ That was a real gap rather than a tidy divergence, and it turned out to be the
 argument that carried — stronger than the elevated-input case, because input
 has a workaround (reach the window another way) and this had none.
 
-**Resolved: XFE now has an opt-in, default-off elevated RTSS helper**, scoped to
-that one write and to nothing else. See *Still divergent* below for what was NOT
-ported and why, which is the more important half of the decision.
+**Resolved: XFE now has a default-on elevated input and RTSS helper.** It carries
+controller input over administrator windows and protected RTSS writes, while
+geometry remains off because Xbox FSE owns presentation.
 
 The one place the two trees do meet is the controller mapping vocabulary. The
 helper implements the builtin keystrokes as fixed actions and declines the five
@@ -391,35 +391,11 @@ smaller divergence than the one it replaced.
 
 ### Still divergent, and both are decisions rather than oversights
 
-- **The elevated INPUT helper is standalone-only, and stays that way.** The
-  premise applies equally — XFE also runs at medium integrity, so UIPI blocks
-  its input from elevated foreground windows in exactly the same way — and XFE
-  installation already requires administrator rights, so the usual objection
-  does not hold.
-
-  The reason it was still not ported is narrower, and stronger, than "runtime
-  posture", and it is worth writing down because the obvious reasoning points
-  the other way. **The helper's input implementation is XInput.** XFE exists
-  because XInput is not enough for its users: Xbox FSE withholds background
-  XInput, and a controller in DirectInput mode — measured on an 8BitDo
-  Ultimate 2 — is not an XInput device at all. Porting elevated input would
-  ship a feature that works only for the people who did not need XFE, while
-  charging every XFE user a permanently resident High-integrity process polling
-  a controller. Elevated input also has a workaround; the RTSS write does not.
-
-  If that ever changes, the work needed is not "port the helper" but "give the
-  helper RawInput and the learned-profile store", which is much larger and
-  shares its decision with the RawInput port recorded under *Deliberately not
-  ported*.
-
-- **The elevated RTSS helper is now in both trees, on different terms.** The
-  standing recommendation from the post-1.9.9 audit — opt-in and default off,
-  or not at all — was followed, with the scope narrowed further to RTSS writes
-  only. Standalone's helper is on by default, carries input and geometry, and
-  may use a protected on-demand scheduled task; XFE's is off by default, carries
-  the frame cap alone, and only ever uses explicit UAC, because its install
-  directory has no protected ancestor chain. Same binary, same protection gate,
-  different `--product`.
+- **The elevated helper is now in both trees, with one deliberate capability
+  difference.** Both default it on, carry controller input and protected RTSS
+  writes, prefer a protected on-demand task, and fall back to explicit UAC.
+  Standalone also enables geometry; XFE disables it because Xbox FSE owns
+  presentation. Same binary, same protection gate, different `--product`.
 - **The Settings windows are laid out by different mechanisms.** RESOLVED. XFE
   now uses flowing row builders and a scrolling content viewport, like
   standalone, and the four category names shared with standalone — General,
@@ -550,8 +526,9 @@ the name suggested:
 | `StopElevated*Helper` | one log label | `SteamShell-Shared.ahk` as `StopElevatedHelper`, label via `ProductIdentity()["helperLabel"]` |
 | `RecordShortcut*Cancel` | one Map key: `"ih"` vs `"input"` | `SteamShell-Shared.ahk` as `RecordShortcutCancel` |
 
-**Starting** the helper stays per-tree, and the entry above still records why —
-standalone may use a protected on-demand task, XFE only ever uses explicit UAC.
+**Starting** the helper stays per-tree because paths, task names and deployment
+responsibilities differ; both products prefer a protected task and can fall back
+to explicit UAC.
 **Stopping** it is not like that: closing a process by PID and waiting is the
 same operation either way.
 

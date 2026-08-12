@@ -853,13 +853,11 @@ LoadConfiguration() {
     ; stops the writes without a restart -- the same reason the helper reloads
     ; everything else in this function.
     ;
-    ; The FALLBACK differs by product, matching each tree's own default: on for
-    ; standalone, off for XFE, where the whole helper is opt-in. Main stops this
-    ; process when the XFE setting is cleared, so this fallback only decides what
-    ; happens if the key is missing entirely -- and for XFE the safe answer to
-    ; "the opt-in cannot be read" is that it was not opted in to.
+    ; Both products default this on. Main stops the helper when its process-level
+    ; preference is cleared; this key independently decides whether RTSS writes
+    ; use the already-running helper.
     EnableElevatedRtssFrameCap := ReadBool(
-        "RTSS", "EnableElevatedFrameCapWrites", HelperProduct != "xfe")
+        "RTSS", "EnableElevatedFrameCapWrites", true)
     EnableControllerMouse := ReadBool(
         "Controller", "EnableControllerMouseMode", true)
     ; EnablePersistentMouseMode, EnableAutoMouseMode, EnableDesktopAutoMouseMode,
@@ -1740,9 +1738,7 @@ SettingsPath := ReadArgument("settings", "")
 LogPath := ReadArgument("log", "")
 ; Anything that is not exactly "xfe" is the standalone shell helper. Stated in
 ; that direction on purpose: an unrecognised or absent value must not silently
-; become the narrower product, because the narrower product does no elevated
-; input and a standalone user would get a helper that appears to run and never
-; reaches a single elevated window.
+; disable elevated geometry, which is the one capability XFE deliberately omits.
 HelperProduct := StrLower(Trim(ReadArgument("product", "standalone"))) = "xfe"
     ? "xfe" : "standalone"
 if (HelperProduct = "xfe") {

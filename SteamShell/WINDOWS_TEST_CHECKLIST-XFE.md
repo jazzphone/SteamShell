@@ -1,7 +1,7 @@
 # SteamShell XFE Windows test checklist
 
-For release **1.9.9**. The coordinated locked source snapshot is
-`releases/1.9.9/`.
+For release **2.0.3**. The coordinated locked source snapshot is
+`releases/2.0.3/`.
 
 Everything under *Additions since 0.1.14* arrived in 0.1.15. 0.1.16 adds the
 RTSS frame-cap input changes described in *Custom FPS stepping* below.
@@ -11,8 +11,8 @@ complete display-mode enumeration changes at the top of this checklist.
 curtain retirement and Assist hardening checks. 0.1.20 adds the Quick Menu
 keyboard, persistent mouse, mappings gesture, and Windows Settings checks.
 
-Test this separately from the standalone SteamShell 1.9.9 runtime, then run the
-combined release validator from `releases\1.9.9`.
+Test this separately from the standalone SteamShell 2.0.3 runtime, then run the
+combined release validator from `releases\2.0.3`.
 
 ## Schema 13 — cursor and park settings renamed to standalone's
 
@@ -112,6 +112,9 @@ so this section comes first.
   Mode, Settings, and System.
 - Select Open Keyboard and confirm Quick Settings disappears before the touch
   keyboard appears.
+- Hold A on **Open Keyboard** and **Open Full Settings Editor**. Confirm the
+  action waits for release, the destination then opens, and Steam/Xbox FSE does
+  not consume the same A press underneath the handoff.
 - Enable Mouse Mode and confirm controller pointer/mappings work without
   View/Back, including while Xbox FSE/Steam is the shell surface. Restart and
   confirm it persists; disable it and confirm the normal modifier gate returns.
@@ -173,6 +176,9 @@ so this section comes first.
   appear after sustained navigation.
 - Navigate rapidly and enter/leave several submenus. No blank/background-only
   frame should appear during either a row bitmap swap or a page resize.
+- Select a non-top row that opens a submenu, then press B. Confirm the parent
+  page returns with that row selected instead of jumping to row 1. Close and
+  reopen Quick Settings and confirm the new session starts at the top of Main.
 - In Quick Menu ▸ Settings, cycle all accent presets in both directions and
   confirm wrapping, immediate repaint, and a matching derived fill tint. In Full
   Settings ▸ General, select Custom and verify a valid `RRGGBB` value persists.
@@ -266,6 +272,8 @@ quickly:
   Confirm the result remains visible until a key is pressed.
 - Confirm **both** validators pass — the shell's and this one — since the single
   build runs both.
+- Confirm the cross-product Python replay and controller-profile simulation pass,
+  and that the compiled `SteamShell.exe /selftest --quiet` exits with code 0.
 - Confirm the companion is left at `dist\SteamShell-XFE.exe` for this test.
   Installing it for real is Setup Assistant inside `SteamShell.exe`.
 - Launch as a standard user; do not enable **Run as administrator**.
@@ -344,9 +352,9 @@ meant it could essentially never apply here.
   confirm `SteamShell-XFE.exe` is **Medium**. Setup runs elevated, so a restart
   through `Run` would silently hand the companion an administrator token —
   exactly what choosing XFE is meant to avoid.
-- Repeat with the **opt-in elevated RTSS helper enabled** so a helper is also
+- Repeat with the **default-on elevated input helper enabled** so a helper is also
   resident. Confirm both are closed, both are replaced, and the helper reports
-  file version 1.9.9.4.
+  file version 2.0.3.1.
 - Confirm the settings INI, `SteamShell-XFE-Controllers.ini`, and the log
   survive the upgrade intact. The companion is closed with WM_CLOSE so its exit
   handler runs; a truncated or missing learned profile means it was terminated
@@ -1153,11 +1161,12 @@ desktop -- but keep a keyboard connected anyway.
 - If Steam's row has no title, confirm it reads something usable rather than
   being blank.
 
-### Elevated RTSS helper without a prompt
+### Elevated helper without a prompt
 
-- Enable elevated frame-cap writes and set a cap. On first use, confirm the
-  protected task is registered and no UAC prompt appears afterwards.
-- Confirm no `HighestAvailable` task exists **before** the opt-in is used.
+- Install XFE through Setup and confirm the protected helper task is registered
+  while Setup is already elevated.
+- Start XFE normally and confirm the default-on helper starts through that task
+  without a UAC prompt.
 - Confirm the task and the helper directory are both removed by Setup
   Assistant's uninstall.
 
@@ -1227,7 +1236,7 @@ not.
 - Repeat with a **read-only** INI: confirm the companion still starts, both keys
   are ignored by the poll loop regardless, and the warning names the reason.
 
-## Opt-in elevated RTSS helper
+## Default-on elevated input and RTSS helper
 
 ### RTSS shortcut messages
 
@@ -1236,43 +1245,42 @@ not.
   than saying "the RTSS shortcut".
 
 
-**None of this has executed.** The helper, its deployment in XFE mode, and every
-refusal path below are new and unrun. Test on a machine you can recover.
+Run these on a recoverable Windows test machine. The normal build gate cannot
+exercise UAC, scheduled tasks, controller hardware, or a real RTSS installation.
 
 Run these as a **standard user** with RTSS installed in its default
 `C:\Program Files (x86)\RivaTuner Statistics Server` location. Anywhere the
 account can already write RTSS's own directory, none of this applies and the
 in-process write works on its own — which is itself worth confirming once.
 
-### The default: nothing is elevated
+### The default: XFE is normal integrity; the helper is elevated
 
 - Install XFE through `SteamShell.exe` Setup in XFE mode, as an administrator.
 - Confirm the completion dialog says the elevated helper was installed and is
-  **turned off**.
+  **enabled by default**, while XFE itself remains normal integrity.
 - Confirm `%ProgramFiles%\SteamShell-XFE\bin\SteamShell-Helper.exe` exists,
-  reports file version **1.9.9.4**, and that `icacls` on **both** the directory
+  reports file version **2.0.3.1**, and that `icacls` on **both** the directory
   and the file lists SYSTEM and Administrators as Full and Users as read/execute
   — the file must list ACEs, not an empty DACL. This is the failure that shipped
   once in the standalone path and certified itself as protected.
 - Confirm `dir /q` shows the helper **owned by Administrators**, not by the
   account that ran Setup. This is the ordering bug that would fail every install.
-- Sign in normally. Confirm **no UAC prompt**, no `SteamShell-Helper.exe` in Task
-  Manager, and that Health Check reports `elevated RTSS helper disabled
-  (default)`.
-- Open Quick Menu → RTSS. Confirm the Frame Limit row reports **read-only** and
-  *Save Limit to Profile* reports **Unavailable**.
+- Sign in normally. Confirm **no UAC prompt**, `SteamShell-XFE.exe` is Medium,
+  `SteamShell-Helper.exe` is High, and Health Check reports the elevated input
+  helper as PASS with its PID.
+- Open Quick Menu → RTSS. Confirm the Frame Limit row is writable and *Save
+  Limit to Profile* becomes available when a game is detected.
 
-### Turning it on
+### Process and RTSS controls are independent
 
-- Settings ▸ RTSS & Performance ▸ **Write the cap through an elevated helper**,
-  then Save & Apply.
-- Confirm a UAC prompt appears **at that moment**, without a restart. Accept it.
-- Confirm `SteamShell-Helper.exe` is running, Health Check reports it as PASS
-  with its PID, and the elevated-helper-protection line reports PASS.
-- Confirm the Frame Limit row is no longer read-only.
-- **Decline** the UAC prompt on a second attempt and confirm the companion keeps
-  running, Health Check says WARN with the cancellation reason, and the row goes
-  back to read-only rather than silently accepting presses.
+- Clear `[RTSS] EnableElevatedFrameCapWrites`, Save & Apply, and confirm the
+  helper remains running for input while protected frame-cap writes become
+  read-only.
+- Restore that setting and confirm writes resume without restarting the helper.
+- Clear `[Features] EnableElevatedInputHelper`, Save & Apply, and confirm the
+  helper exits immediately. Restore it and confirm the task starts it again.
+- Temporarily remove the task on a test machine, start XFE, and confirm the UAC
+  fallback is explicit; declining it leaves XFE running with a WARN result.
 
 ### The write actually reaches RTSS
 
@@ -1317,11 +1325,10 @@ in-process write works on its own — which is itself worth confirming once.
 - Confirm the helper **never** shows a window, message box, or error dialog in
   any of the above.
 
-### What the helper must NOT do
+### Capability boundary
 
 - With the helper running and Task Manager focused, press a mapped controller
-  button. Confirm **nothing happens** — XFE's helper carries no elevated input,
-  and the accepted cost in the README still applies in full.
+  button. Confirm the mapped action reaches the elevated window.
 - Confirm no elevated window is centred or maximised while the helper runs.
 
 ### Uninstall

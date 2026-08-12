@@ -68,7 +68,7 @@
 # Some entries here REVERSE an earlier decision, recorded so the reversal is not
 # mistaken for drift. XFE_PARITY_NOTES.md listed the elevated-helper functions
 # as ones that "should not be added later", on the grounds that XFE would never
-# have an elevated helper. XFE now has an opt-in, default-off RTSS helper, and
+# have an elevated helper. XFE now has a default-on input and RTSS helper, and
 # it verifies the same payload against the same expected version before
 # launching it. Three groups moved in:
 #
@@ -90,16 +90,15 @@
 #       else. ProductDataDir() is now that question, and the builder is shared.
 #
 # What did NOT move, and should not: deployment. Setup Assistant, the embedded
-# payload, installation modes, the protected on-demand task, and
-# HardenElevatedHelperDirectory remain standalone-only, because those are
+# payload, installation modes, task registration, and
+# HardenElevatedHelperDirectory remain Setup-owned, because those are
 # properties of an installer rather than of a path. XFE never deploys the
-# helper; SteamShell.exe's Setup Assistant does, in XFE mode.
+# helper itself; SteamShell.exe's Setup Assistant does, in XFE mode.
 #
 # Also NOT shared, deliberately: StartElevatedInputHelper (standalone) and
 # StartElevatedRtssHelper (XFE). They are different launches of the same binary
-# -- standalone passes --product=standalone and may use a protected on-demand
-# task; XFE passes --product=xfe and only ever uses explicit UAC, because its
-# install directory has no protected ancestor chain.
+# -- standalone passes --product=standalone and XFE passes --product=xfe to
+# disable geometry. Both prefer a protected on-demand task and fall back to UAC.
 # ---------------------------------------------------------------------------
 AddInstallationRecordHealthRow
 AdjustRtssCustomFrameCap
@@ -294,6 +293,7 @@ QuickMenuCurrentAppBlockedReason
 QuickMenuCurrentAppExe
 QuickMenuCurrentAppSelectable
 QuickMenuCurrentAppValue
+QuickMenuControllerActivationEvent
 QuickMenuCycleSharedSetting
 QuickMenuDestroyWindow
 QuickMenuDisplayReflow

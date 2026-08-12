@@ -39,6 +39,7 @@ Assert-True (Test-Path $commonSourcePath) "SteamShell-Common.ahk is missing."
 $commonSource = Get-SourceText $commonSourcePath
 $sample = Get-SourceText $samplePath
 $buildScript = Get-SourceText $buildScriptPath
+$defaultSettingsBody = Get-AhkFunctionBody -Source $rawSource -Name "DefaultSettings"
 
 Assert-True (
     $source -match '@Ahk2Exe-SetVersion 2\.0\.3\.0' -and
@@ -1699,11 +1700,11 @@ Assert-True ($source -notmatch '/create /f /sc onlogon') (
 # NARROWED DELIBERATELY. The rule is about the LOGON task -- the companion must
 # never start elevated at sign-in, which is the whole point of choosing it.
 #
-# The opt-in RTSS helper task is a different thing and IS HighestAvailable by
+# The elevated helper task is a different thing and IS HighestAvailable by
 # necessity: it exists to start an already-elevated helper without a UAC prompt,
 # because a consent dialog runs on the secure desktop where a controller cannot
-# answer it. It is registered lazily, only once the opt-in is used, and only
-# when the helper sits below a Program Files path the user cannot write.
+# answer it. Setup registers it only after placing the helper below a Program
+# Files path the user cannot write; runtime can repair a missing or stale task.
 #
 # So the assertion now reads the logon XML specifically rather than the whole
 # file, and separately pins that the helper task is the ONLY HighestAvailable
@@ -1716,13 +1717,13 @@ Assert-True (
         '(?sm)^XfeLogonTaskXml\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?' +
         '<RunLevel>HighestAvailable</RunLevel>' -and
     # $rawSource, not $source: the resolved source now contains
-    # SteamShell-Common.ahk, where the opt-in helper task's HighestAvailable XML
+    # SteamShell-Common.ahk, where the helper task's HighestAvailable XML
     # legitimately lives. The rule is that the COMPANION does not write one.
     $rawSource -notmatch '<RunLevel>HighestAvailable</RunLevel>' -and
     $rawSource -match
         '(?sm)^EnsureXfeElevatedHelperTask\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?' +
         'ElevatedHelperLocationIsProtected\(') (
-    "The logon task must stay at least privilege; only the opt-in helper task may elevate.")
+    "The logon task must stay at least privilege; only the protected helper task may elevate.")
 
 # Every window here is +AlwaysOnTop, because that is the only thing that puts a
 # window over Xbox FSE. A non-topmost dialog cannot rise above a topmost window
@@ -1956,40 +1957,25 @@ Assert-True (
     "An XFE Frame Limit path no longer records what it applied, or the restore is not armed.")
 
 # ==============================================================================
-# OPT-IN ELEVATED RTSS HELPER
+# ELEVATED INPUT AND RTSS HELPER
 # ==============================================================================
-# XFE_PARITY_NOTES.md recorded for a long time that XFE would never have an
-# elevated helper. That reversed, for one reason and one reason only:
-# RTSSHooks64.dll is loaded into the CALLING process, so on a stock Program
-# Files RTSS install an unelevated companion cannot set the FPS value or save a
-# per-game profile at all. Elevated INPUT was NOT ported and must not be -- see
-# the assertion below that pins the --product argument.
+# The helper is default-on because input over administrator windows and RTSS
+# profile writes under Program Files are core behavior. XFE itself stays at
+# normal integrity, and --product=xfe disables geometry while keeping input and
+# RTSS enabled.
 #
-# Every assertion in this section was mutation-tested by breaking the behaviour
-# it names and confirming the build fails.
-
-# Default ON, in all three places that decide the default: the embedded
-# defaults, the reader, and the shipped sample.
-#
-# This assertion used to pin the opposite, and said "a user chooses XFE because
-# nothing about it is elevated; the opt-in is the feature." What retired that
-# argument is what the installer was already doing: XFE's deployment writes the
-# elevated helper payload to disk DORMANT, so a user opting in later is not sent
-# back to an installer they have already run. The binary was never the line the
-# flag defended.
-#
-# What the flag actually bought, off by default and on the RTSS page, was a
-# frame cap that silently does nothing whenever RTSS sits under Program Files --
-# which is where RTSS installs itself. The reader now lives in
-# LoadSharedSettings, on one default for both products, which is why only two of
-# the three places are checked here.
-#
-# The privilege boundary itself is unchanged and is pinned below: elevated INPUT
-# is still not ported, and the --product argument assertion is what holds that.
+# Pin both process-level and feature-level defaults in the generated Map and the
+# shipped sample. The shared reader is checked by Assert-SharedSettingsReadOnce;
+# checking generated output here closes the earlier gap where a fallback could
+# be true while a fresh INI explicitly generated false or omitted the key.
 Assert-True (
-    $source -match '"EnableElevatedFrameCapWrites",\s*"true"' -and
+    [regex]::IsMatch(
+        $defaultSettingsBody, '"EnableElevatedInputHelper",\s*"true"') -and
+    [regex]::IsMatch(
+        $defaultSettingsBody, '"EnableElevatedFrameCapWrites",\s*"true"') -and
+    $sample -match '(?m)^EnableElevatedInputHelper=true' -and
     $sample -match '(?m)^EnableElevatedFrameCapWrites=true') (
-    "The elevated RTSS helper is no longer on by default.")
+    "The generated XFE settings and shipped sample must default the elevated helper on.")
 
 # Nothing is elevated until it has been proved administrator-protected.
 #
@@ -2007,18 +1993,15 @@ Assert-True (
         'StartElevatedHelperViaUac\(') (
     "The XFE helper can be elevated without proving it is administrator-protected.")
 
-# --product=xfe is the whole difference between an RTSS helper and a second
-# elevated input engine. Without it the same binary polls the controller at High
-# integrity, centres elevated windows, and looks for steamshell.exe as its
-# parent -- none of which XFE asked for, and the input half would work only for
-# XInput controllers, which is precisely the case XFE exists to handle
-# differently.
+# --product=xfe selects the XFE capability policy. The shared helper still polls
+# controller input and handles RTSS requests, but it must not centre or resize
+# windows because Xbox FSE owns presentation.
 Assert-True (
     $source -match
         '(?sm)^StartElevatedRtssHelper\(\)\s*\{(?:(?!\n\})[\s\S])*?' +
         'StartElevatedHelperViaUac\((?:(?!\n\})[\s\S])*?' +
         'SharedElevatedHelperArguments\("xfe"') (
-    "The XFE helper is no longer launched in RTSS-only mode.")
+    "The XFE helper no longer launches with the XFE capability policy.")
 
 # XFE never deploys, extracts, or hardens the helper. It has no embedded payload
 # and no administrator rights; SteamShell.exe Setup owns deployment. Anchored to
@@ -2132,8 +2115,9 @@ Assert-True (
         'SyncElevatedRtssHelperWithSettings\(\)') (
     "The elevated helper no longer starts and stops with the setting.")
 
-# Health Check has to be able to say why the frame cap is still read-only after
-# opting in, which is a different answer from "you did not opt in".
+# Health Check follows the process-level helper setting, not the independent
+# RTSS routing setting. Otherwise disabling elevated frame-cap writes reports a
+# still-running input helper as disabled.
 #
 # Pinned as two SEPARATE rows rather than by their prose, which changed when the
 # checks became Map rows for the shared harness. The claim is the structure --
@@ -2142,15 +2126,15 @@ Assert-True (
 Assert-True (
     $source -match
         '(?sm)^ProductHealthResults\(\)\s*\{(?:(?!\n\})[\s\S])*?' +
-        'if !RtssElevatedFrameCapWrites \{(?:(?!\n\})[\s\S])*?' +
-        'HealthResult\(results, "INFO", "Elevated RTSS helper"' -and
+        'if !EnableElevatedInputHelper \{(?:(?!\n\})[\s\S])*?' +
+        'HealthResult\(results, "INFO", "Elevated input helper"' -and
     $source -match
         '(?sm)^ProductHealthResults\(\)\s*\{(?:(?!\n\})[\s\S])*?' +
-        'HealthResult\(results, "WARN", "Elevated RTSS helper"' -and
+        'HealthResult\(results, "WARN", "Elevated input helper"' -and
     $source -match
         '(?sm)^ProductHealthResults\(\)\s*\{(?:(?!\n\})[\s\S])*?' +
         '"Elevated helper protection"') (
-    "Health Check no longer reports the elevated RTSS helper state as separate " +
+    "Health Check no longer reports the elevated input helper state as separate " +
     "rows for 'not enabled' and 'enabled but unavailable'.")
 
 # The installation record is READ, and reading it is the whole point.

@@ -4,11 +4,11 @@ SteamShell XFE is a portable controller-utility companion for Windows Xbox Full
 Screen Experience. It is separate from the standalone SteamShell application
 and does not replace, install, or modify the Windows shell.
 
-The working tree is **2.0.2**, locked with standalone SteamShell in the
-self-contained `releases/2.0.2` bundle. Controller input, the Quick Menu,
+The working tree is **2.0.3**, locked with standalone SteamShell in the
+self-contained `releases/2.0.3` bundle. Controller input, the Quick Menu,
 Settings, display/HDR controls, RTSS integration, and notification-area control
 work inside Xbox FSE. The companion remains deliberately separate from the
-SteamShell Windows-shell application, whose working tree is also 2.0.2.
+SteamShell Windows-shell application, whose working tree is also 2.0.3.
 
 1.9.9 advances to settings schema 9 and consolidates the validated 0.1.21 feature
 line into the coordinated pre-2.0 version. Every companion-owned settings/editor
@@ -66,8 +66,8 @@ controls persist only for the open menu session; closing destroys the HWND so
 DWM cannot revive stale child surfaces after a fullscreen transition. The
 renderer and configurable Quick Menu accent were introduced in 0.1.17 with
 settings schema 4. The 0.1.18 changes advanced to schema 5 for the audit
-hardening described above; 1.9.9 shipped schema 9 and the 2.0.0 tree is at
-schema 18. Schema 10 added the opt-in
+hardening described above; 1.9.9 shipped schema 9 and the 2.0.3 tree is at
+schema 18. Schema 10 added
 `[RTSS] EnableElevatedFrameCapWrites` described under *Elevation*; schema 11
 retired the automatic-mouse exclusion mode, described under *Automatic mouse
 mode*; schema 12 moved the settings XFE shares with standalone SteamShell into
@@ -79,7 +79,7 @@ Schemas 14 to 18 are additions rather than moves, so nothing relocates. Schema 1
 added the `[Assist]` scoring keys that decide which window is the game; schema 15
 added a `[Logging]` section, which this product did not have at all; schema 16
 added `[Setup]`, the record of what this installation is and where it lives;
-schemas 17 and 18 added the elevated RTSS helper's opt-in keys and the companion's
+schemas 17 and 18 added the elevated helper keys and the companion's
 heartbeat interval. Nothing about behaviour changed in any of them, and existing
 files are migrated on first run.
 
@@ -445,28 +445,20 @@ On the Settings page the slider steps by 100 px/s. Driving it with the controlle
 works through the ordinary arrow-key navigation this window already uses — the
 track's own line size is what makes each press move a useful amount.
 
-## Elevation — deliberately not used
+## Elevation — isolated in a helper
 
-The companion runs at **normal privileges**, and the optional logon task never
-requests elevation. This was tested on hardware and rejected:
+The companion itself runs at **normal privileges**, and its logon task requests
+least privilege. It is never relaunched elevated:
 
 > While an elevated window of ours holds the foreground, Steam cannot inspect it,
 > so Steam never registers that it lost focus and keeps acting on controller
 > input underneath the Quick Menu. Both respond to the same press — and an A
 > press can activate something in Steam while Sleep or Shutdown is being chosen.
 
-**The accepted cost:** at normal privileges the companion cannot send input to,
-activate, or close windows owned by elevated applications. Controller mappings
-will silently do nothing while an elevated anti-cheat game is in front. If a
-mapping ever "stops working" in one specific game, check this first.
+The default-on elevated helper covers the operations Windows blocks across that
+boundary without elevating XFE's UI or presentation logic.
 
-The companion never relaunches itself elevated — that would raise a UAC prompt
-on every boot, since a non-elevated parent starts it.
-
-### The one exception: an optional RTSS helper, off by default
-
-There is exactly one place where normal privileges do not merely cost
-convenience but remove a feature outright, and it has its own opt-in switch.
+### Elevated input and RTSS helper — on by default
 
 `RTSSHooks64.dll` is loaded into the **calling** process, so RTSS's
 `SaveProfile` runs with this companion's token — and RTSS installs under
@@ -476,33 +468,21 @@ file, but it **cannot set the FPS value and cannot save a per-game profile**.
 The Frame Limit row reports itself read-only, which is accurate, and *Save Limit
 to Profile* reports unavailable.
 
-**Write the cap through an elevated helper** in Settings ▸ RTSS & Performance
-(`[RTSS] EnableElevatedFrameCapWrites`, **default off**) hands that one write to
-`SteamShell-Helper.exe`, a separate High-integrity process that performs the
-`LoadProfile` / `SetProfileProperty` / `SaveProfile` / `UpdateProfiles` sequence
-and nothing else.
+`SteamShell-Helper.exe` is a separate High-integrity process. It provides
+controller input over administrator windows and performs protected RTSS profile
+writes. `[Features] EnableElevatedInputHelper=true` controls whether the process
+runs; `[RTSS] EnableElevatedFrameCapWrites=true` independently controls whether
+frame-cap writes use it. Both are explicit, default-on generated settings.
 
-What turning it on costs, stated plainly:
+What running it costs, stated plainly:
 
-- **A UAC prompt when the companion starts.** Once per session. XFE does not get
-  the protected on-demand scheduled task standalone SteamShell uses to avoid
-  that prompt, and that is deliberate — such a task can be invoked directly with
-  `schtasks /run` without asking the companion to re-check anything, so it is
-  only safe below a protected ancestor chain covering the *whole* path. XFE's
-  own directory is user-writable by design, because it keeps its INI, learned
-  controller profiles and log beside its executable.
-- **A second process for the session**, at High integrity, which exits when the
-  companion does.
+- **A second process for the session**, at High integrity. Setup registers a
+  protected on-demand task so normal starts do not require a UAC prompt. If the
+  task is missing or stale, XFE attempts repair and falls back to explicit UAC.
+  The helper exits when the companion does.
 
 What it deliberately does **not** do:
 
-- **No elevated controller input.** UIPI blocks this companion's synthetic input
-  from elevated foreground windows, and the helper *could* have carried input as
-  it does for standalone SteamShell — but that implementation is XInput, and XFE
-  exists precisely because XInput is not enough for its users. A controller in
-  DirectInput mode is not an XInput device at all. Elevated input would have
-  worked only for people who did not need XFE, so it was left out. The accepted
-  cost above still applies in full.
 - **No window management.** Xbox FSE owns presentation.
 - **No UI.** The helper cannot show a message box; an uncaught error is logged
   and the process exits.
@@ -514,12 +494,11 @@ still readable, because an over-restrictive ACL is not protection either.
 Anything less and it is not launched, and Health Check says why.
 
 **The helper is installed by `SteamShell.exe` Setup in XFE mode**, into
-`%ProgramFiles%\SteamShell-XFE\bin`, and lies dormant there. XFE has no embedded
+`%ProgramFiles%\SteamShell-XFE\bin`, and registers its protected task. XFE has no embedded
 payload and no administrator rights, so it can never install or repair the
 helper itself; if it is missing or the wrong version, re-run Setup as an
-administrator. It is installed regardless of this setting so that turning the
-setting on later does not mean re-running an installer — a binary on disk is not
-an elevated process, and nothing starts it until you ask.
+administrator. Disabling the helper in Settings stops it without uninstalling
+the protected payload.
 
 It buys nothing where RTSS is installed somewhere this account can already
 write, or where you run the companion elevated yourself. In both cases the
@@ -876,8 +855,8 @@ exports. They are treated as optional: an RTSS build without them keeps Overlay
 and limiter control and shows the cap **read-only** rather than failing outright.
 
 Writing also needs a token that can write where RTSS is installed, which is a
-different problem with a different answer — see *The one exception: an optional
-RTSS helper* under **Elevation**. On a stock Program Files install an unelevated
+different problem with a different answer — see *Elevated input and RTSS helper*
+under **Elevation**. On a stock Program Files install an unelevated
 companion shows the same **read-only** cap for that reason rather than because
 of the RTSS build.
 
@@ -1271,16 +1250,19 @@ underlying script directly instead:
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Build-SteamShell.ps1
 ```
 
-It runs both validators, then validates each source with the installed 64-bit
-AutoHotkey v2 interpreter before compiling it. The companion is compiled to
-`build\SteamShell-XFE.exe` for embedding and verified at file version 2.0.2.0,
+It runs both PowerShell validators, the cross-product replay and controller
+profile simulation, then validates each source with the installed 64-bit
+AutoHotkey v2 interpreter before compiling it. After version verification it
+runs the compiled main executable's quiet self-test. The companion is compiled to
+`build\SteamShell-XFE.exe` for embedding and verified at file version 2.0.3.0,
 and `assets\SteamShell-XFE.ico` is applied automatically. A copy is left in
 `dist\SteamShell-XFE.exe` for developing the companion — pass `-NoXfeDist` to
 skip it.
 
 **That copy is not how you install XFE.** Setup Assistant inside
 `SteamShell.exe` registers the logon task, grants the companion's own directory
-to the signed-in user, and deploys the dormant elevated helper; a hand-copied
+to the signed-in user, deploys the elevated helper, and registers its protected
+on-demand task; a hand-copied
 executable gets none of that. Only `SteamShell.exe` is published to `current\`.
 
 From the workspace root, `Run-SteamShellValidation.cmd` runs the whole gate:

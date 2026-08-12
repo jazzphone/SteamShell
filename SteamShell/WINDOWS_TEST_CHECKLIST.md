@@ -1,7 +1,7 @@
-# SteamShell 1.9.9 Release Acceptance Test Checklist
+# SteamShell 2.0.3 Release Acceptance Test Checklist
 
-The working tree and coordinated locked source snapshot are 1.9.9. The release
-bundle is `releases/1.9.9/`.
+The working tree and coordinated locked source snapshot are 2.0.3. The release
+bundle is `releases/2.0.3/`.
 
 This development workspace cannot execute AutoHotkey, XInput, Windows display/audio APIs, or RTSS. Test the
 uncompiled script on the HTPC before replacing the current shell executable.
@@ -151,8 +151,9 @@ uncompiled script on the HTPC before replacing the current shell executable.
   the chosen directory, `HKCU\Software\SteamShell\Product` is `XFE`, a
   `SteamShell XFE Companion` logon task exists whose principal is
   **LeastPrivilege** and not HighestAvailable, Winlogon's `Shell` value is
-  unchanged, and no elevated helper was deployed. Sign out and back in; XFE must
-  start at normal integrity.
+  unchanged, and the elevated helper is deployed under
+  `%ProgramFiles%\SteamShell-XFE\bin` with its protected on-demand task. Sign out
+  and back in; XFE must start at normal integrity and the helper at High.
 - **Switch shell to XFE.** With SteamShell registered as the shell, apply XFE
   mode. Explorer must be restored, the helper task removed, and the next sign-in
   must reach a normal desktop with XFE running.
@@ -341,6 +342,9 @@ uncompiled script on the HTPC before replacing the current shell executable.
 - Disable auto-hide while the cursor is hidden and confirm the cursor becomes visible.
 - Open Controller Mapping and Full Settings Editor from the Quick Menu.
 - Press B in a Settings category to return to the Settings page, then press B again to return to the main page.
+- Before entering each submenu, select a row below the top. Press B to return and
+  confirm that exact row is still selected. Close and reopen the Quick Menu and
+  confirm the new session starts at the top of Main.
 
 ## Full Settings editor
 
@@ -1341,6 +1345,9 @@ endpoint selection uses Windows' PolicyConfig interface and needs confirmation o
 - Select Open Keyboard and confirm the Quick Menu disappears before the touch
   keyboard appears. Open Settings ▸ Windows Settings and confirm the same
   dismiss-before-launch behavior.
+- Hold A on **Open Keyboard** and **Open Full Settings Editor**. Confirm the
+  action waits for release, the destination then opens, and Steam does not react
+  to that same A press underneath the handoff.
 - Enable Mouse Mode without holding View/Back and confirm the right stick,
   scrolling, clicks, and configured mappings operate in shell mode. Restart and
   confirm the toggle remains On; turn it Off and confirm View/Back is required.
@@ -1410,7 +1417,7 @@ endpoint selection uses Windows' PolicyConfig interface and needs confirmation o
   Browse to the existing portable directory and select Portable. Confirm the
   summary says it is an upgrade, the existing INI is byte-preserved apart from
   intentional schema/setup-state changes, both EXEs are replaced, the helper
-  reports file version 1.9.9.4, and the registered shell path is unchanged.
+  reports file version 2.0.3.1, and the registered shell path is unchanged.
 - For that disposable upgrade, confirm the pending/in-progress `SteamShell`
   sidecar beside the separate updater EXE is permanently removed only after
   target verification. Confirm the target installation's `SteamShell` sidecar
@@ -1481,7 +1488,7 @@ on **every** apply, because the logon task starts the companion at sign-in.
   handed XFE an administrator token — this is the check that catches that.
 - With a helper resident from an earlier unelevated session, apply Setup.
   Confirm the helper is closed, `bin` is hardened, the payload is replaced, and
-  `SteamShell-Helper.exe` reports file version 1.9.9.4. Confirm the *order* in
+  `SteamShell-Helper.exe` reports file version 2.0.3.1. Confirm the *order* in
   the log: the stop precedes the harden.
 - **Foreign process refusal.** Copy an unrelated executable over
   `SteamShell-XFE.exe`'s path and run it as a different user (or from a
@@ -1539,12 +1546,15 @@ and returns the PowerShell build's failure/success exit code.
 
 The compiled executable is written to `dist\SteamShell.exe`.
 The build also produces two intermediates in `build\` and embeds both:
-`SteamShell-Helper.exe`, verified at version 1.9.9.4, and `SteamShell-XFE.exe`,
-verified at 1.9.9.0. Confirm the main EXE reports file version 1.9.9.0. Neither
+`SteamShell-Helper.exe`, verified at version 2.0.3.1, and `SteamShell-XFE.exe`,
+verified at 2.0.3.0. Confirm the main EXE reports file version 2.0.3.0. Neither
 intermediate is a distribution file. A development copy of the companion is also
 left at `dist\SteamShell-XFE.exe`; it is not published, because installing XFE
 is Setup Assistant's job.
 Confirm the build output identifies `AutoHotkey64.exe`; do not use `AutoHotkey32.exe` as the Ahk2Exe Base File.
+- Confirm both PowerShell validators, `Replay-Validation.py`, and
+  `Test-ControllerProfiles.py` pass, then confirm the compiled quiet self-test
+  runs automatically and returns exit code 0.
 - Confirm the compiled executable and notification-area entry use the standalone
   charcoal/cyan SteamShell “S” controller icon.
 - Right-click the notification-area icon and verify Quick Menu, Settings,
@@ -1568,22 +1578,20 @@ and stopped there, with 30/40/60/90/120 unreachable in that direction.
 
 ## One helper payload, two products
 
-`SteamShell-Helper.exe` now serves XFE as well, in a strictly narrower shape.
+`SteamShell-Helper.exe` serves XFE as well, with geometry disabled while input
+and RTSS request handling remain enabled.
 The standalone behaviour must be **unchanged**, and that is what these steps
 check; the XFE half is in `WINDOWS_TEST_CHECKLIST-XFE.md`, beside this file.
 
-**Unrun.** The `--product` argument, the input gate, and the XFE deployment
-inside Setup Assistant are all new.
-
 - After a clean Setup in shell mode, open the registered task in Task Scheduler
   and confirm its arguments begin with `--product=standalone`.
-- Confirm `SteamShell-Helper.exe` reports file version **1.9.9.4** and that the
-  main EXE still reports 1.9.9.0.
+- Confirm `SteamShell-Helper.exe` reports file version **2.0.3.1** and that the
+  main EXE still reports 2.0.3.0.
 - Confirm the helper's own log line names `product standalone, input on,
   geometry on`.
 - With Task Manager focused, confirm every builtin mapping still fires exactly
   once and the on-screen keyboard is still reachable. A helper that had silently
-  taken the XFE product would do no input at all.
+  taken the XFE product would still provide input but would disable geometry.
 - Confirm elevated windows are still centred and maximised.
 - Confirm the frame cap and per-game profile save still work from a standard-user
   session, and that the file on disk changes.
