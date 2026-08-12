@@ -1348,11 +1348,12 @@ the two in this area by hand.
 - Tick it, Save & Apply, and confirm the INI now reads `true`.
 - Repeat for **Write the cap through an elevated helper**.
 
-## Settings window: flowing rows and a scrolling viewport
+## Settings window: flowing rows and a native scrolling viewport
 
-**Unrun.** Every page was rebuilt and the window gained a scrolling content area
-it never had. A page that draws over the title, a page that cannot be scrolled to
-the bottom, or a control left behind by the scroll are all new failure modes.
+**Unrun.** Page controls now live on one clipped child canvas shared with the
+standalone Settings and Setup Assistant implementations. A page that draws over
+the title, loses keyboard focus, cannot reach the bottom, or moves its fixed
+chrome is a failure.
 
 ### It still opens and looks right
 
@@ -1379,8 +1380,11 @@ the bottom, or a control left behind by the scroll are all new failure modes.
   **list** must scroll, not the page.
 - Scroll one page down, switch to another category and back, and confirm it
   returns to where you left it.
-- Watch for trails or half-drawn controls while dragging the thumb quickly. That
-  is what the redraw batching prevents.
+- Drag the thumb quickly on a busy page. Confirm the content moves smoothly with
+  no white flash, trails, or half-drawn controls, while the title, sidebar,
+  scrollbar and footer remain stationary.
+- Tab through controls above and below the fold and activate a button after
+  scrolling. Confirm keyboard focus crosses the child viewport normally.
 
 ### Rows are where they should be
 
@@ -1407,6 +1411,16 @@ even though the keys did not change.
 - Confirm the Record… buttons on every shortcut row record into the right field.
 - Confirm Browse… on the RTSS path row fills the RTSS executable field.
 - Confirm all twelve Advanced buttons still do what their labels say.
+
+### Live Log while reading history
+
+- Open Live Log with **Follow newest** checked and confirm new entries remain at
+  the top.
+- Scroll several lines into history. Confirm **Follow newest** clears
+  automatically and each refresh preserves the same visible log entry and text
+  selection rather than returning to the top.
+- Re-check **Follow newest** and confirm the view immediately returns to the
+  newest entry. Clear Log and confirm following is restored.
 
 ## Which window is the game
 

@@ -299,6 +299,27 @@ uncompiled script on the HTPC before replacing the current shell executable.
 - Make the settings file read-only, attempt a Settings-editor save, and confirm the original file remains intact and
   the editor reports the failure.
 
+## Native scrolling surfaces
+
+- Open Full Settings, choose a category taller than the viewport, and drag the
+  scrollbar thumb rapidly. Confirm the page moves without flashing, trails, or
+  controls repainting one by one; the title, category list and footer stay fixed.
+- Scroll down, switch categories and return. Confirm the category resumes at its
+  remembered offset. Resize the window at both the top and bottom of a page and
+  confirm the offset clamps cleanly and the last row remains reachable.
+- Tab across controls above and below the fold and activate buttons, checkboxes,
+  dropdowns and list editors after scrolling. Keyboard focus must cross the child
+  viewport and nested lists must consume their own wheel input.
+- Open Setup Assistant, scroll from the first product choice through **Apply
+  Setup**, resize it, and exercise controls throughout. Confirm the content is
+  clipped beneath one fixed scrollbar, retains an even inset from the left/top
+  window edges, leaves no duplicated or garbled text while scrolling quickly,
+  and no named field or button stops working.
+- Open Live Log with **Follow newest** checked, generate entries, then scroll into
+  history. Confirm refresh keeps the same logical entry visible and automatically
+  clears **Follow newest**. Re-check it to jump to the newest entry; Clear Log
+  must restore follow mode.
+
 ## Quick Menu settings
 
 - Confirm the main Quick Menu matches XFE's borderless panel: no DWM outline, caption edge, or backdrop frame.

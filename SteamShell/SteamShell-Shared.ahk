@@ -4537,40 +4537,256 @@ SaveRtssFrameLimitToProfile() {
 ; ==============================================================================
 ; Settings scrollbar
 ; ==============================================================================
-; Scroll maths is scroll maths. The two copies read 0.82 and differed only in the
-; name of the scrollbar global and where the viewport bounds came from -- two
-; globals in the shell, SettingsLayout() in the companion. Neither is a reason to
-; keep the SetScrollInfo call twice.
+; A real scroll host: the parent window keeps its header, navigation, footer and
+; scrollbar stationary; a clipped child viewport contains one larger child
+; canvas, and every form control belongs to that canvas. Scrolling is therefore
+; one canvas move rather than a Move/Visible pass over every control. A host
+; containing transparent controls may request one bounded redraw after the move.
 ;
-; Found by comparing six-line BLOCKS rather than whole functions: the names differ
-; and the whole-function score sat below the cross-name threshold, so a
-; function-level scan could not see it.
+; The canvas deliberately retains the parent window's logical coordinate
+; system. It is positioned at -originX/-originY inside the viewport, so existing
+; flowing builders can keep their measured x/y coordinates and the layout audit
+; can keep comparing the same numbers. This turns the scrolling foundation over
+; without rewriting the Settings UI that sits on it.
+SharedScrollHostCreate(parentGui, x, y, width, height,
+        originX := 0, originY := 0, lineStep := 68,
+        contentMarginX := 0, contentMarginY := 0,
+        redrawAfterMove := false) {
+    childOptions := "-Caption -Border -SysMenu +E0x00010000"
+    viewportGui := Gui(
+        "+Parent" parentGui.Hwnd " " childOptions " +0x02000000")
+    ; Settings benefits from WS_CLIPCHILDREN and paints cleanly while moving.
+    ; Setup's group boxes/statics depend on the canvas background erasing their
+    ; previous pixels, so its explicitly batched redraw path leaves that style
+    ; off the content child.
+    contentGui := Gui(
+        "+Parent" viewportGui.Hwnd " " childOptions
+        . (redrawAfterMove ? "" : " +0x02000000"))
+    viewportGui.MarginX := 0
+    viewportGui.MarginY := 0
+    contentGui.MarginX := Max(0, contentMarginX)
+    contentGui.MarginY := Max(0, contentMarginY)
+    try {
+        if (parentGui.BackColor != "") {
+            viewportGui.BackColor := parentGui.BackColor
+            contentGui.BackColor := parentGui.BackColor
+        }
+    }
+    return Map(
+        "parentGui", parentGui,
+        "viewportGui", viewportGui,
+        "contentGui", contentGui,
+        "scrollBar", "",
+        "x", x, "y", y, "width", Max(1, width), "height", Max(1, height),
+        "originX", originX, "originY", originY,
+        "extentBottom", originY + Max(1, height),
+        "offset", 0, "maxOffset", 0,
+        "lineStep", Max(1, lineStep),
+        "redrawAfterMove", redrawAfterMove,
+        "shown", false, "activeKey", "")
+}
 
-SettingsUpdateScrollBar(offset, maxOffset) {
-    scrollBar := ProductSettingsScrollBar()
+
+SharedScrollHostContentGui(host) {
+    return IsObject(host) && host.Has("contentGui") ? host["contentGui"] : ""
+}
+
+
+SharedScrollHostAttachScrollBar(host, scrollBar) {
+    if !IsObject(host)
+        return
+    host["scrollBar"] := scrollBar
+    SharedScrollHostUpdateScrollBar(host)
+}
+
+
+SharedScrollHostSetViewport(host, x, y, width, height) {
+    if !IsObject(host)
+        return
+    host["x"] := x
+    host["y"] := y
+    host["width"] := Max(1, width)
+    host["height"] := Max(1, height)
+    host["maxOffset"] := Max(
+        0, host["extentBottom"] - (host["originY"] + host["height"]))
+    host["offset"] := ClampInt(host["offset"], 0, host["maxOffset"])
+    SharedScrollHostPlace(host)
+    SharedScrollHostUpdateScrollBar(host)
+}
+
+
+SharedScrollHostSetExtent(host, extentBottom) {
+    if !IsObject(host)
+        return
+    host["extentBottom"] := Max(host["originY"] + 1, extentBottom)
+    host["maxOffset"] := Max(
+        0, host["extentBottom"] - (host["originY"] + host["height"]))
+    host["offset"] := ClampInt(host["offset"], 0, host["maxOffset"])
+    SharedScrollHostPlace(host)
+    SharedScrollHostUpdateScrollBar(host)
+}
+
+
+SharedScrollHostSetOffset(host, offset) {
+    if !IsObject(host)
+        return 0
+    host["offset"] := ClampInt(offset, 0, host["maxOffset"])
+    SharedScrollHostPlace(host)
+    SharedScrollHostUpdateScrollBar(host)
+    return host["offset"]
+}
+
+
+SharedScrollHostScrollBy(host, pixels) {
+    if !IsObject(host)
+        return 0
+    return SharedScrollHostSetOffset(host, host["offset"] + pixels)
+}
+
+
+SharedScrollHostEnsureVisible(host, logicalY, controlHeight) {
+    if !IsObject(host)
+        return 0
+    visibleTop := host["originY"] + host["offset"]
+    visibleBottom := visibleTop + host["height"]
+    offset := host["offset"]
+    if (logicalY < visibleTop)
+        offset := logicalY - host["originY"]
+    else if (logicalY + controlHeight > visibleBottom)
+        offset := logicalY + controlHeight - host["originY"] - host["height"]
+    return SharedScrollHostSetOffset(host, offset)
+}
+
+
+SharedScrollHostTrackPosition(host) {
+    if !IsObject(host) || !host.Has("scrollBar")
+        return 0
+    scrollBar := host["scrollBar"]
+    if !IsObject(scrollBar)
+        return 0
+    scrollInfo := Buffer(28, 0)
+    NumPut("UInt", 28, scrollInfo, 0)
+    NumPut("UInt", 0x10, scrollInfo, 4) ; SIF_TRACKPOS
+    try {
+        if DllCall("User32\GetScrollInfo",
+            "Ptr", scrollBar.Hwnd, "Int", 2, "Ptr", scrollInfo)
+            return NumGet(scrollInfo, 24, "Int")
+    }
+    return host["offset"]
+}
+
+
+SharedScrollHostHandleVerticalScroll(host, wParam) {
+    if !IsObject(host)
+        return 0
+    scrollCode := wParam & 0xFFFF
+    offset := host["offset"]
+    pageStep := Max(host["lineStep"] * 2, host["height"] - host["lineStep"])
+    switch scrollCode {
+        case 0: offset -= host["lineStep"] ; SB_LINEUP
+        case 1: offset += host["lineStep"] ; SB_LINEDOWN
+        case 2: offset -= pageStep ; SB_PAGEUP
+        case 3: offset += pageStep ; SB_PAGEDOWN
+        case 4, 5: offset := SharedScrollHostTrackPosition(host)
+        case 6: offset := 0 ; SB_TOP
+        case 7: offset := host["maxOffset"] ; SB_BOTTOM
+        default: return host["offset"]
+    }
+    return SharedScrollHostSetOffset(host, offset)
+}
+
+
+SharedScrollHostPlace(host) {
+    if !IsObject(host)
+        return
+    viewportGui := host["viewportGui"]
+    contentGui := host["contentGui"]
+    canvasWidth := Max(1, host["originX"] + host["width"])
+    canvasHeight := Max(
+        host["originY"] + host["height"], host["extentBottom"])
+    canvasX := -host["originX"]
+    canvasY := -host["originY"] - host["offset"]
+    if !host["shown"] {
+        contentGui.Show(
+            "NA x" canvasX " y" canvasY
+            . " w" canvasWidth " h" canvasHeight)
+        viewportGui.Show(
+            "NA x" host["x"] " y" host["y"]
+            . " w" host["width"] " h" host["height"])
+        host["shown"] := true
+        return
+    }
+    try viewportGui.Move(
+        host["x"], host["y"], host["width"], host["height"])
+    if host["redrawAfterMove"] {
+        SharedScrollHostSetRedraw(host, false)
+        try contentGui.Move(canvasX, canvasY, canvasWidth, canvasHeight)
+        SharedScrollHostSetRedraw(host, true)
+        SharedScrollHostRedraw(host)
+        return
+    }
+    try contentGui.Move(canvasX, canvasY, canvasWidth, canvasHeight)
+}
+
+
+; Batch the opt-in canvas move behind WM_SETREDRAW. Disabling both levels keeps
+; Windows from preserving and presenting intermediate child-window pixels; the
+; one redraw below then composes a clean viewport from the canvas background up.
+SharedScrollHostSetRedraw(host, enabled) {
+    if !IsObject(host)
+        return
+    viewportGui := host["viewportGui"]
+    contentGui := host["contentGui"]
+    guiOrder := enabled
+        ? [contentGui, viewportGui]
+        : [viewportGui, contentGui]
+    for _, guiObj in guiOrder
+        try DllCall(
+            "User32\SendMessageW", "Ptr", guiObj.Hwnd,
+            "UInt", 0x000B, "Ptr", enabled ? 1 : 0,
+            "Ptr", 0, "Ptr") ; WM_SETREDRAW
+}
+
+
+; Group boxes and wrapped static text use parent-background painting. Windows can
+; preserve their old pixels when their entire child canvas moves, even though
+; ordinary Settings controls repaint cleanly. Hosts that contain those controls
+; opt into one bounded redraw of the visible child tree after the single move.
+SharedScrollHostRedraw(host) {
+    if !IsObject(host) || !host.Has("viewportGui")
+        return
+    viewportGui := host["viewportGui"]
+    try DllCall(
+        "User32\RedrawWindow", "Ptr", viewportGui.Hwnd,
+        "Ptr", 0, "Ptr", 0,
+        "UInt", 0x0185, ; INVALIDATE | ERASE | ALLCHILDREN | UPDATENOW
+        "Int")
+}
+
+
+SharedScrollHostUpdateScrollBar(host) {
+    if !IsObject(host) || !host.Has("scrollBar")
+        return
+    scrollBar := host["scrollBar"]
     if !IsObject(scrollBar)
         return
-    if (maxOffset <= 0) {
+    if (host["maxOffset"] <= 0) {
         try scrollBar.Visible := false
         return
     }
-
-    viewportHeight := ProductSettingsViewportHeight()
-    contentHeight := viewportHeight + maxOffset
+    contentHeight := host["height"] + host["maxOffset"]
     scrollInfo := Buffer(28, 0)
     NumPut("UInt", 28, scrollInfo, 0)
     NumPut("UInt", 0x7, scrollInfo, 4) ; SIF_RANGE | SIF_PAGE | SIF_POS
     NumPut("Int", 0, scrollInfo, 8)
     NumPut("Int", contentHeight - 1, scrollInfo, 12)
-    NumPut("UInt", viewportHeight, scrollInfo, 16)
-    NumPut("Int", offset, scrollInfo, 20)
-    try DllCall("User32\SetScrollInfo"
-        , "Ptr", scrollBar.Hwnd
-        , "Int", 2 ; SB_CTL
-        , "Ptr", scrollInfo
-        , "Int", true)
+    NumPut("UInt", host["height"], scrollInfo, 16)
+    NumPut("Int", host["offset"], scrollInfo, 20)
+    try DllCall("User32\SetScrollInfo",
+        "Ptr", scrollBar.Hwnd, "Int", 2, "Ptr", scrollInfo, "Int", true)
     try scrollBar.Visible := true
 }
+
 
 ; ==============================================================================
 ; Quick Menu title
@@ -4915,8 +5131,8 @@ EnsureRtssRunning() {
 ; Functions that were the same routine under two names
 ; ==============================================================================
 ; Each existed in both trees spelled differently -- SetStatus against
-; ShowNotification, GuiSafeLabel against GuiLiteralText, SettingsRepaint against
-; SettingsEditorRepaint -- so no check could see them. The fingerprint gate and
+; ShowNotification and GuiSafeLabel against GuiLiteralText -- so no check could
+; see them. The fingerprint gate and
 ; DIVERGENT_FUNCTIONS.txt both compare functions BY NAME, which makes a rename
 ; the one form of duplication this project was structurally blind to.
 ;
@@ -5505,48 +5721,6 @@ SharedTaskSwitcherWindows(maxAgeMs := 0) {
             "legacy", legacy))
     }
     return windows
-}
-
-SettingsEditorRepaint() {
-    global SettingsGui
-    if !IsSet(SettingsGui) || !IsObject(SettingsGui)
-        return
-    ; RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW
-    try DllCall("User32\RedrawWindow"
-        , "Ptr", SettingsGui.Hwnd
-        , "Ptr", 0
-        , "Ptr", 0
-        , "UInt", 0x0185
-        , "Int")
-}
-
-SettingsEditorSetRedraw(enabled) {
-    global SettingsGui
-    if !IsSet(SettingsGui) || !IsObject(SettingsGui)
-        return
-    try DllCall("User32\SendMessageW"
-        , "Ptr", SettingsGui.Hwnd
-        , "UInt", 0x000B ; WM_SETREDRAW
-        , "Ptr", enabled ? 1 : 0
-        , "Ptr", 0
-        , "Ptr")
-}
-
-SettingsEditorGetScrollTrackPosition() {
-    scrollBar := ProductSettingsScrollBar()
-    if !IsObject(scrollBar)
-        return 0
-    scrollInfo := Buffer(28, 0)
-    NumPut("UInt", 28, scrollInfo, 0)
-    NumPut("UInt", 0x10, scrollInfo, 4) ; SIF_TRACKPOS
-    try {
-        if DllCall("User32\GetScrollInfo"
-            , "Ptr", scrollBar.Hwnd
-            , "Int", 2 ; SB_CTL
-            , "Ptr", scrollInfo)
-            return NumGet(scrollInfo, 24, "Int")
-    }
-    return 0
 }
 
 GetRtssMenuStatus() {
@@ -7616,17 +7790,16 @@ SettingsLayout() {
 ; the way the ExeList rows do, and the boundary stays as written rather than
 ; being widened to admit it.
 ;
-; The two Settings windows are separate implementations -- ProductSettingsScrollBar
-; records why -- and separate implementations of the same screen drift. They had:
+; The two Settings windows keep product-specific page composition, while their
+; rows, builders, chrome, layout audit and native scroll host are shared. Before
+; that consolidation they had:
 ; rows one product offered and the other did not, the same setting under
 ; different words, and a backend row whose comment still said the shell had no
 ; backend to choose. Every one of those was found by looking, which is the
 ; problem.
 ;
-; This is the CONTENT half. Each tree still draws the rows with its own builders;
-; it just no longer decides what they are. The drawing halves are the next step,
-; and doing content first is what makes that one checkable: the same table has to
-; produce the same rows before and after.
+; This table is the content half; shared builders draw it into a shared child
+; scroll host, and each product supplies the notes and actions unique to it.
 ;
 ; Section and key are given ONCE and both the read and the write derive from
 ; them. That is the shell's model and it is the better one: the companion names a
@@ -10921,7 +11094,7 @@ SettingsRefreshSliderReadouts() {
 ; Registered as a normal field with type "integer", so save, dirty-tracking,
 ; defaults and category reset all treat it exactly like the edit box it replaces
 ; and neither product needed a new save path. The registered control is the
-; SLIDER, so ProductSettingsScrollBar and the focus list see one control per row.
+; SLIDER, so the shared page registry and focus list see one control per row.
 ;
 ; The value readout is a plain Text, deliberately not an Edit: two writable views
 ; of one setting is a synchronisation problem, and the Quick Menu already offers
@@ -11639,88 +11812,42 @@ SettingsAddNote(guiObj, category, text, &y, height := 34) {
 }
 
 
-; How far a page can scroll, and the pass that shows one page at its offset.
-;
-; Stage 4 of matching the two Settings windows, and the same move
-; SharedAuditSettingsLayout already made: the state comes in as PARAMETERS
-; rather than being read from six globals, which is the entire reason these
-; could not be one function before. Both products kept their categories, their
-; per-category control lists, their recorded positions and their per-category
-; offsets in differently-named globals, and that -- plus where contentBottom
-; comes from -- was the whole difference between two copies of one algorithm.
-;
-; The shell's content bottom MOVES, because its window is resizable and its
-; footer follows the height; the companion's is fixed in SettingsLayout. That is
-; a number, so it is an argument.
+; The pass that shows one page at its remembered offset.
 ;
 ; Maps are objects, so writing the clamped offset back through `offsets` updates
 ; the caller's own Map. That is deliberate: the clamp belongs with the scroll
 ; arithmetic, not repeated either side of it.
-SharedSettingsMaxScroll(controlsByCategory, positions, category, contentBottom) {
-    maxBottom := contentBottom
-    if !controlsByCategory.Has(category)
-        return 0
-    for _, control in controlsByCategory[category] {
-        if !positions.Has(control.Hwnd)
-            continue
-        pos := positions[control.Hwnd]
-        if pos["scrollable"]
-            maxBottom := Max(maxBottom, pos["y"] + pos["h"])
-    }
-    return Max(0, maxBottom - contentBottom)
-}
-
-
-; Shows one category at its current scroll offset and hides every other.
-;
-; Redraw is suspended for the whole pass. Without it Windows repaints between the
-; Move and the Visible change during thumb tracking, which leaves trails and
-; half-drawn controls -- the same reason the Quick Menu composes its pages with
-; redraw suspended.
-;
-; A control is hidden rather than clipped when it does not fit the viewport,
-; because one moved above the content top would otherwise draw over the page
-; title and the category list.
+; Shows one category at its remembered offset. Category switches still change
+; control visibility once; ordinary scrolling never touches an individual
+; control. The child viewport clips partially visible rows naturally, and the
+; canvas move below is the only geometry change in a scroll tick.
 SharedApplySettingsCategoryLayout(controlsByCategory, positions, offsets,
-        activeCategory, contentTop, contentBottom) {
-    SettingsEditorSetRedraw(false)
-    try {
-        offset := offsets.Has(activeCategory) ? offsets[activeCategory] : 0
-        maxOffset := SharedSettingsMaxScroll(
-            controlsByCategory, positions, activeCategory, contentBottom)
-        offset := ClampInt(offset, 0, maxOffset)
-        offsets[activeCategory] := offset
+        activeCategory, contentBottom, scrollHost) {
+    if !IsObject(scrollHost)
+        return
+    offset := offsets.Has(activeCategory) ? offsets[activeCategory] : 0
+    maxBottom := contentBottom
+    if controlsByCategory.Has(activeCategory) {
+        for _, control in controlsByCategory[activeCategory] {
+            if !positions.Has(control.Hwnd)
+                continue
+            pos := positions[control.Hwnd]
+            if pos["scrollable"]
+                maxBottom := Max(maxBottom, pos["y"] + pos["h"])
+        }
+    }
 
+    if (scrollHost["activeKey"] != activeCategory) {
         for category, controls in controlsByCategory {
             isActive := category = activeCategory
-            for _, control in controls {
-                if !isActive {
-                    try control.Visible := false
-                    continue
-                }
-                if !positions.Has(control.Hwnd) {
-                    try control.Visible := true
-                    continue
-                }
-                pos := positions[control.Hwnd]
-                if !pos["scrollable"] {
-                    try control.Move(pos["x"], pos["y"], pos["w"], pos["h"])
-                    try control.Visible := true
-                    continue
-                }
-                newY := pos["y"] - offset
-                inside := newY >= contentTop
-                    && newY + pos["h"] <= contentBottom
-                try control.Move(pos["x"], newY, pos["w"], pos["h"])
-                try control.Visible := inside
-            }
+            for _, control in controls
+                try control.Visible := isActive
         }
-
-        SettingsUpdateScrollBar(offset, maxOffset)
-    } finally {
-        SettingsEditorSetRedraw(true)
-        SettingsEditorRepaint()
+        scrollHost["activeKey"] := activeCategory
     }
+
+    SharedScrollHostSetExtent(scrollHost, maxBottom)
+    offsets[activeCategory] := SharedScrollHostSetOffset(scrollHost, offset)
 }
 
 
@@ -12004,6 +12131,119 @@ LiveLogRefreshIntervalMs() {
 }
 
 
+; Replacing the complete Value of a multiline Edit resets its selection and
+; first visible line. Both products use the same Live Log viewer, and a refresh
+; arriving while somebody reads an older entry must not throw them back to the
+; newest line. These helpers preserve a logical line anchor rather than merely
+; the old numeric line: new log entries are prepended, so line 40 may become
+; line 43 while still representing the exact text the user was reading.
+SharedTextViewLineOffset(lines, lineIndex) {
+    offset := 0
+    Loop Min(Max(0, lineIndex), lines.Length)
+        offset += StrLen(lines[A_Index]) + 2 ; Edit controls expose CRLF text.
+    return offset
+}
+
+
+SharedTextViewAnchorLine(oldLines, newLines, oldLineIndex) {
+    if (oldLines.Length = 0 || newLines.Length = 0)
+        return 0
+    oldLineIndex := ClampInt(oldLineIndex, 0, oldLines.Length - 1)
+    anchor := oldLines[oldLineIndex + 1]
+    nextAnchor := oldLineIndex + 2 <= oldLines.Length
+        ? oldLines[oldLineIndex + 2] : ""
+    fallback := -1
+    for index, line in newLines {
+        if !(line == anchor)
+            continue
+        if (fallback < 0)
+            fallback := index - 1
+        if (nextAnchor = ""
+            || (index < newLines.Length && newLines[index + 1] == nextAnchor))
+            return index - 1
+    }
+    return fallback >= 0
+        ? fallback
+        : ClampInt(oldLineIndex, 0, newLines.Length - 1)
+}
+
+
+SharedReplaceTextPreservingView(ctrl, newText, followTop := false) {
+    if !IsObject(ctrl)
+        return false
+    ; A native Edit stores line endings as CRLF even when FileRead/GetLastLines
+    ; handed us LF. Compare and measure the representation the control actually
+    ; uses, or an unchanged log is needlessly replaced every second and every
+    ; selection offset after the first line is short by one character per line.
+    normalizedText := StrReplace(newText, "`r`n", "`n")
+    normalizedText := StrReplace(normalizedText, "`r", "`n")
+    normalizedText := StrReplace(normalizedText, "`n", "`r`n")
+    oldText := ctrl.Value
+    if (oldText == normalizedText) {
+        if followTop
+            SharedTextViewScrollToLine(ctrl, 0)
+        return false
+    }
+
+    hwnd := ctrl.Hwnd
+    oldFirstLine := 0
+    try oldFirstLine := DllCall(
+        "User32\SendMessageW", "Ptr", hwnd,
+        "UInt", 0x00CE, "Ptr", 0, "Ptr", 0, "Ptr") ; EM_GETFIRSTVISIBLELINE
+    selectionStartBuffer := Buffer(4, 0)
+    selectionEndBuffer := Buffer(4, 0)
+    try DllCall(
+        "User32\SendMessageW", "Ptr", hwnd,
+        "UInt", 0x00B0, ; EM_GETSEL
+        "Ptr", selectionStartBuffer.Ptr, "Ptr", selectionEndBuffer.Ptr, "Ptr")
+    selectionStart := NumGet(selectionStartBuffer, 0, "UInt")
+    selectionEnd := NumGet(selectionEndBuffer, 0, "UInt")
+
+    oldLines := StrSplit(StrReplace(oldText, "`r"), "`n")
+    newLines := StrSplit(StrReplace(normalizedText, "`r"), "`n")
+    targetLine := followTop ? 0
+        : SharedTextViewAnchorLine(oldLines, newLines, oldFirstLine)
+    oldAnchorOffset := SharedTextViewLineOffset(oldLines, oldFirstLine)
+    newAnchorOffset := SharedTextViewLineOffset(newLines, targetLine)
+    selectionShift := newAnchorOffset - oldAnchorOffset
+
+    ctrl.Value := normalizedText
+    newLength := StrLen(normalizedText)
+    selectionStart := ClampInt(selectionStart + selectionShift, 0, newLength)
+    selectionEnd := ClampInt(selectionEnd + selectionShift, 0, newLength)
+    try DllCall(
+        "User32\SendMessageW", "Ptr", hwnd,
+        "UInt", 0x00B1, ; EM_SETSEL
+        "Ptr", selectionStart, "Ptr", selectionEnd, "Ptr")
+    SharedTextViewScrollToLine(ctrl, targetLine)
+    return true
+}
+
+
+SharedTextViewScrollToLine(ctrl, lineIndex) {
+    if !IsObject(ctrl)
+        return
+    hwnd := ctrl.Hwnd
+    currentLine := 0
+    try currentLine := DllCall(
+        "User32\SendMessageW", "Ptr", hwnd,
+        "UInt", 0x00CE, "Ptr", 0, "Ptr", 0, "Ptr") ; EM_GETFIRSTVISIBLELINE
+    delta := Max(0, lineIndex) - currentLine
+    if delta
+        try DllCall(
+            "User32\SendMessageW", "Ptr", hwnd,
+            "UInt", 0x00B6, "Ptr", 0, "Int", delta, "Ptr") ; EM_LINESCROLL
+}
+
+
+LiveLogFollowNewestChanged(ctrl, *) {
+    global LiveLogGui
+    if !ctrl.Value || !IsSet(LiveLogGui)
+        return
+    try SharedTextViewScrollToLine(LiveLogGui["detLogView"], 0)
+}
+
+
 ShowLiveLogWindow(*) {
     global LiveLogGui, LogPath
     ProductCaptureLastRealForeground()
@@ -12039,6 +12279,9 @@ ShowLiveLogWindow(*) {
         LiveLogGui.AddButton("x+10 yp w110", "Open Log").OnEvent("Click", LiveLogOpenFile)
         LiveLogGui.AddButton("x+10 yp w110", "Clear Log").OnEvent("Click", LiveLogClear)
         LiveLogGui.AddButton("x+10 yp w110", "Close").OnEvent("Click", (*) => HideLiveLogWindow())
+        followNewest := LiveLogGui.AddCheckbox(
+            "x+18 yp+7 w150 Checked vllFollowNewest", "Follow newest")
+        followNewest.OnEvent("Click", LiveLogFollowNewestChanged)
 
         LiveLogGui.OnEvent("Close", (*) => HideLiveLogWindow())
         LiveLogGui.OnEvent("Escape", (*) => HideLiveLogWindow())
@@ -12116,7 +12359,21 @@ LiveLogRefresh(*) {
     } catch {
         text := "(unable to read log)"
     }
-    try LiveLogGui["detLogView"].Value := GetLastLines(text, MAX_LINES, true)
+    try {
+        view := LiveLogGui["detLogView"]
+        followNewest := LiveLogGui["llFollowNewest"].Value = 1
+        firstVisibleLine := DllCall(
+            "User32\SendMessageW", "Ptr", view.Hwnd,
+            "UInt", 0x00CE, "Ptr", 0, "Ptr", 0, "Ptr")
+        ; Scrolling away is an explicit request to read history. Stop following
+        ; without stopping refresh; the logical anchor is preserved below.
+        if (followNewest && firstVisibleLine > 0) {
+            LiveLogGui["llFollowNewest"].Value := 0
+            followNewest := false
+        }
+        SharedReplaceTextPreservingView(
+            view, GetLastLines(text, MAX_LINES, true), followNewest)
+    }
     for index, line in ProductLiveLogStatusLines() {
         try LiveLogGui["llstat" index].Text := line
     }
@@ -12143,9 +12400,11 @@ LiveLogOpenFile(*) {
 
 
 LiveLogClear(*) {
-    global LogPath
+    global LiveLogGui, LogPath
     try FileDelete(LogPath)
     try FileAppend("", LogPath, "UTF-8")
+    if IsSet(LiveLogGui)
+        try LiveLogGui["llFollowNewest"].Value := 1
     LiveLogRefresh()
 }
 

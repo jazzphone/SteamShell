@@ -516,6 +516,7 @@ global SettingsCategoryControls := Map()
 global SettingsControlPositions := Map()
 global SettingsCategoryOffsets := Map()
 global SettingsScrollBar := 0
+global SettingsScrollHost := ""
 ; The viewport, from SettingsWindowGeometry when the window is built. It was
 ; SettingsLayout's fixed 190/600 while the frame was a fixed 660 tall; the
 ; frame sizes itself to the work area now, so the bounds move with it.
@@ -4893,6 +4894,7 @@ ShowSettings(*) {
     global SettingsStartupListView, SettingsStartupCommandEdit
     global SettingsStartupSelectedSlot
     global SettingsControlPositions, SettingsCategoryOffsets, SettingsScrollBar
+    global SettingsScrollHost
     ; The Launcher Cleanup lists are built from what this product currently
     ; holds, not from a second read of the INI: LoadSettings has already applied
     ; the moved-section rule to LauncherProcesses, and re-reading here would have
@@ -4948,6 +4950,14 @@ ShowSettings(*) {
         SettingsCategoryNames(), settingsGeometry, SettingsCategoryChanged)
     SettingsContentTop := settingsGeometry["contentTop"]
     SettingsContentBottom := settingsGeometry["contentBottom"]
+    layout := SettingsLayout()
+    SettingsScrollHost := SharedScrollHostCreate(
+        settings,
+        layout["contentX"], SettingsContentTop,
+        layout["scrollBarX"] - layout["contentX"],
+        SettingsContentBottom - SettingsContentTop,
+        layout["contentX"], SettingsContentTop, 34)
+    pageGui := SharedScrollHostContentGui(SettingsScrollHost)
 
     ; --------------------------------------------------------------------------
     ; Pages
@@ -4963,20 +4973,20 @@ ShowSettings(*) {
     ; standalone counterpart and are ordered for their own sake, which is
     ; correct: standalone's Startup & Splash, Focus & Windows and Launcher
     ; Cleanup do jobs XFE deliberately leaves to Xbox FSE.
-    settings.SetFont("s10", "Segoe UI")
+    pageGui.SetFont("s10", "Segoe UI")
 
     ; General
     category := "General"
     y := SettingsFirstRowY()
-    SettingsAddRowsForCategory(settings, category, "xfe", &y)
-    SettingsAddButtonRow(settings, category, [
+    SettingsAddRowsForCategory(pageGui, category, "xfe", &y)
+    SettingsAddButtonRow(pageGui, category, [
         ["Customize Quick Menu...", ShowQuickMenuLayoutManager]], &y)
     ; Startup is no longer something to configure here. Setup Assistant inside
     ; SteamShell.exe registers a per-user logon task when it installs XFE, so the
     ; old advice to add SteamShell-XFE.exe as an AnyFSE startup application now
     ; starts the companion twice. What is left is the part Setup cannot do,
     ; because it belongs to AnyFSE's own configuration.
-    SettingsAddNote(settings, category,
+    SettingsAddNote(pageGui, category,
         "Integration: configure AnyFSE to launch Steam Big Picture as the Home "
         . "app, and leave “Exit FSE when Home app exits” off. Setup Assistant "
         . "already starts this companion at sign-in — do not also add it to "
@@ -4987,12 +4997,12 @@ ShowSettings(*) {
     y := SettingsFirstRowY()
     ; The rows themselves are defined once, in SteamShell-Shared.ahk, so this
     ; page and the shell's cannot describe the same settings differently.
-    SettingsAddRowsForCategory(settings, category, "xfe", &y)
+    SettingsAddRowsForCategory(pageGui, category, "xfe", &y)
     ; The same editor standalone has, rather than the pipe-separated edit control
     ; this page used to carry. One list per row here, not two side by side, so
     ; the page cursor advances by the field's own height.
     layout := SettingsLayout()
-    SettingsAddExeListField(settings, category, "Controller", "AutoMouseExeList",
+    SettingsAddExeListField(pageGui, category, "Controller", "AutoMouseExeList",
         "Automatic mouse applications", layout["contentX"], y,
         layout["contentWidth"],
         ; Filtered, so the editor never shows a row this product will not act on.
@@ -5002,17 +5012,17 @@ ShowSettings(*) {
             ReadText("Controller", "AutoMouseExeList",
                 DefaultAutoMouseExeListFor("xfe"))))
     y += SettingsExeListHeight()
-    SettingsAddNote(settings, category,
+    SettingsAddNote(pageGui, category,
         "The controller acts as a mouse in these applications without holding "
         . "View/Back. Leave Xbox FSE off the list: it is controller-driven and "
         . "a pointer inside it gets in the way. explorer.exe is not accepted "
         . "here — it owns the Xbox Mode task switcher.", &y, 60)
-    SettingsAddButtonRow(settings, category, [
+    SettingsAddButtonRow(pageGui, category, [
         ["Controller Mappings...", ShowControllerMappingWindow],
         ["Learn Controller...", ShowControllerLearner],
         ["Delete Learned Profile", DeleteControllerProfileForActiveDevice]], &y)
     ; The window is shared with the shell, which had it first and had it alone.
-    SettingsAddButtonRow(settings, category, [
+    SettingsAddButtonRow(pageGui, category, [
         ["Test / Calibrate Controller...", ShowControllerTest]], &y)
 
     ; Steam — no standalone counterpart. Standalone keeps its three Steam
@@ -5020,24 +5030,24 @@ ShowSettings(*) {
     ; button behaviour, which standalone does not have.
     category := "Steam"
     y := SettingsFirstRowY()
-    SettingsAddNote(settings, category,
+    SettingsAddNote(pageGui, category,
         "These shortcuts must match the bindings configured inside Steam itself. "
         . "The menu shortcuts only reach Steam while Steam owns the foreground.",
         &y, 40)
-    SettingsAddRowsForCategory(settings, category, "xfe", &y)
-    SettingsAddNote(settings, category,
+    SettingsAddRowsForCategory(pageGui, category, "xfe", &y)
+    SettingsAddNote(pageGui, category,
         "Longer in a game: View is often the scoreboard button and gets held.",
         &y)
 
     ; RTSS & Performance
     category := "RTSS & Performance"
     y := SettingsFirstRowY()
-    SettingsAddRowsForCategory(settings, category, "xfe", &y)
+    SettingsAddRowsForCategory(pageGui, category, "xfe", &y)
 
     ; Startup Programs
     category := "Startup Programs"
     y := SettingsFirstRowY()
-    SettingsAddRowsForCategory(settings, category, "xfe", &y)
+    SettingsAddRowsForCategory(pageGui, category, "xfe", &y)
     ; THE SHELL'S EDITOR, which is now the shared one.
     ;
     ; This was a list box and two buttons: add a program, remove a program. A
@@ -5051,9 +5061,9 @@ ShowSettings(*) {
     ; reach the INI is no longer this product's own business either, since
     ; CollectStartupProgramWrites now folds them into the batch SaveSettings
     ; commits.
-    SettingsAddStartupProgramsEditor(settings, category, &y,
+    SettingsAddStartupProgramsEditor(pageGui, category, &y,
         SettingsStartupSlotValues())
-    SettingsAddNote(settings, category,
+    SettingsAddNote(pageGui, category,
         "Hidden suits background helpers that should never draw over Xbox FSE.",
         &y)
 
@@ -5062,12 +5072,12 @@ ShowSettings(*) {
     ; versions that never touch presentation.
     category := "Assist"
     y := SettingsFirstRowY()
-    SettingsAddNote(settings, category,
+    SettingsAddNote(pageGui, category,
         "Automatic help from the shared default profile. None of these ever resize, "
         . "centre or maximise anything — Xbox FSE keeps control of presentation.",
         &y, 40)
-    SettingsAddRowsForCategory(settings, category, "xfe", &y)
-    SettingsAddNote(settings, category,
+    SettingsAddRowsForCategory(pageGui, category, "xfe", &y)
+    SettingsAddNote(pageGui, category,
         "Process lists are edited in the INI under [Assist]. Assistance always "
         . "pauses while any SteamShell XFE window is in front. Use Quick Menu → "
         . "All Settings → Advanced → Probe Screen to identify an overlay that is "
@@ -5082,7 +5092,7 @@ ShowSettings(*) {
     ; behaviour will look.
     category := "Launcher Cleanup"
     y := SettingsFirstRowY()
-    SettingsAddRowsForCategory(settings, category, "xfe", &y)
+    SettingsAddRowsForCategory(pageGui, category, "xfe", &y)
     ; THE TWO LISTS THIS PAGE IS ABOUT, side by side, as on the shell's page.
     ;
     ; The note that stood here sent the user to the INI -- "the launcher list
@@ -5099,22 +5109,22 @@ ShowSettings(*) {
     columnGap := 20
     columnWidth := (layout["contentWidth"] - columnGap) // 2
     listY := y + 8
-    SettingsAddExeListField(settings, category,
+    SettingsAddExeListField(pageGui, category,
         "LauncherCleanup", "LauncherProcesses", "Launcher EXEs to close",
         layout["contentX"], listY, columnWidth, AssistLauncherProcesses)
-    SettingsAddExeListField(settings, category,
+    SettingsAddExeListField(pageGui, category,
         "Assist", "ProtectedProcesses", "Never close these EXEs",
         layout["contentX"] + columnWidth + columnGap, listY, columnWidth,
         AssistProtectedProcesses)
     y := listY + SettingsExeListHeight()
-    SettingsAddButtonRow(settings, category, [
+    SettingsAddButtonRow(pageGui, category, [
         ["Preview Running Cleanup Targets…", SettingsPreviewLauncherCleanup]],
         &y)
 
     ; Advanced
     category := "Advanced & Logging"
     y := SettingsFirstRowY()
-    SettingsAddNote(settings, category,
+    SettingsAddNote(pageGui, category,
         "This companion contains no shell registration, Explorer control, taskbar "
         . "hiding, or window sizing. Xbox FSE keeps control of presentation.",
         &y, 40)
@@ -5124,14 +5134,14 @@ ShowSettings(*) {
     ; standalone's Advanced page, which puts its rows at the top and its
     ; nineteen buttons underneath. Same page, same product family, opposite
     ; reading order, and nothing chose it: the buttons were simply written first.
-    SettingsAddRowsForCategory(settings, category, "xfe", &y)
-    SettingsAddNote(settings, category,
+    SettingsAddRowsForCategory(pageGui, category, "xfe", &y)
+    SettingsAddNote(pageGui, category,
         "The heartbeat log proves whether the companion remains responsive while "
         . "Xbox FSE is active. Diagnostic logging records every controller slot "
         . "and the foreground process, which reveals a virtualised pad "
         . "forwarding only some buttons.", &y, 60)
     y += 12
-    SettingsAddButtonRow(settings, category, [
+    SettingsAddButtonRow(pageGui, category, [
         ["Open INI", (*) => Run(IniPath)],
         ; LiveLogOpenFile, not ProductOpenLogFile. The seam is written to be
         ; CALLED -- it takes no parameters -- and a Click handler is passed the
@@ -5153,7 +5163,7 @@ ShowSettings(*) {
         ["Check Logon Task", SettingsCheckLogonTask],
         ["Re-arm Controller", RearmControllerInput]], &y)
     ; Under the button that fills it, which is where it was and where it belongs.
-    LogonTaskStatusCtrl := settings.AddText("x" SettingsLayout()["contentX"]
+    LogonTaskStatusCtrl := pageGui.AddText("x" SettingsLayout()["contentX"]
         . " y" y " w" SettingsLayout()["contentWidth"] " h20 +Wrap", "")
     SettingsTrackControl(category, LogonTaskStatusCtrl)
     y += 28
@@ -5168,6 +5178,7 @@ ShowSettings(*) {
         ["Reload INI", ReloadSettings],
         ["Close", CloseSettings]])
     SettingsScrollBar := settingsFooter["scrollBar"]
+    SharedScrollHostAttachScrollBar(SettingsScrollHost, SettingsScrollBar)
     settings.OnEvent("Close", CloseSettings)
     settings.OnEvent("Escape", CloseSettings)
     ; Re-registering the same callback is a no-op, so this is safe on every open.
@@ -5249,30 +5260,17 @@ SettingsTrackControl(category, control) {
     return control
 }
 
-; How far this category can scroll, measured from what it actually built rather
-; than from a number someone has to remember to update.
-SettingsGetMaxScroll(category) {
-    global SettingsContentBottom
-    global SettingsCategoryControls, SettingsControlPositions
-    return SharedSettingsMaxScroll(SettingsCategoryControls,
-        SettingsControlPositions, category, SettingsContentBottom)
-}
-
-; Shows one category at its current scroll offset and hides every other.
-;
-; Redraw is suspended for the whole pass. Without it Windows repaints between the
-; Move and the Visible change during thumb tracking, which leaves trails and
-; half-drawn controls -- the same reason the Quick Menu composes its pages with
-; redraw suspended.
-; This tree's state, handed to the shared pass. Its content bounds are fixed in
-; SettingsLayout; the shell's move with its resizable window.
+; Shows one category at its remembered offset through the shared clipped child
+; host. Category changes toggle visibility once; scrolling moves the host canvas
+; once, so this adapter contains no control-by-control repaint or geometry loop.
 SettingsApplyCategoryLayout(activeCategory) {
-    global SettingsContentTop, SettingsContentBottom
+    global SettingsContentBottom
     global SettingsCategoryControls, SettingsControlPositions, SettingsCategoryOffsets
-    layout := SettingsLayout()
+    global SettingsScrollHost
     SharedApplySettingsCategoryLayout(SettingsCategoryControls,
         SettingsControlPositions, SettingsCategoryOffsets,
-        activeCategory, SettingsContentTop, SettingsContentBottom)
+        activeCategory, SettingsContentBottom,
+        SettingsScrollHost)
 }
 
 SettingsActiveCategoryName() {
@@ -5281,53 +5279,24 @@ SettingsActiveCategoryName() {
 }
 
 SettingsScroll(direction, *) {
-    global SettingsCategoryOffsets, SettingsVisible
+    global SettingsCategoryOffsets, SettingsVisible, SettingsScrollHost
     if !SettingsVisible
         return
     category := SettingsActiveCategoryName()
-    current := SettingsCategoryOffsets.Has(category)
-        ? SettingsCategoryOffsets[category] : 0
-    maxOffset := SettingsGetMaxScroll(category)
     SettingsCategoryOffsets[category] :=
-        ClampInt(current + (direction * 68), 0, maxOffset)
-    SettingsApplyCategoryLayout(category)
+        SharedScrollHostScrollBy(SettingsScrollHost, direction * 68)
 }
 
 SettingsVerticalScroll(wParam, lParam, msg, hwnd) {
-    global SettingsContentTop, SettingsContentBottom
     global SettingsGui, SettingsScrollBar, SettingsCategoryOffsets, SettingsVisible
+    global SettingsScrollHost
     if (!IsSet(SettingsGui) || !SettingsVisible || !IsObject(SettingsScrollBar))
         return
     if (lParam != SettingsScrollBar.Hwnd)
         return
-    layout := SettingsLayout()
     category := SettingsActiveCategoryName()
-    current := SettingsCategoryOffsets.Has(category)
-        ? SettingsCategoryOffsets[category] : 0
-    maxOffset := SettingsGetMaxScroll(category)
-    scrollCode := wParam & 0xFFFF
-    lineStep := 34
-    pageStep := Max(68, SettingsContentBottom - SettingsContentTop - 34)
-    switch scrollCode {
-        case 0: ; SB_LINEUP
-            newOffset := current - lineStep
-        case 1: ; SB_LINEDOWN
-            newOffset := current + lineStep
-        case 2: ; SB_PAGEUP
-            newOffset := current - pageStep
-        case 3: ; SB_PAGEDOWN
-            newOffset := current + pageStep
-        case 4, 5: ; SB_THUMBPOSITION / SB_THUMBTRACK
-            newOffset := SettingsEditorGetScrollTrackPosition()
-        case 6: ; SB_TOP
-            newOffset := 0
-        case 7: ; SB_BOTTOM
-            newOffset := maxOffset
-        default:
-            return 0
-    }
-    SettingsCategoryOffsets[category] := ClampInt(newOffset, 0, maxOffset)
-    SettingsApplyCategoryLayout(category)
+    SettingsCategoryOffsets[category] :=
+        SharedScrollHostHandleVerticalScroll(SettingsScrollHost, wParam)
     return 0
 }
 
@@ -6985,18 +6954,6 @@ ProductQuickMenuWorkArea(&left, &top, &right, &bottom) {
         &left, &top, &right, &bottom)
     return false
 }
-
-; Seams for the shared settings scrollbar. Bounds come from SettingsLayout()
-; here; the shell keeps them in two globals.
-ProductSettingsScrollBar() {
-    global SettingsScrollBar
-    return IsObject(SettingsScrollBar) ? SettingsScrollBar : ""
-}
-
-ProductSettingsViewportHeight() {
-    return Max(1, SettingsContentBottom - SettingsContentTop)
-}
-
 
 OpenTouchKeyboard() {
     if WinExist("ahk_class IPTip_Main_Window") {

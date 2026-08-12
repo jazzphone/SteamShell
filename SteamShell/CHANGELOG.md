@@ -98,6 +98,16 @@ definition instead of two.
 - Quick Menu navigation remembers the selected row on every page for the current
   session. Returning from a submenu restores the row that opened it; a newly
   opened menu still begins at the top of Main.
+- Full Settings in both products and Setup Assistant now scroll through one
+  shared native child-window host. A scroll tick moves one clipped canvas rather
+  than repositioning and repainting every control, eliminating the principal
+  source of scrolling flicker while preserving each Settings category's offset.
+- Setup Assistant retains its original content inset inside that host and opts
+  into a bounded post-move redraw for its transparent group-box/static controls,
+  preventing stale text pixels from accumulating while it scrolls.
+- Live Log refresh preserves the logical line and selection being read. Scrolling
+  away automatically turns off **Follow newest**; re-enabling it returns to the
+  newest entry without pausing updates.
 
 ### Build and validation
 
@@ -124,6 +134,9 @@ definition instead of two.
   as resolved: their algorithms were already centralized in
   `SharedScoreGameCandidates` and `SharedApplySettingsCategoryLayout`; only thin
   product-state adapters remain.
+- The scrolling contract now validates the shared child hierarchy, single-canvas
+  movement, page ownership and absence of per-control scroll movement. The old
+  scrollbar seams and redraw functions were removed from the manifests.
 
 ## 2.0.2 — 2026-08-10
 

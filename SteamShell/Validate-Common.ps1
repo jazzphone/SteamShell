@@ -620,7 +620,6 @@ $sharedSeamAllowed = @(
     # Reached the same way, from the Health Check's Export button.
     "ExportDiagnosticBundle",
     "ProductSettingBool",
-    "ProductSettingsScrollBar", "ProductSettingsViewportHeight",
     "ProductTrayBaseTip", "ProductTrayItems", "ProductVersionText",
     "QuickMenuActivateSelected", "QuickMenuAdjustSelected",
     "QuickMenuBuildGui", "QuickMenuCloseSelected",
@@ -660,7 +659,7 @@ $sharedSeamAllowed = @(
 # Restated here, next to the list, and asserted in Assert-SharedParity: changing
 # one without the other fails the build. Update the expectation in the same
 # commit that changes the list, and say in the message why the seam moved.
-$sharedSeamExpectedCount = 59
+$sharedSeamExpectedCount = 57
 
 # Reports same-named functions in both trees whose difference is only naming and
 # formatting -- the drift that a raw similarity score hides.
@@ -2447,6 +2446,16 @@ function Assert-LiveLogShared {
             'SetTimer\(LiveLogRefresh, 0\)') (
         "The Live Log window must arm and cancel its own refresh timer; " +
         "borrowing the host's needs a seam neither product should have to grow.")
+    $preserveView = Get-AhkFunctionBody -Source $sharedText -Name "SharedReplaceTextPreservingView"
+    Assert-True (
+        $show -match 'vllFollowNewest' -and
+        $show -match 'LiveLogFollowNewestChanged' -and
+        $refresh -match '0x00CE' -and
+        $refresh -match 'SharedReplaceTextPreservingView' -and
+        $refresh -match 'llFollowNewest"\]\.Value := 0' -and
+        $preserveView -match 'SharedTextViewAnchorLine') (
+        "Live Log refresh no longer preserves the line being read or exposes " +
+        "the shared Follow newest behavior.")
 
     foreach ($pair in @(
         @{ File = "SteamShell.ahk";     Product = "the shell" },
@@ -4052,7 +4061,7 @@ function Assert-SharedParity {
         $sharedCategoryText -match '"name", "Steam", "product", "(both|standalone)"' -and
         $shellText -match
             '(?s)category := "Steam"[\s\S]{0,400}?' +
-            'SettingsAddRowsForCategory\(SettingsGui, category, "standalone"') (
+            'SettingsAddRowsForCategory\(pageGui, category, "standalone"') (
         "SteamShell.ahk defines Steam settings rows but does not draw a Steam " +
         "category, so they cannot be reached from the Settings window.")
 
@@ -4545,7 +4554,7 @@ function Assert-SharedParity {
     # At 0.75 the gate happened not to reach most of them; at 0.45 it demands a
     # second declaration in DIVERGENT_FUNCTIONS.txt for HideQuickMenu,
     # QuickMenuRefresh, QuickMenuValue, QuickMenuActivateSelected,
-    # QuickMenuAdjustSelected and ProductSettingsViewportHeight, all of which
+    # QuickMenuAdjustSelected, all of which
     # Shared calls precisely so the two products can answer differently.
     #
     # Double-booking one fact in two lists is how the counts in this project keep

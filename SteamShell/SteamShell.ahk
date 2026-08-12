@@ -409,6 +409,7 @@ global SettingsEditorContentTop := 145
 global SettingsEditorContentBottom := 555
 global SettingsEditorWindowHeight := 620
 global SettingsEditorScrollBar := 0
+global SettingsEditorScrollHost := ""
 global SettingsEditorFooterControls := []
 global SettingsEditorDividerCtrl := 0
 global SettingsDialogActive := false
@@ -422,9 +423,8 @@ global SettingsStartupQuiet := false
 global HealthCheckGui := unset
 global HealthCheckResults := []
 global SetupAssistantGui := unset
-global SetupAssistantControls := []
-global SetupAssistantControlPositions := Map()
 global SetupAssistantScrollBar := 0
+global SetupAssistantScrollHost := ""
 global SetupAssistantScrollOffset := 0
 global SetupAssistantContentHeight := 0
 global SetupAssistantViewportHeight := 0
@@ -9702,10 +9702,10 @@ SettingsEditorPreviewLauncherCleanup(*) {
 }
 
 
-SettingsEditorAddMappedChoice(category, section, key, label, choices, values, &y, defaultValue := "") {
-    global SettingsGui, SettingsEditorFields
+SettingsEditorAddMappedChoice(guiObj, category, section, key, label, choices, values, &y, defaultValue := "") {
+    global SettingsEditorFields
     layout := SettingsLayout()
-    labelCtrl := SettingsGui.AddText("x" layout["contentX"] " y" (y + 4) " w315 h24", label)
+    labelCtrl := guiObj.AddText("x" layout["contentX"] " y" (y + 4) " w315 h24", label)
     displayChoices := []
     storedValues := []
     choiceCount := Min(choices.Length, values.Length)
@@ -9732,7 +9732,7 @@ SettingsEditorAddMappedChoice(category, section, key, label, choices, values, &y
         selectedIndex := displayChoices.Length
     }
 
-    ctrl := SettingsGui.AddDropDownList("x" layout["controlX"] " y" y " w320", displayChoices)
+    ctrl := guiObj.AddDropDownList("x" layout["controlX"] " y" y " w320", displayChoices)
     ctrl.Choose(selectedIndex)
     ctrl.OnEvent("Change", SettingsEditorMarkDirty)
     SettingsEditorRegisterControl(category, labelCtrl)
@@ -9862,6 +9862,7 @@ SettingsEditorResized(guiObj, minMax, newWidth, newHeight) {
     global SettingsEditorContentBottom, SettingsEditorWindowHeight
     global SettingsEditorScrollBar, SettingsEditorFooterControls
     global SettingsEditorStatusCtrl, SettingsEditorDividerCtrl
+    global SettingsEditorScrollHost
     if (minMax = -1 || !IsSet(SettingsGui) || guiObj.Hwnd != SettingsGui.Hwnd)
         return
     if (newHeight < 450 || SettingsEditorFooterControls.Length < 3)
@@ -9889,17 +9890,15 @@ SettingsEditorResized(guiObj, minMax, newWidth, newHeight) {
     try SettingsEditorStatusCtrl.Move(20, newHeight - 32, 925, 24)
     try SettingsEditorScrollBar.Move(
         954, SettingsEditorContentTop, 18, Max(40, SettingsEditorContentBottom - SettingsEditorContentTop))
+    SharedScrollHostSetViewport(
+        SettingsEditorScrollHost,
+        SettingsLayout()["contentX"], SettingsEditorContentTop,
+        SettingsLayout()["scrollBarX"] - SettingsLayout()["contentX"],
+        SettingsEditorContentBottom - SettingsEditorContentTop)
 
     categoryIndex := ClampInt(
         SettingsGui["settingsCategoryList"].Value, 1, SettingsEditorCategories.Length)
     SettingsEditorApplyCategoryLayout(SettingsEditorCategories[categoryIndex])
-}
-
-SettingsEditorGetMaxScroll(category) {
-    global SettingsEditorCategoryControls, SettingsEditorControlPositions
-    global SettingsEditorContentBottom
-    return SharedSettingsMaxScroll(SettingsEditorCategoryControls,
-        SettingsEditorControlPositions, category, SettingsEditorContentBottom)
 }
 
 ; This tree's state, handed to the shared pass. Its content bottom MOVES with
@@ -9908,15 +9907,17 @@ SettingsEditorGetMaxScroll(category) {
 SettingsEditorApplyCategoryLayout(activeCategory) {
     global SettingsEditorCategoryControls, SettingsEditorControlPositions
     global SettingsEditorCategoryOffsets
-    global SettingsEditorContentTop, SettingsEditorContentBottom
+    global SettingsEditorContentBottom
+    global SettingsEditorScrollHost
     SharedApplySettingsCategoryLayout(SettingsEditorCategoryControls,
         SettingsEditorControlPositions, SettingsEditorCategoryOffsets,
-        activeCategory, SettingsEditorContentTop, SettingsEditorContentBottom)
+        activeCategory, SettingsEditorContentBottom,
+        SettingsEditorScrollHost)
 }
 
 SettingsEditorVerticalScroll(wParam, lParam, msg, hwnd) {
     global SettingsGui, SettingsEditorScrollBar, SettingsEditorCategories
-    global SettingsEditorCategoryOffsets, SettingsEditorContentTop, SettingsEditorContentBottom
+    global SettingsEditorCategoryOffsets, SettingsEditorScrollHost
     if !IsSet(SettingsGui) || !IsObject(SettingsEditorScrollBar)
         return
     if (lParam != SettingsEditorScrollBar.Hwnd)
@@ -9924,47 +9925,21 @@ SettingsEditorVerticalScroll(wParam, lParam, msg, hwnd) {
 
     categoryIndex := ClampInt(SettingsGui["settingsCategoryList"].Value, 1, SettingsEditorCategories.Length)
     category := SettingsEditorCategories[categoryIndex]
-    currentOffset := SettingsEditorCategoryOffsets.Has(category) ? SettingsEditorCategoryOffsets[category] : 0
-    maxOffset := SettingsEditorGetMaxScroll(category)
-    scrollCode := wParam & 0xFFFF
-    lineStep := 34
-    pageStep := Max(68, SettingsEditorContentBottom - SettingsEditorContentTop - 34)
-
-    switch scrollCode {
-        case 0: ; SB_LINEUP
-            newOffset := currentOffset - lineStep
-        case 1: ; SB_LINEDOWN
-            newOffset := currentOffset + lineStep
-        case 2: ; SB_PAGEUP
-            newOffset := currentOffset - pageStep
-        case 3: ; SB_PAGEDOWN
-            newOffset := currentOffset + pageStep
-        case 4, 5: ; SB_THUMBPOSITION / SB_THUMBTRACK
-            newOffset := SettingsEditorGetScrollTrackPosition()
-        case 6: ; SB_TOP
-            newOffset := 0
-        case 7: ; SB_BOTTOM
-            newOffset := maxOffset
-        default:
-            return 0
-    }
-
-    SettingsEditorCategoryOffsets[category] := ClampInt(newOffset, 0, maxOffset)
-    SettingsEditorApplyCategoryLayout(category)
+    SettingsEditorCategoryOffsets[category] :=
+        SharedScrollHostHandleVerticalScroll(SettingsEditorScrollHost, wParam)
     return 0
 }
 
 SettingsEditorScroll(direction, *) {
     global SettingsGui, SettingsEditorCategories, SettingsEditorCategoryOffsets
+    global SettingsEditorScrollHost
     if !IsSet(SettingsGui)
         return
     categoryIndex := SettingsGui["settingsCategoryList"].Value
     categoryIndex := ClampInt(categoryIndex, 1, SettingsEditorCategories.Length)
     category := SettingsEditorCategories[categoryIndex]
-    currentOffset := SettingsEditorCategoryOffsets.Has(category) ? SettingsEditorCategoryOffsets[category] : 0
-    maxOffset := SettingsEditorGetMaxScroll(category)
-    SettingsEditorCategoryOffsets[category] := ClampInt(currentOffset + (direction * 68), 0, maxOffset)
-    SettingsEditorApplyCategoryLayout(category)
+    SettingsEditorCategoryOffsets[category] :=
+        SharedScrollHostScrollBy(SettingsEditorScrollHost, direction * 68)
 }
 
 SettingsEditorMouseWheel(wParam, lParam, msg, hwnd) {
@@ -9980,21 +9955,15 @@ SettingsEditorMouseWheel(wParam, lParam, msg, hwnd) {
 
 SettingsEditorRevealControl(ctrl) {
     global SettingsEditorControlPositions, SettingsEditorCategoryOffsets
-    global SettingsEditorContentTop, SettingsEditorContentBottom
+    global SettingsEditorScrollHost
     if !SettingsEditorControlPositions.Has(ctrl.Hwnd)
         return
     pos := SettingsEditorControlPositions[ctrl.Hwnd]
     if (!pos["scrollable"])
         return
     category := pos["category"]
-    offset := SettingsEditorCategoryOffsets.Has(category) ? SettingsEditorCategoryOffsets[category] : 0
-    visibleY := pos["y"] - offset
-    if (visibleY < SettingsEditorContentTop)
-        offset := pos["y"] - SettingsEditorContentTop
-    else if (visibleY + pos["h"] > SettingsEditorContentBottom)
-        offset := pos["y"] + pos["h"] - SettingsEditorContentBottom
-    SettingsEditorCategoryOffsets[category] := ClampInt(offset, 0, SettingsEditorGetMaxScroll(category))
-    SettingsEditorApplyCategoryLayout(category)
+    SettingsEditorCategoryOffsets[category] := SharedScrollHostEnsureVisible(
+        SettingsEditorScrollHost, pos["y"], pos["h"])
 }
 
 ; SettingsEditorControllerActive and SettingsEditorPrimaryActive are
@@ -11361,8 +11330,8 @@ SetupAssistantRefreshApplicationPaths() {
         return
     steamDisplay := FileExist(SteamPath) ? SteamPath : "Not found — select Steam.exe"
     rtssDisplay := FileExist(RtssPath) ? RtssPath : "Not found — RTSS is optional"
-    try SetupAssistantGui["SetupSteamPath"].Text := steamDisplay
-    try SetupAssistantGui["SetupRtssPath"].Text := rtssDisplay
+    try SetupAssistantControl("SetupSteamPath").Text := steamDisplay
+    try SetupAssistantControl("SetupRtssPath").Text := rtssDisplay
 }
 
 SetupAssistantDetectInstalledApplications() {
@@ -11429,7 +11398,7 @@ SetupAssistantSetStatus(message) {
     global SetupAssistantGui
     if !IsSet(SetupAssistantGui)
         return
-    try SetupAssistantGui["SetupStatus"].Text := message
+    try SetupAssistantControl("SetupStatus").Text := message
 }
 
 SetupAssistantSelectExecutable(prompt, currentPath := "") {
@@ -11541,13 +11510,13 @@ SetupAssistantSelectDirectory(prompt, initialDirectory := "") {
 SetupAssistantBrowseInstall(*) {
     global SetupAssistantGui
     currentDirectory := ""
-    try currentDirectory := Trim(SetupAssistantGui["SetupInstallPath"].Text)
+    try currentDirectory := Trim(SetupAssistantControl("SetupInstallPath").Text)
     selectedDirectory := SetupAssistantSelectDirectory(
         "Choose the folder that will contain SteamShell.exe", currentDirectory)
     if (selectedDirectory = "")
         return
-    SetupAssistantGui["SetupInstallPath"].Text := selectedDirectory
-    SetupAssistantGui["SetupBrowse"].Value := 1
+    SetupAssistantControl("SetupInstallPath").Text := selectedDirectory
+    SetupAssistantControl("SetupBrowse").Value := 1
     SetupAssistantRefreshDeployment()
 }
 
@@ -11699,10 +11668,10 @@ SetupAssistantPreselectExistingInstallation() {
     ; quietly convert them.
     isXfe := SteamShellProductIsXfe(product)
     isAlongside := !isXfe && !registeredAsShell
-    try SetupAssistantGui["SetupProductStandalone"].Value :=
+    try SetupAssistantControl("SetupProductStandalone").Value :=
         (!isXfe && !isAlongside) ? 1 : 0
-    try SetupAssistantGui["SetupProductAlongside"].Value := isAlongside ? 1 : 0
-    try SetupAssistantGui["SetupProductXfe"].Value := isXfe ? 1 : 0
+    try SetupAssistantControl("SetupProductAlongside").Value := isAlongside ? 1 : 0
+    try SetupAssistantControl("SetupProductXfe").Value := isXfe ? 1 : 0
     SetupAssistantRefreshProductMode()
 
     ; XFE ONLY, and the missing "else" is the point.
@@ -11737,7 +11706,7 @@ SetupAssistantPreselectExistingInstallation() {
     ; when an else follows it. There is no else now, and the braces stay anyway
     ; so that adding one back cannot reintroduce that parse error quietly.
     if isXfe {
-        try SetupAssistantGui["SetupRegisterXfeStartup"].Value := xfeStartsAtLogon ? 1 : 0
+        try SetupAssistantControl("SetupRegisterXfeStartup").Value := xfeStartsAtLogon ? 1 : 0
     }
 
     if (directory != "") {
@@ -11745,12 +11714,12 @@ SetupAssistantPreselectExistingInstallation() {
             ? SetupAssistantXfeStandardDirectory()
             : A_ProgramFiles "\SteamShell"
         if (StrLower(RTrim(directory, "\/")) = StrLower(RTrim(standardDirectory, "\/"))) {
-            try SetupAssistantGui["SetupStandard"].Value := 1
+            try SetupAssistantControl("SetupStandard").Value := 1
         } else if (StrLower(RTrim(directory, "\/")) = StrLower(RTrim(A_ScriptDir, "\/"))) {
-            try SetupAssistantGui["SetupCurrent"].Value := 1
+            try SetupAssistantControl("SetupCurrent").Value := 1
         } else {
-            try SetupAssistantGui["SetupBrowse"].Value := 1
-            try SetupAssistantGui["SetupInstallPath"].Text := directory
+            try SetupAssistantControl("SetupBrowse").Value := 1
+            try SetupAssistantControl("SetupInstallPath").Text := directory
         }
     }
     ; Restored, not left at its default. Without this an upgrade of a portable
@@ -11760,7 +11729,7 @@ SetupAssistantPreselectExistingInstallation() {
     ; the data into ProgramData -- converting a portable install into a managed
     ; one because a checkbox was never ticked back.
     if (!isXfe && InstalledShellIsPortable())
-        try SetupAssistantGui["SetupPortable"].Value := 1
+        try SetupAssistantControl("SetupPortable").Value := 1
 
     SetupAssistantRefreshDeployment()
 
@@ -12359,9 +12328,9 @@ SetupAssistantSelectedProduct() {
     if !IsSet(SetupAssistantGui)
         return "Standalone"
     try {
-        if (SetupAssistantGui["SetupProductXfe"].Value = 1)
+        if (SetupAssistantControl("SetupProductXfe").Value = 1)
             return "XFE"
-        if (SetupAssistantGui["SetupProductAlongside"].Value = 1)
+        if (SetupAssistantControl("SetupProductAlongside").Value = 1)
             return "Alongside"
     }
     return "Standalone"
@@ -12381,8 +12350,8 @@ SetupAssistantRefreshProductMode(*) {
     ; Only Shell mode may register. The radio is the decision now, so the
     ; checkbox follows it rather than being a second, quieter way to answer the
     ; same question -- two controls for one choice is how they end up disagreeing.
-    try SetupAssistantGui["SetupRegisterShell"].Enabled := !isXfe && !isAlongside
-    try SetupAssistantGui["SetupRegisterXfeStartup"].Enabled := isXfe
+    try SetupAssistantControl("SetupRegisterShell").Enabled := !isXfe && !isAlongside
+    try SetupAssistantControl("SetupRegisterXfeStartup").Enabled := isXfe
     ; Each branch sets BOTH boxes: the selected product's registration on, the
     ; other product's off. Clearing only one left the other showing a tick it had
     ; carried since the controls were created, so shell mode displayed "Start
@@ -12390,20 +12359,20 @@ SetupAssistantRefreshProductMode(*) {
     ; enough -- a ticked box reads as something that is going to happen, whether
     ; or not it can be clicked.
     if isXfe {
-        try SetupAssistantGui["SetupRegisterShell"].Value := 0
-        try SetupAssistantGui["SetupRegisterXfeStartup"].Value := 1
+        try SetupAssistantControl("SetupRegisterShell").Value := 0
+        try SetupAssistantControl("SetupRegisterXfeStartup").Value := 1
         SetupAssistantSetStatus(
             "XFE mode: the companion installs to the selected location, starts at sign-in through a "
             . "normal logon task, and never registers itself as the Windows shell or elevates.")
     } else if isAlongside {
-        try SetupAssistantGui["SetupRegisterShell"].Value := 0
-        try SetupAssistantGui["SetupRegisterXfeStartup"].Value := 0
+        try SetupAssistantControl("SetupRegisterShell").Value := 0
+        try SetupAssistantControl("SetupRegisterXfeStartup").Value := 0
         SetupAssistantSetStatus(
             "Alongside mode: Explorer keeps the desktop and taskbar, nothing is written to the "
             . "shell registry, and Steam is not launched automatically. Launch SteamShell when you want it.")
     } else {
-        try SetupAssistantGui["SetupRegisterShell"].Value := 1
-        try SetupAssistantGui["SetupRegisterXfeStartup"].Value := 0
+        try SetupAssistantControl("SetupRegisterShell").Value := 1
+        try SetupAssistantControl("SetupRegisterXfeStartup").Value := 0
         SetupAssistantSetStatus(
             "Shell mode: SteamShell is registered as the Windows shell and the elevated input helper is installed.")
     }
@@ -12425,27 +12394,27 @@ SetupAssistantRefreshDeployment(*) {
     if !IsSet(SetupAssistantGui)
         return
     isXfe := SetupAssistantSelectedProduct() = "XFE"
-    browseSelected := SetupAssistantGui["SetupBrowse"].Value = 1
-    currentSelected := SetupAssistantGui["SetupCurrent"].Value = 1
-    SetupAssistantGui["SetupInstallPath"].Enabled := browseSelected
-    SetupAssistantGui["SetupBrowseButton"].Enabled := browseSelected
+    browseSelected := SetupAssistantControl("SetupBrowse").Value = 1
+    currentSelected := SetupAssistantControl("SetupCurrent").Value = 1
+    SetupAssistantControl("SetupInstallPath").Enabled := browseSelected
+    SetupAssistantControl("SetupBrowseButton").Enabled := browseSelected
     ; Portable is a shell-layout concept: it decides whether the writable data
     ; sits beside the EXE or in ProgramData. XFE has no such choice -- its data
     ; is always beside it -- so the checkbox would be a control that does nothing.
-    SetupAssistantGui["SetupPortable"].Enabled := browseSelected && !isXfe
+    SetupAssistantControl("SetupPortable").Enabled := browseSelected && !isXfe
     if isXfe
-        SetupAssistantGui["SetupPortable"].Value := 0
+        SetupAssistantControl("SetupPortable").Value := 0
 
     if isXfe {
-        if SetupAssistantGui["SetupStandard"].Value = 1
+        if SetupAssistantControl("SetupStandard").Value = 1
             xfeDirectory := SetupAssistantXfeStandardDirectory()
         else if currentSelected
             xfeDirectory := A_ScriptDir
         else
-            xfeDirectory := Trim(SetupAssistantGui["SetupInstallPath"].Text)
+            xfeDirectory := Trim(SetupAssistantControl("SetupInstallPath").Text)
         existingXfe := xfeDirectory != ""
             && FileExist(xfeDirectory "\SteamShell-XFE.exe")
-        SetupAssistantGui["SetupLocationSummary"].Text := existingXfe
+        SetupAssistantControl("SetupLocationSummary").Text := existingXfe
             ? "Existing XFE installation: " xfeDirectory
                 . "`r`nApply replaces SteamShell-XFE.exe; its settings are preserved."
             : "Companion: " (xfeDirectory != "" ? xfeDirectory : "Choose a directory")
@@ -12453,7 +12422,7 @@ SetupAssistantRefreshDeployment(*) {
         return
     }
 
-    if SetupAssistantGui["SetupStandard"].Value = 1 {
+    if SetupAssistantControl("SetupStandard").Value = 1 {
         standardDirectory := A_ProgramFiles "\SteamShell"
         standardHelper := standardDirectory
             . "\components\bin\SteamShell-Helper.exe"
@@ -12471,8 +12440,8 @@ SetupAssistantRefreshDeployment(*) {
             : "Program: " A_ScriptDir
                 . "`r`nWritable data: " A_ScriptDir "\SteamShell (portable)"
     } else {
-        chosenDirectory := Trim(SetupAssistantGui["SetupInstallPath"].Text)
-        isPortable := SetupAssistantGui["SetupPortable"].Value = 1
+        chosenDirectory := Trim(SetupAssistantControl("SetupInstallPath").Text)
+        isPortable := SetupAssistantControl("SetupPortable").Value = 1
         existingPortable := isPortable && chosenDirectory != ""
             && FileExist(chosenDirectory "\SteamShell\SteamShellSettings.ini")
             && FileExist(chosenDirectory "\SteamShell\bin\SteamShell-Helper.exe")
@@ -12485,7 +12454,7 @@ SetupAssistantRefreshDeployment(*) {
                     ? chosenDirectory "\SteamShell (portable)"
                     : SteamShellProgramData "\SteamShell")
     }
-    SetupAssistantGui["SetupLocationSummary"].Text := summary
+    SetupAssistantControl("SetupLocationSummary").Text := summary
 }
 
 SetupAssistantGetDeployment(&targetDirectory, &portableMode, &installationMode) {
@@ -12496,7 +12465,7 @@ SetupAssistantGetDeployment(&targetDirectory, &portableMode, &installationMode) 
     if !IsSet(SetupAssistantGui)
         return false
 
-    if SetupAssistantGui["SetupStandard"].Value = 1 {
+    if SetupAssistantControl("SetupStandard").Value = 1 {
         ; The recommended location differs by product. See
         ; SetupAssistantXfeStandardDirectory for why XFE does not go in
         ; Program Files.
@@ -12504,13 +12473,13 @@ SetupAssistantGetDeployment(&targetDirectory, &portableMode, &installationMode) 
             ? SetupAssistantXfeStandardDirectory()
             : A_ProgramFiles "\SteamShell"
         installationMode := "Standard"
-    } else if SetupAssistantGui["SetupCurrent"].Value = 1 {
+    } else if SetupAssistantControl("SetupCurrent").Value = 1 {
         targetDirectory := A_ScriptDir
         portableMode := true
         installationMode := "Portable"
     } else {
-        targetDirectory := Trim(SetupAssistantGui["SetupInstallPath"].Text)
-        portableMode := SetupAssistantGui["SetupPortable"].Value = 1
+        targetDirectory := Trim(SetupAssistantControl("SetupInstallPath").Text)
+        portableMode := SetupAssistantControl("SetupPortable").Value = 1
         installationMode := portableMode ? "Portable" : "Custom"
     }
 
@@ -12555,7 +12524,7 @@ SetupAssistantApply(*) {
     ; choice, Auto-Login, and the UAC guidance above; everything below this point
     ; is shell-specific and is skipped entirely for it.
     if (SetupAssistantSelectedProduct() = "XFE") {
-        registerXfeStartup := SetupAssistantGui["SetupRegisterXfeStartup"].Value = 1
+        registerXfeStartup := SetupAssistantControl("SetupRegisterXfeStartup").Value = 1
         SetupAssistantSetStatus("Installing the SteamShell-XFE companion…")
         if DeploySteamShellXfe(targetDirectory, registerXfeStartup, true) {
             SetupAssistantSetStatus(
@@ -12569,7 +12538,7 @@ SetupAssistantApply(*) {
         return
     }
 
-    registerShell := SetupAssistantGui["SetupRegisterShell"].Value = 1
+    registerShell := SetupAssistantControl("SetupRegisterShell").Value = 1
     SetupAssistantSetStatus(
         "Applying and verifying the selected installation…"
         . (!FileExist(RtssPath) ? " RTSS was not detected and will remain optional." : ""))
@@ -12913,136 +12882,46 @@ SetupAssistantOpenAutologonGuidance(*) {
 }
 
 SetupAssistantInitializeScrolling() {
-    global SetupAssistantGui, SetupAssistantControls
-    global SetupAssistantControlPositions, SetupAssistantScrollBar
+    global SetupAssistantGui, SetupAssistantScrollBar, SetupAssistantScrollHost
     global SetupAssistantContentHeight, SetupAssistantScrollOffset
-    SetupAssistantControls := []
-    SetupAssistantControlPositions := Map()
     SetupAssistantContentHeight := 0
     SetupAssistantScrollOffset := 0
-    for ctrl in SetupAssistantGui {
+    contentGui := SharedScrollHostContentGui(SetupAssistantScrollHost)
+    for ctrl in contentGui {
         ctrl.GetPos(&ctrlX, &ctrlY, &ctrlW, &ctrlH)
-        SetupAssistantControls.Push(ctrl)
-        SetupAssistantControlPositions[ctrl.Hwnd] := Map(
-            "x", ctrlX, "y", ctrlY, "w", ctrlW, "h", ctrlH)
         SetupAssistantContentHeight := Max(
             SetupAssistantContentHeight, ctrlY + ctrlH + 12)
     }
     SetupAssistantScrollBar := SetupAssistantGui.Add(
         "Custom", "ClassScrollBar x738 y8 w18 h340 0x1")
+    SharedScrollHostAttachScrollBar(
+        SetupAssistantScrollHost, SetupAssistantScrollBar)
+    SharedScrollHostSetExtent(
+        SetupAssistantScrollHost, SetupAssistantContentHeight)
     OnMessage(0x0115, SetupAssistantVerticalScroll)
     OnMessage(0x020A, SetupAssistantMouseWheel)
 }
 
-SetupAssistantSetRedraw(enabled) {
-    global SetupAssistantGui
-    if !IsSet(SetupAssistantGui)
-        return
-    try DllCall(
-        "User32\SendMessageW", "Ptr", SetupAssistantGui.Hwnd,
-        "UInt", 0x000B, "Ptr", enabled ? 1 : 0, "Ptr", 0, "Ptr")
-}
-
-SetupAssistantMaxScroll() {
-    global SetupAssistantContentHeight, SetupAssistantViewportHeight
-    return Max(0, SetupAssistantContentHeight - SetupAssistantViewportHeight)
-}
-
-SetupAssistantUpdateScrollBar() {
-    global SetupAssistantScrollBar, SetupAssistantScrollOffset
-    global SetupAssistantContentHeight, SetupAssistantViewportHeight
-    if !IsObject(SetupAssistantScrollBar)
-        return
-    maxOffset := SetupAssistantMaxScroll()
-    if (maxOffset <= 0) {
-        try SetupAssistantScrollBar.Visible := false
-        return
-    }
-    scrollInfo := Buffer(28, 0)
-    NumPut("UInt", 28, scrollInfo, 0)
-    NumPut("UInt", 0x7, scrollInfo, 4)
-    NumPut("Int", 0, scrollInfo, 8)
-    NumPut("Int", SetupAssistantContentHeight - 1, scrollInfo, 12)
-    NumPut("UInt", Max(1, SetupAssistantViewportHeight), scrollInfo, 16)
-    NumPut("Int", SetupAssistantScrollOffset, scrollInfo, 20)
-    try DllCall(
-        "User32\SetScrollInfo", "Ptr", SetupAssistantScrollBar.Hwnd,
-        "Int", 2, "Ptr", scrollInfo, "Int", true)
-    try SetupAssistantScrollBar.Visible := true
-}
-
 SetupAssistantApplyScroll() {
-    global SetupAssistantControls, SetupAssistantControlPositions
-    global SetupAssistantScrollOffset, SetupAssistantGui
-    SetupAssistantScrollOffset := ClampInt(
-        SetupAssistantScrollOffset, 0, SetupAssistantMaxScroll())
-    SetupAssistantSetRedraw(false)
-    try {
-        for _, ctrl in SetupAssistantControls {
-            if !SetupAssistantControlPositions.Has(ctrl.Hwnd)
-                continue
-            pos := SetupAssistantControlPositions[ctrl.Hwnd]
-            try ctrl.Move(
-                pos["x"], pos["y"] - SetupAssistantScrollOffset,
-                pos["w"], pos["h"])
-        }
-        SetupAssistantUpdateScrollBar()
-    } finally {
-        SetupAssistantSetRedraw(true)
-        try DllCall(
-            "User32\RedrawWindow", "Ptr", SetupAssistantGui.Hwnd,
-            "Ptr", 0, "Ptr", 0, "UInt", 0x0185, "Int")
-    }
-}
-
-SetupAssistantScrollTrackPosition() {
-    global SetupAssistantScrollBar
-    scrollInfo := Buffer(28, 0)
-    NumPut("UInt", 28, scrollInfo, 0)
-    NumPut("UInt", 0x10, scrollInfo, 4)
-    try {
-        if DllCall(
-            "User32\GetScrollInfo", "Ptr", SetupAssistantScrollBar.Hwnd,
-            "Int", 2, "Ptr", scrollInfo)
-            return NumGet(scrollInfo, 24, "Int")
-    }
-    return 0
+    global SetupAssistantScrollOffset, SetupAssistantScrollHost
+    SetupAssistantScrollOffset := SharedScrollHostSetOffset(
+        SetupAssistantScrollHost, SetupAssistantScrollOffset)
 }
 
 SetupAssistantVerticalScroll(wParam, lParam, msg, hwnd) {
     global SetupAssistantGui, SetupAssistantScrollBar
-    global SetupAssistantScrollOffset, SetupAssistantViewportHeight
+    global SetupAssistantScrollOffset, SetupAssistantScrollHost
     if !IsSet(SetupAssistantGui) || !IsObject(SetupAssistantScrollBar)
         return
     if (lParam != SetupAssistantScrollBar.Hwnd)
         return
-    maxOffset := SetupAssistantMaxScroll()
-    scrollCode := wParam & 0xFFFF
-    switch scrollCode {
-        case 0:
-            newOffset := SetupAssistantScrollOffset - 40
-        case 1:
-            newOffset := SetupAssistantScrollOffset + 40
-        case 2:
-            newOffset := SetupAssistantScrollOffset - Max(80, SetupAssistantViewportHeight - 50)
-        case 3:
-            newOffset := SetupAssistantScrollOffset + Max(80, SetupAssistantViewportHeight - 50)
-        case 4, 5:
-            newOffset := SetupAssistantScrollTrackPosition()
-        case 6:
-            newOffset := 0
-        case 7:
-            newOffset := maxOffset
-        default:
-            return 0
-    }
-    SetupAssistantScrollOffset := ClampInt(newOffset, 0, maxOffset)
-    SetupAssistantApplyScroll()
+    SetupAssistantScrollOffset :=
+        SharedScrollHostHandleVerticalScroll(SetupAssistantScrollHost, wParam)
     return 0
 }
 
 SetupAssistantMouseWheel(wParam, lParam, msg, hwnd) {
-    global SetupAssistantGui, SetupAssistantScrollOffset
+    global SetupAssistantGui, SetupAssistantScrollOffset, SetupAssistantScrollHost
     if !IsSet(SetupAssistantGui)
         return
     rootHwnd := DllCall("User32\GetAncestor", "Ptr", hwnd, "UInt", 2, "Ptr")
@@ -13052,15 +12931,16 @@ SetupAssistantMouseWheel(wParam, lParam, msg, hwnd) {
     if (delta & 0x8000)
         delta -= 0x10000
     if (delta != 0) {
-        SetupAssistantScrollOffset += delta > 0 ? -80 : 80
-        SetupAssistantApplyScroll()
+        SetupAssistantScrollOffset := SharedScrollHostScrollBy(
+            SetupAssistantScrollHost, delta > 0 ? -80 : 80)
     }
     return 0
 }
 
 SetupAssistantResized(guiObj, minMax, newWidth, newHeight) {
     global SetupAssistantGui, SetupAssistantScrollBar
-    global SetupAssistantViewportHeight
+    global SetupAssistantViewportHeight, SetupAssistantScrollHost
+    global SetupAssistantScrollOffset
     if (minMax = -1 || !IsSet(SetupAssistantGui)
         || guiObj.Hwnd != SetupAssistantGui.Hwnd)
         return
@@ -13068,12 +12948,24 @@ SetupAssistantResized(guiObj, minMax, newWidth, newHeight) {
     if IsObject(SetupAssistantScrollBar)
         try SetupAssistantScrollBar.Move(
             Max(1, newWidth - 22), 8, 18, Max(40, newHeight - 16))
-    SetupAssistantApplyScroll()
+    ; The caller-owned offset may deliberately have been reset before a hidden
+    ; sizing pass on reopen. Hand that intent to the host before it clamps and
+    ; places the resized canvas, instead of reviving the previous session's y.
+    SetupAssistantScrollHost["offset"] := SetupAssistantScrollOffset
+    SharedScrollHostSetViewport(
+        SetupAssistantScrollHost, 0, 0, Max(1, newWidth - 22), newHeight)
+    SetupAssistantScrollOffset := SetupAssistantScrollHost["offset"]
+}
+
+SetupAssistantControl(name) {
+    global SetupAssistantScrollHost
+    return SharedScrollHostContentGui(SetupAssistantScrollHost)[name]
 }
 
 ShowSetupAssistant(*) {
     global SetupAssistantGui, SteamShellVersion, FirstRunSetupMode
     global SetupAssistantScrollOffset, SetupAssistantViewportHeight
+    global SetupAssistantScrollHost
     ; Read by InstallationRecordAlert; an undeclared global would resolve to an
     ; empty local here and report a consistent installation as moved.
     global SteamShellDataDir, SteamShellInstallationMode
@@ -13084,21 +12976,26 @@ ShowSetupAssistant(*) {
         SetupAssistantGui.Opt("+MinSize760x300")
         SetupAssistantGui.Opt("+OwnDialogs")
         SetupAssistantGui.SetFont("s10", "Segoe UI")
-        title := SetupAssistantGui.AddText("xm ym w720 h30", "SteamShell Setup Assistant")
+        SetupAssistantScrollHost := SharedScrollHostCreate(
+            SetupAssistantGui, 0, 0, 738, 340,
+            0, 0, 40, 12, 12, true)
+        setupContent := SharedScrollHostContentGui(SetupAssistantScrollHost)
+        setupContent.SetFont("s10", "Segoe UI")
+        title := setupContent.AddText("xm ym w720 h30", "SteamShell Setup Assistant")
         title.SetFont("s17 Bold", "Segoe UI")
-        SetupAssistantGui.AddText(
+        setupContent.AddText(
             "xm y+2 w720 h38 +Wrap",
             "Prepare a recoverable SteamShell installation. First-run setup keeps Explorer available and does not launch Steam or enable kiosk presentation.")
 
         ; The first question, because every later one depends on the answer.
-        SetupAssistantGui.AddGroupBox("xm y+10 w720 h176", "1. What are you setting up?")
+        setupContent.AddGroupBox("xm y+10 w720 h176", "1. What are you setting up?")
         ; The two radios are created back to back on purpose. AutoHotkey groups
         ; radio buttons that are created CONSECUTIVELY, so a control added
         ; between them ends the run and the pair stops being mutually exclusive:
         ; both render selected and Apply reads whichever it feels like. The
         ; per-option descriptions are therefore positioned afterwards, from the
         ; radios' own measured positions, rather than interleaved.
-        shellModeRadio := SetupAssistantGui.AddRadio(
+        shellModeRadio := setupContent.AddRadio(
             "xp+14 yp+26 w680 h24 vSetupProductStandalone Group Checked",
             "Replace the Windows shell — SteamShell owns the desktop and launches Steam Big Picture")
         ; Alongside is a FIRST-CLASS answer to this question, not a checkbox
@@ -13107,117 +13004,117 @@ ShowSetupAssistant(*) {
         ; with a hidden opt-out reads as though replacing the shell is the only
         ; way to run the program. It is not, and for a PC that is also used as a
         ; PC it is the wrong one.
-        alongsideModeRadio := SetupAssistantGui.AddRadio(
+        alongsideModeRadio := setupContent.AddRadio(
             "xp y+24 w680 h24 vSetupProductAlongside",
             "Run alongside Explorer — SteamShell is an ordinary program on your desktop")
-        xfeModeRadio := SetupAssistantGui.AddRadio(
+        xfeModeRadio := setupContent.AddRadio(
             "xp y+24 w680 h24 vSetupProductXfe",
             "Work alongside Xbox Full Screen Experience — install the SteamShell-XFE companion")
         shellModeRadio.GetPos(&productRadioX, &shellRadioY, , &productRadioH)
         alongsideModeRadio.GetPos( , &alongsideRadioY)
         xfeModeRadio.GetPos( , &xfeRadioY)
-        SetupAssistantGui.AddText(
+        setupContent.AddText(
             "x" (productRadioX + 22) " y" (shellRadioY + productRadioH + 1) " w650 h20 +Wrap",
             "Registers SteamShell as the Windows shell and installs the elevated input helper.")
-        SetupAssistantGui.AddText(
+        setupContent.AddText(
             "x" (productRadioX + 22) " y" (alongsideRadioY + productRadioH + 1) " w650 h20 +Wrap",
             "Never touches the shell registry. Explorer keeps the desktop and taskbar; you get the Quick Menu, controller pointer, RTSS and Launcher Cleanup.")
-        SetupAssistantGui.AddText(
+        setupContent.AddText(
             "x" (productRadioX + 22) " y" (xfeRadioY + productRadioH + 1) " w650 h20 +Wrap",
             "Never becomes the Windows shell and never elevates. Starts at sign-in through a normal logon task.")
         for _, productControl in [shellModeRadio, alongsideModeRadio, xfeModeRadio]
             productControl.OnEvent("Click", SetupAssistantRefreshProductMode)
 
-        SetupAssistantGui.AddGroupBox("xm y+14 w720 h128", "2. Applications")
-        SetupAssistantGui.AddText(
+        setupContent.AddGroupBox("xm y+14 w720 h128", "2. Applications")
+        setupContent.AddText(
             "xp+14 yp+25 w680 h24 +Wrap",
             "Steam is required. RTSS is optional. Default Program Files locations are detected.")
-        SetupAssistantGui.AddText("xp y+9 w55 h24", "Steam")
-        SetupAssistantGui.AddEdit(
+        setupContent.AddText("xp y+9 w55 h24", "Steam")
+        setupContent.AddEdit(
             "x+8 yp-3 w480 h27 ReadOnly vSetupSteamPath", "")
-        steamButton := SetupAssistantGui.AddButton(
+        steamButton := setupContent.AddButton(
             "x+8 yp-1 w120 h29", "Select…")
         steamButton.OnEvent("Click", SetupAssistantChooseSteam)
-        SetupAssistantGui.AddText("xp-551 y+10 w55 h24", "RTSS")
-        SetupAssistantGui.AddEdit(
+        setupContent.AddText("xp-551 y+10 w55 h24", "RTSS")
+        setupContent.AddEdit(
             "x+8 yp-3 w480 h27 ReadOnly vSetupRtssPath", "")
-        rtssButton := SetupAssistantGui.AddButton(
+        rtssButton := setupContent.AddButton(
             "x+8 yp-1 w120 h29", "Select…")
         rtssButton.OnEvent("Click", SetupAssistantChooseRtss)
 
-        SetupAssistantGui.AddGroupBox("xm y+10 w720 h230", "3. Installation location")
-        standardRadio := SetupAssistantGui.AddRadio(
+        setupContent.AddGroupBox("xm y+10 w720 h230", "3. Installation location")
+        standardRadio := setupContent.AddRadio(
             "xp+14 yp+26 w680 h24 vSetupStandard Group Checked",
             "Standard installation (recommended) — Program Files with writable data in ProgramData")
-        currentRadio := SetupAssistantGui.AddRadio(
+        currentRadio := setupContent.AddRadio(
             "xp yp+32 w680 h24 vSetupCurrent",
             "Use current location — keep SteamShell.exe here and use a portable sidecar folder")
-        browseRadio := SetupAssistantGui.AddRadio(
+        browseRadio := setupContent.AddRadio(
             "xp yp+32 w680 h24 vSetupBrowse", "Choose another location")
-        pathEdit := SetupAssistantGui.AddEdit(
+        pathEdit := setupContent.AddEdit(
             "xp+24 yp+30 w510 h26 vSetupInstallPath Disabled", A_ScriptDir "\SteamShell-Install")
-        browseButton := SetupAssistantGui.AddButton(
+        browseButton := setupContent.AddButton(
             "x+8 yp-1 w120 h28 vSetupBrowseButton Disabled", "Browse…")
         browseButton.OnEvent("Click", SetupAssistantBrowseInstall)
-        portableCheck := SetupAssistantGui.AddCheckbox(
+        portableCheck := setupContent.AddCheckbox(
             "xp-518 y+10 w500 h24 vSetupPortable Disabled",
             "Portable installation — keep settings, logs, and backups beside the application")
-        SetupAssistantGui.AddText(
+        setupContent.AddText(
             "xp y+7 w640 h46 +Wrap vSetupLocationSummary", "")
         for _, deploymentControl in [standardRadio, currentRadio, browseRadio, portableCheck]
             deploymentControl.OnEvent("Click", SetupAssistantRefreshDeployment)
         pathEdit.OnEvent("Change", SetupAssistantRefreshDeployment)
 
-        SetupAssistantGui.AddGroupBox("xm y+10 w720 h186", "4. Windows integration and sign-in")
+        setupContent.AddGroupBox("xm y+10 w720 h186", "4. Windows integration and sign-in")
         ; One startup registration per product, and only the relevant one is
         ; enabled. Both are optional for the same reason: a user may already
         ; start the application their own way, and an installer that silently
         ; creates an automatic-start entry is one that is hard to undo.
-        registerCheck := SetupAssistantGui.AddCheckbox(
+        registerCheck := setupContent.AddCheckbox(
             "xp+14 yp+26 w460 h24 vSetupRegisterShell Checked",
             "Register the selected SteamShell.exe as the Windows shell")
-        xfeStartupCheck := SetupAssistantGui.AddCheckbox(
+        xfeStartupCheck := setupContent.AddCheckbox(
             "xp y+6 w460 h24 vSetupRegisterXfeStartup Checked",
             "Start SteamShell-XFE automatically at sign-in (logon task)")
-        uacButton := SetupAssistantGui.AddButton(
+        uacButton := setupContent.AddButton(
             "xp y+32 w180 h30", "Open UAC Settings")
         uacButton.OnEvent("Click", SetupAssistantOpenUacSettings)
-        autologonButton := SetupAssistantGui.AddButton(
+        autologonButton := setupContent.AddButton(
             "x+10 yp w200 h30", "Configure Auto-Login…")
         autologonButton.OnEvent("Click", SetupAssistantConfigureAutoLogon)
-        guidanceButton := SetupAssistantGui.AddButton(
+        guidanceButton := setupContent.AddButton(
             "x+10 yp w190 h30", "Microsoft Information")
         guidanceButton.OnEvent("Click", SetupAssistantOpenAutologonGuidance)
-        SetupAssistantGui.AddText(
+        setupContent.AddText(
             "xp-400 y+8 w620 h36 +Wrap",
             "Auto-Login uses Windows' protected LSA secret. SteamShell never writes the password to its INI or log.")
 
-        SetupAssistantGui.AddGroupBox("xm y+10 w720 h70", "5. Verify this PC")
-        controllerButton := SetupAssistantGui.AddButton(
+        setupContent.AddGroupBox("xm y+10 w720 h70", "5. Verify this PC")
+        controllerButton := setupContent.AddButton(
             "xp+14 yp+28 w210 h32", "Test / Calibrate Controller")
         controllerButton.OnEvent("Click", ShowControllerTest)
-        healthButton := SetupAssistantGui.AddButton("x+10 yp w170 h32", "Run Health Check")
+        healthButton := setupContent.AddButton("x+10 yp w170 h32", "Run Health Check")
         healthButton.OnEvent("Click", ShowHealthCheck)
-        settingsButton := SetupAssistantGui.AddButton("x+10 yp w180 h32", "Open Full Settings")
+        settingsButton := setupContent.AddButton("x+10 yp w180 h32", "Open Full Settings")
         settingsButton.OnEvent("Click", ShowSettings)
 
-        SetupAssistantGui.AddGroupBox("xm y+10 w720 h96", "6. Remove an installation")
-        SetupAssistantGui.AddText(
+        setupContent.AddGroupBox("xm y+10 w720 h96", "6. Remove an installation")
+        setupContent.AddText(
             "xp+14 yp+24 w680 h34 +Wrap",
             "Retires the detected installation's Windows shell registration or sign-in task. "
             . "Files and settings are left in place, so nothing you configured is lost.")
-        uninstallButton := SetupAssistantGui.AddButton(
+        uninstallButton := setupContent.AddButton(
             "xp y+6 w260 h32", "Uninstall Detected Installation…")
         uninstallButton.OnEvent("Click", SetupAssistantUninstall)
 
-        SetupAssistantGui.AddText(
+        setupContent.AddText(
             "xm y+10 w720 h42 +Wrap vSetupStatus",
             "Nothing is copied or registered until you select Apply Setup.")
-        applyButton := SetupAssistantGui.AddButton("xm y+4 w170 h34 vSetupApply Default", "Apply Setup")
+        applyButton := setupContent.AddButton("xm y+4 w170 h34 vSetupApply Default", "Apply Setup")
         applyButton.OnEvent("Click", SetupAssistantApply)
-        restoreButton := SetupAssistantGui.AddButton("x+10 yp w170 h34", "Restore Desktop")
+        restoreButton := setupContent.AddButton("x+10 yp w170 h34", "Restore Desktop")
         restoreButton.OnEvent("Click", SettingsEditorRestoreDesktop)
-        closeButton := SetupAssistantGui.AddButton("x+200 yp w160 h34", "Close Setup")
+        closeButton := setupContent.AddButton("x+200 yp w160 h34", "Close Setup")
         closeButton.OnEvent("Click", SetupAssistantCloseRequested)
         SetupAssistantGui.OnEvent("Close", SetupAssistantCloseRequested)
         SetupAssistantGui.OnEvent("Escape", SetupAssistantCloseRequested)
@@ -13308,6 +13205,7 @@ ShowSettings(*) {
     global SettingsEditorCategories, SettingsEditorDirty, SettingsEditorUpdating, SettingsEditorStatusCtrl
     global SettingsEditorContentTop, SettingsEditorContentBottom, SettingsEditorWindowHeight
     global SettingsEditorScrollBar, SettingsEditorFooterControls, SettingsEditorDividerCtrl
+    global SettingsEditorScrollHost
     global SettingsStartupListView, SettingsStartupCommandEdit, SettingsStartupSelectedSlot
     global SteamShellVersion, LastRealFgHwnd, ControllerPollIntervalMs
 
@@ -13369,6 +13267,15 @@ ShowSettings(*) {
 
     categoryList := SettingsBuildWindowChrome(SettingsGui, SettingsEditorCategories,
         geometry, SettingsEditorCategoryChanged)
+    layout := SettingsLayout()
+    SettingsEditorScrollHost := SharedScrollHostCreate(
+        SettingsGui,
+        layout["contentX"], SettingsEditorContentTop,
+        layout["scrollBarX"] - layout["contentX"],
+        SettingsEditorContentBottom - SettingsEditorContentTop,
+        layout["contentX"], SettingsEditorContentTop, 34)
+    pageGui := SharedScrollHostContentGui(SettingsEditorScrollHost)
+    pageGui.SetFont("s10", "Segoe UI")
 
     ; General
     category := "General"
@@ -13384,24 +13291,24 @@ ShowSettings(*) {
     ;
     ; ShowGameDetection above stays, because the layout manager covers MAIN rows
     ; and that row lives under System.
-    SettingsAddRowsForCategory(SettingsGui, category, "standalone", &y)
+    SettingsAddRowsForCategory(pageGui, category, "standalone", &y)
     ; The SHARED button row, which the companion has always used. These were
     ; hand-placed at a literal x, y and width per button, which is how the two
     ; products came to lay the same page out differently -- and how a fourth
     ; button once ended up hanging off the window. The row derives its columns
     ; from the content width, so it cannot.
-    SettingsAddButtonRow(SettingsGui, category, [
+    SettingsAddButtonRow(pageGui, category, [
         ["Customize Quick Menu…", ShowQuickMenuLayoutManager]], &y)
 
     ; Startup and splash
     category := "Startup & Splash"
     y := 150
-    SettingsAddRowsForCategory(SettingsGui, category, "standalone", &y)
+    SettingsAddRowsForCategory(pageGui, category, "standalone", &y)
 
     ; Startup programs
     category := "Startup Programs"
     y := 150
-    SettingsAddRowsForCategory(SettingsGui, category, "standalone", &y)
+    SettingsAddRowsForCategory(pageGui, category, "standalone", &y)
     ; The editor itself is shared, and the slot count comes from
     ; SteamShell-Common.ahk so this page cannot show fewer slots than the
     ; launcher reads -- which is exactly what it did while this said 20 and
@@ -13414,14 +13321,14 @@ ShowSettings(*) {
     startupSlots := []
     Loop StartupProgramSlotCount()
         startupSlots.Push(IniReadS("StartupPrograms", "Program" A_Index, ""))
-    SettingsAddStartupProgramsEditor(SettingsGui, category, &y, startupSlots)
+    SettingsAddStartupProgramsEditor(pageGui, category, &y, startupSlots)
 
     ; Controller and cursor
     category := "Controller & Cursor"
     y := 150
     ; The rows themselves are defined once, in SteamShell-Shared.ahk, so this
     ; page and the companion's cannot describe the same settings differently.
-    SettingsAddRowsForCategory(SettingsGui, category, "standalone", &y)
+    SettingsAddRowsForCategory(pageGui, category, "standalone", &y)
     ; THE SAME BUTTONS, IN THE SAME ORDER, AS THE COMPANION'S PAGE. These were
     ; four hand-placed calls at literal coordinates, grouped three-then-one with
     ; Delete Learned Profile deliberately under Learn Controller; the companion
@@ -13432,14 +13339,14 @@ ShowSettings(*) {
     ; The shared row derives its columns from the content width, which is how
     ; the hand-placed version came to have a fourth button hanging off the
     ; window before it was split into two lines by hand.
-    SettingsAddButtonRow(SettingsGui, category, [
+    SettingsAddButtonRow(pageGui, category, [
         ["Controller Mappings…", ShowControllerMappingWindow],
         ["Learn Controller…", ShowControllerLearner],
         ["Delete Learned Profile", DeleteControllerProfileForActiveDevice]], &y)
     ; Second row, as the companion has it. Delete Learned Profile sits beside
     ; Learn Controller rather than under it now -- it undoes exactly what that
     ; button does, and adjacency says so as well as verticality did.
-    SettingsAddButtonRow(SettingsGui, category, [
+    SettingsAddButtonRow(pageGui, category, [
         ["Test / Calibrate Controller…", ShowControllerTest]], &y)
     ; The value is read HERE rather than inside the builder, which is what let
     ; the builder move to SteamShell-Shared.ahk: this tree reads with IniReadS
@@ -13450,11 +13357,11 @@ ShowSettings(*) {
     ; pair meant to be compared. The cursor advances by the shared height rather
     ; than a hand-typed offset, which is the part that was drifting.
     autoMouseY := y
-    SettingsAddExeListField(SettingsGui,
+    SettingsAddExeListField(pageGui,
         category, "Controller", "AutoMouseExeList",
         "Shell-mode automatic mouse allowlist", 255, autoMouseY, 335,
         IniReadS("Controller", "AutoMouseExeList", ""))
-    SettingsAddExeListField(SettingsGui,
+    SettingsAddExeListField(pageGui,
         category, "Controller", "DesktopAutoMouseExcludeExeList",
         "Desktop-mode exclusions (games/apps)", 610, autoMouseY, 335,
         IniReadS("Controller", "DesktopAutoMouseExcludeExeList", ""))
@@ -13470,12 +13377,12 @@ ShowSettings(*) {
     ; users have.
     category := "Steam"
     y := 150
-    SettingsAddRowsForCategory(SettingsGui, category, "standalone", &y)
+    SettingsAddRowsForCategory(pageGui, category, "standalone", &y)
 
     ; Focus
     category := "Focus & Windows"
     y := 150
-    SettingsAddRowsForCategory(SettingsGui, category, "standalone", &y)
+    SettingsAddRowsForCategory(pageGui, category, "standalone", &y)
     ; Hand-placed, and the only settings row that is. The companion compiles
     ; SteamShell-Shared.ahk and forbids this key by name -- it is a shell
     ; responsibility, and a name in a string still counts. So the row stays here
@@ -13484,51 +13391,51 @@ ShowSettings(*) {
     ; It draws after the shared rows, which is where it sat before: last in the
     ; flowing block, above the exclusion list.
     SettingsEditorAddMappedChoice(
-        category, "GameForegroundAssist", "GameMinScoreToActivate",
+        pageGui, category, "GameForegroundAssist", "GameMinScoreToActivate",
         "Foreground sensitivity",
         ["Responsive (55)", "Balanced (60)", "Conservative (70)"],
         ["55", "60", "70"], &y, "55")
     exclusionY := y + 8
-    SettingsAddExeListField(SettingsGui,
+    SettingsAddExeListField(pageGui,
         category, "WindowManagement", "ExcludeExeList",
         "Never center or maximize these EXEs", 255, exclusionY, 690,
         IniReadS("WindowManagement", "ExcludeExeList", ""))
     y := exclusionY + SettingsExeListHeight()
-    SettingsAddButtonRow(SettingsGui, category, [
+    SettingsAddButtonRow(pageGui, category, [
         ["Open AlwaysFocus Manager…", ShowAlwaysFocusManager]], &y)
 
     ; RTSS
     category := "RTSS & Performance"
     y := 150
-    SettingsAddRowsForCategory(SettingsGui, category, "standalone", &y)
-    SettingsAddButtonRow(SettingsGui, category, [
+    SettingsAddRowsForCategory(pageGui, category, "standalone", &y)
+    SettingsAddButtonRow(pageGui, category, [
         ["Launch Selected RTSS", SettingsEditorOpenRtss]], &y)
 
     ; Launcher cleanup
     category := "Launcher Cleanup"
     y := 150
-    SettingsAddRowsForCategory(SettingsGui, category, "standalone", &y)
+    SettingsAddRowsForCategory(pageGui, category, "standalone", &y)
     listY := y + 8
-    SettingsAddExeListField(SettingsGui,
+    SettingsAddExeListField(pageGui,
         category, "LauncherCleanup", "LauncherExeList", "Launcher EXEs to close",
         255, listY, 335, IniReadS("LauncherCleanup", "LauncherExeList", ""))
-    SettingsAddExeListField(SettingsGui,
+    SettingsAddExeListField(pageGui,
         category, "LauncherCleanup", "ExcludeExeList", "Never close these EXEs",
         610, listY, 335, IniReadS("LauncherCleanup", "ExcludeExeList", ""))
     helperListY := listY + 210
-    SettingsAddExeListField(SettingsGui,
+    SettingsAddExeListField(pageGui,
         category, "LauncherCleanup", "BackgroundExeList",
         "Background helper EXEs to close", 255, helperListY, 690,
         IniReadS("LauncherCleanup", "BackgroundExeList", ""))
     y := helperListY + SettingsExeListHeight()
-    SettingsAddButtonRow(SettingsGui, category, [
+    SettingsAddButtonRow(pageGui, category, [
         ["Preview Running Cleanup Targets…", SettingsEditorPreviewLauncherCleanup]], &y)
     y := helperListY + 242
 
     ; Advanced and logging
     category := "Advanced & Logging"
     y := 150
-    SettingsAddRowsForCategory(SettingsGui, category, "standalone", &y)
+    SettingsAddRowsForCategory(pageGui, category, "standalone", &y)
     actionY := y + 12
     ; Shell registration first, then everything else.
     ;
@@ -13548,7 +13455,7 @@ ShowSettings(*) {
     ; not fit in a third of the content width. The width itself is derived, so
     ; these no longer carry a hand-typed 335 that stops being right when the
     ; content area moves.
-    SettingsAddButtonRow(SettingsGui, category, [
+    SettingsAddButtonRow(pageGui, category, [
         ["Install Managed Copy as Shell", SettingsEditorInstallSteamShell],
         ["Register Current EXE as Shell", SettingsEditorRegisterCurrentShell],
         ; Label names the DESTINATION, not the toggle. "Switch Shell / Alongside
@@ -13595,6 +13502,8 @@ ShowSettings(*) {
     SettingsEditorStatusCtrl := settingsFooter["status"]
     SettingsEditorDividerCtrl := settingsFooter["divider"]
     SettingsEditorScrollBar := settingsFooter["scrollBar"]
+    SharedScrollHostAttachScrollBar(
+        SettingsEditorScrollHost, SettingsEditorScrollBar)
     OnMessage(0x020A, SettingsEditorMouseWheel)
     OnMessage(0x0115, SettingsEditorVerticalScroll)
 
@@ -17266,17 +17175,6 @@ ProductCaptureLastRealForeground() {
 
 ; Seams for the shared settings scrollbar. This tree keeps the content bounds
 ; in two globals; the companion computes them from SettingsLayout().
-ProductSettingsScrollBar() {
-    global SettingsEditorScrollBar
-    return IsObject(SettingsEditorScrollBar) ? SettingsEditorScrollBar : ""
-}
-
-ProductSettingsViewportHeight() {
-    global SettingsEditorContentTop, SettingsEditorContentBottom
-    return Max(1, SettingsEditorContentBottom - SettingsEditorContentTop)
-}
-
-
 OpenTouchKeyboard() {
     ; Present the modern touch keyboard without terminating Windows text-input
     ; processes. Killing TextInputHost can leave desktop/custom-shell systems

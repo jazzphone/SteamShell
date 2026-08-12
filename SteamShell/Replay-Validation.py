@@ -2589,6 +2589,15 @@ def check_live_log_shared(sources):
     if not (re.search(r"SetTimer\(LiveLogRefresh,", show)
             and re.search(r"SetTimer\(LiveLogRefresh, 0\)", hide)):
         fail("The Live Log window must arm and cancel its own refresh timer.")
+    preserve = function_body(shared, "SharedReplaceTextPreservingView")
+    if not (re.search(r"vllFollowNewest", show)
+            and re.search(r"LiveLogFollowNewestChanged", show)
+            and re.search(r"0x00CE", refresh)
+            and re.search(r"SharedReplaceTextPreservingView", refresh)
+            and re.search(r'llFollowNewest"\]\.Value := 0', refresh)
+            and re.search(r"SharedTextViewAnchorLine", preserve)):
+        fail("Live Log refresh no longer preserves the line being read or "
+             "exposes the shared Follow newest behavior.")
 
     for name, product in (("SteamShell.ahk", "the shell"),
                           ("SteamShell-XFE.ahk", "the companion")):
@@ -2960,7 +2969,7 @@ def check_view_button_actions(sources):
     # gets a Steam page, and the second still asks the shell whether it draws it.
     if not (re.search(r'"name", "Steam", "product", "(both|standalone)"', shared)
             and re.search(r'(?s)category := "Steam"[\s\S]{0,400}?'
-                          r'SettingsAddRowsForCategory\(SettingsGui, category, "standalone"', shell)):
+                          r'SettingsAddRowsForCategory\(pageGui, category, "standalone"', shell)):
         fail("SteamShell.ahk defines Steam settings rows but does not draw a Steam "
              "category, so they cannot be reached from the Settings window.")
 

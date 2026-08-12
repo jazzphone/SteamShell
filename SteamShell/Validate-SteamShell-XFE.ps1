@@ -100,9 +100,10 @@ $requiredFunctions = @(
     "SyncElevatedRtssHelperWithSettings",
     "SettingsLayout",
     "SettingsFirstRowY",
-    "SettingsGetMaxScroll",
     "SettingsApplyCategoryLayout",
-    "SettingsUpdateScrollBar",
+    "SharedScrollHostContentGui",
+    "SharedScrollHostSetOffset",
+    "SharedReplaceTextPreservingView",
     "SettingsVerticalScroll",
     "SettingsMouseWheel",
     "SettingsScroll",
@@ -2382,24 +2383,23 @@ foreach ($builder in @(
         "Settings row builder $builder no longer advances the page cursor.")
 }
 
-# The scrolling viewport, and the four things that have to be true for it to
-# work at all.
+# The scrolling viewport is a clipped child window containing one larger child
+# canvas. A scroll tick moves that canvas once; it does not repaint and move
+# every control in the category.
 Assert-True (
-    # Positions are captured once, from the real controls.
+    # Positions are still captured once for layout auditing and extent
+    # measurement.
     $source -match
         '(?sm)^SettingsTrackControl\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?' +
         'control\.GetPos\(&ctrlX, &ctrlY, &ctrlW, &ctrlH\)(?:(?!\n\})[\s\S])*?' +
         'SettingsControlPositions\[control\.Hwnd\]' -and
-    # The scroll extent is measured from what the page actually built. The
-    # measuring is SharedSettingsMaxScroll's now -- it was the same loop in both
-    # products over differently-named globals -- so this asks that this tree
-    # hands it THIS tree's state, and the loop itself is checked once, there.
+    # The window creates the shared host and every page builder targets its
+    # content GUI, leaving the chrome and footer on the stationary parent.
     $source -match
-        '(?sm)^SettingsGetMaxScroll\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?' +
-        'SharedSettingsMaxScroll\(SettingsCategoryControls' -and
-    $source -match
-        '(?sm)^SharedSettingsMaxScroll\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?' +
-        'pos\["y"\] \+ pos\["h"\]' -and
+        '(?sm)^ShowSettings\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?' +
+        'SettingsScrollHost := SharedScrollHostCreate\((?:(?!\n\})[\s\S])*?' +
+        'pageGui := SharedScrollHostContentGui\(SettingsScrollHost\)(?:(?!\n\})[\s\S])*?' +
+        'SettingsAddRowsForCategory\(pageGui' -and
     # Showing a category goes through the scrolling layout, not a bare loop.
     $source -match
         '(?sm)^SettingsShowCategory\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?' +
@@ -2410,20 +2410,28 @@ Assert-True (
     $source -match 'ClassScrollBar x" layout\["scrollBarX"\]') (
     "The scrolling Settings viewport is incomplete.")
 
-# Redraw must be suspended across the whole move-and-hide pass. Without it
-# Windows repaints between Move and Visible during thumb tracking and leaves
-# trails and half-drawn controls.
-# The pass is SharedApplySettingsCategoryLayout's now, so the rule is checked
-# where the pass lives -- and this tree must still hand it this tree's state.
+# The common implementation owns the native child hierarchy and is the only
+# code allowed to move geometry while scrolling.
 Assert-True (
     $source -match
         '(?sm)^SettingsApplyCategoryLayout\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?' +
-        'SharedApplySettingsCategoryLayout\(SettingsCategoryControls' -and
+        'SharedApplySettingsCategoryLayout\(SettingsCategoryControls(?:(?!\n\})[\s\S])*?' +
+        'SettingsScrollHost\)' -and
+    $source -match
+        '(?sm)^SharedScrollHostCreate\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?' +
+        'Gui\(\s*"\+Parent" parentGui\.Hwnd(?:(?!\n\})[\s\S])*?' +
+        'Gui\(\s*"\+Parent" viewportGui\.Hwnd' -and
+    $source -match
+        '(?sm)^SharedScrollHostPlace\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?' +
+        'contentGui\.Move\(canvasX, canvasY, canvasWidth, canvasHeight\)' -and
     $source -match
         '(?sm)^SharedApplySettingsCategoryLayout\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?' +
-        'SettingsEditorSetRedraw\(false\)(?:(?!\n\})[\s\S])*?' +
-        'finally \{(?:(?!\n\})[\s\S])*?SettingsEditorSetRedraw\(true\)') (
-    "Settings scrolling no longer batches its control movement behind WM_SETREDRAW.")
+        'SharedScrollHostSetExtent\(scrollHost, maxBottom\)(?:(?!\n\})[\s\S])*?' +
+        'SharedScrollHostSetOffset\(scrollHost, offset\)' -and
+    $source -notmatch
+        '(?sm)^SharedApplySettingsCategoryLayout\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?' +
+        'control\.Move\(') (
+    "Settings scrolling no longer uses the shared clipped child-window host.")
 
 # Recorded positions must be cleared with the window that produced them.
 # CloseSettings destroys the GUI, so a retained HWND would be looked up against
@@ -2503,8 +2511,8 @@ Assert-True (
     # The list is standalone's ListView editor now, not a pipe-separated Edit,
     # and it is the SHARED builder rather than a second one written here.
     $source -match
-        '(?s)SettingsAddRowsForCategory\(settings, category, "xfe", &y\)[\s\S]{0,400}?' +
-        'SettingsAddExeListField\(settings, category, "Controller", "AutoMouseExeList"') (
+        '(?s)SettingsAddRowsForCategory\(pageGui, category, "xfe", &y\)[\s\S]{0,400}?' +
+        'SettingsAddExeListField\(pageGui, category, "Controller", "AutoMouseExeList"') (
     "The automatic mouse controls are not in standalone's position on the Controller page.")
 
 # The companion's exe list is EDITED like standalone's and SAVED like it too.

@@ -258,7 +258,7 @@ Assert-True (
     "The schema-17 first-run setup state or established-user migration is missing.")
 Assert-True (
     $source -match
-        '(?s)SettingsEditorAddMappedChoice\(\s*category,\s*' +
+        '(?s)SettingsEditorAddMappedChoice\(\s*pageGui,\s*category,\s*' +
         '"GameForegroundAssist",\s*"GameMinScoreToActivate".*?' +
         '"Responsive \(55\)".*?"Balanced \(60\)".*?"Conservative \(70\)"') (
     "Full Settings foreground-sensitivity presets are incomplete.")
@@ -504,7 +504,9 @@ $requiredFunctions = @(
     "RequestSteamShellRestart",
     "DeploySteamShell",
     "GrantSteamShellDataAccess",
-    "SettingsEditorSetRedraw",
+    "SharedScrollHostContentGui",
+    "SharedScrollHostSetOffset",
+    "SharedReplaceTextPreservingView",
     "SettingsEditorRefreshDependencies",
     "WindowEngineTick",
     "WindowEngineGeometryHandledByHelper",
@@ -934,7 +936,7 @@ Assert-True (
     # and would have gone on passing while every other button row on every other
     # page drifted to a different width. Two columns because the labels are long.
     $source -match
-        '(?s)SettingsAddButtonRow\(SettingsGui, category, \[' +
+        '(?s)SettingsAddButtonRow\(pageGui, category, \[' +
         '(?:(?!\]\], &)[\s\S])*?Permanently Restore Explorer' +
         '(?:(?!\]\], &)[\s\S])*?\]\], &actionY, 2\)' -and
     $source -notmatch 'actionWidth\s*:=\s*335') (
@@ -1417,7 +1419,7 @@ Assert-True (
     # current value; the shell reads that value with its OWN reader, which is
     # what let the builder move at all.
     $source -match
-        '(?s)SettingsAddExeListField\(SettingsGui,\s*\r?\n\s*category,\s*"Controller",\s*' +
+        '(?s)SettingsAddExeListField\(pageGui,\s*\r?\n\s*category,\s*"Controller",\s*' +
         '"DesktopAutoMouseExcludeExeList"[\s\S]*?' +
         'IniReadS\("Controller", "DesktopAutoMouseExcludeExeList", ""\)') (
     "Desktop-wide automatic mouse mode, exclusions, Settings, or tray control are disconnected.")
@@ -1435,7 +1437,7 @@ Assert-True (
 # come from SettingsCategoryDescriptionFor now.
 Assert-True (
     $source -notmatch 'SettingsEditorAddActionButton' -and
-    $source -match '(?s)category := "Controller & Cursor"[\s\S]{0,1600}?SettingsAddButtonRow\(SettingsGui' -and
+    $source -match '(?s)category := "Controller & Cursor"[\s\S]{0,1600}?SettingsAddButtonRow\(pageGui' -and
     # SettingsEditorAddHeading is gone entirely -- the heading is one shared pair
     # updated on category change -- so forbidding an inline description would be
     # a clause that can no longer fail. What replaces it is the positive: this
@@ -2157,7 +2159,33 @@ Assert-True (
         'MonitorFromWindow(?:(?!\n\})[\s\S])*?GetDpiForMonitor' -and
     $source -match
         '(?sm)^SetupAssistantInitializeScrolling\(\)(?:(?!\n\})[\s\S])*?ClassScrollBar(?:(?!\n\})[\s\S])*?' +
+        'SharedScrollHostAttachScrollBar(?:(?!\n\})[\s\S])*?' +
+        'SharedScrollHostSetExtent(?:(?!\n\})[\s\S])*?' +
         'SetupAssistantVerticalScroll(?:(?!\n\})[\s\S])*?SetupAssistantMouseWheel' -and
+    $source -match
+        '(?sm)^ShowSetupAssistant\([^)]*\)(?:(?!\n\})[\s\S])*?' +
+        'SetupAssistantScrollHost := SharedScrollHostCreate\((?:(?!\n\})[\s\S])*?' +
+        'setupContent := SharedScrollHostContentGui\(SetupAssistantScrollHost\)(?:(?!\n\})[\s\S])*?' +
+        'setupContent\.AddRadio\(' -and
+    $source -match
+        '(?s)SetupAssistantScrollHost := SharedScrollHostCreate\(' +
+        '[\s\S]{0,180}?0, 0, 40, 12, 12, true\)' -and
+    $source -match
+        '(?sm)^SharedScrollHostPlace\([^)]*\)(?:(?!\n\})[\s\S])*?' +
+        'host\["redrawAfterMove"\](?:(?!\n\})[\s\S])*?' +
+        'SharedScrollHostSetRedraw\(host, false\)(?:(?!\n\})[\s\S])*?' +
+        'SharedScrollHostSetRedraw\(host, true\)(?:(?!\n\})[\s\S])*?' +
+        'SharedScrollHostRedraw\(host\)' -and
+    $source -match
+        '(?sm)^SharedScrollHostRedraw\([^)]*\)(?:(?!\n\})[\s\S])*?' +
+        'RedrawWindow(?:(?!\n\})[\s\S])*?0x0185' -and
+    $source -match
+        '(?sm)^SetupAssistantApplyScroll\(\)(?:(?!\n\})[\s\S])*?' +
+        'SharedScrollHostSetOffset\(' -and
+    $source -match
+        '(?sm)^SetupAssistantResized\([^)]*\)(?:(?!\n\})[\s\S])*?' +
+        'SharedScrollHostSetViewport\(' -and
+    $source -notmatch '(?m)^SetupAssistantSetRedraw\(' -and
     $source -match 'vSetupSteamPath' -and
     $source -match 'vSetupRtssPath' -and
     $source -match
@@ -2170,7 +2198,7 @@ Assert-True (
         '(?sm)^SetupAssistantDiscoverRtssPath\(\)(?:(?!\n\})[\s\S])*?' +
         'SetupAssistantProgramFilesX86(?:(?!\n\})[\s\S])*?' +
         'RivaTuner Statistics Server\\RTSS\.exe') (
-    "Setup Assistant scrolling, visible application paths, or default discovery is missing.")
+    "Setup Assistant scrolling, repaint/margins, visible application paths, or default discovery is missing.")
 Assert-True (
     $source -match
         '(?sm)^SetupAssistantRefreshDeployment\([^)]*\)(?:(?!\n\})[\s\S])*?' +
@@ -2555,16 +2583,16 @@ Assert-True (
     # rule in a comment above the thing the rule protects, which is what happened.
     $source -match
         '(?s)vSetupProductStandalone Group Checked"' +
-        '(?:(?!SetupAssistantGui\.Add)[\s\S])*?' +
-        'alongsideModeRadio := SetupAssistantGui\.AddRadio\(' +
-        '(?:(?!SetupAssistantGui\.Add)[\s\S])*?' +
-        'xfeModeRadio := SetupAssistantGui\.AddRadio\(' -and
+        '(?:(?!setupContent\.Add)[\s\S])*?' +
+        'alongsideModeRadio := setupContent\.AddRadio\(' +
+        '(?:(?!setupContent\.Add)[\s\S])*?' +
+        'xfeModeRadio := setupContent\.AddRadio\(' -and
     # Alongside must not be able to register the shell. The radio is the
     # decision; the checkbox follows it rather than being a second way to answer.
     $source -match
         '(?sm)^SetupAssistantRefreshProductMode\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?' +
         'isAlongside\s*:=\s*product\s*=\s*"Alongside"(?:(?!\n\})[\s\S])*?' +
-        'SetupRegisterShell"\]\.Enabled := !isXfe && !isAlongside' -and
+        'SetupAssistantControl\("SetupRegisterShell"\)\.Enabled := !isXfe && !isAlongside' -and
     # The mode has to visibly reconfigure what follows it, or it is a question
     # whose answer does nothing.
     $source -match
@@ -2572,7 +2600,7 @@ Assert-True (
         'isXfe\s*:=\s*SetupAssistantSelectedProduct\(\)\s*=\s*"XFE"' -and
     $source -match
         '(?sm)^SetupAssistantRefreshDeployment\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?' +
-        '"SetupPortable"\]\.Enabled\s*:=\s*browseSelected\s*&&\s*!isXfe' -and
+        'SetupAssistantControl\("SetupPortable"\)\.Enabled\s*:=\s*browseSelected\s*&&\s*!isXfe' -and
     $source -match
         '(?sm)^SetupAssistantGetDeployment\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?' +
         'SetupAssistantSelectedProduct\(\)\s*=\s*"XFE"\s*\r?\n\s*\?\s*' +
@@ -2585,7 +2613,7 @@ Assert-True (
         'A_ProgramFiles' -and
     $source -match
         '(?sm)^SetupAssistantRefreshProductMode\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?' +
-        '"SetupRegisterShell"\]\.Enabled\s*:=\s*!isXfe' -and
+        'SetupAssistantControl\("SetupRegisterShell"\)\.Enabled\s*:=\s*!isXfe\s*&&\s*!isAlongside' -and
     $source -match
         '(?sm)^SetupAssistantApply\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?' +
         'SetupAssistantSelectedProduct\(\)\s*=\s*"XFE"(?:(?!\n\})[\s\S])*?DeploySteamShellXfe(?:(?!\n\})[\s\S])*?' +
@@ -2597,10 +2625,10 @@ Assert-True (
     $source -match 'vSetupRegisterXfeStartup Checked' -and
     $source -match
         '(?sm)^SetupAssistantRefreshProductMode\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?' +
-        '"SetupRegisterXfeStartup"\]\.Enabled\s*:=\s*isXfe' -and
+        'SetupAssistantControl\("SetupRegisterXfeStartup"\)\.Enabled\s*:=\s*isXfe' -and
     $source -match
         '(?sm)^SetupAssistantApply\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?' +
-        'registerXfeStartup\s*:=\s*SetupAssistantGui\["SetupRegisterXfeStartup"\]\.Value\s*=\s*1' +
+        'registerXfeStartup\s*:=\s*SetupAssistantControl\("SetupRegisterXfeStartup"\)\.Value\s*=\s*1' +
         '(?:(?!\n\})[\s\S])*?DeploySteamShellXfe\(targetDirectory,\s*registerXfeStartup') (
     "The Setup Assistant product question is missing or disconnected from Apply.")
 
@@ -2642,7 +2670,7 @@ Assert-True (
     $source -match
         '(?sm)^SetupAssistantPreselectExistingInstallation\(\)\s*\{(?:(?!\n\})[\s\S])*?' +
         'DetectExistingSteamShellInstallation(?:(?!\n\})[\s\S])*?' +
-        '"SetupProductXfe"\](?:(?!\n\})[\s\S])*?SetupAssistantRefreshDeployment' -and
+        'SetupAssistantControl\("SetupProductXfe"\)(?:(?!\n\})[\s\S])*?SetupAssistantRefreshDeployment' -and
     $source -match
         '(?sm)^ShowSetupAssistant\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?' +
         'preselected\s*:=\s*SetupAssistantPreselectExistingInstallation\(\)') (
@@ -4459,13 +4487,13 @@ Assert-True (
     $rawSource -match
         '(?sm)^SetupAssistantRefreshProductMode\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?' +
         'if isXfe \{(?:(?!\n\})[\s\S])*?' +
-        '"SetupRegisterShell"\]\.Value := 0(?:(?!\n\})[\s\S])*?' +
-        '"SetupRegisterXfeStartup"\]\.Value := 1' -and
+        'SetupAssistantControl\("SetupRegisterShell"\)\.Value := 0(?:(?!\n\})[\s\S])*?' +
+        'SetupAssistantControl\("SetupRegisterXfeStartup"\)\.Value := 1' -and
     $rawSource -match
         '(?sm)^SetupAssistantRefreshProductMode\([^)]*\)\s*\{(?:(?!\n\})[\s\S])*?' +
         '\} else \{(?:(?!\n\})[\s\S])*?' +
-        '"SetupRegisterShell"\]\.Value := 1(?:(?!\n\})[\s\S])*?' +
-        '"SetupRegisterXfeStartup"\]\.Value := 0') (
+        'SetupAssistantControl\("SetupRegisterShell"\)\.Value := 1(?:(?!\n\})[\s\S])*?' +
+        'SetupAssistantControl\("SetupRegisterXfeStartup"\)\.Value := 0') (
     "A product branch in SetupAssistantRefreshProductMode leaves the other " +
     "product's sign-in checkbox at whatever it was, so both can show ticked.")
 
@@ -4549,7 +4577,7 @@ Assert-True (
     $rawSource -match
         '(?sm)^SetupAssistantPreselectExistingInstallation\(\)\s*\{(?:(?!\n\})[\s\S])*?' +
         'InstalledShellIsPortable\(\)(?:(?!\n\})[\s\S])*?' +
-        '"SetupPortable"\]\.Value := 1(?:(?!\n\})[\s\S])*?' +
+        'SetupAssistantControl\("SetupPortable"\)\.Value := 1(?:(?!\n\})[\s\S])*?' +
         'SetupAssistantRefreshDeployment\(\)') (
     "A portable installation cannot be upgraded in place: Setup Assistant either " +
     "cannot find where it lives, or comes back as Custom and converts it to a " +

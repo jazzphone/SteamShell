@@ -760,9 +760,9 @@ Three things had to follow it and did not, all found later:
 
 ### The Settings windows, unified
 
-The two Settings surfaces were separate implementations of the same screen, and
-`ProductSettingsScrollBar` recorded that as "revisit when Phase 4c unifies
-settings". This is that.
+The two Settings surfaces were separate implementations of the same screen.
+Their final scrolling seam is gone too: both now place their page controls in
+the same clipped child-window host, and Setup Assistant uses that host as well.
 
 | | where it lives now |
 |---|---|
@@ -772,6 +772,7 @@ settings". This is that.
 | Walking a category | one adapter, taking the product |
 | Filling the window | from the row specs, both products |
 | Writing it back | from the same specs |
+| Scrolling | `SharedScrollHost*` in Shared — one clipped canvas move per tick |
 
 Six seams remain, each answering something only a product knows: where a field
 is recorded, what "changed" means, what Browse and Record do, whether a switch
